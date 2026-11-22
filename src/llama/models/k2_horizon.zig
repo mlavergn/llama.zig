@@ -14,24 +14,13 @@
 //! `llama.cpp/src/models/models.h`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Layer = model_mod.Layer;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 // Mirrors the declaration of `llama_model_k2_horizon` (src/models/models.h:3126 @b1b770d90).
 
 /// Ports `llama_model_k2_horizon`'s `load_arch_hparams` (models/k2-horizon.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -52,8 +41,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         if (try meta.getKey(f32, .expert_weights_scale, false, exc)) |v| hp.expert_weights_scale = v;
         if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
         if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
-        if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-            hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+        if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+            hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
         }
     }
 
@@ -61,11 +50,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .attention_value_expert_count, false, exc)) |v| hp.n_value_expert = v;
     if (try meta.getKey(u32, .attention_value_expert_used_count, false, exc)) |v| hp.n_value_expert_used = v;
     if (hp.n_value_expert > 0) {
-        impl.assert(hp.n_value_expert <= hparams_mod.max_experts, "models/k2-horizon.cpp", 30, "hparams.n_value_expert <= LLAMA_MAX_EXPERTS");
-        impl.assert(hp.n_value_expert_used > 0, "models/k2-horizon.cpp", 31, "hparams.n_value_expert_used > 0");
-        impl.assert(hp.n_value_expert_used <= hp.n_value_expert, "models/k2-horizon.cpp", 32, "hparams.n_value_expert_used <= hparams.n_value_expert");
+        llama.impl.assert(hp.n_value_expert <= llama.hparams.max_experts, "models/k2-horizon.cpp", 30, "hparams.n_value_expert <= LLAMA_MAX_EXPERTS");
+        llama.impl.assert(hp.n_value_expert_used > 0, "models/k2-horizon.cpp", 31, "hparams.n_value_expert_used > 0");
+        llama.impl.assert(hp.n_value_expert_used <= hp.n_value_expert, "models/k2-horizon.cpp", 32, "hparams.n_value_expert_used <= hparams.n_value_expert");
     } else {
-        impl.assert(hp.n_value_expert_used == 0, "models/k2-horizon.cpp", 34, "hparams.n_value_expert_used == 0");
+        llama.impl.assert(hp.n_value_expert_used == 0, "models/k2-horizon.cpp", 34, "hparams.n_value_expert_used == 0");
     }
 
     self.type = switch (hp.nLayer()) {
@@ -82,10 +71,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_k2_horizon`'s `load_arch_tensors` (models/k2-horizon.cpp:51 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -94,7 +83,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -110,8 +99,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.wk = try self.createTensor(.{ .tensor = .attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_k_gqa }, 0, exc);
         // One norm weight per head, stored flat; viewed as {head_dim, n_head}
         // so it splits by head like Q and K.
-        layer.attn_q_norm = try self.createTensor(.{ .tensor = .attn_q_norm, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k, l.n_head }, nr | loader.tensor_allow_reshape, exc);
-        layer.attn_k_norm = try self.createTensor(.{ .tensor = .attn_k_norm, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k, l.n_head_kv }, nr | loader.tensor_allow_reshape, exc);
+        layer.attn_q_norm = try self.createTensor(.{ .tensor = .attn_q_norm, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k, l.n_head }, nr | llama.loader.tensor_allow_reshape, exc);
+        layer.attn_k_norm = try self.createTensor(.{ .tensor = .attn_k_norm, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k, l.n_head_kv }, nr | llama.loader.tensor_allow_reshape, exc);
 
         if (is_mova_layer) {
             const n_value_expert: i64 = hp.n_value_expert;
@@ -156,29 +145,29 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_k2_horizon`'s `build_arch_graph` (models/k2-horizon.cpp:119 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `k2_horizon_group_rms_norm` (models/k2-horizon.cpp:124 @b1b770d90): an RMS
 /// norm over `n_groups` equal slices of `ne[0]`, then one full-width weight.
-fn groupRmsNorm(ctx: *c.ggml_context, cur_: *Tensor, weight: ?*Tensor, n_groups: i64, eps: f32) *Tensor {
-    impl.assert(n_groups > 0 and @rem(cur_.ne[0], n_groups) == 0, "models/k2-horizon.cpp", 125, "n_groups > 0 && cur->ne[0] % n_groups == 0");
+fn groupRmsNorm(ctx: *llama.impl.c.ggml_context, cur_: *llama.impl.c.ggml_tensor, weight: ?*llama.impl.c.ggml_tensor, n_groups: i64, eps: f32) *llama.impl.c.ggml_tensor {
+    llama.impl.assert(n_groups > 0 and @rem(cur_.ne[0], n_groups) == 0, "models/k2-horizon.cpp", 125, "n_groups > 0 && cur->ne[0] % n_groups == 0");
 
     const n_embd = cur_.ne[0];
     const n_tokens = cur_.ne[1];
 
-    var cur: *Tensor = c.ggml_reshape_3d(ctx, cur_, @divTrunc(n_embd, n_groups), n_groups, n_tokens);
-    cur = c.ggml_rms_norm(ctx, cur, eps);
-    cur = c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, cur_, @divTrunc(n_embd, n_groups), n_groups, n_tokens);
+    cur = llama.impl.c.ggml_rms_norm(ctx, cur, eps);
+    cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
 
-    return if (weight) |w| c.ggml_mul(ctx, cur, w) else cur;
+    return if (weight) |w| llama.impl.c.ggml_mul(ctx, cur, w) else cur;
 }
 
 /// Ports `llama_model_k2_horizon::graph`'s `build_routed_value`
 /// (models/k2-horizon.cpp:138 @b1b770d90): MoVA, which routes each token to
 /// `n_value_expert_used` value experts, V = sum_k w_k * silu(W_k x).
-fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, il: c_int) *Tensor {
+fn buildRoutedValue(b: *const llama.graph.Builder, layer: *const llama.model.Layer, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd = cur.ne[0];
@@ -188,38 +177,38 @@ fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, 
     const n_used: i64 = hp.n_value_expert_used;
 
     const logits = b.buildLoraMm(layer.attn_v_gate.?, cur, null);
-    var probs: *Tensor = undefined;
+    var probs: *llama.impl.c.ggml_tensor = undefined;
 
-    const gating: hparams_mod.ExpertGatingFunc = @fromBackingInt(hp.expert_gating_func);
+    const gating: llama.hparams.ExpertGatingFunc = @fromBackingInt(hp.expert_gating_func);
     switch (gating) {
-        .softmax => probs = c.ggml_soft_max(ctx, logits),
-        .sigmoid => probs = c.ggml_sigmoid(ctx, logits),
-        else => impl.abort("models/k2-horizon.cpp", 151, "unsupported K2 Horizon value-router gating function"),
+        .softmax => probs = llama.impl.c.ggml_soft_max(ctx, logits),
+        .sigmoid => probs = llama.impl.c.ggml_sigmoid(ctx, logits),
+        else => llama.impl.abort("models/k2-horizon.cpp", 151, "unsupported K2 Horizon value-router gating function"),
     }
 
     // The bias only affects which experts are selected, not their weights.
     var selection_probs = probs;
     if (layer.attn_v_gate_b) |gate_b| {
-        selection_probs = c.ggml_add(ctx, probs, gate_b);
+        selection_probs = llama.impl.c.ggml_add(ctx, probs, gate_b);
         b.cb(selection_probs, "v_moe_probs_biased", il);
     }
 
-    const selected_experts: *Tensor = c.ggml_argsort_top_k(ctx, selection_probs, @intCast(n_used));
+    const selected_experts: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_argsort_top_k(ctx, selection_probs, @intCast(n_used));
 
-    probs = c.ggml_reshape_3d(ctx, probs, 1, n_values, n_tokens);
-    var weights: *Tensor = c.ggml_get_rows(ctx, probs, selected_experts);
+    probs = llama.impl.c.ggml_reshape_3d(ctx, probs, 1, n_values, n_tokens);
+    var weights: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, probs, selected_experts);
 
     if (hp.expert_weights_norm) {
-        weights = c.ggml_reshape_2d(ctx, weights, n_used, n_tokens);
-        var weights_sum: *Tensor = c.ggml_sum_rows(ctx, weights);
-        weights_sum = c.ggml_clamp(ctx, weights_sum, 6.103515625e-5, std.math.inf(f32));
-        weights = c.ggml_div(ctx, weights, weights_sum);
-        weights = c.ggml_reshape_3d(ctx, weights, 1, n_used, n_tokens);
+        weights = llama.impl.c.ggml_reshape_2d(ctx, weights, n_used, n_tokens);
+        var weights_sum: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sum_rows(ctx, weights);
+        weights_sum = llama.impl.c.ggml_clamp(ctx, weights_sum, 6.103515625e-5, std.math.inf(f32));
+        weights = llama.impl.c.ggml_div(ctx, weights, weights_sum);
+        weights = llama.impl.c.ggml_reshape_3d(ctx, weights, 1, n_used, n_tokens);
         b.cb(weights, "v_moe_weights_norm", il);
     }
 
     if (hp.expert_weights_scale != 0.0 and hp.expert_weights_scale != 1.0) {
-        weights = c.ggml_scale(ctx, weights, hp.expert_weights_scale);
+        weights = llama.impl.c.ggml_scale(ctx, weights, hp.expert_weights_scale);
         b.cb(weights, "v_moe_weights_scaled", il);
     }
 
@@ -229,31 +218,31 @@ fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, 
     b.cb(selected_experts, "v_moe_topk", il);
     b.cb(weights, "v_moe_weights", il);
 
-    var values = b.buildLoraMmId(layer.attn_v_exps.?, c.ggml_reshape_3d(ctx, cur, n_embd, 1, n_tokens), selected_experts, null);
-    values = c.ggml_silu(ctx, values);
-    values = c.ggml_mul(ctx, values, weights);
+    var values = b.buildLoraMmId(layer.attn_v_exps.?, llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd, 1, n_tokens), selected_experts, null);
+    values = llama.impl.c.ggml_silu(ctx, values);
+    values = llama.impl.c.ggml_mul(ctx, values, weights);
     b.cb(values, "v_moe_weighted", il);
 
     // Sum the selected experts. 3-d views of {n_embd_gqa, 1, n_tokens} keep
     // the strides of `values`, which lets the tensor-parallel backend follow
     // its split through the views; ordering the views before the adds lets
     // backends fuse the sum.
-    var value_views: [hparams_mod.max_experts]?*Tensor = @splat(null);
+    var value_views: [llama.hparams.max_experts]?*llama.impl.c.ggml_tensor = @splat(null);
     var i: i64 = 0;
     while (i < n_used) : (i += 1) {
         const ui: usize = @intCast(i);
-        value_views[ui] = c.ggml_view_3d(ctx, values, n_embd_gqa, 1, n_tokens, values.nb[1], values.nb[2], ui * values.nb[1]);
-        c.ggml_build_forward_expand(b.gf, value_views[ui]);
+        value_views[ui] = llama.impl.c.ggml_view_3d(ctx, values, n_embd_gqa, 1, n_tokens, values.nb[1], values.nb[2], ui * values.nb[1]);
+        llama.impl.c.ggml_build_forward_expand(b.gf, value_views[ui]);
     }
 
-    var value_out: *Tensor = value_views[0].?;
+    var value_out: *llama.impl.c.ggml_tensor = value_views[0].?;
     i = 1;
     while (i < n_used) : (i += 1) {
-        value_out = c.ggml_add(ctx, value_out, value_views[@intCast(i)]);
-        c.ggml_build_forward_expand(b.gf, value_out);
+        value_out = llama.impl.c.ggml_add(ctx, value_out, value_views[@intCast(i)]);
+        llama.impl.c.ggml_build_forward_expand(b.gf, value_out);
     }
     if (n_used == 1) {
-        value_out = c.ggml_cont(ctx, value_out);
+        value_out = llama.impl.c.ggml_cont(ctx, value_out);
     }
     b.cb(value_out, "Vcur_routed", il);
 
@@ -262,11 +251,11 @@ fn buildRoutedValue(b: *const graph.Builder, layer: *const Layer, cur: *Tensor, 
 
 /// Ports the constructor of `llama_model_k2_horizon`'s `graph`
 /// (models/k2-horizon.cpp:213 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/k2-horizon.cpp", 215, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/k2-horizon.cpp", 215, "n_embd_head == hparams.n_embd_head_k()");
 
     const n_norm_groups: i64 = hp.n_norm_groups;
 
@@ -279,7 +268,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -303,9 +292,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Kcur = b.buildLoraMm(layer.wk.?, cur, layer.wk_s);
             var Vcur = if (is_mova_layer) buildRoutedValue(b, layer, cur, il) else b.buildLoraMm(layer.wv.?, cur, layer.wv_s);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             // A per-head RMS norm, with a separate weight for every head.
             if (layer.attn_q_norm) |w| {
@@ -331,24 +320,24 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 // A softplus with beta = ln(2): log2(1 + 2^x).
                 const ln2: f32 = 0.6931471805599453;
                 var gate = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, layer.wqkv_gate_s);
-                gate = c.ggml_scale(ctx, gate, ln2);
-                gate = c.ggml_softplus(ctx, gate);
-                gate = c.ggml_scale(ctx, gate, 1.4426950408889634); // 1 / ln(2)
+                gate = llama.impl.c.ggml_scale(ctx, gate, ln2);
+                gate = llama.impl.c.ggml_softplus(ctx, gate);
+                gate = llama.impl.c.ggml_scale(ctx, gate, 1.4426950408889634); // 1 / ln(2)
 
-                cur = c.ggml_mul(ctx, cur, gate);
+                cur = llama.impl.c.ggml_mul(ctx, cur, gate);
                 cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
                 if (layer.wo_b) |wo_b| {
-                    cur = c.ggml_add(ctx, cur, wo_b);
+                    cur = llama.impl.c.ggml_add(ctx, cur, wo_b);
                 }
             }
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = groupRmsNorm(ctx, ffn_inp, layer.ffn_norm, n_norm_groups, hp.f_norm_rms_eps);
@@ -371,7 +360,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             if (layer.ffn_gate_shexp != null) {
                 const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
-                cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+                cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
             } else {
                 cur = moe_out;
             }
@@ -380,7 +369,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

@@ -14,7 +14,7 @@
 //! only that one keeps seeing warnings and errors.
 
 const std = @import("std");
-const msg = @import("msg.zig");
+const mod = @import("module.zig");
 
 /// `common_log`'s four levels, as the macros name them.
 pub const Level = enum { debug, info, warn, err };
@@ -30,7 +30,7 @@ pub var sink: ?*const fn (level: Level, text: []const u8) void = null;
 /// - `level`: the macro's level.
 /// - `fmt`, `args`: the line, in Zig's `std.fmt` syntax.
 pub fn print(level: Level, comptime fmt: []const u8, args: anytype) void {
-    if (sink == null and msg.log_sink == null) return;
+    if (sink == null and mod.msg.log_sink == null) return;
     if (level == .debug and !debugEnabled()) return;
     if (sink == null and (level == .debug or level == .info)) return;
     var stack: [4096]u8 = undefined;
@@ -39,7 +39,7 @@ pub fn print(level: Level, comptime fmt: []const u8, args: anytype) void {
         std.fmt.allocPrint(std.heap.smp_allocator, fmt, args) catch return;
     defer if (!fba.ownsSlice(text)) std.heap.smp_allocator.free(text);
     if (sink) |s| return s(level, text);
-    msg.log_sink.?(if (level == .warn) .warn else .err, text);
+    mod.msg.log_sink.?(if (level == .warn) .warn else .err, text);
 }
 
 /// `LOG_DBG`.

@@ -11,8 +11,10 @@ const stdlib = @import("stdlib");
 const server = @import("server.zig");
 
 comptime {
-    // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama");
+    // libllama and libmtmd, compiled in (see `build/tools.zig`): their C APIs
+    // are what `c.llama_*` and `c.mtmd_*` link against.
+    _ = @import("llama").lib;
+    _ = @import("mtmd").lib;
 }
 
 /// Ports `main` (tools/server/main.cpp:3 @b1b770d90).

@@ -13,30 +13,18 @@
 //! `Model`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const batch = @import("../batch.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const Ubatch = batch.Ubatch;
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llm_graph_input_pos_sensenova_u1` (src/models/sensenova-u1.cpp:4
 /// @b1b770d90). The C++ derives from `llm_graph_input_pos`; here the base
 /// is a member.
 const InpPosSensenovaU1 = struct {
-    base: graph.InpPos = .{ .n_pos_per_embd = 4 },
+    base: llama.graph.InpPos = .{ .n_pos_per_embd = 4 },
 
     /// Ports `llm_graph_input_pos_sensenova_u1`'s `set_input`
     /// (src/models/sensenova-u1.cpp:8 @b1b770d90).
-    pub fn setInput(self: *InpPosSensenovaU1, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpPosSensenovaU1, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         const pos = self.base.pos;
         if (ubatch.pos == null or pos == null) return;
@@ -48,26 +36,26 @@ const InpPosSensenovaU1 = struct {
         // `[t, 0, 0, 0]`. The generic M-RoPE input uses `[t, t, t, 0]`, so
         // U1 needs an input of its own.
         if (ubatch.token != null) {
-            const pos_data = allocator.alloc(c.llama_pos, n_tokens * n_pos_per_embd) catch impl.abort("models/sensenova-u1.cpp", 15, "out of memory");
-            defer allocator.free(pos_data);
+            const pos_data = std.heap.c_allocator.alloc(llama.impl.c.llama_pos, n_tokens * n_pos_per_embd) catch llama.impl.abort("models/sensenova-u1.cpp", 15, "out of memory");
+            defer std.heap.c_allocator.free(pos_data);
             @memset(pos_data, 0);
             for (0..n_tokens) |i| {
                 pos_data[i] = ubatch.pos[i];
             }
-            c.ggml_backend_tensor_set(pos, pos_data.ptr, 0, pos_data.len * c.ggml_element_size(pos));
+            llama.impl.c.ggml_backend_tensor_set(pos, pos_data.ptr, 0, pos_data.len * llama.impl.c.ggml_element_size(pos));
         } else {
-            c.ggml_backend_tensor_set(pos, ubatch.pos, 0, n_tokens * n_pos_per_embd * c.ggml_element_size(pos));
+            llama.impl.c.ggml_backend_tensor_set(pos, ubatch.pos, 0, n_tokens * n_pos_per_embd * llama.impl.c.ggml_element_size(pos));
         }
     }
 
     /// The base's `can_reuse`, which the C++ inherits.
-    pub fn canReuse(self: *InpPosSensenovaU1, params: *const graph.Params) bool {
+    pub fn canReuse(self: *InpPosSensenovaU1, params: *const llama.graph.Params) bool {
         return self.base.canReuse(params);
     }
 };
 
 /// Ports `llama_model_sensenova_u1`'s `load_arch_hparams` (src/models/sensenova-u1.cpp:28 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -84,9 +72,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_sensenova_u1`'s `load_arch_tensors` (src/models/sensenova-u1.cpp:41 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -95,7 +83,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -118,25 +106,25 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_sensenova_u1`'s `build_arch_graph` (src/models/sensenova-u1.cpp:72 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// The constructor's `normalize` lambda.
-fn normalize(b: *const graph.Builder, x_: *Tensor, weight: ?*Tensor) *Tensor {
-    const x: *Tensor = c.ggml_rms_norm(b.ctx0, x_, b.hparams.f_norm_rms_eps);
+fn normalize(b: *const llama.graph.Builder, x_: *llama.impl.c.ggml_tensor, weight: ?*llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
+    const x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_rms_norm(b.ctx0, x_, b.hparams.f_norm_rms_eps);
 
-    return c.ggml_mul(b.ctx0, x, weight);
+    return llama.impl.c.ggml_mul(b.ctx0, x, weight);
 }
 
 /// The constructor's `normalize_and_rotate` lambda: normalize the temporal
 /// and spatial halves separately, then rotate time, height and width.
-fn normalizeAndRotate(model: *const Model, b: *const graph.Builder, pos: *const [3]*Tensor, n_embd_head: i64, x_: *Tensor, weight: *Tensor) *Tensor {
+fn normalizeAndRotate(model: *const llama.model.Model, b: *const llama.graph.Builder, pos: *const [3]*llama.impl.c.ggml_tensor, n_embd_head: i64, x_: *llama.impl.c.ggml_tensor, weight: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const heads = x_.ne[1];
-    var x: *Tensor = c.ggml_reshape_4d(ctx, x_, @divTrunc(n_embd_head, 2), 2, heads, b.n_tokens);
-    x = normalize(b, x, c.ggml_reshape_2d(ctx, weight, @divTrunc(n_embd_head, 2), 2));
-    x = c.ggml_reshape_3d(ctx, x, n_embd_head, heads, b.n_tokens);
+    var x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, x_, @divTrunc(n_embd_head, 2), 2, heads, b.n_tokens);
+    x = normalize(b, x, llama.impl.c.ggml_reshape_2d(ctx, weight, @divTrunc(n_embd_head, 2), 2));
+    x = llama.impl.c.ggml_reshape_3d(ctx, x, n_embd_head, heads, b.n_tokens);
 
     const head: c_int = @intCast(n_embd_head);
     var axis: c_int = 0;
@@ -144,33 +132,33 @@ fn normalizeAndRotate(model: *const Model, b: *const graph.Builder, pos: *const 
         const dims: c_int = if (axis == 0) @divTrunc(head, 2) else @divTrunc(head, 4);
         const offset: c_int = if (axis == 0) 0 else @divTrunc(head, 2) + @divTrunc((axis - 1) * head, 4);
         const base: f32 = if (axis == 0) b.freq_base else model.rope_freq_base_spatial;
-        x = c.ggml_rope_ext(ctx, x, pos[@intCast(axis)], null, dims, c.GGML_ROPE_TYPE_NEOX, b.n_ctx_orig, base, 1.0, 0.0, 1.0, 32.0, 1.0);
-        _ = c.ggml_rope_set_offset(x, offset);
+        x = llama.impl.c.ggml_rope_ext(ctx, x, pos[@intCast(axis)], null, dims, llama.impl.c.GGML_ROPE_TYPE_NEOX, b.n_ctx_orig, base, 1.0, 0.0, 1.0, 32.0, 1.0);
+        _ = llama.impl.c.ggml_rope_set_offset(x, offset);
     }
     return x;
 }
 
 /// Ports the constructor of `llama_model_sensenova_u1`'s `graph`
 /// (src/models/sensenova-u1.cpp:76 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/sensenova-u1.cpp", 81, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/sensenova-u1.cpp", 81, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    const inp = allocator.create(InpPosSensenovaU1) catch impl.abort("models/sensenova-u1.cpp", 95, "out of memory");
+    const inp = std.heap.c_allocator.create(InpPosSensenovaU1) catch llama.impl.abort("models/sensenova-u1.cpp", 95, "out of memory");
     inp.* = .{};
-    const inp_pos: *Tensor = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens * hp.nPosPerEmbd());
+    const inp_pos: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens * hp.nPosPerEmbd());
     inp.base.pos = inp_pos;
-    c.ggml_set_input(inp_pos);
+    llama.impl.c.ggml_set_input(inp_pos);
     _ = b.res.addInput(InpPosSensenovaU1, inp);
 
-    var pos: [3]*Tensor = undefined;
+    var pos: [3]*llama.impl.c.ggml_tensor = undefined;
     for (&pos, 0..) |*p, axis| {
-        p.* = c.ggml_view_1d(ctx, inp_pos, b.n_tokens, axis * @as(usize, @intCast(b.n_tokens)) * @sizeOf(i32));
+        p.* = llama.impl.c.ggml_view_1d(ctx, inp_pos, b.n_tokens, axis * @as(usize, @intCast(b.n_tokens)) * @sizeOf(i32));
     }
 
     const inp_attn = b.buildAttnInpKv();
@@ -203,13 +191,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -219,7 +207,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

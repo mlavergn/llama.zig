@@ -9,20 +9,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_neo_bert`'s `load_arch_hparams` (models/neo-bert.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
@@ -32,10 +23,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_neo_bert`'s `load_arch_tensors` (models/neo-bert.cpp:11 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -64,18 +55,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_neo_bert`'s `build_arch_graph` (models/neo-bert.cpp:39 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_neo_bert`'s `graph`
 /// (models/neo-bert.cpp:43 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/neo-bert.cpp", 46, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/neo-bert.cpp", 46, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -109,15 +100,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "kqv_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         // Re-add the layer input.
-        cur = c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
 
         const ffn_inp = cur;
         b.cb(ffn_inp, "ffn_inp", il);
@@ -130,7 +121,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, null, null, null, null, layer.ffn_down, null, null, null, .swiglu, .seq, il);
 
         // The attention output bypasses the feed-forward.
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         // The next layer's input.
         inpL = cur;

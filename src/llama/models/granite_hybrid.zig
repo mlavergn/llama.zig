@@ -11,22 +11,12 @@
 //! `build_attention_layer` and `build_layer_ffn`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const mamba_base = @import("mamba_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_granite_hybrid`'s `load_arch_hparams`
 /// (models/granite-hybrid.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -70,10 +60,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_granite_hybrid`'s `load_arch_tensors`
 /// (models/granite-hybrid.cpp:41 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     // The Mamba-2 mixer's SSM parameters.
     const d_conv: i64 = hp.ssm_d_conv;
@@ -84,7 +74,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     const d_in_proj = 2 * d_inner + 2 * n_group * d_state + n_ssm_head;
 
     // Only an expansion factor of 2 is supported for now.
-    impl.assert(2 * l.n_embd == d_inner, "models/granite-hybrid.cpp", 54, "2 * n_embd == d_inner");
+    llama.impl.assert(2 * l.n_embd == d_inner, "models/granite-hybrid.cpp", 54, "2 * n_embd == d_inner");
 
     // Embeddings.
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
@@ -96,14 +86,14 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         // Without an output, the input token embedding is used, duplicated
         // to allow offloading.
         if (self.output == null) {
-            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
         }
     }
 
     var i: i32 = 0;
     while (i < l.n_layer) : (i += 1) {
         const layer = &self.layers[@intCast(i)];
-        const rope_dup: u32 = if (i != 0) loader.tensor_duplicated else 0;
+        const rope_dup: u32 = if (i != 0) llama.loader.tensor_duplicated else 0;
 
         // Norm.
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
@@ -166,17 +156,17 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// Ports `llama_model_granite_hybrid`'s `build_arch_graph`
 /// (models/granite-hybrid.cpp:131 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_granite_hybrid`'s `graph`
 /// (models/granite-hybrid.cpp:135 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-hybrid.cpp", 138, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/granite-hybrid.cpp", 138, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -185,12 +175,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_out_ids = b.buildInpOutIds();
 
     // The positions, when RoPE is on.
-    var inp_pos: ?*Tensor = null;
+    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
     if (hp.hasRope(0)) {
         inp_pos = b.buildInpPos();
     }
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -204,15 +194,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         if (hp.isRecr(@intCast(il))) {
             // An SSM layer.
-            cur = mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
+            cur = llama.models.mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
         } else {
             // An attention layer.
             cur = buildAttentionLayer(model, b, cur, inp_pos, inp.getAttn(), n_embd_head, il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         // FFN.
@@ -234,7 +224,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // Granite scales the logits.
     if (hp.f_logit_scale != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_logit_scale);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;
@@ -242,7 +232,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_attention_layer`
 /// (models/granite-hybrid.cpp:202 @b1b770d90).
-fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: ?*Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
+fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_pos: ?*llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
 
@@ -259,7 +249,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
     b.cb(Kcur, "Kcur", il);
     b.cb(Vcur, "Vcur", il);
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
     const cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(cur, "attn_out", il);
     return cur;
@@ -267,7 +257,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 
 /// Ports `llama_model_granite_hybrid::graph`'s `build_layer_ffn`
 /// (models/granite-hybrid.cpp:225 @b1b770d90).
-fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inpSA: *Tensor, il: c_int) *Tensor {
+fn buildLayerFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inpSA: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -275,9 +265,9 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, in
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "ffn_inp", il);
 
     // The feed-forward network, not MoE.
@@ -314,7 +304,7 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, in
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         } else {
             cur = moe_out;
@@ -323,9 +313,9 @@ fn buildLayerFfn(model: *const Model, b: *const graph.Builder, cur_: *Tensor, in
 
     // Granite scales the residual.
     if (hp.f_residual_scale != 0.0) {
-        cur = c.ggml_scale(ctx, cur, hp.f_residual_scale);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_residual_scale);
     }
-    cur = c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "ffn_out", il);
 
     cur = b.buildCvec(cur, il);

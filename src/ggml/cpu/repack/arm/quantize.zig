@@ -29,45 +29,39 @@
 //! C's two bodies expressed once.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const blocks = @import("../blocks.zig");
-const convert = @import("../../convert.zig");
-const neon = @import("../../quants/arm/neon.zig");
-
-const c = impl.c;
-const f32x4 = neon.f32x4;
+const ggml = @import("../../../module.zig");
 
 /// Ports `ggml_quantize_mat_q8_0_4x4` and `ggml_quantize_mat_q8_0_4x8`
 /// (arch/arm/repack.cpp:69, 137 @b1b770d90).
 fn quantizeMat(comptime blck: i64, x: [*]const f32, vy: *anyopaque, k: i64) void {
     const nb = @divTrunc(k, 32);
-    const y: [*]blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));
+    const y: [*]ggml.cpu.repack.blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));
 
-    var srcv: [4][8]f32x4 = undefined;
+    var srcv: [4][8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
     var id: [4]f32 = undefined;
 
     var i: i64 = 0;
     while (i < nb) : (i += 1) {
-        var asrcv: [8]f32x4 = undefined;
-        var amaxv: [8]f32x4 = undefined;
+        var asrcv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
+        var amaxv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
 
         for (0..4) |row_iter| {
             for (0..8) |j| {
                 const off: usize = @intCast(@as(i64, @intCast(row_iter)) * k + i * 32 + 4 * @as(i64, @intCast(j)));
                 srcv[row_iter][j] = x[off..][0..4].*;
             }
-            for (0..8) |j| asrcv[j] = neon.abs_f32(srcv[row_iter][j]);
+            for (0..8) |j| asrcv[j] = ggml.cpu.quants.arch.neon.abs_f32(srcv[row_iter][j]);
 
-            for (0..4) |j| amaxv[2 * j] = neon.max_f32(asrcv[2 * j], asrcv[2 * j + 1]);
-            for (0..2) |j| amaxv[4 * j] = neon.max_f32(amaxv[4 * j], amaxv[4 * j + 2]);
-            for (0..1) |j| amaxv[8 * j] = neon.max_f32(amaxv[8 * j], amaxv[8 * j + 4]);
+            for (0..4) |j| amaxv[2 * j] = ggml.cpu.quants.arch.neon.max_f32(asrcv[2 * j], asrcv[2 * j + 1]);
+            for (0..2) |j| amaxv[4 * j] = ggml.cpu.quants.arch.neon.max_f32(amaxv[4 * j], amaxv[4 * j + 2]);
+            for (0..1) |j| amaxv[8 * j] = ggml.cpu.quants.arch.neon.max_f32(amaxv[8 * j], amaxv[8 * j + 4]);
 
-            const amax = neon.maxvq_f32(amaxv[0]);
+            const amax = ggml.cpu.quants.arch.neon.maxvq_f32(amaxv[0]);
 
             const d = amax / ((1 << 7) - 1);
             id[row_iter] = if (d != 0.0) 1.0 / d else 0.0;
 
-            y[@intCast(i)].d[row_iter] = convert.cpuFp32ToFp16(d);
+            y[@intCast(i)].d[row_iter] = ggml.cpu.convert.cpuFp32ToFp16(d);
         }
 
         // Per `j`, each of the four rows writes `blck` bytes at stride
@@ -77,8 +71,8 @@ fn quantizeMat(comptime blck: i64, x: [*]const f32, vy: *anyopaque, k: i64) void
         while (j < @as(usize, @intCast(@divTrunc(32, blck)))) : (j += 1) {
             for (0..4) |row| {
                 for (0..vecs_per_row) |v| {
-                    const src = neon.mul_n_f32(srcv[row][j * vecs_per_row + v], id[row]);
-                    const vi = neon.cvtnq_s32_f32(src);
+                    const src = ggml.cpu.quants.arch.neon.mul_n_f32(srcv[row][j * vecs_per_row + v], id[row]);
+                    const vi = ggml.cpu.quants.arch.neon.cvtnq_s32_f32(src);
                     const base: usize = @intCast(@as(i64, @intCast(j)) * blck * 4 +
                         @as(i64, @intCast(row)) * blck + @as(i64, @intCast(v)) * 4);
                     inline for (0..4) |lane| {
@@ -100,5 +94,5 @@ pub export fn ggml_quantize_mat_q8_0_4x8(x: [*]const f32, vy: *anyopaque, k: i64
 
 comptime {
     _ = std;
-    _ = c;
+    _ = ggml.impl.c;
 }

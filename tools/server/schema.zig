@@ -33,39 +33,27 @@
 //! for their type checks.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const common = @import("common.zig");
-const task = @import("task.zig");
-const oaicompat = @import("oaicompat.zig");
 
-const c = tools.c;
-const log = tools.log;
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Error = common.Error;
-const Token = common.Token;
-const throw = common.throw;
-const TaskParams = task.TaskParams;
-const SamplerType = task.SamplerType;
-const GrammarTrigger = common.GrammarTrigger;
 
 /// Ports `field_eval_context` (server-schema.h:18 @b1b770d90), with what the
 /// handlers' lambdas capture.
 pub const EvalContext = struct {
     /// the task's arena: everything a handler sets is allocated here
     a: Allocator,
-    params: *TaskParams,
+    params: *mod.task.TaskParams,
     params_base: *const tools.params.Params,
-    vocab: ?*const c.llama_vocab = null,
-    logit_bias_eog: ?[]const c.llama_logit_bias = null,
+    vocab: ?*const tools.c.llama_vocab = null,
+    logit_bias_eog: ?[]const tools.c.llama_logit_bias = null,
 };
 
 /// Ports `field_handler` (server-schema.h:25 @b1b770d90).
-pub const Handler = *const fn (ctx: *EvalContext, data: *const Value) Error!void;
+pub const Handler = *const fn (ctx: *EvalContext, data: *const json.Value) mod.common.Error!void;
 
 /// Ports `field_num` (server-schema.h:48 @b1b770d90): a number, clamped to
 /// `[min, max]`, or refused outside it when the limits are hard.
@@ -103,7 +91,7 @@ pub const Field = struct {
 fn toString(buf: *[512]u8, x: anytype) []const u8 {
     switch (@typeInfo(@TypeOf(x))) {
         .float => {
-            const n = libc.snprintf(buf, buf.len, "%f", @as(f64, @floatCast(x)));
+            const n = stdlib.libc.snprintf(buf, buf.len, "%f", @as(f64, @floatCast(x)));
             return buf[0..@intCast(n)];
         },
         else => return std.fmt.bufPrint(buf, "{d}", .{x}) catch |err| switch (err) {
@@ -118,23 +106,23 @@ fn toString(buf: *[512]u8, x: anytype) []const u8 {
 /// Ports `handle_with_catch` (server-schema.cpp:594 @b1b770d90): any
 /// exception a field throws becomes `std::invalid_argument("Field '<name>':
 /// <what>")`.
-fn handleWithCatch(name: []const u8, r: Error!void) Error!void {
+fn handleWithCatch(name: []const u8, r: mod.common.Error!void) mod.common.Error!void {
     r catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => {
-            const w = try std.heap.c_allocator.dupe(u8, common.what(e));
+            const w = try std.heap.c_allocator.dupe(u8, mod.common.what(e));
             defer std.heap.c_allocator.free(w);
             // `string_format` takes `%s`: the text stops at its first NUL
             const cut = if (std.mem.indexOfScalar(u8, w, 0)) |nul| w[0..nul] else w;
             const n = if (std.mem.indexOfScalar(u8, name, 0)) |nul| name[0..nul] else name;
-            return throw(error.InvalidArgument, "Field '{s}': {s}", .{ n, cut });
+            return mod.common.throw(error.InvalidArgument, "Field '{s}': {s}", .{ n, cut });
         },
     };
 }
 
 /// Ports `has_value` (server-schema.cpp:603 @b1b770d90): a null value is
 /// absent, so a client can send null for the server's default.
-fn hasValue(data: *const Value, n: []const u8) bool {
+fn hasValue(data: *const json.Value, n: []const u8) bool {
     return data.contains(n) and !(data.at(n) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
     }).isNull();
@@ -147,7 +135,7 @@ fn clamp(comptime T: type, min: T, max: T, v: T) T {
 }
 
 /// Ports `field_num`'s `eval` (server-schema.cpp:608 @b1b770d90), the template's.
-fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const Value) Error!void {
+fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
             try handleWithCatch(n, blk: {
@@ -167,7 +155,7 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
                         var b1: [512]u8 = undefined;
                         var b2: [512]u8 = undefined;
                         var b3: [512]u8 = undefined;
-                        break :blk throw(error.InvalidArgument, "Value must be between {s} <= value <= {s}, but got {s}", .{ toString(&b1, num.min), toString(&b2, num.max), toString(&b3, tmp) });
+                        break :blk mod.common.throw(error.InvalidArgument, "Value must be between {s} <= value <= {s}, but got {s}", .{ toString(&b1, num.min), toString(&b2, num.max), toString(&b3, tmp) });
                     }
                     num.val.* = tmp;
                     break :blk {};
@@ -180,7 +168,7 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
 
 /// Ports `field_str`'s `eval` (server-schema.cpp:629 @b1b770d90) and
 /// `field_json`'s `eval` (server-schema.cpp:656 @b1b770d90), which are the same.
-fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
+fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const json.Value, comptime line: c_int) mod.common.Error!void {
     tools.ggml.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
         if (hasValue(data, n)) {
@@ -191,7 +179,7 @@ fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime 
 }
 
 /// Ports `field_bool`'s `eval` (server-schema.cpp:641 @b1b770d90).
-fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) Error!void {
+fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     for (f.name) |n| {
         if (hasValue(data, n)) {
             try handleWithCatch(n, blk: {
@@ -211,7 +199,7 @@ fn evalBool(f: *const Field, val: *bool, ctx: *EvalContext, data: *const Value) 
 
 /// Ports `field_nested`'s `eval` (server-schema.cpp:668 @b1b770d90): the
 /// subfields, evaluated on the member's object.
-fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const Value) Error!void {
+fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     for (f.name) |n| {
         if (data.contains(n) and (data.at(n) catch |err| switch (err) {
             error.OutOfMemory, error.JsonError => unreachable,
@@ -228,7 +216,7 @@ fn evalNested(f: *const Field, subfields: []const Field, ctx: *EvalContext, data
 }
 
 /// `f->eval(ctx, data)`, the virtual dispatched.
-pub fn eval(f: *const Field, ctx: *EvalContext, data: *const Value) Error!void {
+pub fn eval(f: *const Field, ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     switch (f.kind) {
         .num_i32 => |n| try evalNum(i32, f, n, ctx, data),
         .num_i64 => |n| try evalNum(i64, f, n, ctx, data),
@@ -246,38 +234,38 @@ pub fn eval(f: *const Field, ctx: *EvalContext, data: *const Value) Error!void {
 
 /// `common_tokenize(ctx.vocab, text, add_special, parse_special)` after
 /// `GGML_ASSERT(ctx.vocab != nullptr)`.
-fn tokenizeIn(ctx: *EvalContext, comptime line: c_int, text: []const u8, add_special: bool, parse_special: bool) Error![]Token {
+fn tokenizeIn(ctx: *EvalContext, comptime line: c_int, text: []const u8, add_special: bool, parse_special: bool) mod.common.Error![]mod.common.Token {
     tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", line, "ctx.vocab != nullptr");
-    return common.tokenize(ctx.a, ctx.vocab, text, add_special, parse_special);
+    return mod.common.tokenize(ctx.a, ctx.vocab, text, add_special, parse_special);
 }
 
-fn hResponseFields(ctx: *EvalContext, data: *const Value) Error!void {
-    const fields = try common.jsonValueStrings(ctx.a, data, "response_fields");
+fn hResponseFields(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
+    const fields = try mod.common.jsonValueStrings(ctx.a, data, "response_fields");
     const out = try ctx.a.alloc([]const u8, fields.len);
     for (fields, 0..) |f, i| out[i] = try ctx.a.dupe(u8, f);
     ctx.params.response_fields = out;
 }
 
-fn hDryBase(ctx: *EvalContext, data: *const Value) Error!void {
+fn hDryBase(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const v = try (try data.at("dry_base")).get(f32);
     ctx.params.sampling.dry_base = if (v < 1.0) ctx.params_base.sampling.dry_base else v;
 }
 
-fn hLora(ctx: *EvalContext, data: *const Value) Error!void {
+fn hLora(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const lora = try data.at("lora");
     if (!lora.isArray()) {
-        return throw(error.RuntimeError, "Error: 'lora' must be an array of objects with 'id' and 'scale' fields", .{});
+        return mod.common.throw(error.RuntimeError, "Error: 'lora' must be an array of objects with 'id' and 'scale' fields", .{});
     }
-    ctx.params.lora = try common.parseLoraRequest(ctx.a, lora);
+    ctx.params.lora = try mod.common.parseLoraRequest(ctx.a, lora);
 }
 
-fn hDrySequenceBreakers(ctx: *EvalContext, data: *const Value) Error!void {
-    const br = try common.jsonValueStrings(ctx.a, data, "dry_sequence_breakers");
+fn hDrySequenceBreakers(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
+    const br = try mod.common.jsonValueStrings(ctx.a, data, "dry_sequence_breakers");
     const out = try ctx.a.alloc([]const u8, br.len);
     for (br, 0..) |b, i| out[i] = try ctx.a.dupe(u8, b);
     ctx.params.sampling.dry_sequence_breakers = .fromOwnedSlice(out);
     if (ctx.params.sampling.dry_sequence_breakers.items.len == 0) {
-        return throw(error.RuntimeError, "Error: dry_sequence_breakers must be a non-empty array of strings", .{});
+        return mod.common.throw(error.RuntimeError, "Error: dry_sequence_breakers must be a non-empty array of strings", .{});
     }
 
     // each distinct breaker costs a full vocabulary scan at sampler init, so dedupe before counting
@@ -291,26 +279,26 @@ fn hDrySequenceBreakers(ctx: *EvalContext, data: *const Value) Error!void {
         }
     }
 
-    if (n_unique > c.LLAMA_DRY_MAX_SEQ_BREAKERS) {
-        return throw(error.RuntimeError, "Error: dry_sequence_breakers must contain at most {d} distinct entries", .{c.LLAMA_DRY_MAX_SEQ_BREAKERS});
+    if (n_unique > tools.c.LLAMA_DRY_MAX_SEQ_BREAKERS) {
+        return mod.common.throw(error.RuntimeError, "Error: dry_sequence_breakers must contain at most {d} distinct entries", .{tools.c.LLAMA_DRY_MAX_SEQ_BREAKERS});
     }
 
     ctx.params.sampling.dry_sequence_breakers.items.len = n_unique;
 }
 
-fn hJsonSchema(ctx: *EvalContext, data: *const Value) Error!void {
+fn hJsonSchema(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const params = ctx.params;
     const a = ctx.a;
     if (data.contains("json_schema") and !data.contains("grammar")) {
         convertSchema(ctx, data) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
-            else => return common.exception.rethrow(error.RuntimeError, e, "\"json_schema\": ", ""),
+            else => return mod.common.exception.rethrow(error.RuntimeError, e, "\"json_schema\": ", ""),
         };
     } else {
-        const grammar_str = common.jsonValue(data, "grammar", []const u8, "");
+        const grammar_str = mod.common.jsonValue(data, "grammar", []const u8, "");
         if (grammar_str.len != 0) {
             // grammar_type key is set by the server when converting chat template grammars
-            const grammar_type = common.jsonValue(data, "grammar_type", []const u8, "");
+            const grammar_type = mod.common.jsonValue(data, "grammar_type", []const u8, "");
             if (std.mem.eql(u8, grammar_type, "tool_calls")) {
                 params.sampling.grammar_type = .tool_calls;
                 params.sampling.grammar = try a.dupe(u8, grammar_str);
@@ -319,65 +307,65 @@ fn hJsonSchema(ctx: *EvalContext, data: *const Value) Error!void {
                 params.sampling.grammar_type = .user;
                 params.sampling.grammar = try a.dupe(u8, grammar_str);
             }
-            if (log.verbosity_thold >= log.level_debug) {
-                const gt = common.dupZ(grammar_type);
-                defer common.freeZ(gt);
-                const gv = common.dupZ(task.grammarValue(&params.sampling));
-                defer common.freeZ(gv);
-                common.srv(.dbg, "operator()", "Grammar (%s): %s\n", .{ gt, gv });
+            if (tools.log.verbosity_thold >= tools.log.level_debug) {
+                const gt = mod.common.dupZ(grammar_type);
+                defer mod.common.freeZ(gt);
+                const gv = mod.common.dupZ(mod.task.grammarValue(&params.sampling));
+                defer mod.common.freeZ(gv);
+                mod.common.srv(.dbg, "operator()", "Grammar (%s): %s\n", .{ gt, gv });
             }
         }
     }
 }
 
 /// The `try` block of the `json_schema` handler.
-fn convertSchema(ctx: *EvalContext, data: *const Value) Error!void {
+fn convertSchema(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const a = ctx.a;
-    var schema = try common.jsonValueJson(a, data, "json_schema", Value.emptyObject());
+    var schema = try mod.common.jsonValueJson(a, data, "json_schema", json.Value.emptyObject());
     if (schema.isObject() and schema.empty()) {
         // an empty schema means any object
-        try schema.set(a, "type", try Value.initString(a, "object"));
+        try schema.set(a, "type", try json.Value.initString(a, "object"));
     }
-    if (log.verbosity_thold >= log.level_debug) {
+    if (tools.log.verbosity_thold >= tools.log.level_debug) {
         const d = try json.dump(a, &schema, 2);
-        const z = common.dupZ(d);
-        defer common.freeZ(z);
-        common.srv(.dbg, "operator()", "JSON schema: %s\n", .{z});
+        const z = mod.common.dupZ(d);
+        defer mod.common.freeZ(z);
+        mod.common.srv(.dbg, "operator()", "JSON schema: %s\n", .{z});
     }
-    const grammar_str = try oaicompat.schemaToGrammar(a, &schema);
-    if (log.verbosity_thold >= log.level_debug) {
-        const z = common.dupZ(grammar_str);
-        defer common.freeZ(z);
-        common.srv(.dbg, "operator()", "Converted grammar: %s\n", .{z});
+    const grammar_str = try mod.oaicompat.schemaToGrammar(a, &schema);
+    if (tools.log.verbosity_thold >= tools.log.level_debug) {
+        const z = mod.common.dupZ(grammar_str);
+        defer mod.common.freeZ(z);
+        mod.common.srv(.dbg, "operator()", "Converted grammar: %s\n", .{z});
     }
     ctx.params.sampling.grammar_type = .output_format;
     ctx.params.sampling.grammar = grammar_str;
 }
 
-fn hReasoningFormat(ctx: *EvalContext, data: *const Value) Error!void {
+fn hReasoningFormat(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     ctx.params.reasoning_format = try chat.ReasoningFormat.fromName(try (try data.at("reasoning_format")).get([]const u8));
 }
 
-fn hContinueFinalMessage(_: *EvalContext, data: *const Value) Error!void {
+fn hContinueFinalMessage(_: *EvalContext, data: *const json.Value) mod.common.Error!void {
     _ = try chat.msg.continuationParse(try data.at("continue_final_message"));
 }
 
-fn hEcho(_: *EvalContext, data: *const Value) Error!void {
+fn hEcho(_: *EvalContext, data: *const json.Value) mod.common.Error!void {
     _ = try (try data.at("echo")).get(bool);
 }
 
-fn hPreservedTokens(ctx: *EvalContext, data: *const Value) Error!void {
+fn hPreservedTokens(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const tokens = try (try data.at("preserved_tokens")).getSlice(ctx.a, []const u8);
     // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @b1b770d90)
     tools.ggml.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
     try chat.session.addPreservedTokens(ctx.a, &ctx.params.sampling.preserved_tokens, ctx.vocab.?, tokens);
 }
 
-fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
+fn hGrammarTriggers(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     var triggers: std.ArrayList(tools.params.GrammarTrigger) = .empty;
     var it = (try data.at("grammar_triggers")).items();
     while (it.next()) |t| {
-        const ct = try GrammarTrigger.fromJson(ctx.a, t.value);
+        const ct = try mod.common.GrammarTrigger.fromJson(ctx.a, t.value);
         try triggers.append(ctx.a, .{ .type = try triggerType(ct.type), .value = ct.value, .token = ct.token });
     }
     try addGrammarTriggers(ctx, triggers.items);
@@ -388,17 +376,17 @@ fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
 /// type, unlike `common_chat`'s, holds any integer a request sends:
 /// `cli/common_chat/session.zig`'s `addGrammarTriggers` is the same
 /// function over that module's types.
-fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarTrigger) Error!void {
+fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarTrigger) mod.common.Error!void {
     tools.ggml.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1066, "vocab != nullptr");
     const s = &ctx.params.sampling;
     for (triggers) |trigger| {
         if (trigger.type == .word) {
             const word = trigger.value;
-            const ids = try common.tokenize(ctx.a, ctx.vocab, word, false, true);
+            const ids = try mod.common.tokenize(ctx.a, ctx.vocab, word, false, true);
             if (ids.len == 1) {
                 const token = ids[0];
-                if (std.mem.indexOfScalar(Token, s.preserved_tokens.items, token) == null) {
-                    return throw(error.RuntimeError, "Grammar trigger word should be marked as preserved token: {s}", .{word});
+                if (std.mem.indexOfScalar(mod.common.Token, s.preserved_tokens.items, token) == null) {
+                    return mod.common.throw(error.RuntimeError, "Grammar trigger word should be marked as preserved token: {s}", .{word});
                 }
                 try s.grammar_triggers.append(ctx.a, .{ .type = .token, .value = word, .token = token });
             } else {
@@ -409,28 +397,28 @@ fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarT
         }
     }
     if (s.grammar_lazy and s.grammar_triggers.items.len == 0) {
-        return throw(error.RuntimeError, "Error: no triggers set for lazy grammar!", .{});
+        return mod.common.throw(error.RuntimeError, "Error: no triggers set for lazy grammar!", .{});
     }
 }
 
 /// `(common_grammar_trigger_type) in.at("type").get<int>()`: the C++ keeps
 /// any integer, `tools/common/params.zig`'s `GrammarTriggerType` only the
 /// four it names; another one is refused until that enum is open.
-fn triggerType(t: c_int) Error!tools.params.GrammarTriggerType {
+fn triggerType(t: c_int) mod.common.Error!tools.params.GrammarTriggerType {
     const T = tools.params.GrammarTriggerType;
     if (@typeInfo(T).@"enum".mode == .nonexhaustive) return @fromBackingInt(@intCast(t));
     inline for (@typeInfo(T).@"enum".field_values) |v| {
         if (t == v) return @fromBackingInt(@intCast(v));
     }
-    return throw(error.RuntimeError, "grammar trigger type {d} is not representable here", .{t});
+    return mod.common.throw(error.RuntimeError, "grammar trigger type {d} is not representable here", .{t});
 }
 
-fn hReasoningBudgetStartTag(ctx: *EvalContext, data: *const Value) Error!void {
+fn hReasoningBudgetStartTag(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const toks = try tokenizeIn(ctx, 361, try (try data.at("reasoning_budget_start_tag")).get([]const u8), false, true);
     ctx.params.sampling.reasoning_budget_start = .fromOwnedSlice(toks);
 }
 
-fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
+fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 361, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.reasoning_budget_end = .empty;
@@ -450,12 +438,12 @@ fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
     }
 }
 
-fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
+fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 389, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     if (s.reasoning_budget_end.items.len != 0) {
-        var end_tag: std.ArrayList(Token) = .fromOwnedSlice(try ctx.a.dupe(Token, s.reasoning_budget_end.items[0].items));
-        const message = common.jsonValue(data, "reasoning_budget_message", []const u8, "");
+        var end_tag: std.ArrayList(mod.common.Token) = .fromOwnedSlice(try ctx.a.dupe(mod.common.Token, s.reasoning_budget_end.items[0].items));
+        const message = mod.common.jsonValue(data, "reasoning_budget_message", []const u8, "");
         if (message.len != 0) {
             const message_tokens = try tokenizeIn(ctx, 389, message, false, true);
             try end_tag.insertSlice(ctx.a, 0, message_tokens);
@@ -465,7 +453,7 @@ fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 /// The `parse_bias` lambda: a number, or `false` to ban the token.
-fn parseBias(v: *const Value, bias: *f32) Error!bool {
+fn parseBias(v: *const json.Value, bias: *f32) mod.common.Error!bool {
     if (v.isNumber()) {
         bias.* = try v.get(f32);
         return true;
@@ -477,12 +465,12 @@ fn parseBias(v: *const Value, bias: *f32) Error!bool {
     return false;
 }
 
-fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
+fn hLogitBias(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 404, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.logit_bias = .empty;
     const logit_bias = try data.at("logit_bias");
-    const n_vocab = c.llama_vocab_n_tokens(ctx.vocab);
+    const n_vocab = tools.c.llama_vocab_n_tokens(ctx.vocab);
     if (logit_bias.isArray()) {
         for (logit_bias.array.items) |*el| {
             if (!el.isArray() or el.size() != 2) continue;
@@ -490,10 +478,10 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
             if (!try parseBias(try el.atIndex(1), &bias)) continue;
             const e0 = try el.atIndex(0);
             if (e0.isNumberInteger()) {
-                const tok = try e0.get(Token);
+                const tok = try e0.get(mod.common.Token);
                 if (tok >= 0 and tok < n_vocab) try s.logit_bias.append(ctx.a, .{ .token = tok, .bias = bias });
             } else if (e0.isString()) {
-                for (try common.tokenize(ctx.a, ctx.vocab, try e0.get([]const u8), false, false)) |tok|
+                for (try mod.common.tokenize(ctx.a, ctx.vocab, try e0.get([]const u8), false, false)) |tok|
                     try s.logit_bias.append(ctx.a, .{ .token = tok, .bias = bias });
             }
         }
@@ -505,18 +493,18 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
             // `std::stoi`-free `strtol` over the key's `c_str()`: whole up to its NUL
             const key = std.mem.sliceTo(el.key, 0);
             const parsed = stdlib.num.strtol(key, 10);
-            const tok: Token = @truncate(parsed.value);
+            const tok: mod.common.Token = @truncate(parsed.value);
             if (parsed.end == key.len) {
                 if (tok >= 0 and tok < n_vocab) try s.logit_bias.append(ctx.a, .{ .token = tok, .bias = bias });
             } else {
-                for (try common.tokenize(ctx.a, ctx.vocab, el.key, false, false)) |t|
+                for (try mod.common.tokenize(ctx.a, ctx.vocab, el.key, false, false)) |t|
                     try s.logit_bias.append(ctx.a, .{ .token = t, .bias = bias });
             }
         }
     }
 }
 
-fn hIgnoreEos(ctx: *EvalContext, data: *const Value) Error!void {
+fn hIgnoreEos(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     tools.ggml.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 445, "ctx.logit_bias_eog != nullptr");
     const s = &ctx.params.sampling;
     s.ignore_eos = try (try data.at("ignore_eos")).get(bool);
@@ -525,7 +513,7 @@ fn hIgnoreEos(ctx: *EvalContext, data: *const Value) Error!void {
     }
 }
 
-fn hStop(ctx: *EvalContext, data: *const Value) Error!void {
+fn hStop(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     var antiprompt: std.ArrayList([]const u8) = .empty;
     const stop = try data.at("stop");
     if (stop.isArray()) {
@@ -542,7 +530,7 @@ fn hStop(ctx: *EvalContext, data: *const Value) Error!void {
     }
 }
 
-fn hSamplers(ctx: *EvalContext, data: *const Value) Error!void {
+fn hSamplers(ctx: *EvalContext, data: *const json.Value) mod.common.Error!void {
     const samplers = try data.at("samplers");
     if (samplers.isArray()) {
         const names = try samplers.getSlice(ctx.a, []const u8);
@@ -552,7 +540,7 @@ fn hSamplers(ctx: *EvalContext, data: *const Value) Error!void {
     }
 }
 
-fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
+fn dupeStrings(a: Allocator, xs: []const []const u8) mod.common.Error![]const []const u8 {
     const out = try a.alloc([]const u8, xs.len);
     for (xs, 0..) |x, i| out[i] = try a.dupe(u8, x);
     return out;
@@ -561,8 +549,8 @@ fn dupeStrings(a: Allocator, xs: []const []const u8) Error![]const []const u8 {
 /// Ports `common_sampler_types_from_names` (sampling.cpp:963 @b1b770d90): each
 /// name, lower-cased, by its canonical spelling or an alias; an unknown
 /// one is warned about and skipped.
-pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.ArrayList(SamplerType) {
-    const Entry = struct { []const u8, SamplerType };
+pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) mod.common.Error!std.ArrayList(mod.task.SamplerType) {
+    const Entry = struct { []const u8, mod.task.SamplerType };
     const map = [_]Entry{
         // canonical
         .{ "dry", .dry },                 .{ "top_k", .top_k },           .{ "top_p", .top_p },
@@ -580,7 +568,7 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
         .{ "temp", .temperature },        .{ "typ", .typical_p },
     };
 
-    var samplers: std.ArrayList(SamplerType) = .empty;
+    var samplers: std.ArrayList(mod.task.SamplerType) = .empty;
     try samplers.ensureTotalCapacity(a, names.len);
 
     for (names) |name| {
@@ -593,16 +581,16 @@ pub fn samplerTypesFromNames(a: Allocator, names: []const []const u8) Error!std.
             try samplers.append(a, t);
             continue;
         }
-        log.wrn("%s: unable to match sampler by name '%s'\n", .{ "common_sampler_types_from_names", name_lower.ptr });
+        tools.log.wrn("%s: unable to match sampler by name '%s'\n", .{ "common_sampler_types_from_names", name_lower.ptr });
     }
 
     return samplers;
 }
 
 /// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @b1b770d90).
-pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayList(SamplerType) {
-    const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
-    var samplers: std.ArrayList(SamplerType) = .empty;
+pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) mod.common.Error!std.ArrayList(mod.task.SamplerType) {
+    const all = [_]mod.task.SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
+    var samplers: std.ArrayList(mod.task.SamplerType) = .empty;
     try samplers.ensureTotalCapacity(a, chars.len);
     for (chars) |ch| {
         const found = for (all) |t| {
@@ -611,7 +599,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
         if (found) |t| {
             try samplers.append(a, t);
         } else {
-            log.wrn("%s: unable to match sampler by char '%c'\n", .{ "common_sampler_types_from_chars", @as(c_int, ch) });
+            tools.log.wrn("%s: unable to match sampler by char '%c'\n", .{ "common_sampler_types_from_chars", @as(c_int, ch) });
         }
     }
     return samplers;
@@ -625,7 +613,7 @@ pub fn samplerTypesFromChars(a: Allocator, chars: []const u8) Error!std.ArrayLis
 /// `params`.
 ///
 /// Return: owned by `a`.
-pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params, params: *TaskParams) Error![]const Field {
+pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params, params: *mod.task.TaskParams) mod.common.Error![]const Field {
     const s = &params.sampling;
     const i32max = std.math.maxInt(i32);
     const stream_options = try a.dupe(Field, &.{
@@ -730,17 +718,17 @@ pub fn makeLlamaCmplSchema(a: Allocator, params_base: *const tools.params.Params
 /// Return: the parameters, allocated in `a`.
 pub fn evalLlamaCmplSchema(
     a: Allocator,
-    vocab: ?*const c.llama_vocab,
+    vocab: ?*const tools.c.llama_vocab,
     params_base: *const tools.params.Params,
-    logit_bias_eog: []const c.llama_logit_bias,
-    data: *const Value,
-) Error!TaskParams {
-    var params: TaskParams = .{};
+    logit_bias_eog: []const tools.c.llama_logit_bias,
+    data: *const json.Value,
+) mod.common.Error!mod.task.TaskParams {
+    var params: mod.task.TaskParams = .{};
 
     // Sampling parameter defaults are loaded from the global server context (but individual requests can still override them)
-    params.sampling = try task.deepClone(a, params_base.sampling);
+    params.sampling = try mod.task.deepClone(a, params_base.sampling);
     params.speculative = params_base.speculative;
-    params.speculative.types = .fromOwnedSlice(try a.dupe(task.SpeculativeType, params_base.speculative.types.items));
+    params.speculative.types = .fromOwnedSlice(try a.dupe(mod.task.SpeculativeType, params_base.speculative.types.items));
     params.n_keep = params_base.n_keep;
     params.n_predict = params_base.n_predict;
     params.n_cache_reuse = params_base.n_cache_reuse;
@@ -766,11 +754,11 @@ pub fn evalLlamaCmplSchema(
     }
 
     // debugging
-    if (log.verbosity_thold >= log.level_debug) {
+    if (tools.log.verbosity_thold >= tools.log.level_debug) {
         const budget = params.sampling.reasoning_budget_tokens;
-        const gp = common.dupZ(params.sampling.generation_prompt);
-        defer common.freeZ(gp);
-        common.srv(.dbg, "eval_llama_cmpl_schema", "reasoning budget: tokens=%d, generation_prompt='%s', start=%zu toks, end=%zu seqs, forced=%zu toks\n", .{
+        const gp = mod.common.dupZ(params.sampling.generation_prompt);
+        defer mod.common.freeZ(gp);
+        mod.common.srv(.dbg, "eval_llama_cmpl_schema", "reasoning budget: tokens=%d, generation_prompt='%s', start=%zu toks, end=%zu seqs, forced=%zu toks\n", .{
             budget,                                            gp,
             params.sampling.reasoning_budget_start.items.len,  params.sampling.reasoning_budget_end.items.len,
             params.sampling.reasoning_budget_forced.items.len,
@@ -787,7 +775,7 @@ pub fn evalLlamaCmplSchema(
 /// request's fields, pointing into `t`.
 ///
 /// Return: owned by `a`.
-pub fn makeTtsSchema(a: Allocator, t: *task.Task) Error![]const Field {
+pub fn makeTtsSchema(a: Allocator, t: *mod.task.Task) mod.common.Error![]const Field {
     const i32max = std.math.maxInt(i32);
     const fields = [_]Field{
         .{ .name = &.{"top_k"}, .desc = "Top-k for the backbone sampler and the acoustic code predictor, 0 to use the defaults", .kind = .{ .num_i32 = .{ .val = &t.tts_inp.data.top_k, .min = 0, .max = i32max } } },
@@ -806,10 +794,10 @@ pub fn makeTtsSchema(a: Allocator, t: *task.Task) Error![]const Field {
 ///
 /// Parameters:
 /// - `a`: the task's arena.
-pub fn evalTtsSchema(a: Allocator, params_base: *const tools.params.Params, t: *task.Task, data: *const Value) Error!void {
+pub fn evalTtsSchema(a: Allocator, params_base: *const tools.params.Params, t: *mod.task.Task, data: *const json.Value) mod.common.Error!void {
     // baseline defaults, individual requests can override them
     // TODO @ngxson : change the default values based on model
-    t.params.sampling = try task.deepClone(a, params_base.sampling);
+    t.params.sampling = try mod.task.deepClone(a, params_base.sampling);
     t.params.sampling.penalty_repeat = 1.05;
     t.params.n_predict = -1;
     t.tts_inp.data.top_k = 0;
@@ -840,7 +828,7 @@ test "a hard limit refuses with the C++'s text" {
     var data = try json.parse(a, "{\"n_cmpl\":9,\"top_p\":7}");
     const r = evalLlamaCmplSchema(a, null, &base, &.{}, &data);
     try std.testing.expectError(error.InvalidArgument, r);
-    try std.testing.expectEqualStrings("Field 'n_cmpl': Value must be between 1 <= value <= 4, but got 9", common.what(error.InvalidArgument));
+    try std.testing.expectEqualStrings("Field 'n_cmpl': Value must be between 1 <= value <= 4, but got 9", mod.common.what(error.InvalidArgument));
 }
 
 test "a soft limit clamps" {

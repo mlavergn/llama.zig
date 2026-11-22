@@ -13,18 +13,14 @@
 //! `VK_INCOMPLETE` retry of every `enumerate*` -- and nothing else.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
 
 /// The Vulkan C API, `vulkan_core.h` at the pinned SDK,
 /// translated with `VK_NO_PROTOTYPES`: every command is reached through
 /// `dispatch`, as `vulkan.hpp`'s dynamic dispatcher reaches it.
 pub const vk = @import("vulkan_c");
-
-/// The allocator for host-side bookkeeping, libc's heap as everywhere else
-/// in ggml.
-pub const allocator = std.heap.c_allocator;
 
 /// Ports `GGML_VK_NAME` (ggml-vulkan.h:10 @b1b770d90).
 pub const name = "Vulkan";
@@ -247,8 +243,8 @@ pub fn checkOrAbort(result: vk.VkResult, what: [*:0]const u8) void {
 
 /// Aborts on `last_error`, printing what `vk::SystemError::what()` would.
 pub fn abortLastError() noreturn {
-    impl.fprintfStderr("ggml_vulkan: %s: %s\n", .{ last_error.what, resultString(last_error.result).ptr });
-    impl.abort("ggml_vulkan: uncaught vk::SystemError");
+    ggml.impl.fprintfStderr("ggml_vulkan: %s: %s\n", .{ last_error.what, resultString(last_error.result).ptr });
+    ggml.impl.abort("ggml_vulkan: uncaught vk::SystemError");
 }
 
 /// `vk::to_string(vk::Result)`: the enumerant's name without its `VK_`
@@ -308,18 +304,18 @@ pub fn enumerate(comptime T: type, what: [*:0]const u8, f: anytype, args: anytyp
     while (true) {
         var count: u32 = 0;
         try check(@call(.auto, f, args ++ .{ &count, @as([*c]T, null) }), what);
-        const items = allocator.alloc(T, count) catch impl.abort("ggml_vulkan: out of memory");
+        const items = std.heap.c_allocator.alloc(T, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
         const result = @call(.auto, f, args ++ .{ &count, items.ptr });
         if (result == vk.VK_INCOMPLETE) {
-            allocator.free(items);
+            std.heap.c_allocator.free(items);
             continue;
         }
         check(result, what) catch |err| {
-            allocator.free(items);
+            std.heap.c_allocator.free(items);
             return err;
         };
         // The second call may report fewer than the first.
-        return allocator.realloc(items, count) catch items[0..count];
+        return std.heap.c_allocator.realloc(items, count) catch items[0..count];
     }
 }
 
@@ -329,18 +325,18 @@ pub fn enumerateWith(comptime T: type, s_type: vk.VkStructureType, what: [*:0]co
     while (true) {
         var count: u32 = 0;
         try check(@call(.auto, f, args ++ .{ &count, @as([*c]T, null) }), what);
-        const items = allocator.alloc(T, count) catch impl.abort("ggml_vulkan: out of memory");
+        const items = std.heap.c_allocator.alloc(T, count) catch ggml.impl.abort("ggml_vulkan: out of memory");
         for (items) |*item| item.* = structure(T, s_type);
         const result = @call(.auto, f, args ++ .{ &count, items.ptr });
         if (result == vk.VK_INCOMPLETE) {
-            allocator.free(items);
+            std.heap.c_allocator.free(items);
             continue;
         }
         check(result, what) catch |err| {
-            allocator.free(items);
+            std.heap.c_allocator.free(items);
             return err;
         };
-        return allocator.realloc(items, count) catch items[0..count];
+        return std.heap.c_allocator.realloc(items, count) catch items[0..count];
     }
 }
 

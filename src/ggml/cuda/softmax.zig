@@ -22,17 +22,8 @@
 //! arguments, one level down (see that function).
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-const half = kernels.half;
-
-const warp_size = common.warp_size;
+const ggml = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `CUDA_SOFT_MAX_BLOCK_SIZE` (softmax.cuh:3 @b1b770d90).
 const block_size = 1024;
@@ -66,52 +57,52 @@ comptime {
 }
 
 /// `soft_max_f32<use_shared, ncols, block, T>`.
-fn softMaxKernel(comptime use_shared: bool, comptime ncols: comptime_int, comptime block: comptime_int, comptime T: type) kernels.Kernel {
-    return kernels.get("softmax", kernels.tmpl("soft_max_f32", &.{ kernels.boolean(use_shared), kernels.int(ncols), kernels.int(block), kernels.typeName(T) }));
+fn softMaxKernel(comptime use_shared: bool, comptime ncols: comptime_int, comptime block: comptime_int, comptime T: type) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get("softmax", ggml.cuda.kernels.tmpl("soft_max_f32", &.{ ggml.cuda.kernels.boolean(use_shared), ggml.cuda.kernels.int(ncols), ggml.cuda.kernels.int(block), ggml.cuda.kernels.typeName(T) }));
 }
 
 /// Ports `launch_soft_max_kernels` (softmax.cu:279 @b1b770d90),
 /// instantiated with `<32, 64, 128, 256, 512, 1024, 2048, 4096>`.
-fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, p: *const Params, stream: cu.cudaStream_t, block_dims: kernels.Dim3, block_nums: kernels.Dim3, nbytes_shared: usize) void {
-    const id = common.getDevice();
-    const smpbo = common.info().devices[@intCast(id)].smpbo;
+fn launchSoftMaxKernels(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, p: *const Params, stream: ggml.cuda.common.cu.cudaStream_t, block_dims: ggml.cuda.kernels.Dim3, block_nums: ggml.cuda.kernels.Dim3, nbytes_shared: usize) void {
+    const id = ggml.cuda.common.getDevice();
+    const smpbo = ggml.cuda.common.info().devices[@intCast(id)].smpbo;
 
     // The C's unary fold over `launch_kernel`.
     inline for (.{ 32, 64, 128, 256, 512, 1024, 2048, 4096 }) |ncols| {
         const block = if (ncols > 1024) 1024 else ncols;
         if (p.ncols == ncols) {
             const k = comptime softMaxKernel(true, ncols, block, T);
-            kernels.setSharedMemoryLimit(k, smpbo);
-            kernels.launch(k, .{ .grid = block_nums, .block = block_dims, .shmem = nbytes_shared, .stream = stream }, .{ x, mask, sinks, dst, p.* });
+            ggml.cuda.kernels.setSharedMemoryLimit(k, smpbo);
+            ggml.cuda.kernels.launch(k, .{ .grid = block_nums, .block = block_dims, .shmem = nbytes_shared, .stream = stream }, .{ x, mask, sinks, dst, p.* });
             return;
         }
     }
 
     //default case
     const k = comptime softMaxKernel(true, 0, 0, T);
-    kernels.setSharedMemoryLimit(k, smpbo);
-    kernels.launch(k, .{ .grid = block_nums, .block = block_dims, .shmem = nbytes_shared, .stream = stream }, .{ x, mask, sinks, dst, p.* });
+    ggml.cuda.kernels.setSharedMemoryLimit(k, smpbo);
+    ggml.cuda.kernels.launch(k, .{ .grid = block_nums, .block = block_dims, .shmem = nbytes_shared, .stream = stream }, .{ x, mask, sinks, dst, p.* });
 }
 
 /// Ports `soft_max_f32_cuda` (softmax.cu:328 @b1b770d90).
-fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, params: *const Params, stream: cu.cudaStream_t, ctx: *common.Context) void {
-    var nth: c_int = warp_size;
+fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaque, sinks: ?*const anyopaque, dst: ?*anyopaque, params: *const Params, stream: ggml.cuda.common.cu.cudaStream_t, ctx: *ggml.cuda.common.Context) void {
+    var nth: c_int = ggml.cuda.common.warp_size;
     const ncols_x = params.ncols;
 
     while (nth < ncols_x and nth < block_size) nth *= 2;
-    const block_dims: kernels.Dim3 = .{ .x = @bitCast(nth) };
-    const block_nums: kernels.Dim3 = .{
+    const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(nth) };
+    const block_nums: ggml.cuda.kernels.Dim3 = .{
         .x = @truncate(@as(u64, @bitCast(params.ne01))),
         .y = @truncate(@as(u64, @bitCast(params.ne02))),
         .z = @truncate(@as(u64, @bitCast(params.ne03))),
     };
     // GGML_PAD(ncols_x, WARP_SIZE)
-    const padded: i64 = (ncols_x + warp_size - 1) & ~@as(i64, warp_size - 1);
-    const nbytes_shared: usize = @as(usize, @bitCast(padded + warp_size)) *% @sizeOf(f32);
+    const padded: i64 = (ncols_x + ggml.cuda.common.warp_size - 1) & ~@as(i64, ggml.cuda.common.warp_size - 1);
+    const nbytes_shared: usize = @as(usize, @bitCast(padded + ggml.cuda.common.warp_size)) *% @sizeOf(f32);
     comptime std.debug.assert(block_size == 1024); // These values need to be adjusted.
 
-    const id = common.getDevice();
-    const dev = &common.info().devices[@intCast(id)];
+    const id = ggml.cuda.common.getDevice();
+    const dev = &ggml.cuda.common.info().devices[@intCast(id)];
     const smpbo = dev.smpbo;
 
     if (nbytes_shared <= smpbo) {
@@ -124,20 +115,20 @@ fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaqu
         {
             // The C sizes both in *elements* as `nsm * sizeof(float)`.
             const n: usize = @as(usize, @intCast(dev.nsm)) * @sizeOf(f32);
-            var tmp_maxs_alloc = common.PoolAlloc(f32).initAlloc(ctx.pool(), n);
+            var tmp_maxs_alloc = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), n);
             defer tmp_maxs_alloc.deinit();
-            var tmp_sums_alloc = common.PoolAlloc(f32).initAlloc(ctx.pool(), n);
+            var tmp_sums_alloc = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), n);
             defer tmp_sums_alloc.deinit();
 
-            kernels.launchCooperative(kernels.get("softmax", "soft_max_f32_parallelize_cols"), .{
+            ggml.cuda.kernels.launchCooperative(ggml.cuda.kernels.get("softmax", "soft_max_f32_parallelize_cols"), .{
                 .grid = .{ .x = @bitCast(dev.nsm) },
-                .block = .{ .x = warp_size * 8 },
+                .block = .{ .x = ggml.cuda.common.warp_size * 8 },
                 .shmem = 0,
                 .stream = stream,
             }, .{ x, dst, @as(?*anyopaque, @ptrCast(tmp_maxs_alloc.ptr)), @as(?*anyopaque, @ptrCast(tmp_sums_alloc.ptr)), params.* });
         } else {
-            const nbytes_shared_low = warp_size * @sizeOf(f32);
-            kernels.launch(softMaxKernel(false, 0, 0, T), .{
+            const nbytes_shared_low = ggml.cuda.common.warp_size * @sizeOf(f32);
+            ggml.cuda.kernels.launch(softMaxKernel(false, 0, 0, T), .{
                 .grid = block_nums,
                 .block = block_dims,
                 .shmem = nbytes_shared_low,
@@ -148,11 +139,11 @@ fn softMaxF32Cuda(comptime T: type, x: ?*const anyopaque, mask: ?*const anyopaqu
 }
 
 /// Ports `soft_max_back_f32_cuda` (softmax.cu:374 @b1b770d90).
-fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, scale: f32, stream: cu.cudaStream_t) void {
-    const block_dims: kernels.Dim3 = .{ .x = warp_size };
-    const block_nums: kernels.Dim3 = .{ .x = @bitCast(nrows) };
+fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*anyopaque, ncols: c_int, nrows: c_int, scale: f32, stream: ggml.cuda.common.cu.cudaStream_t) void {
+    const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = ggml.cuda.common.warp_size };
+    const block_nums: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(nrows) };
 
-    kernels.launch(kernels.get("softmax", "soft_max_back_f32"), .{
+    ggml.cuda.kernels.launch(ggml.cuda.kernels.get("softmax", "soft_max_back_f32"), .{
         .grid = block_nums,
         .block = block_dims,
         .shmem = 0,
@@ -161,30 +152,30 @@ fn softMaxBackF32Cuda(grad: ?*const anyopaque, dstf: ?*const anyopaque, dst: ?*a
 }
 
 /// Ports `ggml_cuda_op_soft_max` (softmax.cu:383 @b1b770d90).
-pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1: ?*const Tensor = dst.src[1];
-    const src2: ?*const Tensor = dst.src[2];
+pub fn opSoftMax(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1: ?*const ggml.impl.c.ggml_tensor = dst.src[1];
+    const src2: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
 
     const src1_d: ?*const anyopaque = if (src1) |t| t.data else null;
     const src2_d: ?*const anyopaque = if (src2) |t| t.data else null;
 
     const stream = ctx.stream();
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
-    impl.assert(src1 == null or src1.?.type == c.GGML_TYPE_F16 or src1.?.type == c.GGML_TYPE_F32, "!src1 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32"); // src1 contains mask and it is optional
+    ggml.impl.assert(src1 == null or src1.?.type == ggml.impl.c.GGML_TYPE_F16 or src1.?.type == ggml.impl.c.GGML_TYPE_F32, "!src1 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_F32"); // src1 contains mask and it is optional
 
-    const nrows_x = c.ggml_nrows(src0);
+    const nrows_x = ggml.impl.c.ggml_nrows(src0);
     const nrows_y = src0.ne[1];
 
     const ne00 = src0.ne[0];
 
-    const scale = impl.getOpParamsF32(dst, 0);
-    const max_bias = impl.getOpParamsF32(dst, 1);
+    const scale = ggml.impl.getOpParamsF32(dst, 0);
+    const max_bias = ggml.impl.getOpParamsF32(dst, 1);
 
-    const use_f16 = src1 != null and src1.?.type == c.GGML_TYPE_F16;
+    const use_f16 = src1 != null and src1.?.type == ggml.impl.c.GGML_TYPE_F16;
 
     const nb11: i64 = if (src1) |t| @intCast(t.nb[1]) else 1;
     const nb12: i64 = if (src1) |t| @intCast(t.nb[2]) else 1;
@@ -194,10 +185,10 @@ pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
     const ne13: i64 = if (src1) |t| t.ne[3] else 1;
 
     const n_head: u32 = @truncate(@as(u64, @bitCast(src0.ne[2])));
-    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(libm.floorf(libm.log2fInt(n_head)));
+    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(@floor(@as(f32, stdlib.libm.log2fInt(n_head))));
 
-    const m0 = libm.powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
-    const m1 = libm.powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
+    const m0 = stdlib.libm.powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
+    const m1 = stdlib.libm.powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
 
     var params: Params = std.mem.zeroes(Params);
     params.nheads = src0.ne[2];
@@ -220,30 +211,30 @@ pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
     params.m1 = m1;
 
     if (use_f16) {
-        softMaxF32Cuda(half, src0.data, src1_d, src2_d, dst.data, &params, stream, ctx);
+        softMaxF32Cuda(ggml.cuda.kernels.half, src0.data, src1_d, src2_d, dst.data, &params, stream, ctx);
     } else {
         softMaxF32Cuda(f32, src0.data, src1_d, src2_d, dst.data, &params, stream, ctx);
     }
 }
 
 /// Ports `ggml_cuda_op_soft_max_back` (softmax.cu:454 @b1b770d90).
-pub fn opSoftMaxBack(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]); // grad
-    const src1 = impl.one(Tensor, dst.src[1]); // forward pass output
+pub fn opSoftMaxBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // grad
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // forward pass output
 
     const stream = ctx.stream();
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, " dst->type == GGML_TYPE_F32");
 
     const ncols = src0.ne[0];
-    const nrows = c.ggml_nrows(src0);
+    const nrows = ggml.impl.c.ggml_nrows(src0);
 
-    const scale = impl.getOpParamsF32(dst, 0);
-    const max_bias = impl.getOpParamsF32(dst, 1);
+    const scale = ggml.impl.getOpParamsF32(dst, 0);
+    const max_bias = ggml.impl.getOpParamsF32(dst, 1);
 
-    impl.assert(max_bias == 0.0, "max_bias == 0.0f");
+    ggml.impl.assert(max_bias == 0.0, "max_bias == 0.0f");
 
     softMaxBackF32Cuda(src0.data, src1.data, dst.data, @truncate(ncols), @truncate(nrows), scale, stream);
 }

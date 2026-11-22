@@ -18,9 +18,7 @@
 //! the middle differ.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const allocator = impl.allocator;
+const mod = @import("module.zig");
 
 /// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @b1b770d90).
 pub const max_seq = 256;
@@ -29,7 +27,7 @@ pub const max_seq = 256;
 pub const SeqSet = std.bit_set.StaticBitSet(max_seq);
 
 fn oom() noreturn {
-    impl.abort("llama-kv-cells.h", 0, "out of memory");
+    mod.impl.abort("llama-kv-cells.h", 0, "out of memory");
 }
 
 /// Mirrors `llama_kv_cell_ext` (llama-kv-cells.h:37 @b1b770d90): the 2D
@@ -66,7 +64,7 @@ pub const RowsSlice = struct {
     p_min: i32 = -1,
 
     pub fn deinit(self: *RowsSlice) void {
-        self.seq_ids.deinit(allocator);
+        self.seq_ids.deinit(std.heap.c_allocator);
     }
 };
 
@@ -115,7 +113,7 @@ const PosSet = struct {
         const at = self.lowerBound(k);
         const keys = self.items.items;
         if (at < keys.len and keys[at].pos == k.pos and keys[at].cell == k.cell) return;
-        self.items.insert(allocator, at, k) catch oom();
+        self.items.insert(std.heap.c_allocator, at, k) catch oom();
     }
 
     /// `erase`: a key that is absent is left alone, as the C++'s is once
@@ -155,13 +153,13 @@ pub const KvCells = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *KvCells) void {
-        self.used.deinit(allocator);
-        self.pos.deinit(allocator);
-        self.ext.deinit(allocator);
-        self.shift.deinit(allocator);
-        self.seq.deinit(allocator);
-        for (&self.seq_pos) |*sp| sp.items.deinit(allocator);
-        for (&self.seq_bits) |*sb| sb.deinit(allocator);
+        self.used.deinit(std.heap.c_allocator);
+        self.pos.deinit(std.heap.c_allocator);
+        self.ext.deinit(std.heap.c_allocator);
+        self.shift.deinit(std.heap.c_allocator);
+        self.seq.deinit(std.heap.c_allocator);
+        for (&self.seq_pos) |*sp| sp.items.deinit(std.heap.c_allocator);
+        for (&self.seq_bits) |*sb| sb.deinit(std.heap.c_allocator);
     }
 
     fn usedInsert(self: *KvCells, i: u32) void {
@@ -204,11 +202,11 @@ pub const KvCells = struct {
 
     /// Ports `llama_kv_cells`'s `resize` (llama-kv-cells.h:102 @b1b770d90).
     pub fn resize(self: *KvCells, n: u32) void {
-        self.pos.resize(allocator, n) catch oom();
-        self.ext.resize(allocator, n) catch oom();
-        self.shift.resize(allocator, n) catch oom();
-        self.seq.resize(allocator, n) catch oom();
-        self.used.resize(allocator, n, false) catch oom();
+        self.pos.resize(std.heap.c_allocator, n) catch oom();
+        self.ext.resize(std.heap.c_allocator, n) catch oom();
+        self.shift.resize(std.heap.c_allocator, n) catch oom();
+        self.seq.resize(std.heap.c_allocator, n) catch oom();
+        self.used.resize(std.heap.c_allocator, n, false) catch oom();
         for (&self.seq_bits) |*sb| sb.clearRetainingCapacity();
         self.reset();
     }
@@ -458,7 +456,7 @@ pub const KvCells = struct {
                 while (b != 0) : (b &= b - 1) {
                     const i: u32 = @intCast(64 * w + @ctz(b));
                     if (self.pos.items[i] >= pm) {
-                        impl.assert(at < n_per, "llama-kv-cells.h", 455, "dst < end");
+                        mod.impl.assert(at < n_per, "llama-kv-cells.h", 455, "dst < end");
                         dst[at] = @intCast(i);
                         at += 1;
                     }
@@ -567,7 +565,7 @@ pub const KvCells = struct {
         self.seq_pos[s].insert(.{ .pos = self.pos.items[i], .cell = i });
 
         if (self.seq_bits[s].items.len == 0) {
-            self.seq_bits[s].appendNTimes(allocator, 0, (self.pos.items.len + 63) / 64) catch oom();
+            self.seq_bits[s].appendNTimes(std.heap.c_allocator, 0, (self.pos.items.len + 63) / 64) catch oom();
         }
 
         self.seq_bits[s].items[i / 64] |= @as(u64, 1) << @intCast(i % 64);

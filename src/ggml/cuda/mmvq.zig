@@ -11,46 +11,37 @@
 //! `ggml_cuda_op_mul_mat_vec_q`, the row-split entry point, is not ported:
 //! nothing in this version of upstream calls it.
 
-const std = @import("std");
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const quantize = @import("quantize.zig");
-const mmq = @import("mmq.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
 
 /// Ports `MMVQ_MAX_BATCH_SIZE` (mmvq.cuh:3 @b1b770d90).
 pub const max_batch_size = 8;
 
 /// Ports `get_vdr_mmvq` (mmvq.cu:65 @b1b770d90), with the `VDR_*_MMVQ`
 /// constants of `vecdotq.cuh`.
-fn getVdrMmvq(comptime ty: c.enum_ggml_type) comptime_int {
+fn getVdrMmvq(comptime ty: ggml.impl.c.enum_ggml_type) comptime_int {
     return switch (ty) {
-        c.GGML_TYPE_Q1_0 => 1,
-        c.GGML_TYPE_Q2_0 => 1,
-        c.GGML_TYPE_Q4_0 => 2,
-        c.GGML_TYPE_Q4_1 => 2,
-        c.GGML_TYPE_Q5_0 => 2,
-        c.GGML_TYPE_Q5_1 => 2,
-        c.GGML_TYPE_Q8_0 => 2,
-        c.GGML_TYPE_MXFP4 => 2,
-        c.GGML_TYPE_NVFP4 => 4,
-        c.GGML_TYPE_Q2_K => 2,
-        c.GGML_TYPE_Q3_K => 2,
-        c.GGML_TYPE_Q4_K => 2,
-        c.GGML_TYPE_Q5_K => 2,
-        c.GGML_TYPE_Q6_K => 2,
-        c.GGML_TYPE_IQ2_XXS => 2,
-        c.GGML_TYPE_IQ2_XS => 2,
-        c.GGML_TYPE_IQ2_S => 2,
-        c.GGML_TYPE_IQ3_XXS => 2,
-        c.GGML_TYPE_IQ3_S => 2,
-        c.GGML_TYPE_IQ4_NL => 2,
-        c.GGML_TYPE_IQ4_XS => 4,
+        ggml.impl.c.GGML_TYPE_Q1_0 => 1,
+        ggml.impl.c.GGML_TYPE_Q2_0 => 1,
+        ggml.impl.c.GGML_TYPE_Q4_0 => 2,
+        ggml.impl.c.GGML_TYPE_Q4_1 => 2,
+        ggml.impl.c.GGML_TYPE_Q5_0 => 2,
+        ggml.impl.c.GGML_TYPE_Q5_1 => 2,
+        ggml.impl.c.GGML_TYPE_Q8_0 => 2,
+        ggml.impl.c.GGML_TYPE_MXFP4 => 2,
+        ggml.impl.c.GGML_TYPE_NVFP4 => 4,
+        ggml.impl.c.GGML_TYPE_Q2_K => 2,
+        ggml.impl.c.GGML_TYPE_Q3_K => 2,
+        ggml.impl.c.GGML_TYPE_Q4_K => 2,
+        ggml.impl.c.GGML_TYPE_Q5_K => 2,
+        ggml.impl.c.GGML_TYPE_Q6_K => 2,
+        ggml.impl.c.GGML_TYPE_IQ2_XXS => 2,
+        ggml.impl.c.GGML_TYPE_IQ2_XS => 2,
+        ggml.impl.c.GGML_TYPE_IQ2_S => 2,
+        ggml.impl.c.GGML_TYPE_IQ3_XXS => 2,
+        ggml.impl.c.GGML_TYPE_IQ3_S => 2,
+        ggml.impl.c.GGML_TYPE_IQ4_NL => 2,
+        ggml.impl.c.GGML_TYPE_IQ4_XS => 4,
         else => 1,
     };
 }
@@ -61,50 +52,50 @@ const TableId = enum(c_int) { generic = 0, turing, gcn, rdna2, rdna3_0, rdna4, g
 /// Ports the host `get_device_table_id` (mmvq.cu:120 @b1b770d90), NVIDIA
 /// arms (RDNA4_M is AMD). Volta takes the Turing table too.
 fn getDeviceTableId(x: c_int) TableId {
-    const h = common.highestCompiledArch(x);
-    if (common.cc.isNvidia(x) and h >= common.cc.volta and h < common.cc.ampere) return .turing;
-    if (common.cc.isNvidia(x) and h == common.cc.dgx_spark) return .gb10;
+    const h = ggml.cuda.common.highestCompiledArch(x);
+    if (ggml.cuda.common.cc.isNvidia(x) and h >= ggml.cuda.common.cc.volta and h < ggml.cuda.common.cc.ampere) return .turing;
+    if (ggml.cuda.common.cc.isNvidia(x) and h == ggml.cuda.common.cc.dgx_spark) return .gb10;
     return .generic;
 }
 
 /// Ports `get_mmvq_mmid_max_batch_pascal_older` (mmvq.cu:146 @b1b770d90).
-fn mmidMaxBatchPascalOlder(ty: c.enum_ggml_type) c_int {
+fn mmidMaxBatchPascalOlder(ty: ggml.impl.c.enum_ggml_type) c_int {
     return switch (ty) {
-        c.GGML_TYPE_IQ1_S => 6,
-        c.GGML_TYPE_IQ1_M => 6,
-        c.GGML_TYPE_IQ2_S => 4,
-        c.GGML_TYPE_IQ2_XS => 5,
-        c.GGML_TYPE_IQ2_XXS => 5,
-        c.GGML_TYPE_IQ3_S => 4,
-        c.GGML_TYPE_IQ3_XXS => 4,
-        c.GGML_TYPE_IQ4_NL => 6,
-        c.GGML_TYPE_IQ4_XS => 5,
-        c.GGML_TYPE_MXFP4 => 4,
-        c.GGML_TYPE_NVFP4 => 4,
-        c.GGML_TYPE_Q2_K => 4,
-        c.GGML_TYPE_Q3_K => 4,
-        c.GGML_TYPE_Q4_0 => 6,
-        c.GGML_TYPE_Q4_1 => 6,
-        c.GGML_TYPE_Q4_K => 5,
-        c.GGML_TYPE_Q5_0 => 6,
-        c.GGML_TYPE_Q5_1 => 6,
-        c.GGML_TYPE_Q5_K => 5,
-        c.GGML_TYPE_Q6_K => 4,
-        c.GGML_TYPE_Q8_0 => 4,
+        ggml.impl.c.GGML_TYPE_IQ1_S => 6,
+        ggml.impl.c.GGML_TYPE_IQ1_M => 6,
+        ggml.impl.c.GGML_TYPE_IQ2_S => 4,
+        ggml.impl.c.GGML_TYPE_IQ2_XS => 5,
+        ggml.impl.c.GGML_TYPE_IQ2_XXS => 5,
+        ggml.impl.c.GGML_TYPE_IQ3_S => 4,
+        ggml.impl.c.GGML_TYPE_IQ3_XXS => 4,
+        ggml.impl.c.GGML_TYPE_IQ4_NL => 6,
+        ggml.impl.c.GGML_TYPE_IQ4_XS => 5,
+        ggml.impl.c.GGML_TYPE_MXFP4 => 4,
+        ggml.impl.c.GGML_TYPE_NVFP4 => 4,
+        ggml.impl.c.GGML_TYPE_Q2_K => 4,
+        ggml.impl.c.GGML_TYPE_Q3_K => 4,
+        ggml.impl.c.GGML_TYPE_Q4_0 => 6,
+        ggml.impl.c.GGML_TYPE_Q4_1 => 6,
+        ggml.impl.c.GGML_TYPE_Q4_K => 5,
+        ggml.impl.c.GGML_TYPE_Q5_0 => 6,
+        ggml.impl.c.GGML_TYPE_Q5_1 => 6,
+        ggml.impl.c.GGML_TYPE_Q5_K => 5,
+        ggml.impl.c.GGML_TYPE_Q6_K => 4,
+        ggml.impl.c.GGML_TYPE_Q8_0 => 4,
         else => max_batch_size,
     };
 }
 
 /// Ports `get_mmvq_mmid_max_batch_turing_plus` (mmvq.cu:173 @b1b770d90).
-fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
+fn mmidMaxBatchTuringPlus(ty: ggml.impl.c.enum_ggml_type) c_int {
     return switch (ty) {
-        c.GGML_TYPE_IQ2_S => 7,
-        c.GGML_TYPE_IQ3_S => 6,
-        c.GGML_TYPE_IQ3_XXS => 7,
-        c.GGML_TYPE_MXFP4 => 7,
-        c.GGML_TYPE_NVFP4 => 8,
-        c.GGML_TYPE_Q2_K => 7,
-        c.GGML_TYPE_Q3_K => 5,
+        ggml.impl.c.GGML_TYPE_IQ2_S => 7,
+        ggml.impl.c.GGML_TYPE_IQ3_S => 6,
+        ggml.impl.c.GGML_TYPE_IQ3_XXS => 7,
+        ggml.impl.c.GGML_TYPE_MXFP4 => 7,
+        ggml.impl.c.GGML_TYPE_NVFP4 => 8,
+        ggml.impl.c.GGML_TYPE_Q2_K => 7,
+        ggml.impl.c.GGML_TYPE_Q3_K => 5,
         else => max_batch_size,
     };
 }
@@ -114,57 +105,57 @@ fn mmidMaxBatchTuringPlus(ty: c.enum_ggml_type) c_int {
 /// set, as in the device side's `get_mmvq_mmid_max_batch_for_device`.
 /// It decides on the highest compiled architecture,
 /// as the device side does.
-pub fn getMmidMaxBatch(ty: c.enum_ggml_type, x_in: c_int) c_int {
+pub fn getMmidMaxBatch(ty: ggml.impl.c.enum_ggml_type, x_in: c_int) c_int {
     // NVIDIA: P100, Volta, Ada Lovelace, and Blackwell always use MMVQ for MUL_MAT_ID.
-    if (common.cc.isNvidia(x_in)) {
-        const x = common.highestCompiledArch(x_in);
-        if (x == common.cc.pascal or x == common.cc.volta or x >= common.cc.ada_lovelace) return max_batch_size;
-        if (x >= common.cc.turing) return mmidMaxBatchTuringPlus(ty);
+    if (ggml.cuda.common.cc.isNvidia(x_in)) {
+        const x = ggml.cuda.common.highestCompiledArch(x_in);
+        if (x == ggml.cuda.common.cc.pascal or x == ggml.cuda.common.cc.volta or x >= ggml.cuda.common.cc.ada_lovelace) return max_batch_size;
+        if (x >= ggml.cuda.common.cc.turing) return mmidMaxBatchTuringPlus(ty);
         return mmidMaxBatchPascalOlder(ty);
     }
     return max_batch_size;
 }
 
 /// Ports `ggml_cuda_should_use_mmvq` (mmvq.cu:315 @b1b770d90), NVIDIA arms.
-pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
-    if (!c.ggml_is_quantized(ty)) return false;
+pub fn shouldUseMmvq(ty: ggml.impl.c.enum_ggml_type, x: c_int, ne11: i64) bool {
+    if (!ggml.impl.c.ggml_is_quantized(ty)) return false;
     // k-quants cost more to decode and mvq redoes that per column, so MMQ
     // wins sooner. Only list quant-types MMQ supports, others would fall back
     // to cuBLAS.
-    if (common.cc.isNvidia(x) and x == common.cc.ada_lovelace) {
+    if (ggml.cuda.common.cc.isNvidia(x) and x == ggml.cuda.common.cc.ada_lovelace) {
         return switch (ty) { // tuned on RTX 4090
-            c.GGML_TYPE_Q2_K => ne11 <= 4,
-            c.GGML_TYPE_Q3_K => ne11 <= 6,
+            ggml.impl.c.GGML_TYPE_Q2_K => ne11 <= 4,
+            ggml.impl.c.GGML_TYPE_Q3_K => ne11 <= 6,
             else => ne11 <= max_batch_size,
         };
     }
-    if (common.cc.isNvidia(x) and x == common.cc.blackwell) {
+    if (ggml.cuda.common.cc.isNvidia(x) and x == ggml.cuda.common.cc.blackwell) {
         return switch (ty) { // tuned on RTX 5090
-            c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K, c.GGML_TYPE_Q4_K => ne11 <= 5,
-            c.GGML_TYPE_Q5_K => ne11 <= 6,
-            c.GGML_TYPE_Q6_K => ne11 <= 7,
+            ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q4_K => ne11 <= 5,
+            ggml.impl.c.GGML_TYPE_Q5_K => ne11 <= 6,
+            ggml.impl.c.GGML_TYPE_Q6_K => ne11 <= 7,
             else => ne11 <= max_batch_size,
         };
     }
-    if (common.cc.isNvidia(x) and x == common.cc.dgx_spark) {
+    if (ggml.cuda.common.cc.isNvidia(x) and x == ggml.cuda.common.cc.dgx_spark) {
         return switch (ty) { // tuned on DGX Spark GB10
-            c.GGML_TYPE_Q2_K => ne11 <= 6,
+            ggml.impl.c.GGML_TYPE_Q2_K => ne11 <= 6,
             else => ne11 <= max_batch_size,
         };
     }
-    if (common.cc.isNvidia(x) and x == common.cc.orin) {
+    if (ggml.cuda.common.cc.isNvidia(x) and x == ggml.cuda.common.cc.orin) {
         return switch (ty) { // tuned for Jetson Orin
-            c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K, c.GGML_TYPE_Q4_K, c.GGML_TYPE_Q5_K, c.GGML_TYPE_Q6_K => ne11 <= 1,
+            ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q5_K, ggml.impl.c.GGML_TYPE_Q6_K => ne11 <= 1,
             else => ne11 <= max_batch_size,
         };
     }
-    if (common.cc.isNvidia(x) and x == common.cc.volta) {
+    if (ggml.cuda.common.cc.isNvidia(x) and x == ggml.cuda.common.cc.volta) {
         return switch (ty) {
-            c.GGML_TYPE_Q2_K => ne11 <= 4,
-            c.GGML_TYPE_Q3_K => ne11 <= 6,
-            c.GGML_TYPE_Q4_K => ne11 <= 5,
-            c.GGML_TYPE_Q5_K => ne11 <= 6,
-            c.GGML_TYPE_Q6_K => ne11 <= 7,
+            ggml.impl.c.GGML_TYPE_Q2_K => ne11 <= 4,
+            ggml.impl.c.GGML_TYPE_Q3_K => ne11 <= 6,
+            ggml.impl.c.GGML_TYPE_Q4_K => ne11 <= 5,
+            ggml.impl.c.GGML_TYPE_Q5_K => ne11 <= 6,
+            ggml.impl.c.GGML_TYPE_Q6_K => ne11 <= 7,
             else => ne11 <= max_batch_size,
         };
     }
@@ -173,7 +164,7 @@ pub fn shouldUseMmvq(ty: c.enum_ggml_type, x: c_int, ne11: i64) bool {
 
 /// Ports `calc_nwarps` (mmvq.cu:449 @b1b770d90), the NVIDIA tables; the
 /// AMD tables are unreachable from `getDeviceTableId` here.
-fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, halve_iters: bool) c_int {
+fn calcNwarps(ty: ggml.impl.c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, halve_iters: bool) c_int {
     switch (table_id) {
         .generic => return switch (ncols_dst) {
             1, 2, 3, 4 => 4,
@@ -183,7 +174,7 @@ fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k
         .turing => {
             if (ncols_dst == 1) {
                 return switch (ty) {
-                    c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K, c.GGML_TYPE_Q4_K, c.GGML_TYPE_Q5_K, c.GGML_TYPE_Q6_K => 2,
+                    ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_Q4_K, ggml.impl.c.GGML_TYPE_Q5_K, ggml.impl.c.GGML_TYPE_Q6_K => 2,
                     else => 4,
                 };
             }
@@ -199,15 +190,15 @@ fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k
             // in half the trips (observation).
             if (ncols_dst == 1 and !small_k and halve_iters) {
                 switch (ty) {
-                    c.GGML_TYPE_Q4_0,
-                    c.GGML_TYPE_Q4_1,
-                    c.GGML_TYPE_Q5_0,
-                    c.GGML_TYPE_Q5_1,
-                    c.GGML_TYPE_Q8_0,
-                    c.GGML_TYPE_Q4_K,
-                    c.GGML_TYPE_Q5_K,
-                    c.GGML_TYPE_Q6_K,
-                    c.GGML_TYPE_IQ4_NL,
+                    ggml.impl.c.GGML_TYPE_Q4_0,
+                    ggml.impl.c.GGML_TYPE_Q4_1,
+                    ggml.impl.c.GGML_TYPE_Q5_0,
+                    ggml.impl.c.GGML_TYPE_Q5_1,
+                    ggml.impl.c.GGML_TYPE_Q8_0,
+                    ggml.impl.c.GGML_TYPE_Q4_K,
+                    ggml.impl.c.GGML_TYPE_Q5_K,
+                    ggml.impl.c.GGML_TYPE_Q6_K,
+                    ggml.impl.c.GGML_TYPE_IQ4_NL,
                     => return 2 * generic,
                     else => {},
                 }
@@ -221,21 +212,21 @@ fn calcNwarps(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k
 /// Ports `mmvq_two_rows_ncols1` (mmvq.cu:579 @b1b770d90): low bit types load
 /// few weight bytes per thread, a second row per block shares the q8_1
 /// loads and adds memory parallelism.
-fn twoRowsNcols1(ty: c.enum_ggml_type) bool {
+fn twoRowsNcols1(ty: ggml.impl.c.enum_ggml_type) bool {
     return switch (ty) {
-        c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K, c.GGML_TYPE_IQ1_S, c.GGML_TYPE_IQ1_M => true,
+        ggml.impl.c.GGML_TYPE_Q1_0, ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K, ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M => true,
         else => false,
     };
 }
 
 /// Ports `calc_rows_per_block` (mmvq.cu:592 @b1b770d90). The kernel computes
 /// the same number on the device, from `get_device_table_id`.
-fn calcRowsPerBlock(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: c_int) c_int {
+fn calcRowsPerBlock(ty: ggml.impl.c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, small_k: bool, nwarps: c_int) c_int {
     if (table_id == .generic or table_id == .gcn or table_id == .turing or table_id == .gb10) {
         return switch (ncols_dst) {
             1 => {
                 if (small_k) return nwarps;
-                if (table_id == .gb10) return if (ty == c.GGML_TYPE_IQ2_S or ty == c.GGML_TYPE_IQ3_S) 2 else 1;
+                if (table_id == .gb10) return if (ty == ggml.impl.c.GGML_TYPE_IQ2_S or ty == ggml.impl.c.GGML_TYPE_IQ3_S) 2 else 1;
                 return if (table_id == .generic and twoRowsNcols1(ty)) 2 else 1;
             },
             2, 3, 4, 5, 6, 7, 8 => 2,
@@ -246,7 +237,7 @@ fn calcRowsPerBlock(ty: c.enum_ggml_type, ncols_dst: c_int, table_id: TableId, s
 }
 
 /// Ports `calc_launch_params` (mmvq.cu:1032 @b1b770d90).
-fn calcLaunchParams(ty: c.enum_ggml_type, ncols_dst: c_int, nrows_x: c_int, nchannels_dst: c_int, nsamples_or_ntokens: c_int, warp_size: c_int, table_id: TableId, small_k: bool, halve_iters: bool) [2]kernels.Dim3 {
+fn calcLaunchParams(ty: ggml.impl.c.enum_ggml_type, ncols_dst: c_int, nrows_x: c_int, nchannels_dst: c_int, nsamples_or_ntokens: c_int, warp_size: c_int, table_id: TableId, small_k: bool, halve_iters: bool) [2]ggml.cuda.kernels.Dim3 {
     const nwarps = calcNwarps(ty, ncols_dst, table_id, small_k, halve_iters);
     const rpb = calcRowsPerBlock(ty, ncols_dst, table_id, small_k, nwarps);
     const nblocks: i64 = @divTrunc(@as(i64, nrows_x) + rpb - 1, rpb);
@@ -262,33 +253,33 @@ const Common = struct {
     vx: ?*const anyopaque,
     vy: ?*const anyopaque,
     ids: ?*const i32,
-    fusion: common.MmFusionArgsDevice,
+    fusion: ggml.cuda.common.MmFusionArgsDevice,
     dst: ?*f32,
     ncols_x: u32,
-    nchannels_y: cu.uint3,
+    nchannels_y: ggml.cuda.common.cu.uint3,
     stride_row_x: u32,
     stride_col_y: u32,
     stride_col_dst: u32,
-    channel_ratio: cu.uint3,
+    channel_ratio: ggml.cuda.common.cu.uint3,
     stride_channel_x: u32,
     stride_channel_y: u32,
     stride_channel_dst: u32,
-    sample_ratio: cu.uint3,
+    sample_ratio: ggml.cuda.common.cu.uint3,
     stride_sample_x: u32,
     stride_sample_y: u32,
     stride_sample_dst: u32,
     ids_stride: u32,
 };
 
-fn mmvqKernel(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime has_fusion: bool, comptime small_k: bool, comptime halve_iters: bool) kernels.Kernel {
-    return kernels.get("mmvq", kernels.tmpl("mul_mat_vec_q", &.{ kernels.ggmlType(ty), kernels.int(ncols_dst), kernels.boolean(has_fusion), kernels.boolean(small_k), kernels.boolean(halve_iters) }));
+fn mmvqKernel(comptime ty: ggml.impl.c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime has_fusion: bool, comptime small_k: bool, comptime halve_iters: bool) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get("mmvq", ggml.cuda.kernels.tmpl("mul_mat_vec_q", &.{ ggml.cuda.kernels.ggmlType(ty), ggml.cuda.kernels.int(ncols_dst), ggml.cuda.kernels.boolean(has_fusion), ggml.cuda.kernels.boolean(small_k), ggml.cuda.kernels.boolean(halve_iters) }));
 }
 
 /// Ports `mul_mat_vec_q_switch_fusion` (mmvq.cu:1044 @b1b770d90).
-fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]kernels.Dim3, nbytes_shared: c_int, stream: cu.cudaStream_t) void {
+fn switchFusion(comptime ty: ggml.impl.c.enum_ggml_type, comptime ncols_dst: comptime_int, comptime small_k: bool, comptime halve_iters: bool, a: *const Common, dims: [2]ggml.cuda.kernels.Dim3, nbytes_shared: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
     const f = a.fusion;
     const has_fusion = f.gate != null or f.x_bias != null or f.gate_bias != null or f.x_scale != null or f.gate_scale != null;
-    const p: kernels.LaunchParams = .{ .grid = dims[0], .block = dims[1], .shmem = @intCast(nbytes_shared), .stream = stream };
+    const p: ggml.cuda.kernels.LaunchParams = .{ .grid = dims[0], .block = dims[1], .shmem = @intCast(nbytes_shared), .stream = stream };
     const args = .{
         a.vx,              a.vy,               a.ids,               a.fusion,             a.dst,
         a.ncols_x,         a.nchannels_y,      a.stride_row_x,      a.stride_col_y,       a.stride_col_dst,
@@ -297,24 +288,24 @@ fn switchFusion(comptime ty: c.enum_ggml_type, comptime ncols_dst: comptime_int,
     };
     if (ncols_dst == 1) {
         if (has_fusion) {
-            kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, true, small_k, halve_iters), p, args);
+            ggml.cuda.kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, true, small_k, halve_iters), p, args);
             return;
         }
     }
 
-    impl.assert(!has_fusion, "!has_fusion && \"fusion only supported for ncols_dst=1\"");
+    ggml.impl.assert(!has_fusion, "!has_fusion && \"fusion only supported for ncols_dst=1\"");
 
-    kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, false, small_k, halve_iters), p, args);
+    ggml.cuda.kernels.launchPdl(comptime mmvqKernel(ty, ncols_dst, false, small_k, halve_iters), p, args);
 }
 
 /// Ports `mul_mat_vec_q_moe_launch` (mmvq.cu:1076 @b1b770d90). The kernel
 /// takes the fusion arguments by value either way; `has_fusion` picks the
 /// instantiation that reads them. A shared expert is one more
 /// channel of blocks, the last, which the kernel points at its weights.
-fn moeLaunch(comptime ty: c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: cu.cudaStream_t) void {
+fn moeLaunch(comptime ty: ggml.impl.c.enum_ggml_type, a: *const Common, nrows_x: u32, ncols_dst: u32, warp_size: c_int, nchannels_dst: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
     const rows_per_block = 2; // 2 gives best perf based on tuning
     const nblocks_rows: i64 = @divTrunc(@as(i64, nrows_x) + rows_per_block - 1, rows_per_block);
-    const p: kernels.LaunchParams = .{
+    const p: ggml.cuda.kernels.LaunchParams = .{
         .grid = .{ .x = @intCast(nblocks_rows), .y = @bitCast(nchannels_dst + @intFromBool(a.fusion.shared_up != null)) },
         .block = .{ .x = @bitCast(warp_size), .y = ncols_dst },
         .stream = stream,
@@ -331,28 +322,28 @@ fn moeLaunch(comptime ty: c.enum_ggml_type, a: *const Common, nrows_x: u32, ncol
         f.x_scale != null or f.gate_scale != null;
 
     if (has_fusion) {
-        kernels.launchPdl(comptime moeKernel(ty, rows_per_block, true), p, args);
+        ggml.cuda.kernels.launchPdl(comptime moeKernel(ty, rows_per_block, true), p, args);
     } else {
-        kernels.launchPdl(comptime moeKernel(ty, rows_per_block, false), p, args);
+        ggml.cuda.kernels.launchPdl(comptime moeKernel(ty, rows_per_block, false), p, args);
     }
 }
 
-fn moeKernel(comptime ty: c.enum_ggml_type, comptime rows_per_block: comptime_int, comptime has_fusion: bool) kernels.Kernel {
-    return kernels.get("mmvq", kernels.tmpl("mul_mat_vec_q_moe", &.{ kernels.ggmlType(ty), kernels.int(rows_per_block), kernels.boolean(has_fusion) }));
+fn moeKernel(comptime ty: ggml.impl.c.enum_ggml_type, comptime rows_per_block: comptime_int, comptime has_fusion: bool) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get("mmvq", ggml.cuda.kernels.tmpl("mul_mat_vec_q_moe", &.{ ggml.cuda.kernels.ggmlType(ty), ggml.cuda.kernels.int(rows_per_block), ggml.cuda.kernels.boolean(has_fusion) }));
 }
 
-fn contains(list: []const c.enum_ggml_type, t: c.enum_ggml_type) bool {
+fn contains(list: []const ggml.impl.c.enum_ggml_type, t: ggml.impl.c.enum_ggml_type) bool {
     for (list) |x| if (x == t) return true;
     return false;
 }
 
 /// Ports `mul_mat_vec_q_switch_ncols_dst` (mmvq.cu:1109 @b1b770d90).
 fn switchNcolsDst(
-    comptime ty: c.enum_ggml_type,
+    comptime ty: ggml.impl.c.enum_ggml_type,
     vx: ?*const anyopaque,
     vy: ?*const anyopaque,
     ids: ?*const i32,
-    fusion: common.MmFusionArgsDevice,
+    fusion: ggml.cuda.common.MmFusionArgsDevice,
     dst: ?*f32,
     ncols_x: c_int,
     nrows_x: c_int,
@@ -372,25 +363,25 @@ fn switchNcolsDst(
     stride_sample_y: c_int,
     stride_sample_dst: c_int,
     ids_stride: c_int,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
-    impl.assert(@rem(ncols_x, @as(c_int, @intCast(c.ggml_blck_size(ty)))) == 0, "ncols_x % ggml_blck_size(type) == 0");
-    impl.assert(ncols_dst <= max_batch_size, "ncols_dst <= MMVQ_MAX_BATCH_SIZE");
+    ggml.impl.assert(@rem(ncols_x, @as(c_int, @intCast(ggml.impl.c.ggml_blck_size(ty)))) == 0, "ncols_x % ggml_blck_size(type) == 0");
+    ggml.impl.assert(ncols_dst <= max_batch_size, "ncols_dst <= MMVQ_MAX_BATCH_SIZE");
 
-    const zero3: cu.uint3 = .{ .x = 0, .y = 0, .z = 0 };
-    const nchannels_y_fd = if (ids != null) common.initFastdivValues(@bitCast(@as(i64, nchannels_y))) else zero3;
-    const channel_ratio_fd = if (ids != null) zero3 else common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nchannels_dst, nchannels_x))));
-    const sample_ratio_fd = common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nsamples_dst, nsamples_x))));
+    const zero3: ggml.cuda.common.cu.uint3 = .{ .x = 0, .y = 0, .z = 0 };
+    const nchannels_y_fd = if (ids != null) ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, nchannels_y))) else zero3;
+    const channel_ratio_fd = if (ids != null) zero3 else ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nchannels_dst, nchannels_x))));
+    const sample_ratio_fd = ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, @divTrunc(nsamples_dst, nsamples_x))));
 
-    const device = common.getDevice();
-    const x = common.info().devices[@intCast(device)].cc;
-    const warp_size = common.info().devices[@intCast(device)].warp_size;
+    const device = ggml.cuda.common.getDevice();
+    const x = ggml.cuda.common.info().devices[@intCast(device)].cc;
+    const warp_size = ggml.cuda.common.info().devices[@intCast(device)].warp_size;
     const table_id = getDeviceTableId(x);
 
     const has_ids = ids != null;
 
     // How the K loop divides up at the baseline block width.
-    const traits = comptime common.typeTraits(ty);
+    const traits = comptime ggml.cuda.common.typeTraits(ty);
     const vdr = comptime getVdrMmvq(ty);
     const blocks_per_row_x: c_int = @divTrunc(ncols_x, traits.qk);
     const blocks_per_iter_1warp: c_int = @divTrunc(vdr * warp_size, traits.qi);
@@ -431,15 +422,15 @@ fn switchNcolsDst(
                 const nwarps = calcNwarps(ty, c_ncols_dst, table_id, false, false);
                 var use = nwarps > 1 and blocks_per_row_x < nwarps * blocks_per_iter_1warp;
 
-                const iq_slow_turing = [_]c.enum_ggml_type{ c.GGML_TYPE_IQ3_XXS, c.GGML_TYPE_IQ3_S };
-                const iq_slow_other = [_]c.enum_ggml_type{
-                    c.GGML_TYPE_IQ1_S, c.GGML_TYPE_IQ1_M,   c.GGML_TYPE_IQ2_XXS, c.GGML_TYPE_IQ2_XS,
-                    c.GGML_TYPE_IQ2_S, c.GGML_TYPE_IQ3_XXS, c.GGML_TYPE_IQ3_S,   c.GGML_TYPE_IQ4_XS,
+                const iq_slow_turing = [_]ggml.impl.c.enum_ggml_type{ ggml.impl.c.GGML_TYPE_IQ3_XXS, ggml.impl.c.GGML_TYPE_IQ3_S };
+                const iq_slow_other = [_]ggml.impl.c.enum_ggml_type{
+                    ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_IQ1_M,   ggml.impl.c.GGML_TYPE_IQ2_XXS, ggml.impl.c.GGML_TYPE_IQ2_XS,
+                    ggml.impl.c.GGML_TYPE_IQ2_S, ggml.impl.c.GGML_TYPE_IQ3_XXS, ggml.impl.c.GGML_TYPE_IQ3_S,   ggml.impl.c.GGML_TYPE_IQ4_XS,
                 };
-                const slow_pascal = [_]c.enum_ggml_type{ c.GGML_TYPE_IQ3_S, c.GGML_TYPE_Q2_K, c.GGML_TYPE_Q3_K };
+                const slow_pascal = [_]ggml.impl.c.enum_ggml_type{ ggml.impl.c.GGML_TYPE_IQ3_S, ggml.impl.c.GGML_TYPE_Q2_K, ggml.impl.c.GGML_TYPE_Q3_K };
 
-                const is_nvidia_turing_plus = common.cc.isNvidia(x) and x >= common.cc.turing;
-                const is_nvidia_pascal_older = common.cc.isNvidia(x) and x < common.cc.volta;
+                const is_nvidia_turing_plus = ggml.cuda.common.cc.isNvidia(x) and x >= ggml.cuda.common.cc.turing;
+                const is_nvidia_pascal_older = ggml.cuda.common.cc.isNvidia(x) and x < ggml.cuda.common.cc.volta;
 
                 if (is_nvidia_turing_plus) {
                     if (ncols_dst == 1 and contains(&iq_slow_turing, ty)) use = false;
@@ -489,38 +480,38 @@ fn switchNcolsDst(
             const dims = calcLaunchParams(ty, n, nrows_x, nchannels_dst, nsamples_dst, warp_size, table_id, false, false);
             switchFusion(ty, n, false, false, &a, dims, 0, stream);
         },
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `mul_mat_vec_q_switch_type` (mmvq.cu:1300 @b1b770d90).
-fn switchType(vx: ?*const anyopaque, type_x: c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: cu.cudaStream_t) void {
+fn switchType(vx: ?*const anyopaque, type_x: ggml.impl.c.enum_ggml_type, vy: ?*const anyopaque, ids: ?*const i32, fusion: ggml.cuda.common.MmFusionArgsDevice, dst: ?*f32, ncols_x: c_int, nrows_x: c_int, ncols_dst: c_int, stride_row_x: c_int, stride_col_y: c_int, stride_col_dst: c_int, nchannels_x: c_int, nchannels_y: c_int, nchannels_dst: c_int, stride_channel_x: c_int, stride_channel_y: c_int, stride_channel_dst: c_int, nsamples_x: c_int, nsamples_dst: c_int, stride_sample_x: c_int, stride_sample_y: c_int, stride_sample_dst: c_int, ids_stride: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
     switch (type_x) {
-        inline c.GGML_TYPE_Q1_0,
-        c.GGML_TYPE_Q2_0,
-        c.GGML_TYPE_Q4_0,
-        c.GGML_TYPE_Q4_1,
-        c.GGML_TYPE_Q5_0,
-        c.GGML_TYPE_Q5_1,
-        c.GGML_TYPE_Q8_0,
-        c.GGML_TYPE_MXFP4,
-        c.GGML_TYPE_NVFP4,
-        c.GGML_TYPE_Q2_K,
-        c.GGML_TYPE_Q3_K,
-        c.GGML_TYPE_Q4_K,
-        c.GGML_TYPE_Q5_K,
-        c.GGML_TYPE_Q6_K,
-        c.GGML_TYPE_IQ2_XXS,
-        c.GGML_TYPE_IQ2_XS,
-        c.GGML_TYPE_IQ2_S,
-        c.GGML_TYPE_IQ3_XXS,
-        c.GGML_TYPE_IQ1_S,
-        c.GGML_TYPE_IQ1_M,
-        c.GGML_TYPE_IQ4_NL,
-        c.GGML_TYPE_IQ4_XS,
-        c.GGML_TYPE_IQ3_S,
+        inline ggml.impl.c.GGML_TYPE_Q1_0,
+        ggml.impl.c.GGML_TYPE_Q2_0,
+        ggml.impl.c.GGML_TYPE_Q4_0,
+        ggml.impl.c.GGML_TYPE_Q4_1,
+        ggml.impl.c.GGML_TYPE_Q5_0,
+        ggml.impl.c.GGML_TYPE_Q5_1,
+        ggml.impl.c.GGML_TYPE_Q8_0,
+        ggml.impl.c.GGML_TYPE_MXFP4,
+        ggml.impl.c.GGML_TYPE_NVFP4,
+        ggml.impl.c.GGML_TYPE_Q2_K,
+        ggml.impl.c.GGML_TYPE_Q3_K,
+        ggml.impl.c.GGML_TYPE_Q4_K,
+        ggml.impl.c.GGML_TYPE_Q5_K,
+        ggml.impl.c.GGML_TYPE_Q6_K,
+        ggml.impl.c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.c.GGML_TYPE_IQ2_XS,
+        ggml.impl.c.GGML_TYPE_IQ2_S,
+        ggml.impl.c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.c.GGML_TYPE_IQ1_S,
+        ggml.impl.c.GGML_TYPE_IQ1_M,
+        ggml.impl.c.GGML_TYPE_IQ4_NL,
+        ggml.impl.c.GGML_TYPE_IQ4_XS,
+        ggml.impl.c.GGML_TYPE_IQ3_S,
         => |t| switchNcolsDst(t, vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst, nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst, nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream),
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -529,10 +520,10 @@ fn i32Of(x: i64) c_int {
 }
 
 /// Ports `ggml_cuda_mul_mat_vec_q` (mmvq.cu:1452 @b1b770d90).
-pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, ids: ?*const Tensor, dst: *Tensor, fusion: ?*const common.MmFusionArgsHost) void {
-    impl.assert(src1.type == c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
-    impl.assert(ids == null or ids.?.type == c.GGML_TYPE_I32, "!ids || ids->type  == GGML_TYPE_I32");
+pub fn mulMatVecQ(ctx: *ggml.cuda.common.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, ids: ?*const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor, fusion: ?*const ggml.cuda.common.MmFusionArgsHost) void {
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "        src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "        dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(ids == null or ids.?.type == ggml.impl.c.GGML_TYPE_I32, "!ids || ids->type  == GGML_TYPE_I32");
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -548,43 +539,43 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
 
     const stream = ctx.stream();
 
-    const ts_src0 = c.ggml_type_size(src0.type);
-    const ts_src1 = c.ggml_type_size(src1.type);
-    const ts_dst = c.ggml_type_size(dst.type);
+    const ts_src0 = ggml.impl.c.ggml_type_size(src0.type);
+    const ts_src1 = ggml.impl.c.ggml_type_size(src1.type);
+    const ts_dst = ggml.impl.c.ggml_type_size(dst.type);
 
-    impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
-    impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
-    impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
-    impl.assert(ids == null or ids.?.nb[0] == c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
+    ggml.impl.assert(src0.nb[0] == ts_src0, "        nb00       == ts_src0");
+    ggml.impl.assert(src1.nb[0] == ts_src1, "        nb10       == ts_src1");
+    ggml.impl.assert(dst.nb[0] == ts_dst, "        nb0        == ts_dst");
+    ggml.impl.assert(ids == null or ids.?.nb[0] == ggml.impl.c.ggml_type_size(ids.?.type), "!ids || ids->nb[0] == ggml_type_size(ids->type)");
 
-    impl.assert(ids == null or ne12 <= max_batch_size, "!ids || ne12 <= MMVQ_MAX_BATCH_SIZE");
+    ggml.impl.assert(ids == null or ne12 <= max_batch_size, "!ids || ne12 <= MMVQ_MAX_BATCH_SIZE");
 
     const src1_d: ?*const f32 = @ptrCast(@alignCast(src1.data));
     const ids_d: ?*const i32 = if (ids) |i| @ptrCast(@alignCast(i.data)) else null;
     const dst_d: ?*f32 = @ptrCast(@alignCast(dst.data));
 
-    var fusion_local: common.MmFusionArgsDevice = .{};
+    var fusion_local: ggml.cuda.common.MmFusionArgsDevice = .{};
 
     if (fusion) |f| {
-        const x = common.info().devices[@intCast(common.getDevice())].cc;
-        impl.assert(ids == null or dst.ne[2] <= getMmidMaxBatch(src0.type, x), " !ids || dst->ne[2] <= get_mmvq_mmid_max_batch(src0->type, cc)");
-        impl.assert(ids != null or dst.ne[1] == 1, "  ids || dst->ne[1] == 1");
+        const x = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
+        ggml.impl.assert(ids == null or dst.ne[2] <= getMmidMaxBatch(src0.type, x), " !ids || dst->ne[2] <= get_mmvq_mmid_max_batch(src0->type, cc)");
+        ggml.impl.assert(ids != null or dst.ne[1] == 1, "  ids || dst->ne[1] == 1");
         // Scale fusion is only allowed for NVFP4 currently.
-        impl.assert((f.x_scale == null and f.gate_scale == null) or src0.type == c.GGML_TYPE_NVFP4, "(fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4");
+        ggml.impl.assert((f.x_scale == null and f.gate_scale == null) or src0.type == ggml.impl.c.GGML_TYPE_NVFP4, "(fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4");
 
         if (f.shared_up) |su| {
-            impl.assert(ids != null and f.gate != null and f.shared_gate != null and f.shared_dst != null, "ids && fusion->gate && fusion->shared_gate && fusion->shared_dst");
-            impl.assert(f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "!fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
-            impl.assert(ne11 == 1 and ne03 == 1 and ne13 == 1, "ne11 == 1 && ne03 == 1 && ne13 == 1");
+            ggml.impl.assert(ids != null and f.gate != null and f.shared_gate != null and f.shared_dst != null, "ids && fusion->gate && fusion->shared_gate && fusion->shared_dst");
+            ggml.impl.assert(f.x_bias == null and f.gate_bias == null and f.x_scale == null and f.gate_scale == null, "!fusion->x_bias && !fusion->gate_bias && !fusion->x_scale && !fusion->gate_scale");
+            ggml.impl.assert(ne11 == 1 and ne03 == 1 and ne13 == 1, "ne11 == 1 && ne03 == 1 && ne13 == 1");
             const sg = f.shared_gate.?;
             const sd = f.shared_dst.?;
-            impl.assert(su.type == src0.type and sg.type == src0.type, "fusion->shared_up->type == src0->type && fusion->shared_gate->type == src0->type");
-            impl.assert(c.ggml_are_same_shape(su, sg), "ggml_are_same_shape(fusion->shared_up, fusion->shared_gate)");
-            impl.assert(c.ggml_is_contiguous(su) and c.ggml_is_contiguous(sg), "ggml_is_contiguous(fusion->shared_up) && ggml_is_contiguous(fusion->shared_gate)");
-            impl.assert(su.ne[0] == ne00 and su.ne[1] == ne01, "fusion->shared_up->ne[0] == ne00 && fusion->shared_up->ne[1] == ne01");
-            impl.assert(su.nb[1] == src0.nb[1] and c.ggml_is_matrix(su), "fusion->shared_up->nb[1] == nb01 && ggml_is_matrix(fusion->shared_up)");
-            impl.assert(sd.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(sd), "fusion->shared_dst->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->shared_dst)");
-            impl.assert(sd.ne[0] == dst.ne[0] and sd.ne[1] == ne2, "fusion->shared_dst->ne[0] == ne0 && fusion->shared_dst->ne[1] == ne2");
+            ggml.impl.assert(su.type == src0.type and sg.type == src0.type, "fusion->shared_up->type == src0->type && fusion->shared_gate->type == src0->type");
+            ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(su, sg), "ggml_are_same_shape(fusion->shared_up, fusion->shared_gate)");
+            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(su) and ggml.impl.c.ggml_is_contiguous(sg), "ggml_is_contiguous(fusion->shared_up) && ggml_is_contiguous(fusion->shared_gate)");
+            ggml.impl.assert(su.ne[0] == ne00 and su.ne[1] == ne01, "fusion->shared_up->ne[0] == ne00 && fusion->shared_up->ne[1] == ne01");
+            ggml.impl.assert(su.nb[1] == src0.nb[1] and ggml.impl.c.ggml_is_matrix(su), "fusion->shared_up->nb[1] == nb01 && ggml_is_matrix(fusion->shared_up)");
+            ggml.impl.assert(sd.type == ggml.impl.c.GGML_TYPE_F32 and ggml.impl.c.ggml_is_contiguous(sd), "fusion->shared_dst->type == GGML_TYPE_F32 && ggml_is_contiguous(fusion->shared_dst)");
+            ggml.impl.assert(sd.ne[0] == dst.ne[0] and sd.ne[1] == ne2, "fusion->shared_dst->ne[0] == ne0 && fusion->shared_dst->ne[1] == ne2");
             fusion_local.shared_up = su.data;
             fusion_local.shared_gate = sg.data;
             fusion_local.shared_dst = @ptrCast(@alignCast(sd.data));
@@ -592,31 +583,31 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
         }
 
         if (f.x_bias) |b| {
-            impl.assert(b.type == c.GGML_TYPE_F32, "fusion->x_bias->type == GGML_TYPE_F32");
-            impl.assert(b.ne[0] == dst.ne[0], "fusion->x_bias->ne[0] == dst->ne[0]");
-            impl.assert(ids == null or b.ne[1] == src0.ne[2], "!ids || fusion->x_bias->ne[1] == src0->ne[2]");
+            ggml.impl.assert(b.type == ggml.impl.c.GGML_TYPE_F32, "fusion->x_bias->type == GGML_TYPE_F32");
+            ggml.impl.assert(b.ne[0] == dst.ne[0], "fusion->x_bias->ne[0] == dst->ne[0]");
+            ggml.impl.assert(ids == null or b.ne[1] == src0.ne[2], "!ids || fusion->x_bias->ne[1] == src0->ne[2]");
             fusion_local.x_bias = b.data;
         }
         if (f.gate) |g| {
-            impl.assert(g.type == src0.type and c.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
+            ggml.impl.assert(g.type == src0.type and ggml.impl.c.ggml_are_same_stride(g, src0), "fusion->gate->type == src0->type && ggml_are_same_stride(fusion->gate, src0)");
             fusion_local.gate = g.data;
         }
         if (f.gate_bias) |b| {
-            impl.assert(b.type == c.GGML_TYPE_F32, "fusion->gate_bias->type == GGML_TYPE_F32");
-            impl.assert(b.ne[0] == dst.ne[0], "fusion->gate_bias->ne[0] == dst->ne[0]");
-            impl.assert(ids == null or b.ne[1] == src0.ne[2], "!ids || fusion->gate_bias->ne[1] == src0->ne[2]");
+            ggml.impl.assert(b.type == ggml.impl.c.GGML_TYPE_F32, "fusion->gate_bias->type == GGML_TYPE_F32");
+            ggml.impl.assert(b.ne[0] == dst.ne[0], "fusion->gate_bias->ne[0] == dst->ne[0]");
+            ggml.impl.assert(ids == null or b.ne[1] == src0.ne[2], "!ids || fusion->gate_bias->ne[1] == src0->ne[2]");
             fusion_local.gate_bias = b.data;
         }
         if (f.x_scale) |s| {
-            impl.assert(s.type == c.GGML_TYPE_F32, "fusion->x_scale->type == GGML_TYPE_F32");
-            impl.assert(c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->x_scale)");
-            impl.assert(c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(s.type == ggml.impl.c.GGML_TYPE_F32, "fusion->x_scale->type == GGML_TYPE_F32");
+            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->x_scale)");
+            ggml.impl.assert(ggml.impl.c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->x_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.x_scale = s.data;
         }
         if (f.gate_scale) |s| {
-            impl.assert(s.type == c.GGML_TYPE_F32, "fusion->gate_scale->type == GGML_TYPE_F32");
-            impl.assert(c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->gate_scale)");
-            impl.assert(c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
+            ggml.impl.assert(s.type == ggml.impl.c.GGML_TYPE_F32, "fusion->gate_scale->type == GGML_TYPE_F32");
+            ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(s), "ggml_is_contiguous(fusion->gate_scale)");
+            ggml.impl.assert(ggml.impl.c.ggml_nelements(s) == (if (ids != null) src0.ne[2] else 1), "ggml_nelements(fusion->gate_scale) == (ids ? src0->ne[2] : 1)");
             fusion_local.gate_scale = s.data;
         }
         fusion_local.glu_op = f.glu_op;
@@ -624,28 +615,28 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     }
 
     // If src0 is a temporary compute buffer, clear any potential padding.
-    if (c.ggml_backend_buffer_get_usage(src0.buffer) == c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
-        const size_data = c.ggml_nbytes(src0);
-        const size_alloc = c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0);
+    if (ggml.impl.c.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.c.GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
+        const size_data = ggml.impl.c.ggml_nbytes(src0);
+        const size_alloc = ggml.impl.c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0);
         if (size_alloc > size_data) {
-            impl.assert(c.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
-            impl.assert(src0.view_src == null, "!src0->view_src");
-            common.cudaCheck(cu.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
+            ggml.impl.assert(ggml.impl.c.ggml_is_contiguously_allocated(src0), "ggml_is_contiguously_allocated(src0)");
+            ggml.impl.assert(src0.view_src == null, "!src0->view_src");
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemsetAsync(@as([*]u8, @ptrCast(src0.data.?)) + size_data, 0, size_alloc - size_data, stream), "cudaMemsetAsync((char *) src0->data + size_data, 0, size_alloc - size_data, stream)", @src());
         }
     }
 
-    const ne10_padded: i64 = @intCast(stdlib.num.pad(usize, @intCast(ne10), common.matrix_row_padding));
-    var src1_q8_1 = common.PoolAlloc(u8).initAlloc(ctx.pool(), @intCast(@divTrunc(ne13 * ne12 * ne11 * ne10_padded * mmq.sizeof_block_q8_1, c.QK8_1)));
+    const ne10_padded: i64 = @intCast(stdlib.num.pad(usize, @intCast(ne10), ggml.cuda.common.matrix_row_padding));
+    var src1_q8_1 = ggml.cuda.common.PoolAlloc(u8).initAlloc(ctx.pool(), @intCast(@divTrunc(ne13 * ne12 * ne11 * ne10_padded * ggml.cuda.mmq.sizeof_block_q8_1, ggml.impl.c.QK8_1)));
     defer src1_q8_1.deinit();
     {
         const s11: i64 = @intCast(src1.nb[1] / ts_src1);
         const s12: i64 = @intCast(src1.nb[2] / ts_src1);
         const s13: i64 = @intCast(src1.nb[3] / ts_src1);
-        quantize.quantizeRowQ8_1(src1_d, src1_q8_1.get(), ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
+        ggml.cuda.quantize.quantizeRowQ8_1(src1_d, src1_q8_1.get(), ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
     }
 
     const s01: i64 = @intCast(src0.nb[1] / ts_src0);
-    const s11: i64 = @divTrunc(ne10_padded, c.QK8_1);
+    const s11: i64 = @divTrunc(ne10_padded, ggml.impl.c.QK8_1);
     const s1: i64 = @intCast(dst.nb[1] / ts_dst);
     const s02: i64 = @intCast(src0.nb[2] / ts_src0);
     const s2: i64 = @intCast(dst.nb[2] / ts_dst);
@@ -665,7 +656,7 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
     const stride_channel_dst = if (has_ids) s1 else s2;
     const stride_channel_y = if (has_ids) s11 else s12;
 
-    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / c.ggml_type_size(i.type)) else 0;
+    const ids_stride: i64 = if (ids) |i| @intCast(i.nb[1] / ggml.impl.c.ggml_type_size(i.type)) else 0;
 
     switchType(
         src0.data,

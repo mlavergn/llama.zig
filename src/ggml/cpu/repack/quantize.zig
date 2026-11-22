@@ -22,14 +22,7 @@
 //! **is** the live implementation — note the asymmetry, which is why the
 //! exported names differ between the two halves.
 
-const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../../impl.zig");
-const blocks = @import("blocks.zig");
-const helpers = @import("../../quants/helpers.zig");
-const convert = @import("../convert.zig");
-
-const c = impl.c;
+const ggml = @import("../../module.zig");
 
 const QK8_0 = 32;
 const QK_K = 256;
@@ -38,11 +31,11 @@ const QK_K = 256;
 /// `ggml_quantize_mat_q8_0_4x8_generic`
 /// (ggml-cpu/repack.cpp:135, 173 @b1b770d90).
 fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyopaque, k: i64) void {
-    impl.assert(QK8_0 == 32, "QK8_0 == 32");
-    impl.assert(@rem(k, QK8_0) == 0, "k % QK8_0 == 0");
+    ggml.impl.assert(QK8_0 == 32, "QK8_0 == 32");
+    ggml.impl.assert(@rem(k, QK8_0) == 0, "k % QK8_0 == 0");
     const nb: i64 = @divTrunc(k, QK8_0);
 
-    const y: [*]blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));
+    const y: [*]ggml.cpu.repack.blocks.block_q8_0x4 = @ptrCast(@alignCast(vy));
 
     // scalar
     var srcv: [4][QK8_0]f32 = undefined;
@@ -61,7 +54,7 @@ fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
             const d = amax / ((1 << 7) - 1);
             id[row_iter] = if (d != 0.0) 1.0 / d else 0.0;
 
-            y[@intCast(i)].d[row_iter] = convert.cpuFp32ToFp16(d);
+            y[@intCast(i)].d[row_iter] = ggml.cpu.convert.cpuFp32ToFp16(d);
         }
 
         for (0..QK8_0 * 4) |j| {
@@ -71,7 +64,7 @@ fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
             src_offset += @rem(jj, blck_size_interleave);
 
             const x0 = srcv[@intCast(src_id)][@intCast(src_offset)] * id[@intCast(src_id)];
-            y[@intCast(i)].qs[j] = @intFromFloat(libm.roundf(x0));
+            y[@intCast(i)].qs[j] = @intFromFloat(@round(@as(f32, x0)));
         }
     }
 }
@@ -84,11 +77,11 @@ fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
 /// not the magnitude, and the scale is `-127/max`. A sign slip there flips
 /// every quant in the super-block.
 fn quantizeMatQ8K(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyopaque, k: i64) void {
-    impl.assert(QK_K == 256, "QK_K == 256");
-    impl.assert(@rem(k, QK_K) == 0, "k % QK_K == 0");
+    ggml.impl.assert(QK_K == 256, "QK_K == 256");
+    ggml.impl.assert(@rem(k, QK_K) == 0, "k % QK_K == 0");
     const nb: i64 = @divTrunc(k, QK_K);
 
-    const y: [*]blocks.block_q8_Kx4 = @ptrCast(@alignCast(vy));
+    const y: [*]ggml.cpu.repack.blocks.block_q8_Kx4 = @ptrCast(@alignCast(vy));
 
     // scalar
     var srcv: [4][QK_K]f32 = undefined;
@@ -136,7 +129,7 @@ fn quantizeMatQ8K(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
                 (((jj & 31) >> 3) << 2) + ((jj >> 8) << 4) + ((jj >> 6) & 3));
 
             const x0 = srcv[@intCast(src_id)][@intCast(src_offset)] * iscale[@intCast(src_id)];
-            y[@intCast(i)].qs[j] = @intCast(helpers.nearestInt(x0));
+            y[@intCast(i)].qs[j] = @intCast(ggml.quants.helpers.nearestInt(x0));
             y[@intCast(i)].bsums[index] += y[@intCast(i)].qs[j];
         }
     }

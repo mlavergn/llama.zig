@@ -8,13 +8,7 @@
 //! kernel, `mm_ids_helper`, stays CUDA. It writes one
 //! `ggml_cuda_mm_id_tile_spec` per column tile of `tile_width` instead of each expert's bounds.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const cu = common.cu;
-
+const ggml = @import("../module.zig");
 /// Ports `ggml_cuda_mm_id_tile_spec` (mmid.cuh:3 @b1b770d90): the expert and
 /// the column range of one tile. The host only allocates them.
 pub const TileSpec = extern struct {
@@ -43,23 +37,23 @@ fn launchMmIdsHelper(
     si1: c_int,
     sis1: c_int,
     write_inverse: bool,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
-    impl.assert(n_tokens < (1 << 22), "n_tokens          < (1 << 22) && \"too few bits in mm_ids_helper_store\"");
-    impl.assert(n_expert_used_var < (1 << 10), "n_expert_used_var < (1 << 10) && \"too few bits in mm_ids_helper_store\"");
+    ggml.impl.assert(n_tokens < (1 << 22), "n_tokens          < (1 << 22) && \"too few bits in mm_ids_helper_store\"");
+    ggml.impl.assert(n_expert_used_var < (1 << 10), "n_expert_used_var < (1 << 10) && \"too few bits in mm_ids_helper_store\"");
 
-    const id = common.getDevice();
-    const warp_size = common.info().devices[@intCast(id)].warp_size;
-    const smpbo = common.info().devices[@intCast(id)].smpbo;
-    const k = comptime kernels.get("mmid", kernels.tmpl("mm_ids_helper", &.{kernels.int(n_expert_used_template)}));
-    kernels.setSharedMemoryLimit(k, smpbo);
+    const id = ggml.cuda.common.getDevice();
+    const warp_size = ggml.cuda.common.info().devices[@intCast(id)].warp_size;
+    const smpbo = ggml.cuda.common.info().devices[@intCast(id)].smpbo;
+    const k = comptime ggml.cuda.kernels.get("mmid", ggml.cuda.kernels.tmpl("mm_ids_helper", &.{ggml.cuda.kernels.int(n_expert_used_template)}));
+    ggml.cuda.kernels.setSharedMemoryLimit(k, smpbo);
 
-    const tile_width_fd = common.initFastdivValues(@bitCast(@as(i64, tile_width)));
+    const tile_width_fd = ggml.cuda.common.initFastdivValues(@bitCast(@as(i64, tile_width)));
 
     // `n_tokens*sizeof(mm_ids_helper_store)`, a 4-byte struct.
     const nbytes_shared: usize = @as(usize, @intCast(n_tokens)) * 4;
-    impl.assert(nbytes_shared <= smpbo, "nbytes_shared <= smpbo");
-    kernels.launch(k, .{
+    ggml.impl.assert(nbytes_shared <= smpbo, "nbytes_shared <= smpbo");
+    ggml.cuda.kernels.launch(k, .{
         .grid = .{ .x = @intCast(n_experts) },
         .block = .{ .x = @intCast(warp_size) },
         .shmem = nbytes_shared,
@@ -81,7 +75,7 @@ pub fn launchMmIdsHelperDispatch(
     si1: c_int,
     sis1: c_int,
     write_inverse: bool,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     switch (n_expert_used) {
         inline 2, 4, 6, 8, 10, 16, 32 => |n| launchMmIdsHelper(n, ids, ids_src1, ids_dst, tile_spec, n_experts, n_tokens, n_expert_used, nchannels_y, tile_width, si1, sis1, write_inverse, stream),

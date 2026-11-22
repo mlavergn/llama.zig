@@ -38,8 +38,8 @@ pub const common_chat = @import("common_chat");
 comptime {
     // libllama and libmtmd, compiled in: their exports are what `c.llama_*`
     // and `c.mtmd_*` link against.
-    _ = @import("llama");
-    _ = @import("mtmd");
+    _ = @import("llama").lib;
+    _ = @import("mtmd").lib;
 }
 
 // -----------------------------------------------------------------------------

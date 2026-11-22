@@ -19,16 +19,7 @@
 //! radix select for more than one long row, and CUB argsort, or radix
 //! select past 4096 columns, for one long row.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const argsort = @import("argsort.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC` (top-k.cu:10 @b1b770d90),
 /// the CUDA arm.
 const ncols_threshold_bitonic = 512;
@@ -62,7 +53,7 @@ comptime {
 /// to 64 MB. Each block of a row reads a contiguous range of
 /// `block_cols` columns, and the gather breaks ties by column from the last
 /// pass's histograms.
-fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: cu.cudaStream_t) void {
+fn topKRadixCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, stream: ggml.cuda.common.cu.cudaStream_t) void {
     const BLOCK_SIZE = 256;
     const RADIX_BITS = 8;
     const NBINS = 1 << RADIX_BITS;
@@ -74,35 +65,35 @@ fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, nco
     var dst = dst_in;
 
     // chunk the rows to bound the histogram memory to 64 MB
-    const chunk_nrows: i64 = argsort.chunkNrows(@as(usize, @intCast(blocks_per_row)) * NBINS * @sizeOf(c_int), nrows);
+    const chunk_nrows: i64 = ggml.cuda.argsort.chunkNrows(@as(usize, @intCast(blocks_per_row)) * NBINS * @sizeOf(c_int), nrows);
 
-    var states_alloc = common.PoolAlloc(RadixState).initAlloc(pool, @intCast(chunk_nrows));
+    var states_alloc = ggml.cuda.common.PoolAlloc(RadixState).initAlloc(pool, @intCast(chunk_nrows));
     defer states_alloc.deinit();
-    var histograms_alloc = common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @intCast(chunk_nrows)) * @as(usize, @intCast(blocks_per_row)) * NBINS);
+    var histograms_alloc = ggml.cuda.common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @intCast(chunk_nrows)) * @as(usize, @intCast(blocks_per_row)) * NBINS);
     defer histograms_alloc.deinit();
     const states: ?*anyopaque = @ptrCast(states_alloc.get().?);
     const histograms: ?*anyopaque = @ptrCast(histograms_alloc.get().?);
 
-    const init_k = kernels.get("top-k", "top_k_radix_init");
-    const histogram_k = kernels.get("top-k", kernels.tmpl("top_k_radix_histogram", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
-    const select_k = kernels.get("top-k", kernels.tmpl("top_k_radix_select", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
-    const gather_k = kernels.get("top-k", kernels.tmpl("top_k_radix_gather", &.{ kernels.int(BLOCK_SIZE), kernels.int(RADIX_BITS) }));
+    const init_k = ggml.cuda.kernels.get("top-k", "top_k_radix_init");
+    const histogram_k = ggml.cuda.kernels.get("top-k", ggml.cuda.kernels.tmpl("top_k_radix_histogram", &.{ ggml.cuda.kernels.int(BLOCK_SIZE), ggml.cuda.kernels.int(RADIX_BITS) }));
+    const select_k = ggml.cuda.kernels.get("top-k", ggml.cuda.kernels.tmpl("top_k_radix_select", &.{ ggml.cuda.kernels.int(BLOCK_SIZE), ggml.cuda.kernels.int(RADIX_BITS) }));
+    const gather_k = ggml.cuda.kernels.get("top-k", ggml.cuda.kernels.tmpl("top_k_radix_gather", &.{ ggml.cuda.kernels.int(BLOCK_SIZE), ggml.cuda.kernels.int(RADIX_BITS) }));
 
     var i: i64 = 0;
     while (i < nrows) : (i += chunk_nrows) {
         const iter_nrows: c_int = @truncate(@min(chunk_nrows, nrows - i));
         const row_blocks: u32 = @bitCast(@divTrunc(iter_nrows + BLOCK_SIZE - 1, BLOCK_SIZE));
 
-        kernels.launch(init_k, .{ .grid = .{ .x = row_blocks }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ states, iter_nrows, k });
+        ggml.cuda.kernels.launch(init_k, .{ .grid = .{ .x = row_blocks }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ states, iter_nrows, k });
 
-        const row_grid: kernels.Dim3 = .{ .x = @bitCast(blocks_per_row *% iter_nrows) };
+        const row_grid: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(blocks_per_row *% iter_nrows) };
         var shift: c_int = 32 - RADIX_BITS;
         while (shift >= 0) : (shift -= RADIX_BITS) {
-            kernels.launch(histogram_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*const anyopaque, states), histograms, ncols, block_cols, blocks_per_row, shift });
-            kernels.launch(select_k, .{ .grid = .{ .x = @bitCast(iter_nrows) }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, histograms), states, blocks_per_row, shift });
+            ggml.cuda.kernels.launch(histogram_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*const anyopaque, states), histograms, ncols, block_cols, blocks_per_row, shift });
+            ggml.cuda.kernels.launch(select_k, .{ .grid = .{ .x = @bitCast(iter_nrows) }, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, histograms), states, blocks_per_row, shift });
         }
 
-        kernels.launch(gather_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*anyopaque, dst), @as(?*const anyopaque, histograms), states, ncols, block_cols, k, blocks_per_row });
+        ggml.cuda.kernels.launch(gather_k, .{ .grid = row_grid, .block = .{ .x = BLOCK_SIZE }, .stream = stream }, .{ @as(?*const anyopaque, src), @as(?*anyopaque, dst), @as(?*const anyopaque, histograms), states, ncols, block_cols, k, blocks_per_row });
 
         src += @as(usize, @intCast(ncols)) * @as(usize, @intCast(iter_nrows));
         dst += @as(usize, @intCast(k)) * @as(usize, @intCast(iter_nrows));
@@ -112,13 +103,13 @@ fn topKRadixCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, nco
 /// Ports `top_k_argsort_cuda` (top-k.cu:302 @b1b770d90): argsort each chunk
 /// of rows into a scratch buffer, bitonic or CUB, and copy the first `k`
 /// columns out.
-fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: cu.cudaStream_t) void {
-    const chunk_nrows: i64 = argsort.chunkNrows(@as(usize, @intCast(ncols)) * @sizeOf(c_int), nrows);
+fn topKArgsortCuda(pool: *ggml.cuda.common.Pool, src_in: [*]const f32, dst_in: [*]c_int, ncols: c_int, nrows: i64, k: c_int, use_cub: bool, stream: ggml.cuda.common.cu.cudaStream_t) void {
+    const chunk_nrows: i64 = ggml.cuda.argsort.chunkNrows(@as(usize, @intCast(ncols)) * @sizeOf(c_int), nrows);
 
     var src = src_in;
     var dst = dst_in;
 
-    var tmp_alloc = common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @intCast(ncols)) * @as(usize, @intCast(chunk_nrows)));
+    var tmp_alloc = ggml.cuda.common.PoolAlloc(c_int).initAlloc(pool, @as(usize, @intCast(ncols)) * @as(usize, @intCast(chunk_nrows)));
     defer tmp_alloc.deinit();
     const tmp = tmp_alloc.get().?;
 
@@ -127,19 +118,19 @@ fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, n
         const iter_nrows: c_int = @truncate(@min(chunk_nrows, nrows - i));
 
         if (use_cub) {
-            argsort.argsortF32I32CudaCub(pool, src, tmp, ncols, iter_nrows, c.GGML_SORT_ORDER_DESC, stream);
+            ggml.cuda.argsort.argsortF32I32CudaCub(pool, src, tmp, ncols, iter_nrows, ggml.impl.c.GGML_SORT_ORDER_DESC, stream);
         } else {
-            argsort.argsortF32I32CudaBitonic(src, tmp, ncols, iter_nrows, c.GGML_SORT_ORDER_DESC, stream);
+            ggml.cuda.argsort.argsortF32I32CudaBitonic(src, tmp, ncols, iter_nrows, ggml.impl.c.GGML_SORT_ORDER_DESC, stream);
         }
         const isz: usize = @sizeOf(c_int);
-        common.cudaCheck(cu.cudaMemcpy2DAsync(
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaMemcpy2DAsync(
             dst,
             @as(usize, @intCast(k)) * isz,
             tmp,
             @as(usize, @intCast(ncols)) * isz,
             @as(usize, @intCast(k)) * isz,
             @intCast(iter_nrows),
-            cu.cudaMemcpyDeviceToDevice,
+            ggml.cuda.common.cu.cudaMemcpyDeviceToDevice,
             stream,
         ), "cudaMemcpy2DAsync(dst, k * sizeof(int), tmp, ncols * sizeof(int), k * sizeof(int), iter_nrows, cudaMemcpyDeviceToDevice, stream)", @src());
 
@@ -151,24 +142,24 @@ fn topKArgsortCuda(pool: *common.Pool, src_in: [*]const f32, dst_in: [*]c_int, n
 /// Ports `ggml_cuda_op_top_k` (top-k.cu:330 @b1b770d90), the
 /// `GGML_CUDA_USE_CUB` arm without `CUB_TOP_K_AVAILABLE`, with
 /// `next_power_of_2` (top-k.cu:77 @b1b770d90), which is `argsort.cu`'s.
-pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub fn opTopK(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
     const src0_d: [*]const f32 = @ptrCast(@alignCast(src0.data.?));
     const dst_d: [*]c_int = @ptrCast(@alignCast(dst.data.?));
     const stream = ctx.stream();
 
     // are these asserts truly necessary?
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_I32, "dst->type == GGML_TYPE_I32");
-    impl.assert(c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_I32, "dst->type == GGML_TYPE_I32");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src0), "ggml_is_contiguous(src0)");
 
     const ncols: i64 = src0.ne[0];
-    const nrows: i64 = c.ggml_nrows(src0);
+    const nrows: i64 = ggml.impl.c.ggml_nrows(src0);
     const k: i64 = dst.ne[0];
     const pool = ctx.pool();
 
-    const device = common.getDevice();
-    const dev = &common.info().devices[@intCast(device)];
+    const device = ggml.cuda.common.getDevice();
+    const dev = &ggml.cuda.common.info().devices[@intCast(device)];
 
     const bitonic_short = ncols <= ncols_threshold_bitonic;
     const bitonic_few_rows = nrows > nrows_threshold and
@@ -181,7 +172,7 @@ pub fn opTopK(ctx: *common.Context, dst: *Tensor) void {
 
     if (bitonic_short or bitonic_few_rows) {
         // the padded row must fit in shared memory
-        const ncols_pad = argsort.nextPowerOf2(ncols_i);
+        const ncols_pad = ggml.cuda.argsort.nextPowerOf2(ncols_i);
         if (@as(usize, @bitCast(@as(isize, ncols_pad))) *% @sizeOf(c_int) <= dev.smpb) {
             topKArgsortCuda(pool, src0_d, dst_d, ncols_i, nrows, k_i, false, stream);
             return;

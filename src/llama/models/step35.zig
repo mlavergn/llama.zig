@@ -11,29 +11,17 @@
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_step35`'s `load_arch_hparams` (models/step35.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
 
     // The full-attention layers rotate only half the RoPE dimensions.
     hp.n_rot_full = hp.n_rot_full / 2;
@@ -46,8 +34,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
 
     // Step35 gates with a sigmoid unless the GGUF says otherwise.
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
     }
 
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
@@ -65,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_step35`'s `load_arch_tensors` (models/step35.cpp:37 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -106,10 +94,10 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
 /// Ports `load_arch_tensors`'s `load_block_trunk` lambda
 /// (models/step35.cpp:60 @b1b770d90).
-fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, flags: u32, exc: *Exception) Thrown!void {
+fn loadBlockTrunk(self: *llama.model.Model, l: *const llama.model.Model.Locals, n_rot_max: u32, i: i32, flags: u32, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
     const layer = &self.layers[@intCast(i)];
 
     const n_head_l: i64 = hp.nHead(@intCast(i));
@@ -122,7 +110,7 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, 
 
     // Optional RoPE factors (Llama 3) or LongRoPE tensors.
     const rope_dup: u32 = if (i != 0) dup else 0;
-    if (hp.rope_scaling_type_train == c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+    if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
         layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{n_rot_max / 2}, nr | rope_dup, exc);
         layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{n_rot_max / 2}, nr | rope_dup, exc);
     } else {
@@ -158,10 +146,10 @@ fn loadBlockTrunk(self: *Model, l: *const Model.Locals, n_rot_max: u32, i: i32, 
 
 /// Ports `load_arch_tensors`'s `load_block_mtp` lambda
 /// (models/step35.cpp:106 @b1b770d90).
-fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags: u32, i: i32, exc: *Exception) Thrown!void {
+fn loadBlockMtp(self: *llama.model.Model, l: *const llama.model.Model.Locals, n_rot_max: u32, mtp_flags: u32, i: i32, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
     const layer = &self.layers[@intCast(i)];
 
     const n_head_l: i64 = hp.nHead(@intCast(i));
@@ -178,7 +166,7 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags:
     layer.attn_q_norm = try self.createTensor(.{ .tensor = .attn_q_norm, .suffix = "weight", .bid = i }, &.{l.n_embd_head_k}, nr, exc);
     layer.attn_k_norm = try self.createTensor(.{ .tensor = .attn_k_norm, .suffix = "weight", .bid = i }, &.{l.n_embd_head_k}, nr, exc);
 
-    if (hp.rope_scaling_type_train == c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+    if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
         layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{n_rot_max / 2}, nr | dup, exc);
         layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{n_rot_max / 2}, nr | dup, exc);
     } else {
@@ -227,7 +215,7 @@ fn loadBlockMtp(self: *Model, l: *const Model.Locals, n_rot_max: u32, mtp_flags:
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE parameters.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     if (model.hparams.isSwa(il)) {
@@ -240,40 +228,40 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 /// Ports `llama_model_step35`'s `build_arch_graph` (models/step35.cpp:185
 /// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     buildGraph(model, b);
 }
 
 /// The head-wise attention gate, sigmoid(g_proj(x)), shared by both graphs.
-fn headGate(b: *const graph.Builder, wqkv_gate: *Tensor, cur: *Tensor, attn_out: *Tensor, n_head_l: i64, comptime names: [5][*:0]const u8, il: c_int) *Tensor {
+fn headGate(b: *const llama.graph.Builder, wqkv_gate: *llama.impl.c.ggml_tensor, cur: *llama.impl.c.ggml_tensor, attn_out: *llama.impl.c.ggml_tensor, n_head_l: i64, comptime names: [5][*:0]const u8, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     var gate = b.buildLoraMm(wqkv_gate, cur, null); // [n_head_l, n_tokens]
     b.cb(gate, names[0], il);
 
-    gate = c.ggml_sigmoid(ctx, gate);
+    gate = llama.impl.c.ggml_sigmoid(ctx, gate);
     b.cb(gate, names[1], il);
 
     // Reshape and broadcast to [n_embd_head_v, n_head_l, n_tokens].
-    var attn_3d: *Tensor = c.ggml_reshape_3d(ctx, attn_out, b.n_embd_head_v, n_head_l, b.n_tokens);
-    const gate_3d: *Tensor = c.ggml_reshape_3d(ctx, gate, 1, n_head_l, b.n_tokens);
+    var attn_3d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, attn_out, b.n_embd_head_v, n_head_l, b.n_tokens);
+    const gate_3d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_l, b.n_tokens);
     b.cb(gate_3d, names[2], il);
 
-    attn_3d = c.ggml_mul(ctx, attn_3d, gate_3d);
+    attn_3d = llama.impl.c.ggml_mul(ctx, attn_3d, gate_3d);
     b.cb(attn_3d, names[3], il);
 
-    const gated: *Tensor = c.ggml_reshape_2d(ctx, attn_3d, b.n_embd_head_v * n_head_l, b.n_tokens);
+    const gated: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_2d(ctx, attn_3d, b.n_embd_head_v * n_head_l, b.n_tokens);
     b.cb(gated, names[4], il);
     return gated;
 }
 
 /// Ports the constructor of `llama_model_step35`'s `graph`
 /// (models/step35.cpp:192 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
@@ -306,9 +294,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
 
             // The per-head Q and K RMS norms (Step35's q_norm and k_norm).
             if (layer.attn_q_norm != null) {
@@ -326,7 +314,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Qcur, "Qcur_pos", il);
             b.cb(Kcur, "Kcur_pos", il);
 
-            const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
+            const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k);
             var attn_out = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
             b.cb(attn_out, "attn_out", il);
             // The head-wise attention gate, sigmoid(g_proj(x)) in torch.
@@ -340,11 +328,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -376,10 +364,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const sh_out = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
             b.cb(sh_out, "ffn_shared_out", il);
 
-            cur = c.ggml_add(ctx, moe_out, sh_out);
+            cur = llama.impl.c.ggml_add(ctx, moe_out, sh_out);
             b.cb(cur, "ffn_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -394,7 +382,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
@@ -409,44 +397,44 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 /// Ports the constructor of `llama_model_step35`'s `graph_mtp`
 /// (models/step35.cpp:353 @b1b770d90): the `LLM_GRAPH_TYPE_DECODER_MTP`
 /// draft head for Step3p5.
-fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/step35.cpp", 355, "hparams.n_layer_nextn > 0 && \"STEP35 MTP requires n_layer_nextn > 0\"");
+    llama.impl.assert(hp.n_layer_nextn > 0, "models/step35.cpp", 355, "hparams.n_layer_nextn > 0 && \"STEP35 MTP requires n_layer_nextn > 0\"");
 
     // Multi-block MTP: the graph runs the MTP head that
     // cparams.nextn_layer_offset selects (0 is the first trained head). The
     // speculative driver bumps the offset per draft step to chain heads
     // 45, 46 and 47; offset 0 behaves as a single block.
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/step35.cpp", 364, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    llama.impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/step35.cpp", 364, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/step35.cpp", 367, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/step35.cpp", 368, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/step35.cpp", 369, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    llama.impl.assert(layer.nextn.eh_proj != null, "models/step35.cpp", 367, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    llama.impl.assert(layer.nextn.enorm != null, "models/step35.cpp", 368, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    llama.impl.assert(layer.nextn.hnorm != null, "models/step35.cpp", 369, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
 
     const n_head_l: i64 = hp.nHead(@intCast(il));
     const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/step35.cpp", 374, "out of memory");
+    const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/step35.cpp", 374, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.tokens);
 
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.embd);
 
     inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
 
     const h_input = inp.h.?;
-    const tok_embd: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
+    const tok_embd: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    _ = b.res.addInput(graph.InpEmbdH, inp);
+    _ = b.res.addInput(llama.graph.InpEmbdH, inp);
 
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
@@ -457,7 +445,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat: *Tensor = c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, null);
@@ -478,9 +466,9 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Kcur, "mtp_Kcur", il);
     b.cb(Vcur, "mtp_Vcur", il);
 
-    Qcur = c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
-    Kcur = c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
-    Vcur = c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
+    Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
+    Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
+    Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
 
     if (layer.attn_q_norm != null) {
         Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
@@ -496,7 +484,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Qcur, "mtp_Qcur_pos", il);
     b.cb(Kcur, "mtp_Kcur_pos", il);
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k);
     var attn_out = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(attn_out, "mtp_attn_out", il);
 
@@ -508,7 +496,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildLoraMm(layer.wo.?, attn_out, layer.wo_s);
     b.cb(cur, "mtp_attn_proj", il);
 
-    cur = c.ggml_add(ctx, cur, inpSA);
+    cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
     b.cb(cur, "mtp_attn_residual", il);
 
     const ffn_inp = cur;
@@ -538,14 +526,14 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         const sh_out = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
         b.cb(sh_out, "mtp_ffn_shared_out", il);
 
-        cur = c.ggml_add(ctx, moe_out, sh_out);
+        cur = llama.impl.c.ggml_add(ctx, moe_out, sh_out);
         b.cb(cur, "mtp_ffn_out", il);
     }
-    cur = c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_post_ffn", il);
 
     const inp_out_ids = b.buildInpOutIds();
-    cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     // The hidden state before the norm, which seeds the next MTP step of the
     // autoregressive draft loop.
@@ -553,12 +541,12 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/step35.cpp", 522, "head_norm_w && \"STEP35 MTP: missing both nextn.shared_head_norm and output_norm\"");
+    llama.impl.assert(head_norm_w != null, "models/step35.cpp", 522, "head_norm_w && \"STEP35 MTP: missing both nextn.shared_head_norm and output_norm\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
-    impl.assert(head_w != null, "models/step35.cpp", 527, "head_w && \"STEP35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    llama.impl.assert(head_w != null, "models/step35.cpp", 527, "head_w && \"STEP35 MTP: missing LM head (nextn.shared_head_head or model.output)\"");
     cur = b.buildLoraMm(head_w.?, cur, null);
     b.cb(cur, "result_output", -1);
 

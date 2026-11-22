@@ -8,18 +8,10 @@
 //! `build_arch_graph`. Its graph is `llama_model_phi3`'s, in `phi3.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const phi3 = @import("phi3.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_phimoe`'s `load_arch_hparams` (models/phimoe.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -32,10 +24,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_phimoe`'s `load_arch_tensors` (models/phimoe.cpp:12 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     const n_embd_head = @divTrunc(l.n_embd, l.n_head);
 
@@ -74,8 +66,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// Ports `llama_model_phimoe`'s `build_arch_graph` (models/phimoe.cpp:48 @b1b770d90),
 /// which builds `llama_model_phi3`'s `graph` exactly as Phi-3's own does.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
-    phi3.buildArchGraph(model, b, params);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
+    llama.models.phi3.buildArchGraph(model, b, params);
 }
 
 // -----------------------------------------------------------------------------

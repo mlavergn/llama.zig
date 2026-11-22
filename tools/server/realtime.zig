@@ -36,72 +36,43 @@
 //! are `gpa`'s; an event lives as long as it takes to send it.
 
 const std = @import("std");
-const sync = @import("stdlib").sync;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
 
-const http = @import("http.zig");
-const common = @import("common.zig");
-const tokens_mod = @import("tokens.zig");
-const task_mod = @import("task.zig");
-const result_mod = @import("result.zig");
-const oaicompat = @import("oaicompat.zig");
-const convert = @import("convert.zig");
-const context = @import("context.zig");
-
-const c = tc.c;
-const sampling = tc.sampling;
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Sampling = tc.params.Sampling;
-const Params = tc.params.Params;
-const Token = common.Token;
-const Task = task_mod.Task;
-const ControlAction = task_mod.ControlAction;
-const ControlResponse = task_mod.ControlResponse;
-const TaskResultState = task_mod.TaskResultState;
-const Result = result_mod.Result;
-const Meta = context.Meta;
-const Reader = context.Reader;
-const ErrorType = common.ErrorType;
-
-const gpa = context.gpa;
-const token_null = common.token_null;
-const jsonValue = common.jsonValue;
-const npos = chat.msg.npos;
 
 /// `nullptr`, in an object's list.
-const jnull: Value = .null;
-
-const OutMode = c.enum_mtmd_helper_gen_audio_out_mode;
+const jnull: json.Value = .null;
 
 /// `json { {k0, v0}, {k1, v1}, ... }`: an object of the pairs in order.
-fn object(a: Allocator, pairs: anytype) common.Error!Value {
-    var o = Value.emptyObject();
-    inline for (pairs) |p| try o.set(a, p[0], try common.from(a, p[1]));
+fn object(a: Allocator, pairs: anytype) mod.common.Error!json.Value {
+    var o = json.Value.emptyObject();
+    inline for (pairs) |p| try o.set(a, p[0], try mod.common.from(a, p[1]));
     return o;
 }
 
 /// `json::array({ v... })`.
-fn array(a: Allocator, values: anytype) common.Error!Value {
-    var o = Value.emptyArray();
-    inline for (values) |v| try o.pushBack(a, try common.from(a, v));
+fn array(a: Allocator, values: anytype) mod.common.Error!json.Value {
+    var o = json.Value.emptyArray();
+    inline for (values) |v| try o.pushBack(a, try mod.common.from(a, v));
     return o;
 }
 
 /// A string, or null when it is empty: `s.empty() ? json(nullptr) : json(s)`.
-fn orNull(a: Allocator, s: []const u8) common.Error!Value {
-    return if (s.len == 0) .null else Value.initString(a, s);
+fn orNull(a: Allocator, s: []const u8) mod.common.Error!json.Value {
+    return if (s.len == 0) .null else json.Value.initString(a, s);
 }
 
-fn valueIs(v: *const Value, s: []const u8) bool {
+fn valueIs(v: *const json.Value, s: []const u8) bool {
     return v.isString() and std.mem.eql(u8, v.string, s);
 }
 
 /// `"item_" + random_string()`, and the others.
-fn randomId(a: Allocator, prefix: []const u8) common.Error![]u8 {
-    return std.mem.concat(a, u8, &.{ prefix, try common.randomString(a) });
+fn randomId(a: Allocator, prefix: []const u8) mod.common.Error![]u8 {
+    return std.mem.concat(a, u8, &.{ prefix, try mod.common.randomString(a) });
 }
 
 // -----------------------------------------------------------------------------
@@ -112,9 +83,9 @@ fn randomId(a: Allocator, prefix: []const u8) common.Error![]u8 {
 /// and audio itself.
 ///
 /// Return: null, or the error's text in `a`.
-fn parseOutputModalities(a: Allocator, j: *const Value, mode: *OutMode) common.Error!?[]const u8 {
+fn parseOutputModalities(a: Allocator, j: *const json.Value, mode: *tc.c.enum_mtmd_helper_gen_audio_out_mode) mod.common.Error!?[]const u8 {
     if (j.isNull()) {
-        mode.* = c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO;
+        mode.* = tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO;
         return null;
     }
     if (!j.isArray() or j.empty()) {
@@ -132,15 +103,15 @@ fn parseOutputModalities(a: Allocator, j: *const Value, mode: *OutMode) common.E
         }
     }
     if (text and audio) {
-        mode.* = c.MTMD_HELPER_GEN_AUDIO_OUT_MIXED;
+        mode.* = tc.c.MTMD_HELPER_GEN_AUDIO_OUT_MIXED;
     } else {
-        mode.* = if (audio) c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO else c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT;
+        mode.* = if (audio) tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO else tc.c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT;
     }
     return null;
 }
 
 /// Ports `parse_max_output_tokens` (server-realtime.cpp:64 @b1b770d90).
-fn parseMaxOutputTokens(j: *const Value, n: *i32) bool {
+fn parseMaxOutputTokens(j: *const json.Value, n: *i32) bool {
     if (valueIs(j, "inf")) {
         n.* = -1;
         return true;
@@ -171,11 +142,11 @@ fn toolChoiceStr(choice: chat.ToolChoice) []const u8 {
 }
 
 /// Ports `output_modalities_json` (server-realtime.cpp:114 @b1b770d90).
-fn outputModalitiesJson(a: Allocator, mode: OutMode) common.Error!Value {
+fn outputModalitiesJson(a: Allocator, mode: tc.c.enum_mtmd_helper_gen_audio_out_mode) mod.common.Error!json.Value {
     return switch (mode) {
-        c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT => array(a, .{"text"}),
-        c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO => array(a, .{"audio"}),
-        c.MTMD_HELPER_GEN_AUDIO_OUT_MIXED => array(a, .{ "text", "audio" }),
+        tc.c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT => array(a, .{"text"}),
+        tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO => array(a, .{"audio"}),
+        tc.c.MTMD_HELPER_GEN_AUDIO_OUT_MIXED => array(a, .{ "text", "audio" }),
         else => .null,
     };
 }
@@ -183,13 +154,13 @@ fn outputModalitiesJson(a: Allocator, mode: OutMode) common.Error!Value {
 /// Ports `parse_tool_choice` (server-realtime.cpp:92 @b1b770d90).
 ///
 /// Return: null, or the error's text in `a`.
-fn parseToolChoice(a: Allocator, j: *const Value, choice: *chat.ToolChoice) common.Error!?[]const u8 {
+fn parseToolChoice(a: Allocator, j: *const json.Value, choice: *chat.ToolChoice) mod.common.Error!?[]const u8 {
     if (!j.isString()) {
         return "tool_choice must be \"auto\", \"none\" or \"required\"";
     }
     choice.* = chat.msg.toolChoiceParseOaicompat(j.string) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return try a.dupe(u8, context.whatOf(e)),
+        else => return try a.dupe(u8, mod.context.whatOf(e)),
     };
     return null;
 }
@@ -199,13 +170,13 @@ fn parseToolChoice(a: Allocator, j: *const Value, choice: *chat.ToolChoice) comm
 
 /// Ports `server_realtime_deps` (server-realtime.h:23 @b1b770d90).
 pub const Deps = struct {
-    queue_tasks: *context.TaskQueue,
-    queue_results: *context.ResultQueue,
-    meta: *const Meta,
-    params: *const Params,
-    mctx: ?*c.mtmd_context,
-    cap: *const c.mtmd_helper_cap,
-    vocab: ?*const c.llama_vocab,
+    queue_tasks: *mod.context.TaskQueue,
+    queue_results: *mod.context.ResultQueue,
+    meta: *const mod.context.Meta,
+    params: *const tc.params.Params,
+    mctx: ?*tc.c.mtmd_context,
+    cap: *const tc.c.mtmd_helper_cap,
+    vocab: ?*const tc.c.llama_vocab,
 };
 
 /// `req.should_stop`'s kin: the reader's stop test.
@@ -225,7 +196,7 @@ const CallItem = struct { index: usize, idx: usize };
 /// Ports `realtime_conversation` (server-realtime.cpp:123 @b1b770d90).
 const Conversation = struct {
     deps: Deps,
-    conn: *http.WsConn,
+    conn: *mod.http.WsConn,
 
     arena: std.heap.ArenaAllocator,
     /// what `response_create` resets
@@ -239,13 +210,13 @@ const Conversation = struct {
     language: []const u8 = "", // transcription
     out_language: []const u8 = "", // `deps.params.tts_lang` at first
     out_voice: []const u8 = "", // `deps.params.tts_voice` at first
-    out_mode: OutMode = c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO,
+    out_mode: tc.c.enum_mtmd_helper_gen_audio_out_mode = tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO,
     max_output_tokens: i32 = -1, // "inf"
     input_rate: c_int = 16000,
     output_rate: c_int = 24000,
 
     // tools, in the system turn
-    tools_json: Value = Value.emptyArray(), // as the client sent them
+    tools_json: json.Value = json.Value.emptyArray(), // as the client sent them
     tools: std.ArrayList(chat.Tool) = .empty,
     tool_choice: chat.ToolChoice = .auto,
 
@@ -265,10 +236,10 @@ const Conversation = struct {
     tool_results: bool = false, // tool results went in after the last response, the next one answers them
     n_turns: c_int = 0,
     next_header: []const u8 = "", // text that goes in before the next user turn
-    resampler: ?*c.mtmd_helper_resampler = null, // input_rate -> model rate
+    resampler: ?*tc.c.mtmd_helper_resampler = null, // input_rate -> model rate
 
     // the item or response the results belong to, shared with the result loop
-    mutex: sync.Mutex = .{},
+    mutex: stdlib.sync.Mutex = .{},
     last_item_id: []const u8 = "",
     transcribe_item_id: []const u8 = "", // transcription: the item being transcribed
     transcript: std.ArrayList(u8) = .empty,
@@ -277,11 +248,11 @@ const Conversation = struct {
     response_text: std.ArrayList(u8) = .empty,
     idx_text: i32 = -1,
     idx_audio: i32 = -1,
-    parts: Value = Value.emptyArray(),
-    output: Value = Value.emptyArray(), // items of the response
+    parts: json.Value = json.Value.emptyArray(),
+    output: json.Value = json.Value.emptyArray(), // items of the response
     idx_message: i32 = -1, // output index of the message, added with its first delta
     call_items: std.ArrayList(CallItem) = .empty, // tool call -> output index
-    parse: ?TaskResultState = null, // the tool call parser, with tools
+    parse: ?mod.task.TaskResultState = null, // the tool call parser, with tools
 
     closed: std.atomic.Value(bool) = .init(false),
 
@@ -299,15 +270,15 @@ const Conversation = struct {
 
     /// `last_item_id = id`, with `mutex` held.
     fn setLastItem(self: *Conversation, id: []const u8) !void {
-        const copy = try gpa.dupe(u8, id);
-        gpa.free(self.last_item_id);
+        const copy = try mod.context.gpa.dupe(u8, id);
+        mod.context.gpa.free(self.last_item_id);
         self.last_item_id = copy;
     }
 
     /// `transcribe_item_id = id`, with `mutex` held.
     fn setTranscribeItem(self: *Conversation, id: []const u8) !void {
-        const copy = try gpa.dupe(u8, id);
-        gpa.free(self.transcribe_item_id);
+        const copy = try mod.context.gpa.dupe(u8, id);
+        mod.context.gpa.free(self.transcribe_item_id);
         self.transcribe_item_id = copy;
     }
 
@@ -321,10 +292,10 @@ const Conversation = struct {
 
     /// Ports `send_event` (server-realtime.cpp:188 @b1b770d90). `ev` is
     /// allocated in `ea`, an arena that outlives the call.
-    fn sendEvent(self: *Conversation, ea: Allocator, ev: Value) !void {
+    fn sendEvent(self: *Conversation, ea: Allocator, ev: json.Value) !void {
         var e = ev;
-        try e.set(ea, "event_id", try Value.initString(ea, try randomId(ea, "event_")));
-        _ = self.conn.send(try common.safeJsonToStr(ea, &e));
+        try e.set(ea, "event_id", try json.Value.initString(ea, try randomId(ea, "event_")));
+        _ = self.conn.send(try mod.common.safeJsonToStr(ea, &e));
     }
 
     /// Ports `send_error` (server-realtime.cpp:193 @b1b770d90).
@@ -345,7 +316,7 @@ const Conversation = struct {
     }
 
     /// Ports `session_json` (server-realtime.cpp:200 @b1b770d90).
-    fn sessionJson(self: *Conversation, ea: Allocator) !Value {
+    fn sessionJson(self: *Conversation, ea: Allocator) !json.Value {
         var audio_in = try object(ea, .{
             .{ "format", try object(ea, .{ .{ "type", "audio/pcm" }, .{ "rate", self.input_rate } }) },
             .{ "turn_detection", jnull },
@@ -370,7 +341,7 @@ const Conversation = struct {
                 .{ "language", try orNull(ea, self.out_language) },
             }));
         }
-        const max_tokens: Value = if (self.max_output_tokens < 0) try Value.initString(ea, "inf") else .{ .number_integer = self.max_output_tokens };
+        const max_tokens: json.Value = if (self.max_output_tokens < 0) try json.Value.initString(ea, "inf") else .{ .number_integer = self.max_output_tokens };
         return object(ea, .{
             .{ "id", self.id },
             .{ "object", "realtime.session" },
@@ -390,22 +361,22 @@ const Conversation = struct {
     //
 
     /// Ports `control` (server-realtime.cpp:237 @b1b770d90).
-    fn control(self: *Conversation, action: ControlAction, text: []const u8, audio: []const f32, response: ?*const ControlResponse) !bool {
-        var ctl = try Reader.init(gpa, self.deps.queue_tasks, self.deps.queue_results, 1);
+    fn control(self: *Conversation, action: mod.task.ControlAction, text: []const u8, audio: []const f32, response: ?*const mod.task.ControlResponse) !bool {
+        var ctl = try mod.context.Reader.init(mod.context.gpa, self.deps.queue_tasks, self.deps.queue_results, 1);
         defer ctl.deinit();
-        var task = Task.initType(.control);
+        var task = mod.task.Task.initType(.control);
         task.id = ctl.getNewId();
-        const ta = try task.arenaAlloc(gpa);
+        const ta = try task.arenaAlloc(mod.context.gpa);
         task.params.control_action = action;
         task.params.control_cmpl_id = try ta.dupe(u8, self.id);
         task.params.control_text = try ta.dupe(u8, text);
         task.params.control_audio = try ta.dupe(f32, audio);
         if (response) |r| {
-            task.params.control_response = try task_mod.deepClone(ta, r.*);
+            task.params.control_response = try mod.task.deepClone(ta, r.*);
         }
         try ctl.postTask(task, false);
         const result = (try ctl.next(Stop{ .conv = self, .with_closed = true })) orelse return false;
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
         return switch (result.kind) {
             .control => |res| res.success,
             else => false,
@@ -415,8 +386,8 @@ const Conversation = struct {
     /// Ports `response_sampling` (server-realtime.cpp:254 @b1b770d90):
     /// sampling of a response: the server defaults, with the tool call
     /// grammar of `session`.
-    fn responseSampling(self: *Conversation, ea: Allocator, session: ?*const chat.session.Session) !Sampling {
-        var s = try task_mod.deepClone(ea, self.deps.params.sampling);
+    fn responseSampling(self: *Conversation, ea: Allocator, session: ?*const chat.session.Session) !tc.params.Sampling {
+        var s = try mod.task.deepClone(ea, self.deps.params.sampling);
         if (session) |ss| {
             try ss.applySampling(ea, &s);
         }
@@ -457,7 +428,7 @@ const Conversation = struct {
     /// Ports `derive_turn_text` (server-realtime.cpp:284 @b1b770d90): the
     /// text around a user and an assistant turn, from placeholder messages.
     fn deriveTurnText(self: *Conversation, instructions: []const u8) !bool {
-        var tmp = std.heap.ArenaAllocator.init(gpa);
+        var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer tmp.deinit();
         const ta = tmp.allocator();
         const sa = self.a();
@@ -532,8 +503,8 @@ const Conversation = struct {
     }
 
     /// Ports `on_append` (server-realtime.cpp:359 @b1b770d90).
-    fn onAppend(self: *Conversation, ea: Allocator, ev: *const Value) !void {
-        const pcm = tokens_mod.base64HppDecode(ea, jsonValue(ev, "audio", []const u8, "")) catch |e| switch (e) {
+    fn onAppend(self: *Conversation, ea: Allocator, ev: *const json.Value) !void {
+        const pcm = mod.tokens.base64HppDecode(ea, mod.common.jsonValue(ev, "audio", []const u8, "")) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             else => return self.sendInvalid(ea, "invalid base64 audio"),
         };
@@ -554,14 +525,14 @@ const Conversation = struct {
     /// false after sending the error.
     fn resample(self: *Conversation, ea: Allocator, samples: *[]f32) !bool {
         if (self.resampler == null) {
-            self.resampler = c.mtmd_helper_resampler_init(self.input_rate, c.mtmd_get_audio_sample_rate(self.deps.mctx));
+            self.resampler = tc.c.mtmd_helper_resampler_init(self.input_rate, tc.c.mtmd_get_audio_sample_rate(self.deps.mctx));
             if (self.resampler == null) {
                 try self.sendError(ea, "failed to initialize the audio resampler", "server_error");
                 return false;
             }
         }
         var out: [*c]const f32 = null;
-        const n = c.mtmd_helper_resampler_process(self.resampler, samples.ptr, samples.len, &out);
+        const n = tc.c.mtmd_helper_resampler_process(self.resampler, samples.ptr, samples.len, &out);
         if (n < 0) {
             try self.sendError(ea, "failed to resample the audio", "server_error");
             return false;
@@ -606,7 +577,7 @@ const Conversation = struct {
     }
 
     /// `conversation.item.added`, then `conversation.item.done`.
-    fn sendItemEvents(self: *Conversation, ea: Allocator, prev: *const Value, item: *const Value) !void {
+    fn sendItemEvents(self: *Conversation, ea: Allocator, prev: *const json.Value, item: *const json.Value) !void {
         try self.sendEvent(ea, try object(ea, .{
             .{ "type", "conversation.item.added" },
             .{ "previous_item_id", try prev.clone(ea) },
@@ -631,9 +602,9 @@ const Conversation = struct {
             try self.setTranscribeItem(self.last_item_id);
             self.transcript.clearRetainingCapacity();
         }
-        var response: ControlResponse = .{};
+        var response: mod.task.ControlResponse = .{};
         response.n_predict = self.max_output_tokens;
-        response.out_mode = c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT;
+        response.out_mode = tc.c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT;
         response.sampling = try self.responseSampling(ea, null);
         const prompt = try std.mem.concat(ea, u8, &.{ self.user_footer, self.assistant_header });
         if (!try self.control(.response_create, prompt, &.{}, &response)) {
@@ -645,7 +616,7 @@ const Conversation = struct {
     }
 
     /// `item.contains("id") && item["id"].is_string() ? item["id"] : "item_" + random_string()`.
-    fn itemId(ea: Allocator, item: *const Value) ![]const u8 {
+    fn itemId(ea: Allocator, item: *const json.Value) ![]const u8 {
         if (item.contains("id")) {
             const v = try item.at("id");
             if (v.isString()) return v.string;
@@ -654,17 +625,17 @@ const Conversation = struct {
     }
 
     /// Ports `on_item_create` (server-realtime.cpp:448 @b1b770d90).
-    fn onItemCreate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
+    fn onItemCreate(self: *Conversation, ea: Allocator, ev: *const json.Value) !void {
         if (std.mem.eql(u8, self.type, "transcription")) {
             return self.sendInvalid(ea, "conversation.item.create: not supported in a transcription session");
         }
-        const empty = Value.emptyObject();
-        const item: *const Value = if (ev.contains("item")) try ev.at("item") else &empty;
-        const item_type = jsonValue(item, "type", []const u8, "");
+        const empty = json.Value.emptyObject();
+        const item: *const json.Value = if (ev.contains("item")) try ev.at("item") else &empty;
+        const item_type = mod.common.jsonValue(item, "type", []const u8, "");
         if (std.mem.eql(u8, item_type, "function_call_output")) {
             return self.onToolOutput(ea, item);
         }
-        if (!std.mem.eql(u8, item_type, "message") or !std.mem.eql(u8, jsonValue(item, "role", []const u8, ""), "user")) {
+        if (!std.mem.eql(u8, item_type, "message") or !std.mem.eql(u8, mod.common.jsonValue(item, "role", []const u8, ""), "user")) {
             return self.sendInvalid(ea, "conversation.item.create: only user messages and function call outputs are supported");
         }
         var text: std.ArrayList(u8) = .empty;
@@ -700,24 +671,24 @@ const Conversation = struct {
         try self.sendItemEvents(ea, &prev, &out);
     }
 
-    fn appendPart(self: *Conversation, ea: Allocator, text: *std.ArrayList(u8), part: *const Value) !bool {
-        const t = jsonValue(part, "type", []const u8, "");
+    fn appendPart(self: *Conversation, ea: Allocator, text: *std.ArrayList(u8), part: *const json.Value) !bool {
+        const t = mod.common.jsonValue(part, "type", []const u8, "");
         if (!std.mem.eql(u8, t, "input_text")) {
             try self.sendInvalid(ea, try std.mem.concat(ea, u8, &.{ "conversation.item.create: unsupported content type: ", t }));
             return false;
         }
-        try text.appendSlice(ea, jsonValue(part, "text", []const u8, ""));
+        try text.appendSlice(ea, mod.common.jsonValue(part, "text", []const u8, ""));
         return true;
     }
 
     /// Ports `on_tool_output` (server-realtime.cpp:484 @b1b770d90): the
     /// result of a tool call of the last response, the next response
     /// answers it.
-    fn onToolOutput(self: *Conversation, ea: Allocator, item: *const Value) !void {
+    fn onToolOutput(self: *Conversation, ea: Allocator, item: *const json.Value) !void {
         if (self.tools.items.len == 0 or self.n_turns == 0 or self.turn_open) {
             return self.sendInvalid(ea, "conversation.item.create: a function call output must follow the response that called it");
         }
-        const output = jsonValue(item, "output", []const u8, "");
+        const output = mod.common.jsonValue(item, "output", []const u8, "");
         const text = try std.mem.concat(ea, u8, &.{ self.next_header, self.tool_header, output, self.tool_footer });
         if (!try self.control(.text_append, text, &.{}, null)) {
             return;
@@ -733,7 +704,7 @@ const Conversation = struct {
             .{ "id", self.last_item_id },
             .{ "object", "realtime.item" },
             .{ "type", "function_call_output" },
-            .{ "call_id", jsonValue(item, "call_id", []const u8, "") },
+            .{ "call_id", mod.common.jsonValue(item, "call_id", []const u8, "") },
             .{ "output", output },
             .{ "status", "completed" },
         });
@@ -741,7 +712,7 @@ const Conversation = struct {
     }
 
     /// Ports `on_response_create` (server-realtime.cpp:505 @b1b770d90).
-    fn onResponseCreate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
+    fn onResponseCreate(self: *Conversation, ea: Allocator, ev: *const json.Value) !void {
         if (std.mem.eql(u8, self.type, "transcription")) {
             return self.sendInvalid(ea, "response.create: not supported in a transcription session");
         }
@@ -749,17 +720,17 @@ const Conversation = struct {
             return self.sendError(ea, "response.create: commit audio or create a message first", "conversation_empty");
         }
         var mode = self.out_mode;
-        const empty = Value.emptyObject();
-        const resp: *const Value = if (ev.contains("response")) try ev.at("response") else &empty;
+        const empty = json.Value.emptyObject();
+        const resp: *const json.Value = if (ev.contains("response")) try ev.at("response") else &empty;
         if (resp.contains("output_modalities")) {
             if (try parseOutputModalities(ea, try resp.at("output_modalities"), &mode)) |err| {
                 return self.sendInvalid(ea, try std.mem.concat(ea, u8, &.{ "response.create: ", err }));
             }
         }
-        if (!self.deps.cap.audio_gen and mode != c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT and mode != c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO) {
+        if (!self.deps.cap.audio_gen and mode != tc.c.MTMD_HELPER_GEN_AUDIO_OUT_TEXT and mode != tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO) {
             return self.sendInvalid(ea, "response.create: the model cannot generate audio");
         }
-        if (!self.deps.cap.text_gen and mode != c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO and mode != c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO) {
+        if (!self.deps.cap.text_gen and mode != tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUDIO and mode != tc.c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO) {
             return self.sendInvalid(ea, "response.create: the model cannot generate text");
         }
         // audio not committed yet belongs to this turn
@@ -776,7 +747,7 @@ const Conversation = struct {
 
         // the gen-audio pipeline opens the response in the asked mode, after tool results the assistant turn opens right away
         const prompt = try std.mem.concat(ea, u8, &.{ if (self.turn_open) self.user_footer else "", self.assistant_header });
-        var response: ControlResponse = .{};
+        var response: mod.task.ControlResponse = .{};
         response.n_predict = self.max_output_tokens;
         if (resp.contains("max_output_tokens") and !parseMaxOutputTokens(try resp.at("max_output_tokens"), &response.n_predict)) {
             return self.sendInvalid(ea, "response.create: max_output_tokens must be an integer or \"inf\"");
@@ -793,9 +764,9 @@ const Conversation = struct {
             var inputs = try self.chatInputs(ea, &.{user}, true);
             inputs.tool_choice = choice;
             inputs.parallel_tool_calls = true;
-            session = chat.session.Session.init(gpa, self.deps.meta.chat_params.tmpls, self.deps.vocab, &inputs, .{}) catch |e| {
+            session = chat.session.Session.init(mod.context.gpa, self.deps.meta.chat_params.tmpls, self.deps.vocab, &inputs, .{}) catch |e| {
                 if (e == error.OutOfMemory) return error.OutOfMemory;
-                return self.sendError(ea, try std.mem.concat(ea, u8, &.{ "response.create: ", context.whatOf(e) }), "server_error");
+                return self.sendError(ea, try std.mem.concat(ea, u8, &.{ "response.create: ", mod.context.whatOf(e) }), "server_error");
             };
         }
         response.sampling = try self.responseSampling(ea, if (session) |*ss| ss else null);
@@ -808,16 +779,16 @@ const Conversation = struct {
             self.response_id = try randomId(rsa, "resp_");
             self.response_item_id = try randomId(rsa, "item_");
             self.response_text = .empty;
-            self.parts = Value.emptyArray();
+            self.parts = json.Value.emptyArray();
             self.idx_text = -1;
             self.idx_audio = -1;
-            self.output = Value.emptyArray();
+            self.output = json.Value.emptyArray();
             self.idx_message = -1;
             self.call_items = .empty;
-            if (self.parse) |*p| p.deinit(gpa);
+            if (self.parse) |*p| p.deinit(mod.context.gpa);
             self.parse = null;
             if (session) |*ss| {
-                self.parse = try TaskResultState.init(gpa, ss);
+                self.parse = try mod.task.TaskResultState.init(mod.context.gpa, ss);
             }
             try self.sendEvent(ea, try object(ea, .{
                 .{ "type", "response.created" },
@@ -826,7 +797,7 @@ const Conversation = struct {
                     .{ "object", "realtime.response" },
                     .{ "status", "in_progress" },
                     .{ "output_modalities", try outputModalitiesJson(ea, mode) },
-                    .{ "output", Value.emptyArray() },
+                    .{ "output", json.Value.emptyArray() },
                 }) },
             }));
         }
@@ -841,7 +812,7 @@ const Conversation = struct {
     }
 
     /// Ports `on_session_update` (server-realtime.cpp:603 @b1b770d90).
-    fn onSessionUpdate(self: *Conversation, ea: Allocator, ev: *const Value) !void {
+    fn onSessionUpdate(self: *Conversation, ea: Allocator, ev: *const json.Value) !void {
         const session = try valueOr(ev, "session");
         if (!session.isObject()) {
             return self.sendInvalid(ea, "session.update: session must be an object");
@@ -893,18 +864,18 @@ const Conversation = struct {
         const audio = try valueOr(&session, "audio");
         const in = try valueOr(&audio, "input");
         if (in.contains("format") and (try in.at("format")).isObject()) {
-            const rate = jsonValue(try in.at("format"), "rate", c_int, self.input_rate);
+            const rate = mod.common.jsonValue(try in.at("format"), "rate", c_int, self.input_rate);
             if (rate < 8000 or rate > 192000) {
                 return self.sendInvalid(ea, "session.update: the input audio rate must be between 8000 and 192000 Hz");
             }
             if (rate != self.input_rate) {
                 self.input_rate = rate;
-                if (self.resampler) |r| c.mtmd_helper_resampler_free(r);
+                if (self.resampler) |r| tc.c.mtmd_helper_resampler_free(r);
                 self.resampler = null;
             }
         }
         if (in.contains("transcription") and (try in.at("transcription")).isObject()) {
-            self.language = try self.a().dupe(u8, jsonValue(try in.at("transcription"), "language", []const u8, self.language));
+            self.language = try self.a().dupe(u8, mod.common.jsonValue(try in.at("transcription"), "language", []const u8, self.language));
         }
         const out = try valueOr(&audio, "output");
         if (out.contains("voice") or out.contains("language")) {
@@ -912,9 +883,9 @@ const Conversation = struct {
             if (out.contains("voice")) {
                 // string or {"id": name}
                 const v = try out.at("voice");
-                voice = if (v.isObject()) jsonValue(v, "id", []const u8, "") else if (v.isString()) v.string else "";
+                voice = if (v.isObject()) mod.common.jsonValue(v, "id", []const u8, "") else if (v.isString()) v.string else "";
             }
-            const lang = jsonValue(&out, "language", []const u8, self.out_language);
+            const lang = mod.common.jsonValue(&out, "language", []const u8, self.out_language);
             const voices = self.deps.meta.tts_voices;
             if (voice.len != 0 and voices.len != 0) {
                 const known = for (voices) |name| {
@@ -945,24 +916,24 @@ const Conversation = struct {
     /// rejected here.
     ///
     /// Return: null, or the error's text in `ea`.
-    fn parseTools(self: *Conversation, ea: Allocator, j: *const Value) !?[]const u8 {
-        var converted = convert.responsesTools(ea, j) catch |e| {
+    fn parseTools(self: *Conversation, ea: Allocator, j: *const json.Value) !?[]const u8 {
+        var converted = mod.convert.responsesTools(ea, j) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+            return try std.mem.concat(ea, u8, &.{ "tools: ", mod.context.whatOf(e) });
         };
         const parsed = chat.msg.toolsParseOaicompat(self.a(), &converted) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+            return try std.mem.concat(ea, u8, &.{ "tools: ", mod.context.whatOf(e) });
         };
         // reject the schemas that would fail later, when the chat template builds the tool call grammar
         for (parsed.items) |*tool| {
             const schema = json.parse(ea, tool.parameters) catch |e| {
                 if (e == error.OutOfMemory) return error.OutOfMemory;
-                return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+                return try std.mem.concat(ea, u8, &.{ "tools: ", mod.context.whatOf(e) });
             };
-            _ = oaicompat.schemaToGrammar(ea, &schema) catch |e| {
+            _ = mod.oaicompat.schemaToGrammar(ea, &schema) catch |e| {
                 if (e == error.OutOfMemory) return error.OutOfMemory;
-                return try std.mem.concat(ea, u8, &.{ "tools: ", context.whatOf(e) });
+                return try std.mem.concat(ea, u8, &.{ "tools: ", mod.context.whatOf(e) });
             };
         }
         self.tools = parsed;
@@ -993,7 +964,7 @@ const Conversation = struct {
             error.OutOfMemory => return error.OutOfMemory,
             else => return self.sendInvalid(ea, "invalid JSON"),
         };
-        const t = jsonValue(&ev, "type", []const u8, "");
+        const t = mod.common.jsonValue(&ev, "type", []const u8, "");
         if (std.mem.eql(u8, t, "session.update") or std.mem.eql(u8, t, "transcription_session.update")) {
             try self.onSessionUpdate(ea, &ev);
         } else if (std.mem.eql(u8, t, "input_audio_buffer.append")) {
@@ -1032,7 +1003,7 @@ const Conversation = struct {
             .{ "type", "message" },
             .{ "role", "assistant" },
             .{ "status", "in_progress" },
-            .{ "content", Value.emptyArray() },
+            .{ "content", json.Value.emptyArray() },
         }));
         try self.sendEvent(ea, try object(ea, .{
             .{ "type", "response.output_item.added" },
@@ -1118,7 +1089,7 @@ const Conversation = struct {
         }
         const item = &self.output.array.items[idx];
         const args = try std.mem.concat(rsa, u8, &.{ (try item.at("arguments")).string, diff.tool_call_delta.arguments });
-        try item.set(rsa, "arguments", try Value.initString(rsa, args));
+        try item.set(rsa, "arguments", try json.Value.initString(rsa, args));
         try self.sendEvent(ea, try object(ea, .{
             .{ "type", "response.function_call_arguments.delta" },
             .{ "response_id", self.response_id },
@@ -1130,13 +1101,13 @@ const Conversation = struct {
     }
 
     /// Ports `on_result` (server-realtime.cpp:807 @b1b770d90).
-    fn onResult(self: *Conversation, ea: Allocator, res: *const result_mod.Realtime) !void {
+    fn onResult(self: *Conversation, ea: Allocator, res: *const mod.result.Realtime) !void {
         self.lock();
         defer self.unlock();
         const res_text = res.content.text.items;
         if (self.transcribe_item_id.len != 0) {
             if (!res.content.empty()) {
-                try self.transcript.appendSlice(gpa, res_text);
+                try self.transcript.appendSlice(mod.context.gpa, res_text);
                 try self.sendEvent(ea, try object(ea, .{
                     .{ "type", "conversation.item.input_audio_transcription.delta" },
                     .{ "item_id", self.transcribe_item_id },
@@ -1170,7 +1141,7 @@ const Conversation = struct {
             if (diff.content_delta.len != 0) {
                 try self.onText(ea, diff.content_delta);
             }
-            if (diff.tool_call_index != npos) {
+            if (diff.tool_call_index != chat.msg.npos) {
                 try self.onToolCall(ea, diff);
             }
         }
@@ -1202,15 +1173,15 @@ const Conversation = struct {
                     .{ "content_index", i },
                 });
                 if (@as(i32, @intCast(i)) == self.idx_text) {
-                    try part.set(rsa, "text", try Value.initString(rsa, self.response_text.items));
-                    try ev.set(ea, "type", try Value.initString(ea, "response.output_text.done"));
-                    try ev.set(ea, "text", try Value.initString(ea, self.response_text.items));
+                    try part.set(rsa, "text", try json.Value.initString(rsa, self.response_text.items));
+                    try ev.set(ea, "type", try json.Value.initString(ea, "response.output_text.done"));
+                    try ev.set(ea, "text", try json.Value.initString(ea, self.response_text.items));
                 } else {
-                    try ev.set(ea, "type", try Value.initString(ea, "response.output_audio.done"));
+                    try ev.set(ea, "type", try json.Value.initString(ea, "response.output_audio.done"));
                 }
                 try self.sendEvent(ea, try ev.clone(ea));
                 try ev.erase(ea, "text");
-                try ev.set(ea, "type", try Value.initString(ea, "response.content_part.done"));
+                try ev.set(ea, "type", try json.Value.initString(ea, "response.content_part.done"));
                 try ev.set(ea, "part", try part.clone(ea));
                 try self.sendEvent(ea, ev);
             }
@@ -1229,7 +1200,7 @@ const Conversation = struct {
             }));
         }
         for (self.output.array.items, 0..) |*item, i| {
-            try item.set(rsa, "status", try Value.initString(rsa, status));
+            try item.set(rsa, "status", try json.Value.initString(rsa, status));
             try self.sendEvent(ea, try object(ea, .{
                 .{ "type", "response.output_item.done" },
                 .{ "response_id", self.response_id },
@@ -1248,7 +1219,7 @@ const Conversation = struct {
                 .{ "usage", try object(ea, .{.{ "output_tokens", res.n_decoded }}) },
             }) },
         }));
-        if (self.parse) |*p| p.deinit(gpa);
+        if (self.parse) |*p| p.deinit(mod.context.gpa);
         self.parse = null;
     }
 
@@ -1259,9 +1230,9 @@ const Conversation = struct {
     /// The reader thread of `run`: client events, handled in order.
     fn readerLoop(self: *Conversation) void {
         self.readEvents() catch |e| {
-            const z = common.dupZ(context.whatOf(e));
-            defer common.freeZ(z);
-            common.srv(.err, "operator()", "realtime session failed: %s\n", .{z});
+            const z = mod.common.dupZ(mod.context.whatOf(e));
+            defer mod.common.freeZ(z);
+            mod.common.srv(.err, "operator()", "realtime session failed: %s\n", .{z});
         };
         self.closed.store(true, .seq_cst);
         self.conn.close();
@@ -1269,28 +1240,28 @@ const Conversation = struct {
 
     fn readEvents(self: *Conversation) !void {
         var msg: std.ArrayList(u8) = .empty;
-        defer msg.deinit(gpa);
-        var ev_arena = std.heap.ArenaAllocator.init(gpa);
+        defer msg.deinit(mod.context.gpa);
+        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer ev_arena.deinit();
-        while (try self.conn.read(gpa, &msg) != 0) {
+        while (try self.conn.read(mod.context.gpa, &msg) != 0) {
             _ = ev_arena.reset(.retain_capacity);
             const ea = ev_arena.allocator();
             self.handle(ea, msg.items) catch |e| {
-                try self.sendError(ea, context.whatOf(e), "server_error");
+                try self.sendError(ea, mod.context.whatOf(e), "server_error");
             };
         }
     }
 
     /// Ports `run` (server-realtime.cpp:892 @b1b770d90).
     fn run(self: *Conversation) !void {
-        var ev_arena = std.heap.ArenaAllocator.init(gpa);
+        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer ev_arena.deinit();
         const ea = ev_arena.allocator();
 
         self.id = try randomId(self.a(), "sess_");
-        self.input_rate = c.mtmd_get_audio_sample_rate(self.deps.mctx);
+        self.input_rate = tc.c.mtmd_get_audio_sample_rate(self.deps.mctx);
         if (self.deps.cap.audio_gen) {
-            self.output_rate = c.mtmd_gen_audio_get_info(self.deps.mctx).sample_rate;
+            self.output_rate = tc.c.mtmd_gen_audio_get_info(self.deps.mctx).sample_rate;
         }
         if (!try self.configure(ea)) {
             try self.sendError(ea, "the chat template does not fit the realtime turn format", "server_error");
@@ -1298,14 +1269,14 @@ const Conversation = struct {
             return;
         }
 
-        var rd = try Reader.init(gpa, self.deps.queue_tasks, self.deps.queue_results, 1);
+        var rd = try mod.context.Reader.init(mod.context.gpa, self.deps.queue_tasks, self.deps.queue_results, 1);
         defer rd.deinit();
         {
-            var task = Task.initType(.realtime);
+            var task = mod.task.Task.initType(.realtime);
             task.id = rd.getNewId();
-            const ta = try task.arenaAlloc(gpa);
-            task.params = try task_mod.TaskParams.init(ta);
-            task.params.sampling = try task_mod.deepClone(ta, self.deps.params.sampling);
+            const ta = try task.arenaAlloc(mod.context.gpa);
+            task.params = try mod.task.TaskParams.init(ta);
+            task.params.sampling = try mod.task.deepClone(ta, self.deps.params.sampling);
             task.params.stream = true;
             task.params.oaicompat_cmpl_id = try ta.dupe(u8, self.id);
             task.params.oaicompat_model = try ta.dupe(u8, self.deps.meta.model_name);
@@ -1318,10 +1289,10 @@ const Conversation = struct {
                 self.conn.close();
                 return;
             };
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
             if (result.isError()) {
                 var j = try result.toJson(ea);
-                try self.sendError(ea, jsonValue(&j, "message", []const u8, "server error"), "server_error");
+                try self.sendError(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
                 self.conn.close();
                 return;
             }
@@ -1338,15 +1309,15 @@ const Conversation = struct {
         while (true) {
             _ = ev_arena.reset(.retain_capacity);
             const result = (try rd.next(stop)) orelse break;
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
             if (result.isError()) {
                 var j = try result.toJson(ea);
-                try self.sendError(ea, jsonValue(&j, "message", []const u8, "server error"), "server_error");
+                try self.sendError(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
                 break;
             }
             switch (result.kind) {
                 .realtime => |*res| self.onResult(ea, res) catch |e| {
-                    try self.sendError(ea, context.whatOf(e), "server_error");
+                    try self.sendError(ea, mod.context.whatOf(e), "server_error");
                     break;
                 },
                 else => {},
@@ -1361,25 +1332,25 @@ const Conversation = struct {
 
 /// `json.value(key, json::object())`: the member, or an empty object; of
 /// anything but an object it throws.
-fn valueOr(v: *const Value, key: []const u8) !Value {
+fn valueOr(v: *const json.Value, key: []const u8) !json.Value {
     if (!v.isObject()) {
         return json.errors.fail(.type_error, 306, "cannot use value() with {s}", .{v.typeName()});
     }
     if (v.contains(key)) return (try v.at(key)).*;
-    return Value.emptyObject();
+    return json.Value.emptyObject();
 }
 
 /// Ports `encode_pcm16` (server-realtime.cpp:751 @b1b770d90).
 ///
 /// Return: owned by `a`.
-fn encodePcm16(a: Allocator, samples: []const f32) common.Error![]u8 {
-    return oaicompat.base64Encode(a, try common.pcmF32ToS16(a, samples));
+fn encodePcm16(a: Allocator, samples: []const f32) mod.common.Error![]u8 {
+    return mod.oaicompat.base64Encode(a, try mod.common.pcmF32ToS16(a, samples));
 }
 
 /// The PCM16 of an `input_audio_buffer.append`, as float samples.
 ///
 /// Return: owned by `a`.
-pub fn pcm16ToF32(a: Allocator, pcm: []const u8) common.Error![]f32 {
+pub fn pcm16ToF32(a: Allocator, pcm: []const u8) mod.common.Error![]f32 {
     const samples = try a.alloc(f32, pcm.len / 2);
     for (samples, 0..) |*s, i| {
         const v = std.mem.readInt(i16, pcm[2 * i ..][0..2], .little);
@@ -1392,28 +1363,28 @@ pub fn pcm16ToF32(a: Allocator, pcm: []const u8) common.Error![]f32 {
 /// a realtime conversation over websocket, for models that answer after the
 /// audio (e.g. LFM3-Audio): the audio is prefilled as it arrives, responses
 /// follow output_modalities or the model's own switching.
-pub fn conversation(deps: Deps, conn: *http.WsConn) void {
+pub fn conversation(deps: Deps, conn: *mod.http.WsConn) void {
     var session: Conversation = .{
         .deps = deps,
         .conn = conn,
-        .arena = std.heap.ArenaAllocator.init(gpa),
-        .resp_arena = std.heap.ArenaAllocator.init(gpa),
+        .arena = std.heap.ArenaAllocator.init(mod.context.gpa),
+        .resp_arena = std.heap.ArenaAllocator.init(mod.context.gpa),
         .out_language = deps.params.tts_lang,
         .out_voice = deps.params.tts_voice,
     };
     defer {
-        if (session.resampler) |r| c.mtmd_helper_resampler_free(r);
-        if (session.parse) |*p| p.deinit(gpa);
-        gpa.free(session.last_item_id);
-        gpa.free(session.transcribe_item_id);
-        session.transcript.deinit(gpa);
+        if (session.resampler) |r| tc.c.mtmd_helper_resampler_free(r);
+        if (session.parse) |*p| p.deinit(mod.context.gpa);
+        mod.context.gpa.free(session.last_item_id);
+        mod.context.gpa.free(session.transcribe_item_id);
+        session.transcript.deinit(mod.context.gpa);
         session.resp_arena.deinit();
         session.arena.deinit();
     }
     session.run() catch |e| {
-        const z = common.dupZ(context.whatOf(e));
-        defer common.freeZ(z);
-        common.srv(.err, "server_realtime_conversation", "realtime session failed: %s\n", .{z});
+        const z = mod.common.dupZ(mod.context.whatOf(e));
+        defer mod.common.freeZ(z);
+        mod.common.srv(.err, "server_realtime_conversation", "realtime session failed: %s\n", .{z});
         conn.close();
     };
 }
@@ -1425,16 +1396,16 @@ pub fn conversation(deps: Deps, conn: *http.WsConn) void {
 /// of a realtime conversation. Its strings are `arena`'s, the control task's
 /// own.
 const Op = struct {
-    action: ControlAction,
+    action: mod.task.ControlAction,
     text: []const u8,
     audio: []const f32,
-    response: ControlResponse,
+    response: mod.task.ControlResponse,
     arena: ?*std.heap.ArenaAllocator,
 
     fn deinit(self: *Op) void {
         if (self.arena) |ar| {
             ar.deinit();
-            gpa.destroy(ar);
+            mod.context.gpa.destroy(ar);
         }
         self.arena = null;
     }
@@ -1447,41 +1418,41 @@ const Op = struct {
 /// batch.
 pub const RealtimeSlot = struct {
     err_msg: []const u8 = "",
-    err_type: ErrorType = .server,
+    err_type: mod.common.ErrorType = .server,
 
-    ctx: ?*c.llama_context,
-    model: ?*const c.llama_model,
-    vocab: ?*const c.llama_vocab,
-    mctx: ?*c.mtmd_context,
-    seq_id: c.llama_seq_id,
+    ctx: ?*tc.c.llama_context,
+    model: ?*const tc.c.llama_model,
+    vocab: ?*const tc.c.llama_vocab,
+    mctx: ?*tc.c.mtmd_context,
+    seq_id: tc.c.llama_seq_id,
     n_ctx: i32,
     seed: u32,
-    queue_results: *context.ResultQueue,
+    queue_results: *mod.context.ResultQueue,
     id_task: c_int,
     index: usize,
 
     ops: std.ArrayList(Op) = .empty,
-    n_past: c.llama_pos = 0, // positions of the conversation in the sequence
+    n_past: tc.c.llama_pos = 0, // positions of the conversation in the sequence
     responding: bool = false,
     cancelled: bool = false,
     n_predict: i32 = 0,
     n_decoded: i32 = 0,
-    sampled: Token = token_null, // next text token of the response, sampled right after the slot's own decode
+    sampled: mod.common.Token = mod.common.token_null, // next text token of the response, sampled right after the slot's own decode
 
-    stream: ?*c.mtmd_audio_stream = null, // the audio of the open turn
-    gen: ?*c.mtmd_helper_gen_audio = null, // set if the model generates audio
+    stream: ?*tc.c.mtmd_audio_stream = null, // the audio of the open turn
+    gen: ?*tc.c.mtmd_helper_gen_audio = null, // set if the model generates audio
     h_state: std.ArrayList(f32) = .empty, // hidden state that the gen-audio pipeline steps from
-    smpl: ?*sampling.Sampler = null,
-    preserved: std.ArrayList(Token) = .empty, // special tokens of the response that go out as text (tool calls)
+    smpl: ?*tc.sampling.Sampler = null,
+    preserved: std.ArrayList(mod.common.Token) = .empty, // special tokens of the response that go out as text (tool calls)
 
     /// Ports the constructor of `server_realtime_slot` (server-realtime.cpp:976 @b1b770d90).
-    pub fn create(ctx: ?*c.llama_context, mctx: ?*c.mtmd_context, seq_id: c.llama_seq_id, n_ctx: i32, params: *const Sampling, queue_results: *context.ResultQueue, id_task: c_int, index: usize) !*RealtimeSlot {
-        const self = try gpa.create(RealtimeSlot);
-        const model = c.llama_get_model(ctx);
+    pub fn create(ctx: ?*tc.c.llama_context, mctx: ?*tc.c.mtmd_context, seq_id: tc.c.llama_seq_id, n_ctx: i32, params: *const tc.params.Sampling, queue_results: *mod.context.ResultQueue, id_task: c_int, index: usize) !*RealtimeSlot {
+        const self = try mod.context.gpa.create(RealtimeSlot);
+        const model = tc.c.llama_get_model(ctx);
         self.* = .{
             .ctx = ctx,
             .model = model,
-            .vocab = c.llama_model_get_vocab(model),
+            .vocab = tc.c.llama_model_get_vocab(model),
             .mctx = mctx,
             .seq_id = seq_id,
             .n_ctx = n_ctx,
@@ -1490,28 +1461,28 @@ pub const RealtimeSlot = struct {
             .id_task = id_task,
             .index = index,
         };
-        if (c.mtmd_gen_audio_get_info(mctx).type != c.MTMD_GEN_AUDIO_TYPE_NONE) {
-            self.gen = c.mtmd_helper_gen_audio_init(ctx, mctx);
+        if (tc.c.mtmd_gen_audio_get_info(mctx).type != tc.c.MTMD_GEN_AUDIO_TYPE_NONE) {
+            self.gen = tc.c.mtmd_helper_gen_audio_init(ctx, mctx);
         }
         return self;
     }
 
     pub fn destroy(self: *RealtimeSlot) void {
         for (self.ops.items) |*op| op.deinit();
-        self.ops.deinit(gpa);
-        if (self.stream) |st| c.mtmd_audio_stream_free(st);
-        if (self.gen) |g| c.mtmd_helper_gen_audio_free(g);
-        self.h_state.deinit(gpa);
+        self.ops.deinit(mod.context.gpa);
+        if (self.stream) |st| tc.c.mtmd_audio_stream_free(st);
+        if (self.gen) |g| tc.c.mtmd_helper_gen_audio_free(g);
+        self.h_state.deinit(mod.context.gpa);
         if (self.smpl) |s| s.destroy();
-        self.preserved.deinit(gpa);
-        gpa.free(self.err_msg);
-        gpa.destroy(self);
+        self.preserved.deinit(mod.context.gpa);
+        mod.context.gpa.free(self.err_msg);
+        mod.context.gpa.destroy(self);
     }
 
     /// Ports `push` (server-realtime.cpp:985 @b1b770d90): takes the control
     /// task's parameters, its arena with them.
-    pub fn push(self: *RealtimeSlot, task: *Task) !void {
-        try self.ops.append(gpa, .{
+    pub fn push(self: *RealtimeSlot, task: *mod.task.Task) !void {
+        try self.ops.append(mod.context.gpa, .{
             .action = task.params.control_action,
             .text = task.params.control_text,
             .audio = task.params.control_audio,
@@ -1534,10 +1505,10 @@ pub const RealtimeSlot = struct {
     }
 
     /// Ports `fail` (server-realtime.cpp:997 @b1b770d90).
-    fn fail(self: *RealtimeSlot, msg: []const u8, ty: ErrorType) !bool {
-        gpa.free(self.err_msg);
+    fn fail(self: *RealtimeSlot, msg: []const u8, ty: mod.common.ErrorType) !bool {
+        mod.context.gpa.free(self.err_msg);
         self.err_msg = "";
-        self.err_msg = try gpa.dupe(u8, msg);
+        self.err_msg = try mod.context.gpa.dupe(u8, msg);
         self.err_type = ty;
         return false;
     }
@@ -1545,8 +1516,8 @@ pub const RealtimeSlot = struct {
     /// Ports `send_result` (server-realtime.cpp:1003 @b1b770d90): the text
     /// goes with its tokens.
     fn sendResult(self: *RealtimeSlot, content: *const chat.input.Input, audio: []const f32, response_done: bool) !void {
-        const res = try Result.create(gpa, .realtime);
-        errdefer res.destroy(gpa);
+        const res = try mod.result.Result.create(mod.context.gpa, .realtime);
+        errdefer res.destroy(mod.context.gpa);
         const r = &res.kind.realtime;
         res.id = self.id_task;
         res.index = self.index;
@@ -1560,16 +1531,16 @@ pub const RealtimeSlot = struct {
 
     /// Ports `decode` (server-realtime.cpp:1016 @b1b770d90): appends tokens or
     /// embedding rows to the conversation, logits of the last one if asked.
-    fn decode(self: *RealtimeSlot, tokens: ?[*]const Token, rows: ?[*]const f32, n: i32, logits_last: bool) !bool {
-        const n_embd: usize = @intCast(c.llama_model_n_embd_inp(self.model));
-        const n_batch: i32 = @intCast(c.llama_n_batch(self.ctx));
+    fn decode(self: *RealtimeSlot, tokens: ?[*]const mod.common.Token, rows: ?[*]const f32, n: i32, logits_last: bool) !bool {
+        const n_embd: usize = @intCast(tc.c.llama_model_n_embd_inp(self.model));
+        const n_batch: i32 = @intCast(tc.c.llama_n_batch(self.ctx));
         if (self.n_past + n >= self.n_ctx) {
             return self.fail("the conversation does not fit in the context", .exceed_context_size);
         }
         var c_i0: i32 = 0;
         while (c_i0 < n) : (c_i0 += n_batch) {
             const n_cur = @min(n_batch, n - c_i0);
-            var b = c.llama_batch_init(n_cur, if (rows != null) @intCast(n_embd) else 0, 1);
+            var b = tc.c.llama_batch_init(n_cur, if (rows != null) @intCast(n_embd) else 0, 1);
             var i: i32 = 0;
             while (i < n_cur) : (i += 1) {
                 const ui: usize = @intCast(i);
@@ -1585,8 +1556,8 @@ pub const RealtimeSlot = struct {
                 b.logits[ui] = @intFromBool(logits_last and c_i0 + i == n - 1);
             }
             b.n_tokens = n_cur;
-            const ret = c.llama_decode(self.ctx, b);
-            c.llama_batch_free(b);
+            const ret = tc.c.llama_decode(self.ctx, b);
+            tc.c.llama_batch_free(b);
             if (ret != 0) {
                 return self.fail("failed to decode the conversation", .server);
             }
@@ -1599,14 +1570,14 @@ pub const RealtimeSlot = struct {
     /// rows the audio stream has ready.
     fn audioRows(self: *RealtimeSlot) !bool {
         while (true) {
-            const n = c.mtmd_audio_stream_step(self.stream, token_null);
+            const n = tc.c.mtmd_audio_stream_step(self.stream, mod.common.token_null);
             if (n == -2) {
                 return self.fail("audio stream error", .server);
             }
             if (n <= 0) {
                 return true;
             }
-            if (!try self.decode(null, c.mtmd_audio_stream_get_output_embd(self.stream), n, false)) {
+            if (!try self.decode(null, tc.c.mtmd_audio_stream_get_output_embd(self.stream), n, false)) {
                 return false;
             }
         }
@@ -1617,8 +1588,8 @@ pub const RealtimeSlot = struct {
     /// decode; several slots respond in turns on the same context, so this
     /// runs before any other slot decodes.
     fn sampleNext(self: *RealtimeSlot) !void {
-        self.sampled = token_null;
-        if (self.gen != null and !c.mtmd_helper_gen_audio_next_is_text(self.gen)) {
+        self.sampled = mod.common.token_null;
+        if (self.gen != null and !tc.c.mtmd_helper_gen_audio_next_is_text(self.gen)) {
             return;
         }
         self.sampled = try self.smpl.?.sample(self.ctx, -1, false);
@@ -1634,7 +1605,7 @@ pub const RealtimeSlot = struct {
 
         if (self.gen != null) {
             // the gen-audio pipeline continues the conversation and follows the model's text/audio switching
-            var inp = task_mod.TtsInp.init();
+            var inp = mod.task.TtsInp.init();
             defer inp.deinit();
             const ar = op.arena.?.allocator();
             inp.prompt_str = try ar.dupeSentinel(u8, op.text, 0);
@@ -1642,40 +1613,40 @@ pub const RealtimeSlot = struct {
             inp.data.n_past = self.n_past;
             inp.data.seed = self.seed;
             inp.data.stream = true;
-            inp.data.out_type = c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM;
+            inp.data.out_type = tc.c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM;
             inp.data.out_mode = op.response.out_mode;
             inp.lang_str = try ar.dupeSentinel(u8, op.response.lang, 0);
             // predefined voice -> speaker ref, LFM3 uses the system prompt instead
-            if (op.response.voice.len != 0 and c.mtmd_gen_audio_get_info(self.mctx).n_voices > 0) {
-                const voice = c.mtmd_gen_audio_get_voice(self.mctx, (try ar.dupeSentinel(u8, op.response.voice, 0)).ptr);
+            if (op.response.voice.len != 0 and tc.c.mtmd_gen_audio_get_info(self.mctx).n_voices > 0) {
+                const voice = tc.c.mtmd_gen_audio_get_voice(self.mctx, (try ar.dupeSentinel(u8, op.response.voice, 0)).ptr);
                 if (voice == null) {
                     return self.fail(try std.mem.concat(ar, u8, &.{ "unknown voice \"", op.response.voice, "\"" }), .invalid_request);
                 }
                 inp.setSpeakerRef(voice);
             }
-            if (c.mtmd_helper_gen_audio_set_input(self.gen, inp.get()) != 0) {
+            if (tc.c.mtmd_helper_gen_audio_set_input(self.gen, inp.get()) != 0) {
                 return self.fail("failed to start the response", .server);
             }
             // the pipeline may bias some text tokens, e.g. the switch to audio of a text-only response
             var n_bias: usize = 0;
-            const bias = c.mtmd_helper_gen_audio_get_logit_bias(self.gen, &n_bias);
+            const bias = tc.c.mtmd_helper_gen_audio_get_logit_bias(self.gen, &n_bias);
             if (n_bias != 0) {
                 try sparams.logit_bias.appendSlice(ar, bias[0..n_bias]);
             }
-            var ret: i32 = c.mtmd_helper_gen_audio_step_prompt(self.gen, @intCast(c.llama_n_batch(self.ctx)));
+            var ret: i32 = tc.c.mtmd_helper_gen_audio_step_prompt(self.gen, @intCast(tc.c.llama_n_batch(self.ctx)));
             while (ret > 0) {
-                ret = c.mtmd_helper_gen_audio_step_prompt(self.gen, @intCast(c.llama_n_batch(self.ctx)));
+                ret = tc.c.mtmd_helper_gen_audio_step_prompt(self.gen, @intCast(tc.c.llama_n_batch(self.ctx)));
             }
             if (ret < 0) {
                 return self.fail("failed to start the response", .server);
             }
-            const h = c.llama_get_embeddings_ith(self.ctx, -1);
+            const h = tc.c.llama_get_embeddings_ith(self.ctx, -1);
             self.h_state.clearRetainingCapacity();
-            try self.h_state.appendSlice(gpa, h[0..@intCast(c.llama_model_n_embd(self.model))]);
+            try self.h_state.appendSlice(mod.context.gpa, h[0..@intCast(tc.c.llama_model_n_embd(self.model))]);
         } else {
-            var tmp = std.heap.ArenaAllocator.init(gpa);
+            var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
             defer tmp.deinit();
-            const toks = try common.tokenize(tmp.allocator(), self.vocab, op.text, false, true);
+            const toks = try mod.common.tokenize(tmp.allocator(), self.vocab, op.text, false, true);
             if (toks.len == 0) {
                 return self.fail("failed to start the response", .server);
             }
@@ -1685,9 +1656,9 @@ pub const RealtimeSlot = struct {
         }
         if (self.smpl) |s| s.destroy();
         self.smpl = null;
-        self.smpl = try sampling.init(self.model, sparams);
+        self.smpl = try tc.sampling.init(self.model, sparams);
         self.preserved.clearRetainingCapacity();
-        try self.preserved.appendSlice(gpa, sparams.preserved_tokens.items);
+        try self.preserved.appendSlice(mod.context.gpa, sparams.preserved_tokens.items);
         // the logits of the last decode are this slot's only until another slot decodes
         try self.sampleNext();
         self.responding = true;
@@ -1699,9 +1670,9 @@ pub const RealtimeSlot = struct {
     /// (tool calls).
     ///
     /// Return: owned by `a`.
-    fn piece(self: *const RealtimeSlot, a: Allocator, tok: Token) ![]const u8 {
-        const p = std.mem.indexOfScalar(Token, self.preserved.items, tok) != null;
-        if (p or !c.llama_vocab_is_control(self.vocab, tok)) {
+    fn piece(self: *const RealtimeSlot, a: Allocator, tok: mod.common.Token) ![]const u8 {
+        const p = std.mem.indexOfScalar(mod.common.Token, self.preserved.items, tok) != null;
+        if (p or !tc.c.llama_vocab_is_control(self.vocab, tok)) {
             return tc.common.tokenToPiece(a, self.vocab, tok, p);
         }
         return "";
@@ -1710,7 +1681,7 @@ pub const RealtimeSlot = struct {
     /// Ports `response_step` (server-realtime.cpp:1138 @b1b770d90): one text
     /// token or audio frame of the response being generated.
     fn responseStep(self: *RealtimeSlot) !bool {
-        var tmp = std.heap.ArenaAllocator.init(gpa);
+        var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer tmp.deinit();
         const ta = tmp.allocator();
 
@@ -1720,19 +1691,19 @@ pub const RealtimeSlot = struct {
 
         if (self.gen != null) {
             var h_next: [*c]const f32 = null;
-            if (c.mtmd_helper_gen_audio_step_gen(self.gen, self.sampled, self.h_state.items.ptr, &h_next, &stop) != 0) {
+            if (tc.c.mtmd_helper_gen_audio_step_gen(self.gen, self.sampled, self.h_state.items.ptr, &h_next, &stop) != 0) {
                 return self.fail("response generation failed", .server);
             }
-            if (self.sampled != token_null and !stop) {
+            if (self.sampled != mod.common.token_null and !stop) {
                 try content.append(try self.piece(ta, self.sampled), self.sampled);
             }
             if (h_next != null) {
-                const n: usize = @intCast(c.llama_model_n_embd(self.model));
+                const n: usize = @intCast(tc.c.llama_model_n_embd(self.model));
                 self.h_state.clearRetainingCapacity();
-                try self.h_state.appendSlice(gpa, h_next[0..n]);
+                try self.h_state.appendSlice(mod.context.gpa, h_next[0..n]);
             }
         } else {
-            stop = c.llama_vocab_is_eog(self.vocab, self.sampled);
+            stop = tc.c.llama_vocab_is_eog(self.vocab, self.sampled);
             if (!stop) {
                 try content.append(try self.piece(ta, self.sampled), self.sampled);
                 if (!try self.decode(@ptrCast(&self.sampled), null, 1, true)) {
@@ -1744,7 +1715,7 @@ pub const RealtimeSlot = struct {
 
         // the pipeline decodes on its own, the response ends before the context is full
         const ctx_full = if (self.gen != null)
-            c.llama_memory_seq_pos_max(c.llama_get_memory(self.ctx), self.seq_id) + 2 >= self.n_ctx
+            tc.c.llama_memory_seq_pos_max(tc.c.llama_get_memory(self.ctx), self.seq_id) + 2 >= self.n_ctx
         else
             self.n_past + 1 >= self.n_ctx;
         const done = stop or self.cancelled or ctx_full or (self.n_predict > 0 and self.n_decoded >= self.n_predict);
@@ -1753,12 +1724,12 @@ pub const RealtimeSlot = struct {
         }
         if (self.gen != null) {
             if (done) {
-                _ = c.mtmd_helper_gen_audio_flush(self.gen);
+                _ = tc.c.mtmd_helper_gen_audio_flush(self.gen);
             }
             var sample_rate: i32 = 0;
             var data: [*c]const u8 = null;
             var data_len: usize = 0;
-            if (c.mtmd_helper_gen_audio_get_output(self.gen, &sample_rate, @ptrCast(&data), &data_len, null) == 0 and data_len > 0) {
+            if (tc.c.mtmd_helper_gen_audio_get_output(self.gen, &sample_rate, @ptrCast(&data), &data_len, null) == 0 and data_len > 0) {
                 const n = data_len / @sizeOf(f32);
                 const samples = try ta.alloc(f32, n);
                 @memcpy(std.mem.sliceAsBytes(samples), data[0 .. n * @sizeOf(f32)]);
@@ -1771,7 +1742,7 @@ pub const RealtimeSlot = struct {
         if (done) {
             if (self.gen != null) {
                 // the pipeline decoded the response, the sequence ends where it stopped
-                self.n_past = c.llama_memory_seq_pos_max(c.llama_get_memory(self.ctx), self.seq_id) + 1;
+                self.n_past = tc.c.llama_memory_seq_pos_max(tc.c.llama_get_memory(self.ctx), self.seq_id) + 1;
             }
             const none = chat.input.Input.init(ta);
             try self.sendResult(&none, &.{}, true);
@@ -1787,7 +1758,7 @@ pub const RealtimeSlot = struct {
     ///
     /// Return: false on error, see `err_msg` and `err_type`.
     pub fn update(self: *RealtimeSlot) !bool {
-        c.llama_set_embeddings(self.ctx, self.gen != null);
+        tc.c.llama_set_embeddings(self.ctx, self.gen != null);
 
         if (self.responding) {
             return self.responseStep();
@@ -1798,21 +1769,21 @@ pub const RealtimeSlot = struct {
             defer op.deinit();
             switch (op.action) {
                 .text_append => {
-                    var tmp = std.heap.ArenaAllocator.init(gpa);
+                    var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
                     defer tmp.deinit();
-                    const toks = try common.tokenize(tmp.allocator(), self.vocab, op.text, false, true);
+                    const toks = try mod.common.tokenize(tmp.allocator(), self.vocab, op.text, false, true);
                     if (toks.len != 0 and !try self.decode(toks.ptr, null, @intCast(toks.len), false)) {
                         return false;
                     }
                 },
                 .audio_append => {
                     if (self.stream == null) {
-                        self.stream = c.mtmd_audio_stream_init(self.mctx, c.mtmd_audio_stream_params_default());
+                        self.stream = tc.c.mtmd_audio_stream_init(self.mctx, tc.c.mtmd_audio_stream_params_default());
                         if (self.stream == null) {
                             return self.fail("failed to initialize the audio stream", .server);
                         }
                     }
-                    _ = c.mtmd_audio_stream_push(self.stream, op.audio.ptr, op.audio.len);
+                    _ = tc.c.mtmd_audio_stream_push(self.stream, op.audio.ptr, op.audio.len);
                     if (!try self.audioRows()) {
                         return false;
                     }
@@ -1820,11 +1791,11 @@ pub const RealtimeSlot = struct {
                 .audio_commit, .audio_end => {
                     // the end of the audio of a turn
                     if (self.stream != null) {
-                        _ = c.mtmd_audio_stream_flush(self.stream, true);
+                        _ = tc.c.mtmd_audio_stream_flush(self.stream, true);
                         if (!try self.audioRows()) {
                             return false;
                         }
-                        c.mtmd_audio_stream_free(self.stream);
+                        tc.c.mtmd_audio_stream_free(self.stream);
                         self.stream = null;
                     }
                 },
@@ -1834,8 +1805,8 @@ pub const RealtimeSlot = struct {
                     }
                 },
                 .clear => {
-                    _ = c.llama_memory_seq_rm(c.llama_get_memory(self.ctx), self.seq_id, -1, -1);
-                    if (self.stream) |st| c.mtmd_audio_stream_free(st);
+                    _ = tc.c.llama_memory_seq_rm(tc.c.llama_get_memory(self.ctx), self.seq_id, -1, -1);
+                    if (self.stream) |st| tc.c.mtmd_audio_stream_free(st);
                     self.stream = null;
                     self.n_past = 0;
                 },

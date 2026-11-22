@@ -6,13 +6,10 @@
 //! Ports `llama.cpp/tools/mtmd/models/siglip.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const c = impl.c;
+const mtmd = @import("../module.zig");
 
 /// Ports `build` (siglip.cpp:3 @b1b770d90), a member of `mtmd_graph_siglip`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -22,30 +19,30 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const inp = g.buildInp();
 
     var learned_pos_embd = model.position_embeddings;
-    if (pt == .lfm2 or pt == .d1omni_v or pt == .phi4) learned_pos_embd = g.resizePositionEmbeddings(graph.default_interpolation_mode);
+    if (pt == .lfm2 or pt == .d1omni_v or pt == .phi4) learned_pos_embd = g.resizePositionEmbeddings(mtmd.graph.default_interpolation_mode);
 
     var cur = g.buildVit(inp, g.n_patches, .normal, hparams.ffn_op, learned_pos_embd, null, .{});
 
     if (pt == .gemma3) {
         const batch_size = 1;
-        impl.ggmlAssert(g.n_patches_x == g.n_patches_y, "siglip.cpp", 20, "n_patches_x == n_patches_y");
+        mtmd.impl.ggmlAssert(g.n_patches_x == g.n_patches_y, "siglip.cpp", 20, "n_patches_x == n_patches_y");
         const patches_per_image = g.n_patches_x;
         const kernel_size = hparams.n_merge;
 
-        cur = c.ggml_transpose(ctx0, cur);
-        cur = c.ggml_cont_4d(ctx0, cur, patches_per_image, patches_per_image, g.n_embd, batch_size);
+        cur = mtmd.impl.c.ggml_transpose(ctx0, cur);
+        cur = mtmd.impl.c.ggml_cont_4d(ctx0, cur, patches_per_image, patches_per_image, g.n_embd, batch_size);
 
         // doing a pool2d to reduce the number of output tokens
-        cur = c.ggml_pool_2d(ctx0, cur, c.GGML_OP_POOL_AVG, kernel_size, kernel_size, kernel_size, kernel_size, 0, 0);
-        cur = c.ggml_reshape_3d(ctx0, cur, graph.ne(cur, 0) * graph.ne(cur, 0), g.n_embd, batch_size);
-        cur = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, cur));
+        cur = mtmd.impl.c.ggml_pool_2d(ctx0, cur, mtmd.impl.c.GGML_OP_POOL_AVG, kernel_size, kernel_size, kernel_size, kernel_size, 0, 0);
+        cur = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 0), g.n_embd, batch_size);
+        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, cur));
 
         // apply norm before projection
-        cur = c.ggml_rms_norm(ctx0, cur, g.eps);
-        cur = c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
+        cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, g.eps);
+        cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
 
         // apply projection
-        cur = c.ggml_mul_mat(ctx0, c.ggml_cont(ctx0, c.ggml_transpose(ctx0, model.mm_input_proj_w)), cur);
+        cur = mtmd.impl.c.ggml_mul_mat(ctx0, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, model.mm_input_proj_w)), cur);
     } else if (pt == .idefics3) {
         // pixel_shuffle
         const scale_factor = hparams.n_merge;
@@ -55,11 +52,11 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         // tiles are square, so the pixel shuffle is the same as Idefics3
         cur = g.buildPatchMergePermute(cur, hparams.n_merge);
         cur = g.buildMm(model.mm_1_w, cur);
-        cur = c.ggml_add(ctx0, cur, model.mm_1_b);
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_1_b);
         // linear_1 output is [x, gate], HF computes silu(gate) * x
-        cur = c.ggml_swiglu_swapped(ctx0, cur);
+        cur = mtmd.impl.c.ggml_swiglu_swapped(ctx0, cur);
         cur = g.buildMm(model.mm_2_w, cur);
-        cur = c.ggml_add(ctx0, cur, model.mm_2_b);
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_2_b);
     } else if (pt == .lfm2 or pt == .d1omni_v) {
         // pixel unshuffle block
         const scale_factor = hparams.n_merge;
@@ -67,10 +64,10 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
         // projection, in LFM2-VL input norm is optional
         if (model.mm_input_norm_w != null) {
-            cur = c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
-            cur = c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
+            cur = mtmd.impl.c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
+            cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
         }
-        if (model.mm_input_norm_b != null) cur = c.ggml_add(ctx0, cur, model.mm_input_norm_b);
+        if (model.mm_input_norm_b != null) cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_input_norm_b);
 
         // d1-omni uses the exact gelu in the projector
         cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, if (pt == .d1omni_v) .gelu_erf else .gelu, -1);
@@ -79,11 +76,11 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     } else if (pt == .phi4) {
         cur = g.buildFfn(cur, model.mm_0_w, model.mm_0_b, null, null, model.mm_2_w, model.mm_2_b, .gelu, -1);
     } else {
-        impl.abort("siglip.cpp", 98, "SigLIP: Unsupported projector type");
+        mtmd.impl.abort("siglip.cpp", 98, "SigLIP: Unsupported projector type");
     }
 
     // build the graph
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

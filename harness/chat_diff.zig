@@ -49,8 +49,6 @@ extern fn ref_from_str(p: [*]const u8, n: usize) c_int;
 extern fn ref_apply(tmpl: c_int, msgs: [*]const Message, n: usize, add_ass: bool, init: [*:0]const u8, out: *[*]u8, out_len: *usize) i32;
 extern fn ref_free_buf(p: [*]u8) void;
 
-/// `LC_ALL` in `<locale.h>` on this target.
-const LC_ALL: c_int = 0;
 /// UTF-8 and Latin-1, where `isspace` and `toupper` reach past ASCII, and
 /// `kk_KZ.PT154`, whose `toupper` table is wrong for ASCII itself (`'a'`
 /// and `'A'` both map to `'Z'`) -- the one installed locale, of 288
@@ -517,7 +515,7 @@ pub fn main(init: std.process.Init) !void {
     // maps 0xe0-0xfe -- which the C++ never reaches for a role, because it
     // passes a signed `char`. A missing locale is reported, not failed.
     for (locales) |loc| {
-        if (libc.setlocale(LC_ALL, loc) == null) {
+        if (libc.setlocale(libc.LC.ALL, loc) == null) {
             std.debug.print("  locale {s} not installed; its sweep is skipped\n", .{loc});
             continue;
         }
@@ -529,7 +527,7 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    _ = libc.setlocale(LC_ALL, "C");
+    _ = libc.setlocale(libc.LC.ALL, "C");
 
     std.debug.print("  llama_chat_apply_template\n", .{});
     for (convs[0..300]) |conv| {

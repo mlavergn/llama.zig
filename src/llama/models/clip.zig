@@ -10,28 +10,21 @@
 //! `build_arch_graph`, all three stubs.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_clip`'s `load_arch_hparams` (src/models/clip.cpp:6 @b1b770d90).
-pub fn loadArchHparams(_: *Model, _: *const loader.Loader, _: *Exception) Thrown!void {
-    impl.abort("models/clip.cpp", 7, "CLIP is a quant-only stub; load_arch_hparams should not be called");
+pub fn loadArchHparams(_: *llama.model.Model, _: *const llama.loader.Loader, _: *llama.impl.Exception) llama.impl.Thrown!void {
+    llama.impl.abort("models/clip.cpp", 7, "CLIP is a quant-only stub; load_arch_hparams should not be called");
 }
 
 /// Ports `llama_model_clip`'s `load_arch_tensors` (src/models/clip.cpp:11 @b1b770d90).
-pub fn loadArchTensors(_: *Model, _: *loader.Loader, _: *Exception) Thrown!void {
-    impl.abort("models/clip.cpp", 12, "CLIP is a quant-only stub; load_arch_tensors should not be called");
+pub fn loadArchTensors(_: *llama.model.Model, _: *llama.loader.Loader, _: *llama.impl.Exception) llama.impl.Thrown!void {
+    llama.impl.abort("models/clip.cpp", 12, "CLIP is a quant-only stub; load_arch_tensors should not be called");
 }
 
 /// Ports `llama_model_clip`'s `build_arch_graph` (src/models/clip.cpp:16 @b1b770d90).
-pub fn buildArchGraph(_: *const Model, _: *const graph.Builder, _: *const graph.Params) void {
-    impl.abort("models/clip.cpp", 17, "CLIP has no inference graph via llama_model dispatch; runtime lives in tools/mtmd");
+pub fn buildArchGraph(_: *const llama.model.Model, _: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.impl.abort("models/clip.cpp", 17, "CLIP has no inference graph via llama_model dispatch; runtime lives in tools/mtmd");
 }
 
 // -----------------------------------------------------------------------------

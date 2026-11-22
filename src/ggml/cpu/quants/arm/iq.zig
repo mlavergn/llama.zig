@@ -32,23 +32,10 @@
 //! `scripts/vecdot-prefix` is what settles the shape when it is ambiguous.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const convert = @import("../../convert.zig");
-const blocks = @import("../../../quants/blocks.zig");
-const neon = @import("neon.zig");
-const c = impl.c;
-
-const i8x8 = neon.i8x8;
-const i8x16 = neon.i8x16;
-const u8x8 = neon.u8x8;
-const u8x16 = neon.u8x16;
-const u16x8 = neon.u16x8;
-const i16x8 = neon.i16x8;
-const i32x4 = neon.i32x4;
-const u32x4 = neon.u32x4;
+const ggml = @import("../../../module.zig");
 
 inline fn f(h: u16) f32 {
-    return convert.cpuFp16ToFp32(h);
+    return ggml.cpu.convert.cpuFp16ToFp32(h);
 }
 
 inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
@@ -56,32 +43,32 @@ inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
 }
 
 /// The `q8_K` operand's quantized bytes at an offset.
-inline fn q8At(y: *const blocks.Q8_K, off: usize) [*]const u8 {
+inline fn q8At(y: *const ggml.quants.blocks.Q8_K, off: usize) [*]const u8 {
     return @as([*]const u8, @ptrCast(&y.qs)) + off;
 }
 
 /// Four 16-lane `q8` vectors, the `ggml_vld1q_s8_x4` every kernel opens with.
-inline fn q8x4(y: *const blocks.Q8_K, off: usize) [4]i8x16 {
-    var out: [4]i8x16 = undefined;
-    inline for (0..4) |k| out[k] = neon.load(i8x16, q8At(y, off + k * 16));
+inline fn q8x4(y: *const ggml.quants.blocks.Q8_K, off: usize) [4]ggml.cpu.quants.arch.neon.i8x16 {
+    var out: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
+    inline for (0..4) |k| out[k] = ggml.cpu.quants.arch.neon.load(ggml.cpu.quants.arch.neon.i8x16, q8At(y, off + k * 16));
     return out;
 }
 
 /// Ports `vld1_s8((const void *)(grid + idx))`: one 64-bit grid entry as eight
 /// signed lanes.
-inline fn grid8(grid: [*]const u64, idx: usize) i8x8 {
+inline fn grid8(grid: [*]const u64, idx: usize) ggml.cpu.quants.arch.neon.i8x8 {
     return @bitCast(grid[idx]);
 }
 
 /// Two grid entries combined into one 16-lane vector, `a` low.
-inline fn grid16(grid: [*]const u64, a: usize, b: usize) i8x16 {
-    return neon.combine(grid8(grid, a), grid8(grid, b));
+inline fn grid16(grid: [*]const u64, a: usize, b: usize) ggml.cpu.quants.arch.neon.i8x16 {
+    return ggml.cpu.quants.arch.neon.combine(grid8(grid, a), grid8(grid, b));
 }
 
 /// Ports `ggml_vld1q_u32(w,x,y,z)` over the **32-bit** `iq3` grids: four
 /// entries into one 16-lane vector.
-inline fn grid4x4(grid: [*]const u32, g0: usize, g1: usize, g2: usize, g3: usize) i8x16 {
-    const v: u32x4 = .{ grid[g0], grid[g1], grid[g2], grid[g3] };
+inline fn grid4x4(grid: [*]const u32, g0: usize, g1: usize, g2: usize, g3: usize) ggml.cpu.quants.arch.neon.i8x16 {
+    const v: ggml.cpu.quants.arch.neon.u32x4 = .{ grid[g0], grid[g1], grid[g2], grid[g3] };
     return @bitCast(v);
 }
 
@@ -106,10 +93,10 @@ const keven_signs = blk: {
 };
 
 /// The sign vector for a seven-bit index.
-inline fn signs16(a: usize, b: usize) i8x16 {
-    return neon.combine(
-        @as(i8x8, @bitCast(keven_signs[a])),
-        @as(i8x8, @bitCast(keven_signs[b])),
+inline fn signs16(a: usize, b: usize) ggml.cpu.quants.arch.neon.i8x16 {
+    return ggml.cpu.quants.arch.neon.combine(
+        @as(ggml.cpu.quants.arch.neon.i8x8, @bitCast(keven_signs[a])),
+        @as(ggml.cpu.quants.arch.neon.i8x8, @bitCast(keven_signs[b])),
     );
 }
 
@@ -120,9 +107,9 @@ inline fn signs16(a: usize, b: usize) i8x16 {
 /// `mask1` broadcasts each of four sign bytes across eight lanes; `mask2`
 /// selects one bit per lane. Together they turn a 32-bit sign field into a
 /// per-lane `0x00`/`0xFF` mask, which `vorrq_u8(.., 1)` then makes `+1`/`-1`.
-const k_mask1_lo: u8x16 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 };
-const k_mask1_hi: u8x16 = .{ 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3 };
-const k_mask2: u8x16 = .{ 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128 };
+const k_mask1_lo: ggml.cpu.quants.arch.neon.u8x16 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 };
+const k_mask1_hi: ggml.cpu.quants.arch.neon.u8x16 = .{ 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3 };
+const k_mask2: ggml.cpu.quants.arch.neon.u8x16 = .{ 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128 };
 
 /// Expands a 32-bit sign field into two `+1`/`-1` lane vectors.
 ///
@@ -130,29 +117,29 @@ const k_mask2: u8x16 = .{ 1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 1
 /// - `bits`: the packed signs, four bytes.
 ///
 /// Return: `{ low 16 lanes, high 16 lanes }`, each lane `+1` or `-1`.
-inline fn expandSigns(bits: u32) [2]i8x16 {
-    const m1: u8x16 = @splat(1);
-    const v: u8x16 = @bitCast(@as(u32x4, @splat(bits)));
+inline fn expandSigns(bits: u32) [2]ggml.cpu.quants.arch.neon.i8x16 {
+    const m1: ggml.cpu.quants.arch.neon.u8x16 = @splat(1);
+    const v: ggml.cpu.quants.arch.neon.u8x16 = @bitCast(@as(ggml.cpu.quants.arch.neon.u32x4, @splat(bits)));
 
-    const lo_sel = neon.@"and"(neon.qtbl1q_u8(v, k_mask1_lo), k_mask2);
-    const hi_sel = neon.@"and"(neon.qtbl1q_u8(v, k_mask1_hi), k_mask2);
+    const lo_sel = ggml.cpu.quants.arch.neon.@"and"(ggml.cpu.quants.arch.neon.qtbl1q_u8(v, k_mask1_lo), k_mask2);
+    const hi_sel = ggml.cpu.quants.arch.neon.@"and"(ggml.cpu.quants.arch.neon.qtbl1q_u8(v, k_mask1_hi), k_mask2);
 
     return .{
-        @bitCast(neon.orr(neon.ceq(lo_sel, k_mask2), m1)),
-        @bitCast(neon.orr(neon.ceq(hi_sel, k_mask2), m1)),
+        @bitCast(ggml.cpu.quants.arch.neon.orr(ggml.cpu.quants.arch.neon.ceq(lo_sel, k_mask2), m1)),
+        @bitCast(ggml.cpu.quants.arch.neon.orr(ggml.cpu.quants.arch.neon.ceq(hi_sel, k_mask2), m1)),
     };
 }
 
 /// `ggml_vdotq_s32(zero, a, b)` reduced to a scalar.
-inline fn dotv(a: i8x16, b: i8x16) i32 {
-    const zero: i32x4 = @splat(0);
-    return neon.addvq_s32(neon.ggml_vdotq_s32(zero, a, b));
+inline fn dotv(a: ggml.cpu.quants.arch.neon.i8x16, b: ggml.cpu.quants.arch.neon.i8x16) i32 {
+    const zero: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+    return ggml.cpu.quants.arch.neon.addvq_s32(ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, a, b));
 }
 
 /// Two chained dot products reduced to a scalar.
-inline fn dotv2(a0: i8x16, b0: i8x16, a1: i8x16, b1: i8x16) i32 {
-    const zero: i32x4 = @splat(0);
-    return neon.addvq_s32(neon.ggml_vdotq_s32(neon.ggml_vdotq_s32(zero, a0, b0), a1, b1));
+inline fn dotv2(a0: ggml.cpu.quants.arch.neon.i8x16, b0: ggml.cpu.quants.arch.neon.i8x16, a1: ggml.cpu.quants.arch.neon.i8x16, b1: ggml.cpu.quants.arch.neon.i8x16) i32 {
+    const zero: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+    return ggml.cpu.quants.arch.neon.addvq_s32(ggml.cpu.quants.arch.neon.ggml_vdotq_s32(ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, a0, b0), a1, b1));
 }
 
 /// Ports `ggml_vec_dot_iq2_xxs_q8_K` (arch/arm/quants.c:3634 @b1b770d90).
@@ -166,14 +153,14 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ2_XXS, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u64 = @ptrCast(&c.iq2xxs_grid);
+    const x = as(ggml.quants.blocks.IQ2_XXS, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u64 = @ptrCast(&ggml.impl.c.iq2xxs_grid);
 
     var sumf: f32 = 0;
 
@@ -188,7 +175,7 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
         var sumf2: f32 = 0;
 
         var ib32: usize = 0;
-        while (ib32 < c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
@@ -207,8 +194,8 @@ pub export fn ggml_vec_dot_iq2_xxs_q8_K(
             const s2 = signs16((aux32[3] >> 0) & 127, (aux32[3] >> 7) & 127);
             const s3 = signs16((aux32[3] >> 14) & 127, (aux32[3] >> 21) & 127);
 
-            const p1 = dotv2(neon.mul(w0, s0), b[0], neon.mul(w1, s1), b[1]);
-            const p2 = dotv2(neon.mul(w2, s2), b[2], neon.mul(w3, s3), b[3]);
+            const p1 = dotv2(ggml.cpu.quants.arch.neon.mul(w0, s0), b[0], ggml.cpu.quants.arch.neon.mul(w1, s1), b[1]);
+            const p2 = dotv2(ggml.cpu.quants.arch.neon.mul(w2, s2), b[2], ggml.cpu.quants.arch.neon.mul(w3, s3), b[3]);
 
             sumf1 = @mulAdd(f32, @floatFromInt(p1), 0.5 + @as(f32, @floatFromInt(aux32[1] >> 28)), sumf1);
             sumf2 = @mulAdd(f32, @floatFromInt(p2), 0.5 + @as(f32, @floatFromInt(aux32[3] >> 28)), sumf2);
@@ -234,14 +221,14 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ2_XS, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u64 = @ptrCast(&c.iq2xs_grid);
+    const x = as(ggml.quants.blocks.IQ2_XS, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u64 = @ptrCast(&ggml.impl.c.iq2xs_grid);
 
     var sumf: f32 = 0;
 
@@ -251,55 +238,55 @@ pub export fn ggml_vec_dot_iq2_xs_q8_K(
         // The eight scale bytes hold sixteen four-bit fields; zipping the low
         // and high nibbles interleaves them back into block order, then
         // `2*v + 1` gives the odd scale.
-        const scales8 = neon.loadFrom(u8x8, &x[i].scales);
-        const nib: u8x8 = @splat(0xf);
-        const scales_l = neon.@"and"(scales8, nib);
-        const scales_h = neon.shrN(scales8, 4);
-        var scales = neon.combine(
-            neon.zip1_u8(scales_l, scales_h),
-            neon.zip2_u8(scales_l, scales_h),
+        const scales8 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x8, &x[i].scales);
+        const nib: ggml.cpu.quants.arch.neon.u8x8 = @splat(0xf);
+        const scales_l = ggml.cpu.quants.arch.neon.@"and"(scales8, nib);
+        const scales_h = ggml.cpu.quants.arch.neon.shrN(scales8, 4);
+        var scales = ggml.cpu.quants.arch.neon.combine(
+            ggml.cpu.quants.arch.neon.zip1_u8(scales_l, scales_h),
+            ggml.cpu.quants.arch.neon.zip2_u8(scales_l, scales_h),
         );
-        const ones: u8x16 = @splat(1);
-        scales = neon.add(neon.shlN(scales, 1), ones);
+        const ones: ggml.cpu.quants.arch.neon.u8x16 = @splat(1);
+        scales = ggml.cpu.quants.arch.neon.add(ggml.cpu.quants.arch.neon.shlN(scales, 1), ones);
 
-        const scales1: u16x8 = neon.movl_u8(neon.low(scales));
-        const scales2: u16x8 = neon.movl_u8(neon.high(scales));
-        const scales32 = [4]i32x4{
-            @bitCast(neon.movl_u16(neon.low(scales1))),
-            @bitCast(neon.movl_u16(neon.high(scales1))),
-            @bitCast(neon.movl_u16(neon.low(scales2))),
-            @bitCast(neon.movl_u16(neon.high(scales2))),
+        const scales1: ggml.cpu.quants.arch.neon.u16x8 = ggml.cpu.quants.arch.neon.movl_u8(ggml.cpu.quants.arch.neon.low(scales));
+        const scales2: ggml.cpu.quants.arch.neon.u16x8 = ggml.cpu.quants.arch.neon.movl_u8(ggml.cpu.quants.arch.neon.high(scales));
+        const scales32 = [4]ggml.cpu.quants.arch.neon.i32x4{
+            @bitCast(ggml.cpu.quants.arch.neon.movl_u16(ggml.cpu.quants.arch.neon.low(scales1))),
+            @bitCast(ggml.cpu.quants.arch.neon.movl_u16(ggml.cpu.quants.arch.neon.high(scales1))),
+            @bitCast(ggml.cpu.quants.arch.neon.movl_u16(ggml.cpu.quants.arch.neon.low(scales2))),
+            @bitCast(ggml.cpu.quants.arch.neon.movl_u16(ggml.cpu.quants.arch.neon.high(scales2))),
         };
 
-        var sumi: i32x4 = @splat(0);
+        var sumi: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
         var q2: usize = 0;
         var q8: usize = 0;
 
-        for (0..c.QK_K / 64) |ib64| {
+        for (0..ggml.impl.c.QK_K / 64) |ib64| {
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
-            var u: [4]i8x16 = undefined;
+            var u: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..4) |k| {
                 const a = x[i].qs[q2 + 2 * k];
                 const bb = x[i].qs[q2 + 2 * k + 1];
                 const g = grid16(grid, a & 511, bb & 511);
                 const sg = signs16(a >> 9, bb >> 9);
-                u[k] = neon.mul(g, sg);
+                u[k] = ggml.cpu.quants.arch.neon.mul(g, sg);
             }
 
-            const zero: i32x4 = @splat(0);
-            const p1 = neon.ggml_vdotq_s32(zero, u[0], b[0]);
-            const p2 = neon.ggml_vdotq_s32(zero, u[1], b[1]);
-            const p3 = neon.ggml_vdotq_s32(zero, u[2], b[2]);
-            const p4 = neon.ggml_vdotq_s32(zero, u[3], b[3]);
-            const p = neon.paddq_s32(neon.paddq_s32(p1, p2), neon.paddq_s32(p3, p4));
+            const zero: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+            const p1 = ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, u[0], b[0]);
+            const p2 = ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, u[1], b[1]);
+            const p3 = ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, u[2], b[2]);
+            const p4 = ggml.cpu.quants.arch.neon.ggml_vdotq_s32(zero, u[3], b[3]);
+            const p = ggml.cpu.quants.arch.neon.paddq_s32(ggml.cpu.quants.arch.neon.paddq_s32(p1, p2), ggml.cpu.quants.arch.neon.paddq_s32(p3, p4));
 
-            sumi = neon.mla_s32(sumi, p, scales32[ib64]);
+            sumi = ggml.cpu.quants.arch.neon.mla_s32(sumi, p, scales32[ib64]);
             q2 += 8;
         }
 
-        sumf = @mulAdd(f32, d, @as(f32, @floatFromInt(neon.addvq_s32(sumi))), sumf);
+        sumf = @mulAdd(f32, d, @as(f32, @floatFromInt(ggml.cpu.quants.arch.neon.addvq_s32(sumi))), sumf);
     }
 
     s[0] = 0.125 * sumf;
@@ -319,14 +306,14 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ2_S, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u64 = @ptrCast(&c.iq2s_grid);
+    const x = as(ggml.quants.blocks.IQ2_S, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u64 = @ptrCast(&ggml.impl.c.iq2s_grid);
 
     var sumf: f32 = 0;
 
@@ -335,19 +322,19 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
 
         var qs: usize = 0;
         // The signs alias the second half of `qs`, read as `u16`.
-        var sgn: usize = c.QK_K / 8;
+        var sgn: usize = ggml.impl.c.QK_K / 8;
         var q8: usize = 0;
 
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
 
         var ib32: usize = 0;
-        while (ib32 < c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
             // The high-bit shift *decreases* with the index: 8, 6, 4, 2.
-            var u: [4]i8x16 = undefined;
+            var u: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..2) |half| {
                 const h = x[i].qh[ib32 + half];
                 const lo_i = x[i].qs[qs + 4 * half + 0] |
@@ -367,8 +354,8 @@ pub export fn ggml_vec_dot_iq2_s_q8_K(
                 const w0 = std.mem.readInt(u16, x[i].qs[sgn + 4 * half ..][0..2], .little);
                 const w1 = std.mem.readInt(u16, x[i].qs[sgn + 4 * half + 2 ..][0..2], .little);
                 const vs = expandSigns(@as(u32, w0) | (@as(u32, w1) << 16));
-                u[2 * half + 0] = neon.mul(vs[0], u[2 * half + 0]);
-                u[2 * half + 1] = neon.mul(vs[1], u[2 * half + 1]);
+                u[2 * half + 0] = ggml.cpu.quants.arch.neon.mul(vs[0], u[2 * half + 0]);
+                u[2 * half + 1] = ggml.cpu.quants.arch.neon.mul(vs[1], u[2 * half + 1]);
             }
             sgn += 8;
 
@@ -402,14 +389,14 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ3_XXS, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u32 = @ptrCast(&c.iq3xxs_grid);
+    const x = as(ggml.quants.blocks.IQ3_XXS, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u32 = @ptrCast(&ggml.impl.c.iq3xxs_grid);
 
     var sumf: f32 = 0;
 
@@ -417,14 +404,14 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
         const d = f(x[i].d) * y[i].d;
 
         var q3: usize = 0;
-        var gas: usize = c.QK_K / 4;
+        var gas: usize = ggml.impl.c.QK_K / 4;
         var q8: usize = 0;
 
         var sumf1: f32 = 0;
         var sumf2: f32 = 0;
 
         var ib32: usize = 0;
-        while (ib32 < c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
@@ -432,7 +419,7 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
             @memcpy(std.mem.asBytes(&aux32), std.mem.sliceAsBytes(x[i].qs[gas..][0..8]));
             gas += 8;
 
-            var g: [4]i8x16 = undefined;
+            var g: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..4) |k| {
                 g[k] = grid4x4(
                     grid,
@@ -449,8 +436,8 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
             const s2 = signs16((aux32[1] >> 0) & 127, (aux32[1] >> 7) & 127);
             const s3 = signs16((aux32[1] >> 14) & 127, (aux32[1] >> 21) & 127);
 
-            const p1 = dotv2(neon.mul(s0, g[0]), b[0], neon.mul(s1, g[1]), b[1]);
-            const p2 = dotv2(neon.mul(s2, g[2]), b[2], neon.mul(s3, g[3]), b[3]);
+            const p1 = dotv2(ggml.cpu.quants.arch.neon.mul(s0, g[0]), b[0], ggml.cpu.quants.arch.neon.mul(s1, g[1]), b[1]);
+            const p2 = dotv2(ggml.cpu.quants.arch.neon.mul(s2, g[2]), b[2], ggml.cpu.quants.arch.neon.mul(s3, g[3]), b[3]);
 
             sumf1 = @mulAdd(f32, @floatFromInt(p1), 0.5 + @as(f32, @floatFromInt(aux32[0] >> 28)), sumf1);
             sumf2 = @mulAdd(f32, @floatFromInt(p2), 0.5 + @as(f32, @floatFromInt(aux32[1] >> 28)), sumf2);
@@ -466,7 +453,7 @@ pub export fn ggml_vec_dot_iq3_xxs_q8_K(
 ///
 /// Eight *descending* shifts, so `qh`'s bit `j` lands at position 8 for lane
 /// `j` -- which the `& 256` then keeps.
-const k_shift_iq3s: i16x8 = .{ 8, 7, 6, 5, 4, 3, 2, 1 };
+const k_shift_iq3s: ggml.cpu.quants.arch.neon.i16x8 = .{ 8, 7, 6, 5, 4, 3, 2, 1 };
 
 /// Ports `ggml_vec_dot_iq3_s_q8_K` (arch/arm/quants.c:3929 @b1b770d90).
 pub export fn ggml_vec_dot_iq3_s_q8_K(
@@ -479,16 +466,16 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ3_S, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u32 = @ptrCast(&c.iq3s_grid);
+    const x = as(ggml.quants.blocks.IQ3_S, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u32 = @ptrCast(&ggml.impl.c.iq3s_grid);
 
-    const m256: u16x8 = @splat(256);
+    const m256: ggml.cpu.quants.arch.neon.u16x8 = @splat(256);
 
     var sumf: f32 = 0;
 
@@ -509,22 +496,22 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
         var sumi2: i32 = 0;
 
         var ib32: usize = 0;
-        while (ib32 < c.QK_K / 32) : (ib32 += 2) {
+        while (ib32 < ggml.impl.c.QK_K / 32) : (ib32 += 2) {
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
-            const idx_l = neon.loadFrom(u8x16, x[i].qs[qs..].ptr);
+            const idx_l = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[i].qs[qs..].ptr);
             qs += 16;
 
-            var g: [4]i8x16 = undefined;
+            var g: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..2) |half| {
-                const qh: u16x8 = @splat(x[i].qh[ib32 + half]);
-                const hi = neon.@"and"(@as(u16x8, @bitCast(neon.shlq(qh, k_shift_iq3s))), m256);
-                const base: u16x8 = if (half == 0)
-                    neon.movl_u8(neon.low(idx_l))
+                const qh: ggml.cpu.quants.arch.neon.u16x8 = @splat(x[i].qh[ib32 + half]);
+                const hi = ggml.cpu.quants.arch.neon.@"and"(@as(ggml.cpu.quants.arch.neon.u16x8, @bitCast(ggml.cpu.quants.arch.neon.shlq(qh, k_shift_iq3s))), m256);
+                const base: ggml.cpu.quants.arch.neon.u16x8 = if (half == 0)
+                    ggml.cpu.quants.arch.neon.movl_u8(ggml.cpu.quants.arch.neon.low(idx_l))
                 else
-                    neon.movl_u8(neon.high(idx_l));
-                const index: [8]u16 = neon.orr(base, hi);
+                    ggml.cpu.quants.arch.neon.movl_u8(ggml.cpu.quants.arch.neon.high(idx_l));
+                const index: [8]u16 = ggml.cpu.quants.arch.neon.orr(base, hi);
 
                 g[2 * half + 0] = grid4x4(grid, index[0], index[1], index[2], index[3]);
                 g[2 * half + 1] = grid4x4(grid, index[4], index[5], index[6], index[7]);
@@ -534,8 +521,8 @@ pub export fn ggml_vec_dot_iq3_s_q8_K(
                 const w0 = std.mem.readInt(u16, x[i].signs[sgn + 4 * half ..][0..2], .little);
                 const w1 = std.mem.readInt(u16, x[i].signs[sgn + 4 * half + 2 ..][0..2], .little);
                 const vs = expandSigns(@as(u32, w0) | (@as(u32, w1) << 16));
-                g[2 * half + 0] = neon.mul(vs[0], g[2 * half + 0]);
-                g[2 * half + 1] = neon.mul(vs[1], g[2 * half + 1]);
+                g[2 * half + 0] = ggml.cpu.quants.arch.neon.mul(vs[0], g[2 * half + 0]);
+                g[2 * half + 1] = ggml.cpu.quants.arch.neon.mul(vs[1], g[2 * half + 1]);
             }
             sgn += 8;
 
@@ -567,14 +554,14 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ1_S, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u64 = @ptrCast(&c.iq1s_grid);
+    const x = as(ggml.quants.blocks.IQ1_S, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u64 = @ptrCast(&ggml.impl.c.iq1s_grid);
 
     var sumf: f32 = 0;
 
@@ -587,10 +574,10 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
         var sumi3: i32 = 0;
 
         var ib: usize = 0;
-        while (ib < c.QK_K / 32) : (ib += 2) {
+        while (ib < ggml.impl.c.QK_K / 32) : (ib += 2) {
             // The four shifts are 8, 5, 2 and -1: the last is a *right* shift,
             // which is why it reads `>> 1` in the C rather than `<< -1`.
-            var g: [4]i8x16 = undefined;
+            var g: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..2) |half| {
                 const h: usize = x[i].qh[ib + half];
                 const k0 = x[i].qs[qs + 4 * half + 0] | ((h << 8) & 0x700);
@@ -620,7 +607,7 @@ pub export fn ggml_vec_dot_iq1_s_q8_K(
         }
 
         const inner = @as(f32, @floatFromInt(sumi1 + sumi2)) +
-            blocks.iq1s_delta * @as(f32, @floatFromInt(sumi3));
+            ggml.quants.blocks.iq1s_delta * @as(f32, @floatFromInt(sumi3));
         sumf = @mulAdd(f32, y[i].d * f(x[i].d), inner, sumf);
     }
 
@@ -642,25 +629,25 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
     by: usize,
     nrc: c_int,
 ) void {
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ1_M, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
-    const grid: [*]const u64 = @ptrCast(&c.iq1s_grid);
+    const x = as(ggml.quants.blocks.IQ1_M, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const grid: [*]const u64 = @ptrCast(&ggml.impl.c.iq1s_grid);
 
-    const mask: i32x4 = @splat(0x7);
-    const mone: i32x4 = @splat(1);
-    const mzero: i32x4 = @splat(0);
+    const mask: ggml.cpu.quants.arch.neon.i32x4 = @splat(0x7);
+    const mone: ggml.cpu.quants.arch.neon.i32x4 = @splat(1);
+    const mzero: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
 
     // The four sign patterns: each half of the vector is all `+1` or all `-1`.
-    const deltas = [4]i8x16{
-        neon.combine(@as(i8x8, @splat(1)), @as(i8x8, @splat(1))),
-        neon.combine(@as(i8x8, @splat(-1)), @as(i8x8, @splat(1))),
-        neon.combine(@as(i8x8, @splat(1)), @as(i8x8, @splat(-1))),
-        neon.combine(@as(i8x8, @splat(-1)), @as(i8x8, @splat(-1))),
+    const deltas = [4]ggml.cpu.quants.arch.neon.i8x16{
+        ggml.cpu.quants.arch.neon.combine(@as(ggml.cpu.quants.arch.neon.i8x8, @splat(1)), @as(ggml.cpu.quants.arch.neon.i8x8, @splat(1))),
+        ggml.cpu.quants.arch.neon.combine(@as(ggml.cpu.quants.arch.neon.i8x8, @splat(-1)), @as(ggml.cpu.quants.arch.neon.i8x8, @splat(1))),
+        ggml.cpu.quants.arch.neon.combine(@as(ggml.cpu.quants.arch.neon.i8x8, @splat(1)), @as(ggml.cpu.quants.arch.neon.i8x8, @splat(-1))),
+        ggml.cpu.quants.arch.neon.combine(@as(ggml.cpu.quants.arch.neon.i8x8, @splat(-1)), @as(ggml.cpu.quants.arch.neon.i8x8, @splat(-1))),
     };
 
     var sumf: f32 = 0;
@@ -671,14 +658,14 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
         var q8: usize = 0;
 
         const sc: *const [4]u16 = @ptrCast(@alignCast(&x[i].scales));
-        const scale = blocks.iq1mScale(sc);
+        const scale = ggml.quants.blocks.iq1mScale(sc);
 
-        var sumi1: i32x4 = mzero;
-        var sumi2: i32x4 = mzero;
+        var sumi1: ggml.cpu.quants.arch.neon.i32x4 = mzero;
+        var sumi2: ggml.cpu.quants.arch.neon.i32x4 = mzero;
 
         var ib: usize = 0;
-        while (ib < c.QK_K / 32) : (ib += 2) {
-            var g: [4]i8x16 = undefined;
+        while (ib < ggml.impl.c.QK_K / 32) : (ib += 2) {
+            var g: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..4) |k| {
                 const h: usize = x[i].qh[qh + k];
                 const k0 = x[i].qs[qs + 2 * k + 0] | ((h << 8) & 0x700);
@@ -689,15 +676,15 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
             const b = q8x4(&y[i], q8);
             q8 += 64;
 
-            const p1 = neon.paddq_s32(
-                neon.ggml_vdotq_s32(mzero, g[0], b[0]),
-                neon.ggml_vdotq_s32(mzero, g[1], b[1]),
+            const p1 = ggml.cpu.quants.arch.neon.paddq_s32(
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, g[0], b[0]),
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, g[1], b[1]),
             );
-            const p2 = neon.paddq_s32(
-                neon.ggml_vdotq_s32(mzero, g[2], b[2]),
-                neon.ggml_vdotq_s32(mzero, g[3], b[3]),
+            const p2 = ggml.cpu.quants.arch.neon.paddq_s32(
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, g[2], b[2]),
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, g[3], b[3]),
             );
-            const p12 = neon.paddq_s32(p1, p2);
+            const p12 = ggml.cpu.quants.arch.neon.paddq_s32(p1, p2);
 
             // Two bits per quarter-group, gathered from `qh` four bytes at a
             // time, indexing `deltas`.
@@ -705,33 +692,33 @@ pub export fn ggml_vec_dot_iq1_m_q8_K(
             const aux32 = ((qh32 >> 3) & 0x01010101) | ((qh32 >> 6) & 0x02020202);
             const aux8: [4]u8 = @bitCast(aux32);
 
-            const p3 = neon.paddq_s32(
-                neon.ggml_vdotq_s32(mzero, deltas[aux8[0]], b[0]),
-                neon.ggml_vdotq_s32(mzero, deltas[aux8[1]], b[1]),
+            const p3 = ggml.cpu.quants.arch.neon.paddq_s32(
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, deltas[aux8[0]], b[0]),
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, deltas[aux8[1]], b[1]),
             );
-            const p4 = neon.paddq_s32(
-                neon.ggml_vdotq_s32(mzero, deltas[aux8[2]], b[2]),
-                neon.ggml_vdotq_s32(mzero, deltas[aux8[3]], b[3]),
+            const p4 = ggml.cpu.quants.arch.neon.paddq_s32(
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, deltas[aux8[2]], b[2]),
+                ggml.cpu.quants.arch.neon.ggml_vdotq_s32(mzero, deltas[aux8[3]], b[3]),
             );
-            const p34 = neon.paddq_s32(p3, p4);
+            const p34 = ggml.cpu.quants.arch.neon.paddq_s32(p3, p4);
 
-            const raw: i32x4 = .{
+            const raw: ggml.cpu.quants.arch.neon.i32x4 = .{
                 @as(i32, sc[ib / 2] >> 0),
                 @as(i32, sc[ib / 2] >> 3),
                 @as(i32, sc[ib / 2] >> 6),
                 @as(i32, sc[ib / 2] >> 9),
             };
-            const scales_4 = neon.add(neon.shlN(neon.@"and"(raw, mask), 1), mone);
+            const scales_4 = ggml.cpu.quants.arch.neon.add(ggml.cpu.quants.arch.neon.shlN(ggml.cpu.quants.arch.neon.@"and"(raw, mask), 1), mone);
 
-            sumi1 = neon.mla_s32(sumi1, scales_4, p12);
-            sumi2 = neon.mla_s32(sumi2, scales_4, p34);
+            sumi1 = ggml.cpu.quants.arch.neon.mla_s32(sumi1, scales_4, p12);
+            sumi2 = ggml.cpu.quants.arch.neon.mla_s32(sumi2, scales_4, p34);
 
             qs += 8;
             qh += 4;
         }
 
-        const inner = @as(f32, @floatFromInt(neon.addvq_s32(sumi1))) +
-            blocks.iq1m_delta * @as(f32, @floatFromInt(neon.addvq_s32(sumi2)));
+        const inner = @as(f32, @floatFromInt(ggml.cpu.quants.arch.neon.addvq_s32(sumi1))) +
+            ggml.quants.blocks.iq1m_delta * @as(f32, @floatFromInt(ggml.cpu.quants.arch.neon.addvq_s32(sumi2)));
         sumf = @mulAdd(f32, y[i].d * f(scale), inner, sumf);
     }
 
@@ -754,15 +741,15 @@ pub export fn ggml_vec_dot_iq4_xs_q8_K(
     nrc: c_int,
 ) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, c.QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ4_XS, vx);
-    const y = as(blocks.Q8_K, vy);
-    const nb = @divTrunc(n, c.QK_K);
+    const x = as(ggml.quants.blocks.IQ4_XS, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
 
-    const values: i8x16 = c.kvalues_iq4nl;
-    const m4b: u8x16 = @splat(0x0f);
+    const values: ggml.cpu.quants.arch.neon.i8x16 = ggml.impl.c.kvalues_iq4nl;
+    const m4b: ggml.cpu.quants.arch.neon.u8x16 = @splat(0x0f);
 
     var sumf: f32 = 0;
 
@@ -774,18 +761,18 @@ pub export fn ggml_vec_dot_iq4_xs_q8_K(
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
 
-        for (0..c.QK_K / 64) |ib| {
-            const q4bits0 = neon.loadFrom(u8x16, x[ibl].qs[q4..].ptr);
-            const q4bits1 = neon.loadFrom(u8x16, x[ibl].qs[q4 + 16 ..].ptr);
+        for (0..ggml.impl.c.QK_K / 64) |ib| {
+            const q4bits0 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[ibl].qs[q4..].ptr);
+            const q4bits1 = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.u8x16, x[ibl].qs[q4 + 16 ..].ptr);
             q4 += 32;
 
             const b = q8x4(&y[ibl], q8);
             q8 += 64;
 
-            const w0 = neon.qtbl1q_s8(values, neon.@"and"(q4bits0, m4b));
-            const w1 = neon.qtbl1q_s8(values, neon.shrN(q4bits0, 4));
-            const w2 = neon.qtbl1q_s8(values, neon.@"and"(q4bits1, m4b));
-            const w3 = neon.qtbl1q_s8(values, neon.shrN(q4bits1, 4));
+            const w0 = ggml.cpu.quants.arch.neon.qtbl1q_s8(values, ggml.cpu.quants.arch.neon.@"and"(q4bits0, m4b));
+            const w1 = ggml.cpu.quants.arch.neon.qtbl1q_s8(values, ggml.cpu.quants.arch.neon.shrN(q4bits0, 4));
+            const w2 = ggml.cpu.quants.arch.neon.qtbl1q_s8(values, ggml.cpu.quants.arch.neon.@"and"(q4bits1, m4b));
+            const w3 = ggml.cpu.quants.arch.neon.qtbl1q_s8(values, ggml.cpu.quants.arch.neon.shrN(q4bits1, 4));
 
             const prod_1 = dotv2(w0, b[0], w1, b[1]);
             const prod_2 = dotv2(w2, b[2], w3, b[3]);
@@ -812,39 +799,38 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const testing = @import("../testing.zig");
-const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
+const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "iq2_xxs dot matches the C" {
-    try testing.check(ggml_vec_dot_iq2_xxs_q8_K, c.GGML_TYPE_IQ2_XXS, c.GGML_TYPE_Q8_K, golden.iq2_xxs);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xxs_q8_K, ggml.impl.c.GGML_TYPE_IQ2_XXS, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq2_xxs);
 }
 
 test "iq2_xs dot matches the C" {
-    try testing.check(ggml_vec_dot_iq2_xs_q8_K, c.GGML_TYPE_IQ2_XS, c.GGML_TYPE_Q8_K, golden.iq2_xs);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_xs_q8_K, ggml.impl.c.GGML_TYPE_IQ2_XS, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq2_xs);
 }
 
 test "iq2_s dot matches the C" {
-    try testing.check(ggml_vec_dot_iq2_s_q8_K, c.GGML_TYPE_IQ2_S, c.GGML_TYPE_Q8_K, golden.iq2_s);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq2_s_q8_K, ggml.impl.c.GGML_TYPE_IQ2_S, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq2_s);
 }
 
 test "iq3_xxs dot matches the C" {
-    try testing.check(ggml_vec_dot_iq3_xxs_q8_K, c.GGML_TYPE_IQ3_XXS, c.GGML_TYPE_Q8_K, golden.iq3_xxs);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_xxs_q8_K, ggml.impl.c.GGML_TYPE_IQ3_XXS, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq3_xxs);
 }
 
 test "iq3_s dot matches the C" {
-    try testing.check(ggml_vec_dot_iq3_s_q8_K, c.GGML_TYPE_IQ3_S, c.GGML_TYPE_Q8_K, golden.iq3_s);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq3_s_q8_K, ggml.impl.c.GGML_TYPE_IQ3_S, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq3_s);
 }
 
 test "iq1_s dot matches the C" {
-    try testing.check(ggml_vec_dot_iq1_s_q8_K, c.GGML_TYPE_IQ1_S, c.GGML_TYPE_Q8_K, golden.iq1_s);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_s_q8_K, ggml.impl.c.GGML_TYPE_IQ1_S, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq1_s);
 }
 
 test "iq1_m dot matches the C" {
-    try testing.check(ggml_vec_dot_iq1_m_q8_K, c.GGML_TYPE_IQ1_M, c.GGML_TYPE_Q8_K, golden.iq1_m);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq1_m_q8_K, ggml.impl.c.GGML_TYPE_IQ1_M, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq1_m);
 }
 
 test "iq4_xs dot matches the C" {
-    try testing.check(ggml_vec_dot_iq4_xs_q8_K, c.GGML_TYPE_IQ4_XS, c.GGML_TYPE_Q8_K, golden.iq4_xs);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_xs_q8_K, ggml.impl.c.GGML_TYPE_IQ4_XS, ggml.impl.c.GGML_TYPE_Q8_K, golden.iq4_xs);
 }
 
 test "the even-signs table matches the C's literal" {

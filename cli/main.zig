@@ -9,9 +9,10 @@
 //! `session.zig`, where the tests can reach it without spawning a process.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
+const llama = @import("llama");
 const builtin = @import("builtin");
-const cli = @import("module.zig");
 
 /// Log configuration for the executable.
 pub const std_options: std.Options = .{
@@ -40,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
     var stderr = std.Io.File.stderr().writerStreaming(init.io, &err_buf);
     const err = &stderr.interface;
 
-    const parsed = try cli.args.parse(argv, out);
+    const parsed = try mod.args.parse(argv, out);
     switch (parsed) {
         .fail => |f| {
             try f.report(err);
@@ -62,9 +63,9 @@ pub fn main(init: std.process.Init) !void {
                 std.process.exit(1);
             };
             // `--chat-template-kwargs` is parsed with the command line upstream.
-            const kwargs = cli.conversation.resolveKwargs(arena, settings.kwargOps()) catch |e| {
+            const kwargs = mod.conversation.resolveKwargs(arena, settings.kwargOps()) catch |e| {
                 if (e == error.OutOfMemory) return e;
-                try err.print("error while handling argument \"--chat-template-kwargs\": {s}\n", .{cli.conversation.last_error.items});
+                try err.print("error while handling argument \"--chat-template-kwargs\": {s}\n", .{mod.conversation.last_error.items});
                 try err.flush();
                 std.process.exit(1);
             };
@@ -95,7 +96,7 @@ pub fn main(init: std.process.Init) !void {
 /// What `main` works out beside the command line, before anything loads.
 const RunOptions = struct {
     /// The template kwargs, from `conversation.resolveKwargs`.
-    kwargs: []const cli.common_chat.templates.KwArg,
+    kwargs: []const mod.common_chat.templates.KwArg,
     /// Whether the reasoning is greyed, `--color` resolved.
     color: bool,
     /// Whether `LLAMAZIG_CNV_TRACE` is set, sending the context size and GPU
@@ -120,7 +121,7 @@ const RunOptions = struct {
 fn run(
     gpa: std.mem.Allocator,
     io: std.Io,
-    settings: *const cli.Args,
+    settings: *const mod.Args,
     opts: RunOptions,
     err: *std.Io.Writer,
     out: *std.Io.Writer,
@@ -128,13 +129,13 @@ fn run(
     // Quiet by default: libllama logs load progress at INFO, which upstream's
     // llama-cli hides unless asked. Ours does the same, so a completion is the
     // only thing on stdout and the output is usable in a pipeline.
-    cli.session.c.llama_log_set(quietLog, null);
+    llama.api.impl.llama_log_set(quietLog, null);
 
-    cli.session.c.llama_backend_init();
-    defer cli.session.c.llama_backend_free();
+    llama.api.llama.llama_backend_init();
+    defer llama.api.llama.llama_backend_free();
 
     const prompt = if (settings.escape)
-        try cli.args.processEscapes(gpa, settings.prompt)
+        try mod.args.processEscapes(gpa, settings.prompt)
     else
         try gpa.dupe(u8, settings.prompt);
     defer gpa.free(prompt);
@@ -147,19 +148,19 @@ fn run(
     try err.print("loading {s} ...\n", .{settings.model});
     try err.flush();
 
-    var session = try cli.Session.init(gpa, settings.*, err);
+    var session = try mod.Session.init(gpa, settings.*, err);
     defer session.deinit();
     if (opts.trace) {
         session.turn_trace = err;
         // What `--fit` left, as libllama took it.
-        try err.print("[ctx: {d}, gpu layers: {d}]\n", .{ cli.session.c.llama_n_ctx(session.ctx), session.gpu_layers });
+        try err.print("[ctx: {d}, gpu layers: {d}]\n", .{ llama.api.context.llama_n_ctx(session.ctx), session.gpu_layers });
         try err.flush();
     }
 
     if (settings.interactive or settings.useChatTemplate()) {
         var chat = try openChat(gpa, io, settings, opts, &session);
         defer chat.deinit();
-        var display: cli.conversation.Display = .{ .out = out, .color = opts.color };
+        var display: mod.conversation.Display = .{ .out = out, .color = opts.color };
         if (settings.interactive) {
             try runInteractive(io, settings, prompt, &chat, &session, &display, err);
         } else {
@@ -187,17 +188,17 @@ fn run(
 fn openChat(
     gpa: std.mem.Allocator,
     io: std.Io,
-    settings: *const cli.Args,
+    settings: *const mod.Args,
     opts: RunOptions,
-    session: *cli.Session,
-) !cli.conversation.Chat {
+    session: *mod.Session,
+) !mod.conversation.Chat {
     // `--chat-template` beats `--chat-template-file`, which beats the
     // model's own, which a model without one replaces with ChatML.
     const override = try readMaybeFile(gpa, io, settings.chat_template, settings.chat_template_file);
     defer gpa.free(override);
     const system = try readMaybeFile(gpa, io, settings.system_prompt, settings.system_prompt_file);
     defer gpa.free(system);
-    return cli.conversation.Chat.init(gpa, settings, opts.kwargs, session.model, override, system);
+    return mod.conversation.Chat.init(gpa, settings, opts.kwargs, session.model, override, system);
 }
 
 /// Holds a multi-turn conversation on stdin.
@@ -223,11 +224,11 @@ fn openChat(
 /// Return: nothing; ends at end of input.
 fn runInteractive(
     io: std.Io,
-    settings: *const cli.Args,
+    settings: *const mod.Args,
     prompt: []const u8,
-    chat: *cli.conversation.Chat,
-    session: *cli.Session,
-    display: *cli.conversation.Display,
+    chat: *mod.conversation.Chat,
+    session: *mod.Session,
+    display: *mod.conversation.Display,
     err: *std.Io.Writer,
 ) !void {
     var stdin_buf: [4096]u8 = undefined;
@@ -327,7 +328,7 @@ var grammar_error: std.ArrayList(u8) = .empty;
 ///
 /// Return: the grammar, empty for none; on failure an error, with the text
 /// upstream's exception would carry in `grammar_error`.
-fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSource) ![]const u8 {
+fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: mod.args.GrammarSource) ![]const u8 {
     grammar_error.clearRetainingCapacity();
     const text: []const u8 = switch (src) {
         .none => return "",
@@ -342,15 +343,15 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSourc
     };
     if (src == .gbnf_file) return text;
 
-    var value = cli.json.parse(gpa, text) catch |e| {
+    var value = mod.json.parse(gpa, text) catch |e| {
         if (e == error.OutOfMemory) return e;
-        try grammar_error.appendSlice(gpa, cli.json.what());
+        try grammar_error.appendSlice(gpa, mod.json.what());
         return error.GrammarSource;
     };
     defer value.deinit(gpa);
-    return cli.json.schema_to_grammar.jsonSchemaToGrammar(gpa, &value, false) catch |e| {
+    return mod.json.schema_to_grammar.jsonSchemaToGrammar(gpa, &value, false) catch |e| {
         if (e == error.OutOfMemory) return error.OutOfMemory;
-        try grammar_error.appendSlice(gpa, cli.json.schema.what());
+        try grammar_error.appendSlice(gpa, mod.json.schema.what());
         return error.GrammarSource;
     };
 }
@@ -365,7 +366,7 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSourc
 /// Return: nothing.
 fn quietLog(level: c_uint, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = user_data;
-    if (level == cli.session.c.GGML_LOG_LEVEL_ERROR or level == cli.session.c.GGML_LOG_LEVEL_WARN) {
+    if (level == llama.impl.c.GGML_LOG_LEVEL_ERROR or level == llama.impl.c.GGML_LOG_LEVEL_WARN) {
         std.debug.print("{s}", .{std.mem.span(text)});
     }
 }
@@ -379,17 +380,17 @@ fn quietLog(level: c_uint, text: [*c]const u8, user_data: ?*anyopaque) callconv(
 /// adding one forces a decision about what to say.
 fn describe(e: anyerror) []const u8 {
     return switch (e) {
-        cli.session.Error.ModelLoadFailed => "could not load the model -- check the path and that it is a GGUF file",
-        cli.session.Error.NoVocab => "the model has no vocabulary",
-        cli.session.Error.ContextFailed => "could not create a context -- try a smaller -c",
-        cli.session.Error.SamplerFailed => "could not build the sampler chain",
-        cli.session.Error.GrammarFailed => "failed to parse grammar",
-        cli.session.Error.TokenizeFailed => "could not tokenize the prompt",
-        cli.session.Error.DecodeFailed => "the model failed to decode",
-        cli.session.Error.PromptTooLong => "the prompt is longer than the context -- raise -c or shorten it",
-        cli.conversation.Error.ChatFailed => cli.conversation.last_error.items,
-        cli.conversation.Error.MarkingLost => "the chat template's output could not be matched with its trust marks",
-        cli.conversation.Error.EmptyRender => "the chat template rendered nothing",
+        mod.session.Error.ModelLoadFailed => "could not load the model -- check the path and that it is a GGUF file",
+        mod.session.Error.NoVocab => "the model has no vocabulary",
+        mod.session.Error.ContextFailed => "could not create a context -- try a smaller -c",
+        mod.session.Error.SamplerFailed => "could not build the sampler chain",
+        mod.session.Error.GrammarFailed => "failed to parse grammar",
+        mod.session.Error.TokenizeFailed => "could not tokenize the prompt",
+        mod.session.Error.DecodeFailed => "the model failed to decode",
+        mod.session.Error.PromptTooLong => "the prompt is longer than the context -- raise -c or shorten it",
+        mod.conversation.Error.ChatFailed => mod.conversation.last_error.items,
+        mod.conversation.Error.MarkingLost => "the chat template's output could not be matched with its trust marks",
+        mod.conversation.Error.EmptyRender => "the chat template rendered nothing",
         error.OutOfMemory => "out of memory",
         else => @errorName(e),
     };

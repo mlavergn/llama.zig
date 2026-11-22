@@ -9,20 +9,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_phi2`'s `load_arch_hparams` (models/phi2.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
 
@@ -34,7 +25,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_phi2`'s `load_arch_tensors` (models/phi2.cpp:13 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
@@ -67,12 +58,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// Ports `llama_model_phi2`'s `build_arch_graph` (models/phi2.cpp:43 @b1b770d90)
 /// and the constructor of its `graph` (models/phi2.cpp:47 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/phi2.cpp", 50, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/phi2.cpp", 50, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -91,7 +82,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         b.cb(attn_norm_output, "attn_norm", il);
 
         // Self-attention.
-        var cur: *Tensor = undefined;
+        var cur: *llama.impl.c.ggml_tensor = undefined;
         {
             const qkv = b.buildQkv(layer, attn_norm_output, n_embd_head, b.n_head, b.n_head_kv, il);
             var Qcur = qkv.q;
@@ -106,21 +97,21 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
             // Phi-2 scales Q to avoid precision issues; see
             // https://github.com/ml-explore/mlx-examples/blob/08e862336ade809bc37d1035f94b359e7d1a5152/phi2/phi2.py#L64-L66
-            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / libm.sqrtfInt(n_embd_head));
+            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
 
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
-            attn_norm_output = c.ggml_get_rows(ctx, attn_norm_output, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            attn_norm_output = llama.impl.c.ggml_get_rows(ctx, attn_norm_output, inp_out_ids);
         }
         // The feed-forward network.
         const ffn_output = b.buildFfn(attn_norm_output, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .gelu, .seq, il);
         b.cb(ffn_output, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_output);
-        cur = c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_output);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -136,7 +127,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
     b.cb(cur, "result_output_no_bias", -1);
 
-    cur = c.ggml_add(ctx, cur, model.output_b);
+    cur = llama.impl.c.ggml_add(ctx, cur, model.output_b);
 
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

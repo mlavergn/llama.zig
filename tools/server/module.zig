@@ -21,6 +21,25 @@ pub const subproc = @import("subproc.zig");
 pub const queue = @import("queue.zig");
 pub const decision = @import("decision.zig");
 
+pub const connect = @import("connect.zig");
+pub const context = @import("context.zig");
+pub const cors_proxy = @import("cors_proxy.zig");
+pub const download = @import("download.zig");
+pub const file_lock = @import("file_lock.zig");
+pub const hf_cache = @import("hf_cache.zig");
+pub const http = @import("http.zig");
+pub const mcp = @import("mcp.zig");
+pub const models = @import("models.zig");
+pub const models_sched = @import("models_sched.zig");
+pub const preset = @import("preset.zig");
+pub const proxy = @import("proxy.zig");
+pub const realtime = @import("realtime.zig");
+pub const routes = @import("routes.zig");
+pub const stream = @import("stream.zig");
+pub const tools = @import("tools.zig");
+
+pub const httplib = @import("httplib/module.zig");
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 
@@ -28,8 +47,8 @@ test {
     std.testing.refAllDecls(@This());
     // libllama and libmtmd, compiled in: their exports are what `c.llama_*`
     // and `c.mtmd_*` link against.
-    _ = @import("llama");
-    _ = @import("mtmd");
+    _ = @import("llama").lib;
+    _ = @import("mtmd").lib;
 }
 
 const task_mod = @import("task.zig");

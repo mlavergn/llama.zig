@@ -10,18 +10,8 @@
 //! `build_plamo2_mamba_layer`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const mamba_base = @import("mamba_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// `std::max(64, int(hparams.n_embd / 16))`, the dt projection's width.
 fn dtDim(n_embd: u32) i64 {
@@ -29,7 +19,7 @@ fn dtDim(n_embd: u32) i64 {
 }
 
 /// Ports `llama_model_plamo2`'s `load_arch_hparams` (models/plamo2.cpp:4 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -64,7 +54,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_plamo2`'s `load_arch_tensors` (models/plamo2.cpp:35 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -83,10 +73,10 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Output.
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
-    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
+    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_not_required, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -138,12 +128,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_plamo2`'s `build_arch_graph` (models/plamo2.cpp:106 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_plamo2`'s `graph` (models/plamo2.cpp:110 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
 
@@ -157,7 +147,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     const inp_out_ids = b.buildInpOutIds();
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -176,8 +166,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
 
         // The post-mixer norm.
@@ -185,7 +175,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "attn_post_norm", il);
 
         // The residual connection.
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(cur, "attn_residual", il);
         residual = cur;
 
@@ -202,7 +192,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "ffn_post_norm", il);
 
         // The residual connection.
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(cur, "ffn_residual", il);
 
         // The next layer's input.
@@ -222,18 +212,18 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "result_output", -1);
 
     // Marked as an output explicitly, for the backend assignment.
-    c.ggml_set_output(cur);
+    llama.impl.c.ggml_set_output(cur);
 
     b.res.t_logits = cur;
 }
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_attn_layer`
 /// (models/plamo2.cpp:201 @b1b770d90).
-fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
+fn buildPlamo2AttnLayer(b: *const llama.graph.Builder, inp: *llama.graph.InpAttnKv, inp_pos: *llama.impl.c.ggml_tensor, cur_: *llama.impl.c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
 
     // Self-attention.
     {
@@ -252,10 +242,10 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
         const k_offset: i64 = n_embd_head_q * n_head;
         const v_offset: i64 = k_offset + n_embd_head_k * n_head_kv;
 
-        const es = c.ggml_element_size(qkv);
-        var Qcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head_q, n_head, b.n_tokens, @as(usize, @intCast(n_embd_head_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * es);
-        var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head_k, n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head_k)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * es);
-        const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head_v, n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * es);
+        const es = llama.impl.c.ggml_element_size(qkv);
+        var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head_q, n_head, b.n_tokens, @as(usize, @intCast(n_embd_head_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * es);
+        var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head_k, n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head_k)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * es);
+        const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head_v, n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * es);
 
         b.cb(Qcur, "Qcur", il);
         b.cb(Kcur, "Kcur", il);
@@ -271,7 +261,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 
         Kcur = b.buildRope(Kcur, inp_pos, il);
 
-        cur = b.buildAttn(inp, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head_v), il);
+        cur = b.buildAttn(inp, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head_v), il);
     }
 
     b.cb(cur, "attn_out", il);
@@ -281,7 +271,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 
 /// Ports `llama_model_plamo2::graph`'s `build_plamo2_mamba_layer`
 /// (models/plamo2.cpp:253 @b1b770d90).
-fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_: *Tensor, model: *const Model, il: c_int) *Tensor {
+fn buildPlamo2MambaLayer(b: *const llama.graph.Builder, inp: *const llama.graph.InpRs, cur_: *llama.impl.c.ggml_tensor, model: *const llama.model.Model, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const ubatch = b.ubatch;
@@ -300,54 +290,54 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
 
     const n_seq_tokens: i64 = ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/plamo2.cpp", 271, "n_seqs != 0");
-    impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 272, "ubatch.equal_seqs()");
-    impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 273, "ubatch.n_tokens == n_seq_tokens * n_seqs");
-    impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 274, "d_inner % n_heads == 0");
-    impl.assert(n_group == 0, "models/plamo2.cpp", 275, "n_group == 0");
+    llama.impl.assert(n_seqs != 0, "models/plamo2.cpp", 271, "n_seqs != 0");
+    llama.impl.assert(ubatch.equalSeqs(), "models/plamo2.cpp", 272, "ubatch.equal_seqs()");
+    llama.impl.assert(ubatch.n_tokens == n_seq_tokens * n_seqs, "models/plamo2.cpp", 273, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    llama.impl.assert(@rem(d_inner, n_heads) == 0, "models/plamo2.cpp", 274, "d_inner % n_heads == 0");
+    llama.impl.assert(n_group == 0, "models/plamo2.cpp", 275, "n_group == 0");
 
     const conv_states_all = mctx_cur.getRL(il);
     const ssm_states_all = mctx_cur.getSL(il);
 
     var conv = b.buildRs(inp, conv_states_all, @bitCast(hp.nEmbdR()), @intCast(n_seqs), null);
-    conv = c.ggml_reshape_3d(ctx, conv, d_conv - 1, d_inner + 2 * n_group * d_state, n_seqs);
+    conv = llama.impl.c.ggml_reshape_3d(ctx, conv, d_conv - 1, d_inner + 2 * n_group * d_state, n_seqs);
 
     // {n_embd, n_tokens} => {n_embd, n_seq_tokens, n_seqs}
-    var cur: *Tensor = c.ggml_reshape_3d(ctx, cur_, cur_.ne[0], n_seq_tokens, n_seqs);
+    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, cur_, cur_.ne[0], n_seq_tokens, n_seqs);
 
     // in_proj: {n_embd, 2*d_inner} @ {n_embd, n_seq_tokens, n_seqs} => {2*d_inner, n_seq_tokens, n_seqs}
     var zx = b.buildLoraMm(layer.ssm_in.?, cur, null);
     b.cb(zx, "mamba_in_proj", il);
     // {8192, 5, 1, 1} -> {8192, 1, 5, 1}
-    zx = c.ggml_permute(ctx, zx, 0, 2, 1, 3);
-    zx = c.ggml_cont_4d(ctx, zx, head_dim * 2, n_heads, n_seq_tokens, n_seqs);
+    zx = llama.impl.c.ggml_permute(ctx, zx, 0, 2, 1, 3);
+    zx = llama.impl.c.ggml_cont_4d(ctx, zx, head_dim * 2, n_heads, n_seq_tokens, n_seqs);
     b.cb(zx, "mamba_in_proj_out", il);
 
     // Split into z and x.
     // => {head_dim * n_heads, n_seq_tokens, n_seqs}
-    var x: *Tensor = c.ggml_view_4d(ctx, zx, head_dim, n_heads, n_seq_tokens, n_seqs, zx.nb[1], zx.nb[2], zx.nb[3], @as(usize, @intCast(head_dim)) * c.ggml_element_size(zx));
-    x = c.ggml_cont_3d(ctx, x, head_dim * n_heads, n_seq_tokens, n_seqs);
+    var x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, zx, head_dim, n_heads, n_seq_tokens, n_seqs, zx.nb[1], zx.nb[2], zx.nb[3], @as(usize, @intCast(head_dim)) * llama.impl.c.ggml_element_size(zx));
+    x = llama.impl.c.ggml_cont_3d(ctx, x, head_dim * n_heads, n_seq_tokens, n_seqs);
     b.cb(x, "mamba_x_split", il);
 
-    const z: *Tensor = c.ggml_view_4d(ctx, zx, head_dim, n_heads, n_seq_tokens, n_seqs, zx.nb[1], zx.nb[2], zx.nb[3], 0);
+    const z: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, zx, head_dim, n_heads, n_seq_tokens, n_seqs, zx.nb[1], zx.nb[2], zx.nb[3], 0);
     b.cb(z, "mamba_z_split", il);
 
     // conv1d
     {
         // => {d_conv - 1 + n_seq_tokens, d_inner, n_seqs}
-        const conv_x: *Tensor = c.ggml_concat(ctx, conv, c.ggml_transpose(ctx, x), 0);
+        const conv_x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, conv, llama.impl.c.ggml_transpose(ctx, x), 0);
         b.cb(conv_x, "mamba_conv1d_input", il);
 
         // Copy the last (d_conv - 1) columns back into the state cache.
-        const last_conv = c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(n_seq_tokens)) * conv_x.nb[0]);
+        const last_conv = llama.impl.c.ggml_view_3d(ctx, conv_x, d_conv - 1, d_inner, n_seqs, conv_x.nb[1], conv_x.nb[2], @as(usize, @intCast(n_seq_tokens)) * conv_x.nb[0]);
 
-        c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, last_conv, c.ggml_view_1d(ctx, conv_states_all, (d_conv - 1) * (d_inner + 2 * n_group * d_state) * n_seqs, kv_head * @as(usize, @intCast((d_conv - 1) * (d_inner + 2 * n_group * d_state))) * c.ggml_element_size(conv_states_all))));
+        llama.impl.c.ggml_build_forward_expand(b.gf, llama.impl.c.ggml_cpy(ctx, last_conv, llama.impl.c.ggml_view_1d(ctx, conv_states_all, (d_conv - 1) * (d_inner + 2 * n_group * d_state) * n_seqs, kv_head * @as(usize, @intCast((d_conv - 1) * (d_inner + 2 * n_group * d_state))) * llama.impl.c.ggml_element_size(conv_states_all))));
 
         // The 1D convolution.
-        x = c.ggml_ssm_conv(ctx, conv_x, layer.ssm_conv1d);
+        x = llama.impl.c.ggml_ssm_conv(ctx, conv_x, layer.ssm_conv1d);
         b.cb(x, "mamba_conv1d", il);
 
-        x = c.ggml_silu(ctx, x);
+        x = llama.impl.c.ggml_silu(ctx, x);
         b.cb(x, "mamba_conv1d_silu", il);
     }
 
@@ -359,9 +349,9 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
 
         // Split into dt, B and C.
         const dt_dim: i64 = dtDim(hp.n_embd);
-        var B: *Tensor = c.ggml_view_3d(ctx, x_bcdt, d_state, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], 0);
-        var C: *Tensor = c.ggml_view_3d(ctx, x_bcdt, d_state, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], c.ggml_element_size(x_bcdt) * @as(usize, @intCast(d_state)));
-        var dt: *Tensor = c.ggml_view_3d(ctx, x_bcdt, dt_dim, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], c.ggml_element_size(x_bcdt) * @as(usize, @intCast(2 * d_state)));
+        var B: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, x_bcdt, d_state, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], 0);
+        var C: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, x_bcdt, d_state, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], llama.impl.c.ggml_element_size(x_bcdt) * @as(usize, @intCast(d_state)));
+        var dt: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, x_bcdt, dt_dim, n_seq_tokens, n_seqs, x_bcdt.nb[1], x_bcdt.nb[2], llama.impl.c.ggml_element_size(x_bcdt) * @as(usize, @intCast(2 * d_state)));
         b.cb(B, "mamba_B_raw", il);
         b.cb(C, "mamba_C_raw", il);
         b.cb(dt, "mamba_dt_raw", il);
@@ -376,53 +366,53 @@ fn buildPlamo2MambaLayer(b: *const graph.Builder, inp: *const graph.InpRs, cur_:
 
         // dt_proj: {dt_rank, d_inner} @ {dt_rank, n_seq_tokens, n_seqs} => {d_inner, n_seq_tokens, n_seqs}
         dt = b.buildLoraMm(layer.ssm_dt.?, dt, null);
-        dt = c.ggml_add(ctx, dt, layer.ssm_dt_b);
+        dt = llama.impl.c.ggml_add(ctx, dt, layer.ssm_dt_b);
         b.cb(dt, "mamba_dt_proj", il);
 
-        const A: *Tensor = c.ggml_reshape_2d(ctx, layer.ssm_a, 1, n_heads);
+        const A: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_2d(ctx, layer.ssm_a, 1, n_heads);
         b.cb(A, "mamba_A", il);
 
-        const xes = c.ggml_element_size(x);
+        const xes = llama.impl.c.ggml_element_size(x);
         const hd: usize = @intCast(head_dim);
         const nh: usize = @intCast(n_heads);
         const nst: usize = @intCast(n_seq_tokens);
-        x = c.ggml_view_4d(ctx, x, head_dim, n_heads, n_seq_tokens, n_seqs, hd * xes, hd * nh * xes, hd * nh * nst * xes, 0);
-        B = c.ggml_view_4d(ctx, B, d_state, 1, n_seq_tokens, n_seqs, @as(usize, @intCast(d_state)) * B.nb[0], B.nb[1], B.nb[2], 0);
-        C = c.ggml_view_4d(ctx, C, d_state, 1, n_seq_tokens, n_seqs, @as(usize, @intCast(d_state)) * C.nb[0], C.nb[1], C.nb[2], 0);
+        x = llama.impl.c.ggml_view_4d(ctx, x, head_dim, n_heads, n_seq_tokens, n_seqs, hd * xes, hd * nh * xes, hd * nh * nst * xes, 0);
+        B = llama.impl.c.ggml_view_4d(ctx, B, d_state, 1, n_seq_tokens, n_seqs, @as(usize, @intCast(d_state)) * B.nb[0], B.nb[1], B.nb[2], 0);
+        C = llama.impl.c.ggml_view_4d(ctx, C, d_state, 1, n_seq_tokens, n_seqs, @as(usize, @intCast(d_state)) * C.nb[0], C.nb[1], C.nb[2], 0);
 
-        const rows: mamba_base.SsmRows = .{ .d_state = d_state, .head_dim = head_dim, .n_head = n_heads, .n_slots = mctx_cur.getSize(), .x = x, .dt = dt, .A = A, .B = B, .C = C, .K = 1 };
+        const rows: llama.models.mamba_base.SsmRows = .{ .d_state = d_state, .head_dim = head_dim, .n_head = n_heads, .n_slots = mctx_cur.getSize(), .x = x, .dt = dt, .A = A, .B = B, .C = C, .K = 1 };
         const y_ssm = b.buildRs(inp, ssm_states_all, @bitCast(hp.nEmbdS()), @intCast(ubatch.n_seqs), rows.rowsFn());
         b.cb(y_ssm, "mamba_ssm_scan", il);
 
         // Store the last states.
         const ns: usize = @intCast(n_seqs);
         const ds: usize = @intCast(d_state);
-        c.ggml_build_forward_expand(b.gf, c.ggml_cpy(
+        llama.impl.c.ggml_build_forward_expand(b.gf, llama.impl.c.ggml_cpy(
             ctx,
-            c.ggml_view_1d(ctx, y_ssm, n_heads * head_dim * d_state * n_seqs, nh * hd * nst * ns * c.ggml_element_size(y_ssm)),
-            c.ggml_view_1d(ctx, ssm_states_all, n_heads * head_dim * d_state * n_seqs, kv_head * ns * nh * hd * ds * c.ggml_element_size(ssm_states_all)),
+            llama.impl.c.ggml_view_1d(ctx, y_ssm, n_heads * head_dim * d_state * n_seqs, nh * hd * nst * ns * llama.impl.c.ggml_element_size(y_ssm)),
+            llama.impl.c.ggml_view_1d(ctx, ssm_states_all, n_heads * head_dim * d_state * n_seqs, kv_head * ns * nh * hd * ds * llama.impl.c.ggml_element_size(ssm_states_all)),
         ));
 
-        var y: *Tensor = c.ggml_view_4d(ctx, y_ssm, head_dim, n_heads, n_seq_tokens, n_seqs, hd * c.ggml_element_size(x), hd * nh * c.ggml_element_size(x), hd * nh * nst * c.ggml_element_size(x), 0);
+        var y: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, y_ssm, head_dim, n_heads, n_seq_tokens, n_seqs, hd * llama.impl.c.ggml_element_size(x), hd * nh * llama.impl.c.ggml_element_size(x), hd * nh * nst * llama.impl.c.ggml_element_size(x), 0);
         b.cb(y, "mamba_y_view", il);
 
         // Add the D parameter and gate with z.
         // {d_inner, n_seq_tokens, n_seqs} * {d_inner} => {d_inner, n_seq_tokens, n_seqs}
-        const D: *Tensor = c.ggml_reshape_2d(ctx, layer.ssm_d, 1, n_heads);
-        y = c.ggml_add(ctx, y, c.ggml_mul(ctx, x, D));
+        const D: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_2d(ctx, layer.ssm_d, 1, n_heads);
+        y = llama.impl.c.ggml_add(ctx, y, llama.impl.c.ggml_mul(ctx, x, D));
         b.cb(y, "mamba_y_add_d", il);
 
-        y = c.ggml_swiglu_split(ctx, c.ggml_cont(ctx, z), y);
+        y = llama.impl.c.ggml_swiglu_split(ctx, llama.impl.c.ggml_cont(ctx, z), y);
         b.cb(y, "mamba_y_swiglu_z", il);
 
         // out_proj: {d_inner, n_embd} @ {d_inner, n_seq_tokens, n_seqs} => {n_embd, n_seq_tokens, n_seqs}
-        y = c.ggml_view_3d(ctx, y, head_dim * n_heads, n_seq_tokens, n_seqs, y.nb[2], y.nb[3], 0);
+        y = llama.impl.c.ggml_view_3d(ctx, y, head_dim * n_heads, n_seq_tokens, n_seqs, y.nb[2], y.nb[3], 0);
         cur = b.buildLoraMm(layer.ssm_out.?, y, null);
         b.cb(cur, "mamba_out_proj", il);
     }
 
     // {n_embd, n_seq_tokens, n_seqs} => {n_embd, n_tokens}
-    cur = c.ggml_reshape_2d(ctx, cur, cur.ne[0], n_seq_tokens * n_seqs);
+    cur = llama.impl.c.ggml_reshape_2d(ctx, cur, cur.ne[0], n_seq_tokens * n_seqs);
     b.cb(cur, "mamba_out", il);
 
     return cur;

@@ -31,58 +31,48 @@
 //! body below is the whole of the live function.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const mmla = @import("mmla.zig");
+const ggml = @import("../../../module.zig");
 
-// The `_generic` implementations, in `cpu/repack/`. Declared rather than
-// imported so the call reads as the C's does, across what is a translation
-// unit boundary there.
-extern fn ggml_gemv_q4_0_8x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q4_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q4_0_8x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q4_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q5_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q6_K_8x8_q8_K_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_q8_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
+// The `_generic` implementations, in `cpu/repack/`, by their C names.
 
 /// Ports `ggml_gemv_q4_0_8x8_q8_0` (arch/arm/repack.cpp:357 @b1b770d90).
 pub export fn ggml_gemv_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    ggml_gemv_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q4_0.ggml_gemv_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q4_0_4x8_q8_0` (arch/arm/repack.cpp:2570 @b1b770d90).
 pub export fn ggml_gemm_q4_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime mmla.enabled) return mmla.gemmQ4_0_4x8(n, s, bs, vx, vy, nr, nc);
-    ggml_gemm_q4_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.arch.mmla.gemmQ4_0_4x8(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q4_0.ggml_gemm_q4_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q4_0_8x8_q8_0` (arch/arm/repack.cpp:2991 @b1b770d90).
 pub export fn ggml_gemm_q4_0_8x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    ggml_gemm_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q4_0.ggml_gemm_q4_0_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q4_K_8x8_q8_K` (arch/arm/repack.cpp:4015 @b1b770d90).
 pub export fn ggml_gemm_q4_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime mmla.enabled) return mmla.gemmQ4_K_8x8(n, s, bs, vx, vy, nr, nc);
-    ggml_gemm_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.arch.mmla.gemmQ4_K_8x8(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q4_k.ggml_gemm_q4_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q5_K_8x8_q8_K` (arch/arm/repack.cpp:4535 @b1b770d90).
 pub export fn ggml_gemm_q5_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime mmla.enabled) return mmla.gemmQ5_K_8x8(n, s, bs, vx, vy, nr, nc);
-    ggml_gemm_q5_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.arch.mmla.gemmQ5_K_8x8(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q5_k.ggml_gemm_q5_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q6_K_8x8_q8_K` (arch/arm/repack.cpp:4984 @b1b770d90).
 pub export fn ggml_gemm_q6_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime mmla.enabled) return mmla.gemmQ6_K_8x8(n, s, bs, vx, vy, nr, nc);
-    ggml_gemm_q6_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.arch.mmla.gemmQ6_K_8x8(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q6_k.ggml_gemm_q6_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 /// Ports `ggml_gemm_q8_0_4x8_q8_0` (arch/arm/repack.cpp:5456 @b1b770d90).
 pub export fn ggml_gemm_q8_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime mmla.enabled) return mmla.gemmQ8_0_4x8(n, s, bs, vx, vy, nr, nc);
-    ggml_gemm_q8_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime ggml.cpu.quants.arch.neon.has_i8mm) return ggml.cpu.repack.arch.mmla.gemmQ8_0_4x8(n, s, bs, vx, vy, nr, nc);
+    ggml.cpu.repack.q8_0.ggml_gemm_q8_0_4x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
 
 // -----------------------------------------------------------------------------
@@ -94,19 +84,15 @@ pub export fn ggml_gemm_q8_0_4x8_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const
 // the same names itself, so the renames are made per architecture, here and
 // in `x86/fallback.zig`.
 
-const nibble4 = @import("../nibble4.zig");
-const q2_k = @import("../q2_k.zig");
-const quantize = @import("../quantize.zig");
-
 comptime {
-    _ = impl;
+    _ = ggml.impl;
     _ = std;
-    @export(&quantize.ggml_quantize_mat_q8_K_4x4_generic, .{ .name = "ggml_quantize_mat_q8_K_4x4" });
-    @export(&quantize.ggml_quantize_mat_q8_K_4x8_generic, .{ .name = "ggml_quantize_mat_q8_K_4x8" });
-    @export(&nibble4.ggml_gemv_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemv_iq4_nl_8x8_q8_0" });
-    @export(&nibble4.ggml_gemv_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemv_mxfp4_8x8_q8_0" });
-    @export(&q2_k.ggml_gemv_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemv_q2_K_8x8_q8_K" });
-    @export(&nibble4.ggml_gemm_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemm_iq4_nl_8x8_q8_0" });
-    @export(&nibble4.ggml_gemm_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemm_mxfp4_8x8_q8_0" });
-    @export(&q2_k.ggml_gemm_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemm_q2_K_8x8_q8_K" });
+    @export(&ggml.cpu.repack.quantize.ggml_quantize_mat_q8_K_4x4_generic, .{ .name = "ggml_quantize_mat_q8_K_4x4" });
+    @export(&ggml.cpu.repack.quantize.ggml_quantize_mat_q8_K_4x8_generic, .{ .name = "ggml_quantize_mat_q8_K_4x8" });
+    @export(&ggml.cpu.repack.nibble4.ggml_gemv_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemv_iq4_nl_8x8_q8_0" });
+    @export(&ggml.cpu.repack.nibble4.ggml_gemv_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemv_mxfp4_8x8_q8_0" });
+    @export(&ggml.cpu.repack.q2_k.ggml_gemv_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemv_q2_K_8x8_q8_K" });
+    @export(&ggml.cpu.repack.nibble4.ggml_gemm_iq4_nl_8x8_q8_0_generic, .{ .name = "ggml_gemm_iq4_nl_8x8_q8_0" });
+    @export(&ggml.cpu.repack.nibble4.ggml_gemm_mxfp4_8x8_q8_0_generic, .{ .name = "ggml_gemm_mxfp4_8x8_q8_0" });
+    @export(&ggml.cpu.repack.q2_k.ggml_gemm_q2_K_8x8_q8_K_generic, .{ .name = "ggml_gemm_q2_K_8x8_q8_K" });
 }

@@ -8,23 +8,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
-const s2g = json.schema_to_grammar;
 
 /// EOG text must reach the parser: an XML call has no closing tag of its own
 const eog_tokens = [_][]const u8{
@@ -35,27 +23,27 @@ const param_open = "<rfl:parameter name=\"";
 const param_close = "\n</rfl:parameter>";
 
 /// `with_eog`: `delims` followed by the EOG tokens.
-fn withEog(a: Allocator, delims: []const []const u8) Error![]const []const u8 {
+fn withEog(a: Allocator, delims: []const []const u8) common_chat.exception.Error![]const []const u8 {
     return std.mem.concat(a, []const u8, &.{ delims, &eog_tokens });
 }
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
-    cb: *ChatBuilder = undefined,
-    arg_close: ParserId = undefined,
-    arg_string: ParserId = undefined,
-    arg_sep: ParserId = undefined,
-    call_close: ParserId = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    arg_close: peg.ParserId = undefined,
+    arg_string: peg.ParserId = undefined,
+    arg_sep: peg.ParserId = undefined,
+    call_close: peg.ParserId = undefined,
+    tool_choice: peg.ParserId = undefined,
     name: []const u8 = "",
     tool_index: usize = 0,
-    arg_rules: std.ArrayList(ParserId) = .empty,
+    arg_rules: std.ArrayList(peg.ParserId) = .empty,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const a = self.a;
         const b = &p.b;
@@ -119,7 +107,7 @@ const Build = struct {
             self.call_close = try b.gbnf(call_alts, try std.mem.concat(a, u8, &.{ "(", call_close_gbnf.items, ")?" }));
 
             self.tool_choice = try b.choiceEmpty();
-            parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+            common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
 
             const tool_calls = if (self.inputs.parallel_tool_calls)
                 try b.plus(self.tool_choice, try b.zeroOrMore(try b.plus(start, self.tool_choice)))
@@ -143,27 +131,27 @@ const Build = struct {
     }
 
     /// `gbnf_format_literal`.
-    fn gbnfLiteral(a: Allocator, s: []const u8) chat_peg.Error![]u8 {
-        return s2g.gbnfFormatLiteral(a, s) catch |e| peg.errors.fromSchema(e);
+    fn gbnfLiteral(a: Allocator, s: []const u8) peg.Error![]u8 {
+        return json.schema_to_grammar.gbnfFormatLiteral(a, s) catch |e| peg.errors.fromSchema(e);
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
         self.tool_index = tool_index;
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        self.name = try parsers.functionName(t);
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        self.name = try common_chat.parsers.functionName(t);
         self.arg_rules = .empty;
-        try parsers.foreachParameter(self.a, function, self, param);
-        self.buildTool() catch |e| return util.fromPeg(e);
+        try common_chat.parsers.foreachParameter(self.a, function, self, param);
+        self.buildTool() catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build) chat_peg.Error!void {
+    fn buildTool(self: *Build) peg.Error!void {
         const p = self.cb;
         const b = &p.b;
         const a = self.a;
 
         if (self.arg_rules.items.len == 0) {
             const any_name = try b.chars("[^\"\\n<]", 1, -1);
-            const rule_name = try parsers.indexName(a, "tool-", self.tool_index, "-arg-any");
+            const rule_name = try common_chat.parsers.indexName(a, "tool-", self.tool_index, "-arg-any");
             const open = try p.toolArgOpen(try b.plus(try b.plus(try b.literal(param_open), try p.toolArgName(any_name)), try b.literal("\">\n")));
             try self.arg_rules.append(a, try b.rule(rule_name, try p.toolArg(try b.plus(open, self.arg_string)), false));
         }
@@ -175,18 +163,18 @@ const Build = struct {
         const with_args = try b.plus(try p.toolOpen(open), try p.toolArgs(args));
         const call = try p.tool(try b.plus(with_args, try p.toolClose(self.call_close)));
 
-        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(a, "tool-", self.tool_index, ""), call, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try common_chat.parsers.indexName(a, "tool-", self.tool_index, ""), call, false));
     }
 
-    fn param(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const r = self.buildParam(param_index, prop, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) common_chat.exception.Error!void {
+        const r = self.buildParam(param_index, prop, doc) catch |e| return common_chat.util.fromPeg(e);
         try self.arg_rules.append(self.a, r);
     }
 
-    fn buildParam(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prop: *const json.schema.Property, doc: *peg.SharedDoc) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
-        const rule_name = try parsers.argName(self.a, self.tool_index, param_index, "");
+        const rule_name = try common_chat.parsers.argName(self.a, self.tool_index, param_index, "");
         var open = try b.plus(try b.literal(param_open), try p.toolArgName(try b.literal(prop.name)));
         open = try b.plus(open, try b.literal("\">\n"));
         const arg_open = try p.toolArgOpen(open);
@@ -220,11 +208,11 @@ const Build = struct {
 /// Ports `common_chat_params_init_harmony_xml` (parsers/harmony-xml.cpp:4 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, null, null, null);
     try data.message_delimiters.add(a, .assistant, "<|start|>assistant");
     try data.message_delimiters.add(a, .user, "<|start|>user");
     try data.message_delimiters.add(a, .system, "<|start|>developer");
@@ -250,7 +238,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         try data.prompt.append(a, data.generation_prompt, false);
     }
 
-    const has_tools = parsers.hasTools(&inputs.tools);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
     const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
     const extract_reasoning = inputs.reasoning_format != .none;
@@ -262,12 +250,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
 
         if (data.grammar_lazy) {
             try data.grammar_triggers.appendSlice(a, &.{
@@ -291,9 +279,9 @@ test "Harmony XML builds a tool parser with lazy triggers" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var t = try template.Template.init(std.testing.allocator, "{% for m in messages %}<|start|>{{ m.role }}<|message|>{{ m.content }}<|end|>{% endfor %}", "", "");
+    var t = try common_chat.template.Template.init(std.testing.allocator, "{% for m in messages %}<|start|>{{ m.role }}<|message|>{{ m.content }}<|end|>{% endfor %}", "", "");
     defer t.deinit();
-    var p: GenerationParams = .{};
+    var p: common_chat.template.GenerationParams = .{};
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{\"type\":\"string\"}}}}}]");
     const data = try init(a, &t, &p);

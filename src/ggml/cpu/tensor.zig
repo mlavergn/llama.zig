@@ -23,14 +23,7 @@
 //! trap on the narrowing instead, which is a worse way to say the same thing.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const types = @import("../types.zig");
-const context = @import("../context.zig");
-const convert = @import("convert.zig");
-const c = impl.c;
-
-const Tensor = c.ggml_tensor;
-const Context = context.Context;
+const ggml = @import("../module.zig");
 
 /// A byte pointer into a tensor's data, with no alignment promise.
 ///
@@ -39,7 +32,7 @@ const Context = context.Context;
 /// so every access here goes through `align(1)`: unaligned loads cost nothing
 /// on AArch64 and asserting an alignment the C never guarantees would turn a
 /// working read into a panic.
-fn bytes(tensor: *const Tensor) [*]u8 {
+fn bytes(tensor: *const ggml.impl.c.ggml_tensor) [*]u8 {
     return @ptrCast(tensor.data.?);
 }
 
@@ -65,7 +58,7 @@ inline fn vecSet(comptime T: type, n: i64, p: [*]u8, v: T) void {
 /// The byte offset of element `(d0, d1, d2, d3)` — the C calls them `i0`..`i3`,
 /// which Zig reserves as integer type names. The `nd` accessors' shared first line.
 /// first line.
-inline fn offsetOf(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) usize {
+inline fn offsetOf(tensor: *const ggml.impl.c.ggml_tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) usize {
     return @as(usize, @intCast(d0)) * tensor.nb[0] +
         @as(usize, @intCast(d1)) * tensor.nb[1] +
         @as(usize, @intCast(d2)) * tensor.nb[2] +
@@ -83,10 +76,10 @@ inline fn offsetOf(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c
 /// - `value`: the scalar to store.
 ///
 /// Return: a 1-element I32 tensor owned by `ctx`.
-pub export fn ggml_new_i32(ctx: *Context, value: i32) *Tensor {
-    impl.assert(!context.ggml_get_no_alloc(ctx), "!ggml_get_no_alloc(ctx)");
+pub export fn ggml_new_i32(ctx: *ggml.context.Context, value: i32) *ggml.impl.c.ggml_tensor {
+    ggml.impl.assert(!ggml.context.ggml_get_no_alloc(ctx), "!ggml_get_no_alloc(ctx)");
 
-    const result = context.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, 1);
+    const result = ggml.context.ggml_new_tensor_1d(ctx, ggml.impl.c.GGML_TYPE_I32, 1);
     _ = ggml_set_i32(result, value);
     return result;
 }
@@ -98,10 +91,10 @@ pub export fn ggml_new_i32(ctx: *Context, value: i32) *Tensor {
 /// - `value`: the scalar to store.
 ///
 /// Return: a 1-element F32 tensor owned by `ctx`.
-pub export fn ggml_new_f32(ctx: *Context, value: f32) *Tensor {
-    impl.assert(!context.ggml_get_no_alloc(ctx), "!ggml_get_no_alloc(ctx)");
+pub export fn ggml_new_f32(ctx: *ggml.context.Context, value: f32) *ggml.impl.c.ggml_tensor {
+    ggml.impl.assert(!ggml.context.ggml_get_no_alloc(ctx), "!ggml_get_no_alloc(ctx)");
 
-    const result = context.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, 1);
+    const result = ggml.context.ggml_new_tensor_1d(ctx, ggml.impl.c.GGML_TYPE_F32, 1);
     _ = ggml_set_f32(result, value);
     return result;
 }
@@ -119,44 +112,44 @@ pub export fn ggml_new_f32(ctx: *Context, value: f32) *Tensor {
 /// - `value`: the value, converted to the tensor's type.
 ///
 /// Return: `tensor`, for chaining, as the C does.
-pub export fn ggml_set_i32(tensor: *Tensor, value: i32) *Tensor {
-    const n = types.ggml_nrows(tensor);
+pub export fn ggml_set_i32(tensor: *ggml.impl.c.ggml_tensor, value: i32) *ggml.impl.c.ggml_tensor {
+    const n = ggml.types.ggml_nrows(tensor);
     const nc = tensor.ne[0];
     const n1 = tensor.nb[1];
     const data = bytes(tensor);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => {
+        ggml.impl.c.GGML_TYPE_I8 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i8));
             for (0..@intCast(n)) |i| vecSet(i8, nc, data + i * n1, @truncate(value));
         },
-        c.GGML_TYPE_I16 => {
+        ggml.impl.c.GGML_TYPE_I16 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i16));
             for (0..@intCast(n)) |i| vecSet(i16, nc, data + i * n1, @truncate(value));
         },
-        c.GGML_TYPE_I32 => {
+        ggml.impl.c.GGML_TYPE_I32 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i32));
             for (0..@intCast(n)) |i| vecSet(i32, nc, data + i * n1, value);
         },
-        c.GGML_TYPE_F16 => {
-            std.debug.assert(tensor.nb[0] == @sizeOf(c.ggml_fp16_t));
-            const v = convert.cpuFp32ToFp16(@floatFromInt(value));
-            for (0..@intCast(n)) |i| vecSet(c.ggml_fp16_t, nc, data + i * n1, v);
+        ggml.impl.c.GGML_TYPE_F16 => {
+            std.debug.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t));
+            const v = ggml.cpu.convert.cpuFp32ToFp16(@floatFromInt(value));
+            for (0..@intCast(n)) |i| vecSet(ggml.impl.c.ggml_fp16_t, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_BF16 => {
+        ggml.impl.c.GGML_TYPE_BF16 => {
             // The C asserts `sizeof(ggml_fp16_t)` here rather than
             // `sizeof(ggml_bf16_t)`. They are the same two bytes, so the
             // assertion still holds; kept as the C wrote it.
-            std.debug.assert(tensor.nb[0] == @sizeOf(c.ggml_fp16_t));
-            const v = c.ggml_bf16_t{ .bits = impl.fp32ToBf16(@floatFromInt(value)) };
-            for (0..@intCast(n)) |i| vecSet(c.ggml_bf16_t, nc, data + i * n1, v);
+            std.debug.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t));
+            const v = ggml.impl.c.ggml_bf16_t{ .bits = ggml.impl.fp32ToBf16(@floatFromInt(value)) };
+            for (0..@intCast(n)) |i| vecSet(ggml.impl.c.ggml_bf16_t, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_F32 => {
+        ggml.impl.c.GGML_TYPE_F32 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(f32));
             const v: f32 = @floatFromInt(value);
             for (0..@intCast(n)) |i| vecSet(f32, nc, data + i * n1, v);
         },
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 
     return tensor;
@@ -169,43 +162,43 @@ pub export fn ggml_set_i32(tensor: *Tensor, value: i32) *Tensor {
 /// - `value`: the value, converted to the tensor's type.
 ///
 /// Return: `tensor`, for chaining.
-pub export fn ggml_set_f32(tensor: *Tensor, value: f32) *Tensor {
-    const n = types.ggml_nrows(tensor);
+pub export fn ggml_set_f32(tensor: *ggml.impl.c.ggml_tensor, value: f32) *ggml.impl.c.ggml_tensor {
+    const n = ggml.types.ggml_nrows(tensor);
     const nc = tensor.ne[0];
     const n1 = tensor.nb[1];
     const data = bytes(tensor);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => {
+        ggml.impl.c.GGML_TYPE_I8 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i8));
-            const v = impl.truncTo(i8, value);
+            const v = ggml.impl.truncTo(i8, value);
             for (0..@intCast(n)) |i| vecSet(i8, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_I16 => {
+        ggml.impl.c.GGML_TYPE_I16 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i16));
-            const v = impl.truncTo(i16, value);
+            const v = ggml.impl.truncTo(i16, value);
             for (0..@intCast(n)) |i| vecSet(i16, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_I32 => {
+        ggml.impl.c.GGML_TYPE_I32 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(i32));
-            const v = impl.truncTo(i32, value);
+            const v = ggml.impl.truncTo(i32, value);
             for (0..@intCast(n)) |i| vecSet(i32, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_F16 => {
-            std.debug.assert(tensor.nb[0] == @sizeOf(c.ggml_fp16_t));
-            const v = convert.cpuFp32ToFp16(value);
-            for (0..@intCast(n)) |i| vecSet(c.ggml_fp16_t, nc, data + i * n1, v);
+        ggml.impl.c.GGML_TYPE_F16 => {
+            std.debug.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t));
+            const v = ggml.cpu.convert.cpuFp32ToFp16(value);
+            for (0..@intCast(n)) |i| vecSet(ggml.impl.c.ggml_fp16_t, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_BF16 => {
-            std.debug.assert(tensor.nb[0] == @sizeOf(c.ggml_bf16_t));
-            const v = c.ggml_bf16_t{ .bits = impl.fp32ToBf16(value) };
-            for (0..@intCast(n)) |i| vecSet(c.ggml_bf16_t, nc, data + i * n1, v);
+        ggml.impl.c.GGML_TYPE_BF16 => {
+            std.debug.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_bf16_t));
+            const v = ggml.impl.c.ggml_bf16_t{ .bits = ggml.impl.fp32ToBf16(value) };
+            for (0..@intCast(n)) |i| vecSet(ggml.impl.c.ggml_bf16_t, nc, data + i * n1, v);
         },
-        c.GGML_TYPE_F32 => {
+        ggml.impl.c.GGML_TYPE_F32 => {
             std.debug.assert(tensor.nb[0] == @sizeOf(f32));
             for (0..@intCast(n)) |i| vecSet(f32, nc, data + i * n1, value);
         },
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 
     return tensor;
@@ -225,10 +218,10 @@ pub export fn ggml_set_f32(tensor: *Tensor, value: f32) *Tensor {
 /// - `i`: flat element index.
 ///
 /// Return: the element, converted to `i32` by truncation toward zero.
-pub export fn ggml_get_i32_1d(tensor: *const Tensor, i: c_int) i32 {
-    if (!types.ggml_is_contiguous(tensor)) {
+pub export fn ggml_get_i32_1d(tensor: *const ggml.impl.c.ggml_tensor, i: c_int) i32 {
+    if (!ggml.types.ggml_is_contiguous(tensor)) {
         var id: [4]i64 = @splat(0);
-        context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
+        ggml.context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
         return ggml_get_i32_nd(tensor, @intCast(id[0]), @intCast(id[1]), @intCast(id[2]), @intCast(id[3]));
     }
 
@@ -236,31 +229,31 @@ pub export fn ggml_get_i32_1d(tensor: *const Tensor, i: c_int) i32 {
     const idx: usize = @intCast(i);
 
     return switch (tensor.type) {
-        c.GGML_TYPE_I8 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(i8), "tensor->nb[0] == sizeof(int8_t)");
+        ggml.impl.c.GGML_TYPE_I8 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i8), "tensor->nb[0] == sizeof(int8_t)");
             break :blk load(i8, data + idx * @sizeOf(i8));
         },
-        c.GGML_TYPE_I16 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(i16), "tensor->nb[0] == sizeof(int16_t)");
+        ggml.impl.c.GGML_TYPE_I16 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i16), "tensor->nb[0] == sizeof(int16_t)");
             break :blk load(i16, data + idx * @sizeOf(i16));
         },
-        c.GGML_TYPE_I32 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(i32), "tensor->nb[0] == sizeof(int32_t)");
+        ggml.impl.c.GGML_TYPE_I32 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i32), "tensor->nb[0] == sizeof(int32_t)");
             break :blk load(i32, data + idx * @sizeOf(i32));
         },
-        c.GGML_TYPE_F16 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(c.ggml_fp16_t), "tensor->nb[0] == sizeof(ggml_fp16_t)");
-            break :blk impl.truncTo(i32, convert.cpuFp16ToFp32(load(c.ggml_fp16_t, data + idx * 2)));
+        ggml.impl.c.GGML_TYPE_F16 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t), "tensor->nb[0] == sizeof(ggml_fp16_t)");
+            break :blk ggml.impl.truncTo(i32, ggml.cpu.convert.cpuFp16ToFp32(load(ggml.impl.c.ggml_fp16_t, data + idx * 2)));
         },
-        c.GGML_TYPE_BF16 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(c.ggml_bf16_t), "tensor->nb[0] == sizeof(ggml_bf16_t)");
-            break :blk impl.truncTo(i32, impl.bf16ToFp32(load(c.ggml_bf16_t, data + idx * 2).bits));
+        ggml.impl.c.GGML_TYPE_BF16 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_bf16_t), "tensor->nb[0] == sizeof(ggml_bf16_t)");
+            break :blk ggml.impl.truncTo(i32, ggml.impl.bf16ToFp32(load(ggml.impl.c.ggml_bf16_t, data + idx * 2).bits));
         },
-        c.GGML_TYPE_F32 => blk: {
-            impl.assert(tensor.nb[0] == @sizeOf(f32), "tensor->nb[0] == sizeof(float)");
-            break :blk impl.truncTo(i32, load(f32, data + idx * @sizeOf(f32)));
+        ggml.impl.c.GGML_TYPE_F32 => blk: {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(f32), "tensor->nb[0] == sizeof(float)");
+            break :blk ggml.impl.truncTo(i32, load(f32, data + idx * @sizeOf(f32)));
         },
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     };
 }
 
@@ -270,10 +263,10 @@ pub export fn ggml_get_i32_1d(tensor: *const Tensor, i: c_int) i32 {
 /// - `tensor`: the tensor to write.
 /// - `i`: flat element index.
 /// - `value`: the value, converted to the tensor's type.
-pub export fn ggml_set_i32_1d(tensor: *const Tensor, i: c_int, value: i32) void {
-    if (!types.ggml_is_contiguous(tensor)) {
+pub export fn ggml_set_i32_1d(tensor: *const ggml.impl.c.ggml_tensor, i: c_int, value: i32) void {
+    if (!ggml.types.ggml_is_contiguous(tensor)) {
         var id: [4]i64 = @splat(0);
-        context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
+        ggml.context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
         ggml_set_i32_nd(tensor, @intCast(id[0]), @intCast(id[1]), @intCast(id[2]), @intCast(id[3]), value);
         return;
     }
@@ -282,31 +275,31 @@ pub export fn ggml_set_i32_1d(tensor: *const Tensor, i: c_int, value: i32) void 
     const idx: usize = @intCast(i);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => {
-            impl.assert(tensor.nb[0] == @sizeOf(i8), "tensor->nb[0] == sizeof(int8_t)");
+        ggml.impl.c.GGML_TYPE_I8 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i8), "tensor->nb[0] == sizeof(int8_t)");
             store(i8, data + idx * @sizeOf(i8), @truncate(value));
         },
-        c.GGML_TYPE_I16 => {
-            impl.assert(tensor.nb[0] == @sizeOf(i16), "tensor->nb[0] == sizeof(int16_t)");
+        ggml.impl.c.GGML_TYPE_I16 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i16), "tensor->nb[0] == sizeof(int16_t)");
             store(i16, data + idx * @sizeOf(i16), @truncate(value));
         },
-        c.GGML_TYPE_I32 => {
-            impl.assert(tensor.nb[0] == @sizeOf(i32), "tensor->nb[0] == sizeof(int32_t)");
+        ggml.impl.c.GGML_TYPE_I32 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(i32), "tensor->nb[0] == sizeof(int32_t)");
             store(i32, data + idx * @sizeOf(i32), value);
         },
-        c.GGML_TYPE_F16 => {
-            impl.assert(tensor.nb[0] == @sizeOf(c.ggml_fp16_t), "tensor->nb[0] == sizeof(ggml_fp16_t)");
-            store(c.ggml_fp16_t, data + idx * 2, convert.cpuFp32ToFp16(@floatFromInt(value)));
+        ggml.impl.c.GGML_TYPE_F16 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t), "tensor->nb[0] == sizeof(ggml_fp16_t)");
+            store(ggml.impl.c.ggml_fp16_t, data + idx * 2, ggml.cpu.convert.cpuFp32ToFp16(@floatFromInt(value)));
         },
-        c.GGML_TYPE_BF16 => {
-            impl.assert(tensor.nb[0] == @sizeOf(c.ggml_bf16_t), "tensor->nb[0] == sizeof(ggml_bf16_t)");
-            store(c.ggml_bf16_t, data + idx * 2, .{ .bits = impl.fp32ToBf16(@floatFromInt(value)) });
+        ggml.impl.c.GGML_TYPE_BF16 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(ggml.impl.c.ggml_bf16_t), "tensor->nb[0] == sizeof(ggml_bf16_t)");
+            store(ggml.impl.c.ggml_bf16_t, data + idx * 2, .{ .bits = ggml.impl.fp32ToBf16(@floatFromInt(value)) });
         },
-        c.GGML_TYPE_F32 => {
-            impl.assert(tensor.nb[0] == @sizeOf(f32), "tensor->nb[0] == sizeof(float)");
+        ggml.impl.c.GGML_TYPE_F32 => {
+            ggml.impl.assert(tensor.nb[0] == @sizeOf(f32), "tensor->nb[0] == sizeof(float)");
             store(f32, data + idx * @sizeOf(f32), @floatFromInt(value));
         },
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -317,10 +310,10 @@ pub export fn ggml_set_i32_1d(tensor: *const Tensor, i: c_int, value: i32) void 
 /// - `i`: flat element index.
 ///
 /// Return: the element, widened to `f32`.
-pub export fn ggml_get_f32_1d(tensor: *const Tensor, i: c_int) f32 {
-    if (!types.ggml_is_contiguous(tensor)) {
+pub export fn ggml_get_f32_1d(tensor: *const ggml.impl.c.ggml_tensor, i: c_int) f32 {
+    if (!ggml.types.ggml_is_contiguous(tensor)) {
         var id: [4]i64 = @splat(0);
-        context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
+        ggml.context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
         return ggml_get_f32_nd(tensor, @intCast(id[0]), @intCast(id[1]), @intCast(id[2]), @intCast(id[3]));
     }
 
@@ -329,13 +322,13 @@ pub export fn ggml_get_f32_1d(tensor: *const Tensor, i: c_int) f32 {
 
     // Unlike the `i32` reader, the C asserts nothing here.
     return switch (tensor.type) {
-        c.GGML_TYPE_I8 => @floatFromInt(load(i8, data + idx * @sizeOf(i8))),
-        c.GGML_TYPE_I16 => @floatFromInt(load(i16, data + idx * @sizeOf(i16))),
-        c.GGML_TYPE_I32 => @floatFromInt(load(i32, data + idx * @sizeOf(i32))),
-        c.GGML_TYPE_F16 => convert.cpuFp16ToFp32(load(c.ggml_fp16_t, data + idx * 2)),
-        c.GGML_TYPE_BF16 => impl.bf16ToFp32(load(c.ggml_bf16_t, data + idx * 2).bits),
-        c.GGML_TYPE_F32 => load(f32, data + idx * @sizeOf(f32)),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => @floatFromInt(load(i8, data + idx * @sizeOf(i8))),
+        ggml.impl.c.GGML_TYPE_I16 => @floatFromInt(load(i16, data + idx * @sizeOf(i16))),
+        ggml.impl.c.GGML_TYPE_I32 => @floatFromInt(load(i32, data + idx * @sizeOf(i32))),
+        ggml.impl.c.GGML_TYPE_F16 => ggml.cpu.convert.cpuFp16ToFp32(load(ggml.impl.c.ggml_fp16_t, data + idx * 2)),
+        ggml.impl.c.GGML_TYPE_BF16 => ggml.impl.bf16ToFp32(load(ggml.impl.c.ggml_bf16_t, data + idx * 2).bits),
+        ggml.impl.c.GGML_TYPE_F32 => load(f32, data + idx * @sizeOf(f32)),
+        else => ggml.impl.abort("fatal error"),
     };
 }
 
@@ -345,10 +338,10 @@ pub export fn ggml_get_f32_1d(tensor: *const Tensor, i: c_int) f32 {
 /// - `tensor`: the tensor to write.
 /// - `i`: flat element index.
 /// - `value`: the value, converted to the tensor's type.
-pub export fn ggml_set_f32_1d(tensor: *const Tensor, i: c_int, value: f32) void {
-    if (!types.ggml_is_contiguous(tensor)) {
+pub export fn ggml_set_f32_1d(tensor: *const ggml.impl.c.ggml_tensor, i: c_int, value: f32) void {
+    if (!ggml.types.ggml_is_contiguous(tensor)) {
         var id: [4]i64 = @splat(0);
-        context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
+        ggml.context.ggml_unravel_index(tensor, i, &id[0], &id[1], &id[2], &id[3]);
         ggml_set_f32_nd(tensor, @intCast(id[0]), @intCast(id[1]), @intCast(id[2]), @intCast(id[3]), value);
         return;
     }
@@ -357,13 +350,13 @@ pub export fn ggml_set_f32_1d(tensor: *const Tensor, i: c_int, value: f32) void 
     const idx: usize = @intCast(i);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => store(i8, data + idx * @sizeOf(i8), impl.truncTo(i8, value)),
-        c.GGML_TYPE_I16 => store(i16, data + idx * @sizeOf(i16), impl.truncTo(i16, value)),
-        c.GGML_TYPE_I32 => store(i32, data + idx * @sizeOf(i32), impl.truncTo(i32, value)),
-        c.GGML_TYPE_F16 => store(c.ggml_fp16_t, data + idx * 2, convert.cpuFp32ToFp16(value)),
-        c.GGML_TYPE_BF16 => store(c.ggml_bf16_t, data + idx * 2, .{ .bits = impl.fp32ToBf16(value) }),
-        c.GGML_TYPE_F32 => store(f32, data + idx * @sizeOf(f32), value),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => store(i8, data + idx * @sizeOf(i8), ggml.impl.truncTo(i8, value)),
+        ggml.impl.c.GGML_TYPE_I16 => store(i16, data + idx * @sizeOf(i16), ggml.impl.truncTo(i16, value)),
+        ggml.impl.c.GGML_TYPE_I32 => store(i32, data + idx * @sizeOf(i32), ggml.impl.truncTo(i32, value)),
+        ggml.impl.c.GGML_TYPE_F16 => store(ggml.impl.c.ggml_fp16_t, data + idx * 2, ggml.cpu.convert.cpuFp32ToFp16(value)),
+        ggml.impl.c.GGML_TYPE_BF16 => store(ggml.impl.c.ggml_bf16_t, data + idx * 2, .{ .bits = ggml.impl.fp32ToBf16(value) }),
+        ggml.impl.c.GGML_TYPE_F32 => store(f32, data + idx * @sizeOf(f32), value),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -377,17 +370,17 @@ pub export fn ggml_set_f32_1d(tensor: *const Tensor, i: c_int, value: f32) void 
 /// - `d0`..`d3`: coordinates along each dimension.
 ///
 /// Return: the element, converted to `i32` by truncation toward zero.
-pub export fn ggml_get_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) i32 {
+pub export fn ggml_get_i32_nd(tensor: *const ggml.impl.c.ggml_tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) i32 {
     const p = bytes(tensor) + offsetOf(tensor, d0, d1, d2, d3);
 
     return switch (tensor.type) {
-        c.GGML_TYPE_I8 => load(i8, p),
-        c.GGML_TYPE_I16 => load(i16, p),
-        c.GGML_TYPE_I32 => load(i32, p),
-        c.GGML_TYPE_F16 => impl.truncTo(i32, convert.cpuFp16ToFp32(load(c.ggml_fp16_t, p))),
-        c.GGML_TYPE_BF16 => impl.truncTo(i32, impl.bf16ToFp32(load(c.ggml_bf16_t, p).bits)),
-        c.GGML_TYPE_F32 => impl.truncTo(i32, load(f32, p)),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => load(i8, p),
+        ggml.impl.c.GGML_TYPE_I16 => load(i16, p),
+        ggml.impl.c.GGML_TYPE_I32 => load(i32, p),
+        ggml.impl.c.GGML_TYPE_F16 => ggml.impl.truncTo(i32, ggml.cpu.convert.cpuFp16ToFp32(load(ggml.impl.c.ggml_fp16_t, p))),
+        ggml.impl.c.GGML_TYPE_BF16 => ggml.impl.truncTo(i32, ggml.impl.bf16ToFp32(load(ggml.impl.c.ggml_bf16_t, p).bits)),
+        ggml.impl.c.GGML_TYPE_F32 => ggml.impl.truncTo(i32, load(f32, p)),
+        else => ggml.impl.abort("fatal error"),
     };
 }
 
@@ -397,17 +390,17 @@ pub export fn ggml_get_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
 /// - `tensor`: the tensor to write.
 /// - `d0`..`d3`: coordinates along each dimension.
 /// - `value`: the value, converted to the tensor's type.
-pub export fn ggml_set_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int, value: i32) void {
+pub export fn ggml_set_i32_nd(tensor: *const ggml.impl.c.ggml_tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int, value: i32) void {
     const p = bytes(tensor) + offsetOf(tensor, d0, d1, d2, d3);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => store(i8, p, @truncate(value)),
-        c.GGML_TYPE_I16 => store(i16, p, @truncate(value)),
-        c.GGML_TYPE_I32 => store(i32, p, value),
-        c.GGML_TYPE_F16 => store(c.ggml_fp16_t, p, convert.cpuFp32ToFp16(@floatFromInt(value))),
-        c.GGML_TYPE_BF16 => store(c.ggml_bf16_t, p, .{ .bits = impl.fp32ToBf16(@floatFromInt(value)) }),
-        c.GGML_TYPE_F32 => store(f32, p, @floatFromInt(value)),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => store(i8, p, @truncate(value)),
+        ggml.impl.c.GGML_TYPE_I16 => store(i16, p, @truncate(value)),
+        ggml.impl.c.GGML_TYPE_I32 => store(i32, p, value),
+        ggml.impl.c.GGML_TYPE_F16 => store(ggml.impl.c.ggml_fp16_t, p, ggml.cpu.convert.cpuFp32ToFp16(@floatFromInt(value))),
+        ggml.impl.c.GGML_TYPE_BF16 => store(ggml.impl.c.ggml_bf16_t, p, .{ .bits = ggml.impl.fp32ToBf16(@floatFromInt(value)) }),
+        ggml.impl.c.GGML_TYPE_F32 => store(f32, p, @floatFromInt(value)),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -418,17 +411,17 @@ pub export fn ggml_set_i32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
 /// - `d0`..`d3`: coordinates along each dimension.
 ///
 /// Return: the element, widened to `f32`.
-pub export fn ggml_get_f32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) f32 {
+pub export fn ggml_get_f32_nd(tensor: *const ggml.impl.c.ggml_tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int) f32 {
     const p = bytes(tensor) + offsetOf(tensor, d0, d1, d2, d3);
 
     return switch (tensor.type) {
-        c.GGML_TYPE_I8 => @floatFromInt(load(i8, p)),
-        c.GGML_TYPE_I16 => @floatFromInt(load(i16, p)),
-        c.GGML_TYPE_I32 => @floatFromInt(load(i32, p)),
-        c.GGML_TYPE_F16 => convert.cpuFp16ToFp32(load(c.ggml_fp16_t, p)),
-        c.GGML_TYPE_BF16 => impl.bf16ToFp32(load(c.ggml_bf16_t, p).bits),
-        c.GGML_TYPE_F32 => load(f32, p),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => @floatFromInt(load(i8, p)),
+        ggml.impl.c.GGML_TYPE_I16 => @floatFromInt(load(i16, p)),
+        ggml.impl.c.GGML_TYPE_I32 => @floatFromInt(load(i32, p)),
+        ggml.impl.c.GGML_TYPE_F16 => ggml.cpu.convert.cpuFp16ToFp32(load(ggml.impl.c.ggml_fp16_t, p)),
+        ggml.impl.c.GGML_TYPE_BF16 => ggml.impl.bf16ToFp32(load(ggml.impl.c.ggml_bf16_t, p).bits),
+        ggml.impl.c.GGML_TYPE_F32 => load(f32, p),
+        else => ggml.impl.abort("fatal error"),
     };
 }
 
@@ -438,17 +431,17 @@ pub export fn ggml_get_f32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c
 /// - `tensor`: the tensor to write.
 /// - `d0`..`d3`: coordinates along each dimension.
 /// - `value`: the value, converted to the tensor's type.
-pub export fn ggml_set_f32_nd(tensor: *const Tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int, value: f32) void {
+pub export fn ggml_set_f32_nd(tensor: *const ggml.impl.c.ggml_tensor, d0: c_int, d1: c_int, d2: c_int, d3: c_int, value: f32) void {
     const p = bytes(tensor) + offsetOf(tensor, d0, d1, d2, d3);
 
     switch (tensor.type) {
-        c.GGML_TYPE_I8 => store(i8, p, impl.truncTo(i8, value)),
-        c.GGML_TYPE_I16 => store(i16, p, impl.truncTo(i16, value)),
-        c.GGML_TYPE_I32 => store(i32, p, impl.truncTo(i32, value)),
-        c.GGML_TYPE_F16 => store(c.ggml_fp16_t, p, convert.cpuFp32ToFp16(value)),
-        c.GGML_TYPE_BF16 => store(c.ggml_bf16_t, p, .{ .bits = impl.fp32ToBf16(value) }),
-        c.GGML_TYPE_F32 => store(f32, p, value),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_I8 => store(i8, p, ggml.impl.truncTo(i8, value)),
+        ggml.impl.c.GGML_TYPE_I16 => store(i16, p, ggml.impl.truncTo(i16, value)),
+        ggml.impl.c.GGML_TYPE_I32 => store(i32, p, ggml.impl.truncTo(i32, value)),
+        ggml.impl.c.GGML_TYPE_F16 => store(ggml.impl.c.ggml_fp16_t, p, ggml.cpu.convert.cpuFp32ToFp16(value)),
+        ggml.impl.c.GGML_TYPE_BF16 => store(ggml.impl.c.ggml_bf16_t, p, .{ .bits = ggml.impl.fp32ToBf16(value) }),
+        ggml.impl.c.GGML_TYPE_F32 => store(f32, p, value),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -460,8 +453,8 @@ test {
 }
 
 /// A context big enough for the small tensors below, with its own buffer.
-fn testContext() *Context {
-    return context.ggml_init(.{
+fn testContext() *ggml.context.Context {
+    return ggml.context.ggml_init(.{
         .mem_size = 16 * 1024 * 1024,
         .mem_buffer = null,
         .no_alloc = false,
@@ -470,7 +463,7 @@ fn testContext() *Context {
 
 test "new_i32 and new_f32 round trip a scalar" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
     const a = ggml_new_i32(ctx, -7);
     try std.testing.expectEqual(@as(i32, -7), ggml_get_i32_1d(a, 0));
@@ -481,15 +474,15 @@ test "new_i32 and new_f32 round trip a scalar" {
 
 test "set_f32 fills every element of every scalar type" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
-    const cases = [_]c.enum_ggml_type{
-        c.GGML_TYPE_I8,  c.GGML_TYPE_I16,  c.GGML_TYPE_I32,
-        c.GGML_TYPE_F16, c.GGML_TYPE_BF16, c.GGML_TYPE_F32,
+    const cases = [_]ggml.impl.c.enum_ggml_type{
+        ggml.impl.c.GGML_TYPE_I8,  ggml.impl.c.GGML_TYPE_I16,  ggml.impl.c.GGML_TYPE_I32,
+        ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16, ggml.impl.c.GGML_TYPE_F32,
     };
 
     for (cases) |t| {
-        const a = context.ggml_new_tensor_1d(ctx, t, 8);
+        const a = ggml.context.ggml_new_tensor_1d(ctx, t, 8);
         _ = ggml_set_f32(a, 3.0);
         for (0..8) |i| {
             try std.testing.expectEqual(@as(f32, 3.0), ggml_get_f32_1d(a, @intCast(i)));
@@ -499,15 +492,15 @@ test "set_f32 fills every element of every scalar type" {
 
 test "set_i32 fills every element of every scalar type" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
-    const cases = [_]c.enum_ggml_type{
-        c.GGML_TYPE_I8,  c.GGML_TYPE_I16,  c.GGML_TYPE_I32,
-        c.GGML_TYPE_F16, c.GGML_TYPE_BF16, c.GGML_TYPE_F32,
+    const cases = [_]ggml.impl.c.enum_ggml_type{
+        ggml.impl.c.GGML_TYPE_I8,  ggml.impl.c.GGML_TYPE_I16,  ggml.impl.c.GGML_TYPE_I32,
+        ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16, ggml.impl.c.GGML_TYPE_F32,
     };
 
     for (cases) |t| {
-        const a = context.ggml_new_tensor_1d(ctx, t, 8);
+        const a = ggml.context.ggml_new_tensor_1d(ctx, t, 8);
         _ = ggml_set_i32(a, -5);
         for (0..8) |i| {
             try std.testing.expectEqual(@as(i32, -5), ggml_get_i32_1d(a, @intCast(i)));
@@ -517,9 +510,9 @@ test "set_i32 fills every element of every scalar type" {
 
 test "the nd accessors walk the strides" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
-    const a = context.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 3, 2);
+    const a = ggml.context.ggml_new_tensor_2d(ctx, ggml.impl.c.GGML_TYPE_F32, 3, 2);
     _ = ggml_set_f32(a, 0.0);
 
     ggml_set_f32_nd(a, 2, 1, 0, 0, 9.0);
@@ -532,9 +525,9 @@ test "the nd accessors walk the strides" {
 
 test "a non-contiguous view is read through unravel_index" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
-    const a = context.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 4, 2);
+    const a = ggml.context.ggml_new_tensor_2d(ctx, ggml.impl.c.GGML_TYPE_F32, 4, 2);
     _ = ggml_set_f32(a, 0.0);
     for (0..8) |i| ggml_set_f32_1d(a, @intCast(i), @floatFromInt(i));
 
@@ -543,7 +536,7 @@ test "a non-contiguous view is read through unravel_index" {
         const t = @import("../ops.zig");
         break :ctx_view t.ggml_view_2d(ctx, a, 2, 2, a.nb[1], 0);
     };
-    try std.testing.expect(!types.ggml_is_contiguous(v));
+    try std.testing.expect(!ggml.types.ggml_is_contiguous(v));
 
     // Flat 2 is (0,1) in the view, which is element 4 of the source.
     try std.testing.expectEqual(@as(f32, 4.0), ggml_get_f32_1d(v, 2));
@@ -552,9 +545,9 @@ test "a non-contiguous view is read through unravel_index" {
 
 test "truncation toward zero, not rounding" {
     const ctx = testContext();
-    defer context.ggml_free(ctx);
+    defer ggml.context.ggml_free(ctx);
 
-    const a = context.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, 2);
+    const a = ggml.context.ggml_new_tensor_1d(ctx, ggml.impl.c.GGML_TYPE_F32, 2);
     ggml_set_f32_1d(a, 0, 1.9);
     ggml_set_f32_1d(a, 1, -1.9);
 

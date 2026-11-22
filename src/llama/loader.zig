@@ -35,21 +35,8 @@
 //! `sscanf` so its edge cases are the C++'s.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("impl.zig");
-const arch = @import("arch.zig");
-const gguf_meta = @import("gguf_meta.zig");
-const hparams_mod = @import("hparams.zig");
-const mmap = @import("mmap.zig");
-const regex = @import("regex.zig");
-
-const File = mmap.File;
-const Hparams = hparams_mod.Hparams;
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
 
 const MiB: usize = 1024 * 1024;
 const GiB: usize = 1024 * MiB;
@@ -75,85 +62,85 @@ pub fn fileVersionName(version: FileVersion) [:0]const u8 {
 /// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @b1b770d90): the
 /// name, with `(guessed) ` in front when `LLAMA_FTYPE_GUESSED` is set.
 pub fn ftypeName(ftype: c_uint) [:0]const u8 {
-    const prefixed: [:0]const u8 = switch (ftype & ~@as(c_uint, c.LLAMA_FTYPE_GUESSED)) {
-        c.LLAMA_FTYPE_ALL_F32 => "(guessed) all F32",
-        c.LLAMA_FTYPE_MOSTLY_F16 => "(guessed) F16",
-        c.LLAMA_FTYPE_MOSTLY_BF16 => "(guessed) BF16",
-        c.LLAMA_FTYPE_MOSTLY_Q1_0 => "(guessed) Q1_0",
-        c.LLAMA_FTYPE_MOSTLY_Q2_0 => "(guessed) Q2_0",
-        c.LLAMA_FTYPE_MOSTLY_F8_E4M3 => "(guessed) F8_E4M3",
-        c.LLAMA_FTYPE_MOSTLY_Q4_0 => "(guessed) Q4_0",
-        c.LLAMA_FTYPE_MOSTLY_Q4_1 => "(guessed) Q4_1",
-        c.LLAMA_FTYPE_MOSTLY_Q5_0 => "(guessed) Q5_0",
-        c.LLAMA_FTYPE_MOSTLY_Q5_1 => "(guessed) Q5_1",
-        c.LLAMA_FTYPE_MOSTLY_Q8_0 => "(guessed) Q8_0",
-        c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE => "(guessed) MXFP4 MoE",
-        c.LLAMA_FTYPE_MOSTLY_NVFP4 => "(guessed) NVFP4",
-        c.LLAMA_FTYPE_MOSTLY_Q2_K => "(guessed) Q2_K - Medium",
-        c.LLAMA_FTYPE_MOSTLY_Q2_K_S => "(guessed) Q2_K - Small",
-        c.LLAMA_FTYPE_MOSTLY_Q3_K_S => "(guessed) Q3_K - Small",
-        c.LLAMA_FTYPE_MOSTLY_Q3_K_M => "(guessed) Q3_K - Medium",
-        c.LLAMA_FTYPE_MOSTLY_Q3_K_L => "(guessed) Q3_K - Large",
-        c.LLAMA_FTYPE_MOSTLY_Q4_K_S => "(guessed) Q4_K - Small",
-        c.LLAMA_FTYPE_MOSTLY_Q4_K_M => "(guessed) Q4_K - Medium",
-        c.LLAMA_FTYPE_MOSTLY_Q5_K_S => "(guessed) Q5_K - Small",
-        c.LLAMA_FTYPE_MOSTLY_Q5_K_M => "(guessed) Q5_K - Medium",
-        c.LLAMA_FTYPE_MOSTLY_Q6_K => "(guessed) Q6_K",
-        c.LLAMA_FTYPE_MOSTLY_TQ1_0 => "(guessed) TQ1_0 - 1.69 bpw ternary",
-        c.LLAMA_FTYPE_MOSTLY_TQ2_0 => "(guessed) TQ2_0 - 2.06 bpw ternary",
-        c.LLAMA_FTYPE_MOSTLY_IQ2_XXS => "(guessed) IQ2_XXS - 2.0625 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ2_XS => "(guessed) IQ2_XS - 2.3125 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ2_S => "(guessed) IQ2_S - 2.5 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ2_M => "(guessed) IQ2_M - 2.7 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ3_XS => "(guessed) IQ3_XS - 3.3 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ3_XXS => "(guessed) IQ3_XXS - 3.0625 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ1_S => "(guessed) IQ1_S - 1.5625 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ1_M => "(guessed) IQ1_M - 1.75 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ4_NL => "(guessed) IQ4_NL - 4.5 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ4_XS => "(guessed) IQ4_XS - 4.25 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ3_S => "(guessed) IQ3_S - 3.4375 bpw",
-        c.LLAMA_FTYPE_MOSTLY_IQ3_M => "(guessed) IQ3_S mix - 3.66 bpw",
+    const prefixed: [:0]const u8 = switch (ftype & ~@as(c_uint, mod.impl.c.LLAMA_FTYPE_GUESSED)) {
+        mod.impl.c.LLAMA_FTYPE_ALL_F32 => "(guessed) all F32",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_F16 => "(guessed) F16",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_BF16 => "(guessed) BF16",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q1_0 => "(guessed) Q1_0",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_0 => "(guessed) Q2_0",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_F8_E4M3 => "(guessed) F8_E4M3",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_0 => "(guessed) Q4_0",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_1 => "(guessed) Q4_1",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_0 => "(guessed) Q5_0",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_1 => "(guessed) Q5_1",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q8_0 => "(guessed) Q8_0",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE => "(guessed) MXFP4 MoE",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_NVFP4 => "(guessed) NVFP4",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K => "(guessed) Q2_K - Medium",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K_S => "(guessed) Q2_K - Small",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_S => "(guessed) Q3_K - Small",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M => "(guessed) Q3_K - Medium",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L => "(guessed) Q3_K - Large",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_S => "(guessed) Q4_K - Small",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M => "(guessed) Q4_K - Medium",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_S => "(guessed) Q5_K - Small",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M => "(guessed) Q5_K - Medium",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q6_K => "(guessed) Q6_K",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ1_0 => "(guessed) TQ1_0 - 1.69 bpw ternary",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ2_0 => "(guessed) TQ2_0 - 2.06 bpw ternary",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS => "(guessed) IQ2_XXS - 2.0625 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS => "(guessed) IQ2_XS - 2.3125 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S => "(guessed) IQ2_S - 2.5 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M => "(guessed) IQ2_M - 2.7 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS => "(guessed) IQ3_XS - 3.3 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS => "(guessed) IQ3_XXS - 3.0625 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S => "(guessed) IQ1_S - 1.5625 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M => "(guessed) IQ1_M - 1.75 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL => "(guessed) IQ4_NL - 4.5 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS => "(guessed) IQ4_XS - 4.25 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_S => "(guessed) IQ3_S - 3.4375 bpw",
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M => "(guessed) IQ3_S mix - 3.66 bpw",
         else => "(guessed) unknown, may not work",
     };
     const guessed_prefix_len = "(guessed) ".len;
-    return if (ftype & c.LLAMA_FTYPE_GUESSED != 0) prefixed else prefixed[guessed_prefix_len..];
+    return if (ftype & mod.impl.c.LLAMA_FTYPE_GUESSED != 0) prefixed else prefixed[guessed_prefix_len..];
 }
 
 // -----------------------------------------------------------------------------
 // Metadata as text
 
 fn oom() noreturn {
-    impl.abort("llama-model-loader.cpp", 0, "out of memory");
+    mod.impl.abort("llama-model-loader.cpp", 0, "out of memory");
 }
 
 fn appendPrint(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) void {
-    out.print(allocator, fmt, args) catch oom();
+    out.print(std.heap.c_allocator, fmt, args) catch oom();
 }
 
 /// `snprintf` with a C format, appended; for the conversions whose exact
 /// digits only libc can promise, `%f` above all.
 fn appendC(out: *std.ArrayList(u8), comptime fmt: [:0]const u8, args: anytype) void {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
-    out.appendSlice(allocator, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
+    const n = @call(.auto, mod.impl.c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
+    out.appendSlice(std.heap.c_allocator, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 
 /// Ports `gguf_data_to_str` (llama-impl.cpp:151 @b1b770d90): one element
 /// as `std`'s `to_string` writes it, so a float has six decimals.
-fn dataToStr(out: *std.ArrayList(u8), ty: c.enum_gguf_type, data: ?*const anyopaque, i: usize) void {
+fn dataToStr(out: *std.ArrayList(u8), ty: mod.impl.c.enum_gguf_type, data: ?*const anyopaque, i: usize) void {
     const p: [*]const u8 = @ptrCast(data.?);
     switch (ty) {
-        c.GGUF_TYPE_UINT8 => appendPrint(out, "{d}", .{p[i]}),
-        c.GGUF_TYPE_INT8 => appendPrint(out, "{d}", .{@as([*]const i8, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_UINT16 => appendPrint(out, "{d}", .{@as([*]align(1) const u16, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_INT16 => appendPrint(out, "{d}", .{@as([*]align(1) const i16, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_UINT32 => appendPrint(out, "{d}", .{@as([*]align(1) const u32, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_INT32 => appendPrint(out, "{d}", .{@as([*]align(1) const i32, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_UINT64 => appendPrint(out, "{d}", .{@as([*]align(1) const u64, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_INT64 => appendPrint(out, "{d}", .{@as([*]align(1) const i64, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_FLOAT32 => appendC(out, "%f", .{@as(f64, @as([*]align(1) const f32, @ptrCast(p))[i])}),
-        c.GGUF_TYPE_FLOAT64 => appendC(out, "%f", .{@as([*]align(1) const f64, @ptrCast(p))[i]}),
-        c.GGUF_TYPE_BOOL => appendPrint(out, "{s}", .{if (@as([*]const i8, @ptrCast(p))[i] != 0) "true" else "false"}),
+        mod.impl.c.GGUF_TYPE_UINT8 => appendPrint(out, "{d}", .{p[i]}),
+        mod.impl.c.GGUF_TYPE_INT8 => appendPrint(out, "{d}", .{@as([*]const i8, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_UINT16 => appendPrint(out, "{d}", .{@as([*]align(1) const u16, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_INT16 => appendPrint(out, "{d}", .{@as([*]align(1) const i16, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_UINT32 => appendPrint(out, "{d}", .{@as([*]align(1) const u32, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_INT32 => appendPrint(out, "{d}", .{@as([*]align(1) const i32, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_UINT64 => appendPrint(out, "{d}", .{@as([*]align(1) const u64, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_INT64 => appendPrint(out, "{d}", .{@as([*]align(1) const i64, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_FLOAT32 => appendC(out, "%f", .{@as(f64, @as([*]align(1) const f32, @ptrCast(p))[i])}),
+        mod.impl.c.GGUF_TYPE_FLOAT64 => appendC(out, "%f", .{@as([*]align(1) const f64, @ptrCast(p))[i]}),
+        mod.impl.c.GGUF_TYPE_BOOL => appendPrint(out, "{s}", .{if (@as([*]const i8, @ptrCast(p))[i] != 0) "true" else "false"}),
         else => appendPrint(out, "unknown type {d}", .{ty}),
     }
 }
@@ -168,35 +155,35 @@ fn dataToStr(out: *std.ArrayList(u8), ty: c.enum_gguf_type, data: ?*const anyopa
 /// - `out`: receives the text, into an empty list.
 ///
 /// Return: nothing.
-pub fn kvToStr(ctx: *const c.gguf_context, i: i64, max_len: usize, out: *std.ArrayList(u8)) void {
-    const ty = c.gguf_get_kv_type(ctx, i);
+pub fn kvToStr(ctx: *const mod.impl.c.gguf_context, i: i64, max_len: usize, out: *std.ArrayList(u8)) void {
+    const ty = mod.impl.c.gguf_get_kv_type(ctx, i);
     switch (ty) {
-        c.GGUF_TYPE_STRING => out.appendSlice(allocator, gguf_meta.cString(c.gguf_get_val_str(ctx, i))) catch oom(),
-        c.GGUF_TYPE_ARRAY => {
-            const arr_type = c.gguf_get_arr_type(ctx, i);
-            const arr_n: usize = c.gguf_get_arr_n(ctx, i);
-            const data = if (arr_type == c.GGUF_TYPE_STRING) null else c.gguf_get_arr_data(ctx, i);
-            out.append(allocator, '[') catch oom();
+        mod.impl.c.GGUF_TYPE_STRING => out.appendSlice(std.heap.c_allocator, mod.gguf_meta.cString(mod.impl.c.gguf_get_val_str(ctx, i))) catch oom(),
+        mod.impl.c.GGUF_TYPE_ARRAY => {
+            const arr_type = mod.impl.c.gguf_get_arr_type(ctx, i);
+            const arr_n: usize = mod.impl.c.gguf_get_arr_n(ctx, i);
+            const data = if (arr_type == mod.impl.c.GGUF_TYPE_STRING) null else mod.impl.c.gguf_get_arr_data(ctx, i);
+            out.append(std.heap.c_allocator, '[') catch oom();
             var j: usize = 0;
             while (j < arr_n and out.items.len <= max_len) : (j += 1) {
-                if (j > 0) out.appendSlice(allocator, ", ") catch oom();
-                if (arr_type == c.GGUF_TYPE_STRING) {
-                    const str = gguf_meta.cString(c.gguf_get_arr_str(ctx, i, @intCast(j)));
-                    out.append(allocator, '"') catch oom();
+                if (j > 0) out.appendSlice(std.heap.c_allocator, ", ") catch oom();
+                if (arr_type == mod.impl.c.GGUF_TYPE_STRING) {
+                    const str = mod.gguf_meta.cString(mod.impl.c.gguf_get_arr_str(ctx, i, @intCast(j)));
+                    out.append(std.heap.c_allocator, '"') catch oom();
                     for (str) |ch| {
-                        if (ch == '\\' or ch == '"') out.append(allocator, '\\') catch oom();
-                        out.append(allocator, ch) catch oom();
+                        if (ch == '\\' or ch == '"') out.append(std.heap.c_allocator, '\\') catch oom();
+                        out.append(std.heap.c_allocator, ch) catch oom();
                     }
-                    out.append(allocator, '"') catch oom();
-                } else if (arr_type == c.GGUF_TYPE_ARRAY) {
-                    out.appendSlice(allocator, "???") catch oom();
+                    out.append(std.heap.c_allocator, '"') catch oom();
+                } else if (arr_type == mod.impl.c.GGUF_TYPE_ARRAY) {
+                    out.appendSlice(std.heap.c_allocator, "???") catch oom();
                 } else {
                     dataToStr(out, arr_type, data, j);
                 }
             }
-            if (j == arr_n) out.append(allocator, ']') catch oom();
+            if (j == arr_n) out.append(std.heap.c_allocator, ']') catch oom();
         },
-        else => dataToStr(out, ty, c.gguf_get_val_data(ctx, i), 0),
+        else => dataToStr(out, ty, mod.impl.c.gguf_get_val_data(ctx, i), 0),
     }
 }
 
@@ -209,26 +196,26 @@ pub const Weight = struct {
     idx: u16,
     /// The data's offset in that file.
     offs: usize,
-    tensor: *c.ggml_tensor,
+    tensor: *mod.impl.c.ggml_tensor,
     /// `sscanf(name, "blk.%d.", &layer)`, -1 where it reads nothing.
     layer: c_int,
 
     /// Ports the constructor of `llama_tensor_weight` (llama-model-loader.h:38
     /// @b1b770d90): the tensor's offset, checked against the file's size.
-    fn init(file: *const File, idx: u16, gguf_ctx: *const c.gguf_context, tensor: *c.ggml_tensor, exc: *Exception) Thrown!Weight {
-        const tname = gguf_meta.cString(c.ggml_get_name(tensor));
-        const tensor_idx = c.gguf_find_tensor(gguf_ctx, c.ggml_get_name(tensor));
+    fn init(file: *const mod.mmap.File, idx: u16, gguf_ctx: *const mod.impl.c.gguf_context, tensor: *mod.impl.c.ggml_tensor, exc: *mod.impl.Exception) mod.impl.Thrown!Weight {
+        const tname = mod.gguf_meta.cString(mod.impl.c.ggml_get_name(tensor));
+        const tensor_idx = mod.impl.c.gguf_find_tensor(gguf_ctx, mod.impl.c.ggml_get_name(tensor));
         if (tensor_idx < 0) return exc.throw(.runtime_error, "tensor '{s}' not found in the model", .{tname});
-        const offs = c.gguf_get_data_offset(gguf_ctx) +% c.gguf_get_tensor_offset(gguf_ctx, tensor_idx);
-        const nbytes = c.ggml_nbytes(tensor);
+        const offs = mod.impl.c.gguf_get_data_offset(gguf_ctx) +% mod.impl.c.gguf_get_tensor_offset(gguf_ctx, tensor_idx);
+        const nbytes = mod.impl.c.ggml_nbytes(tensor);
         if (offs +% nbytes < offs or offs +% nbytes > file.size) {
             return exc.throw(.runtime_error, "tensor '{s}' data is not within the file bounds, model is corrupted or incomplete", .{tname});
         }
-        return .{ .idx = idx, .offs = offs, .tensor = tensor, .layer = blockOf(c.ggml_get_name(tensor)) };
+        return .{ .idx = idx, .offs = offs, .tensor = tensor, .layer = blockOf(mod.impl.c.ggml_get_name(tensor)) };
     }
 
     fn name(self: *const Weight) []const u8 {
-        return gguf_meta.cString(c.ggml_get_name(self.tensor));
+        return mod.gguf_meta.cString(mod.impl.c.ggml_get_name(self.tensor));
     }
 
     /// Ports `weight_name_comparer` (llama-model-loader.h:52 @b1b770d90).
@@ -240,7 +227,7 @@ pub const Weight = struct {
 
 fn blockOf(name: [*c]const u8) c_int {
     var layer: c_int = -1;
-    _ = c.sscanf(name, "blk.%d.", &layer);
+    _ = mod.impl.c.sscanf(name, "blk.%d.", &layer);
     return layer;
 }
 
@@ -252,7 +239,7 @@ fn blockOf(name: [*c]const u8) c_int {
 /// loaded whole -- per-layer embeddings, say, kept on disk. It needs mmap.
 pub const LazyRead = struct {
     /// Set by the caller before the `createTensor` calls.
-    mode: c.enum_llama_lazy_mode = c.LLAMA_LAZY_MODE_OFF,
+    mode: mod.impl.c.enum_llama_lazy_mode = mod.impl.c.LLAMA_LAZY_MODE_OFF,
 
     /// `ranges`, a `std::map` by file index: each file's lazy byte ranges,
     /// in the order they were added.
@@ -260,7 +247,7 @@ pub const LazyRead = struct {
     /// `tensors`: the lazy tensors' names, owned.
     tensors: std.StringHashMapUnmanaged(void) = .empty,
 
-    const FileRanges = struct { idx: u32, ranges: mmap.Ranges };
+    const FileRanges = struct { idx: u32, ranges: mod.mmap.Ranges };
 
     /// Below this a tensor is not read lazily under `LLAMA_LAZY_MODE_AUTO`:
     /// a lazy read has a cost that only a large tensor repays.
@@ -275,28 +262,28 @@ pub const LazyRead = struct {
     /// - `w`: its weight, to record it as well; null only to ask.
     ///
     /// Return: whether the tensor is lazy.
-    pub fn add(self: *LazyRead, name: []const u8, t: *const c.ggml_tensor, w: ?*const Weight) bool {
-        if (self.mode == c.LLAMA_LAZY_MODE_OFF) return false;
+    pub fn add(self: *LazyRead, name: []const u8, t: *const mod.impl.c.ggml_tensor, w: ?*const Weight) bool {
+        if (self.mode == mod.impl.c.LLAMA_LAZY_MODE_OFF) return false;
 
         // Do not lazy-read small tensors: it has significant overhead and is
         // not worth it.
-        const nbytes = c.ggml_nbytes(t);
-        if (self.mode != c.LLAMA_LAZY_MODE_ON and nbytes <= auto_min_size) return false;
+        const nbytes = mod.impl.c.ggml_nbytes(t);
+        if (self.mode != mod.impl.c.LLAMA_LAZY_MODE_ON and nbytes <= auto_min_size) return false;
 
-        if (!mmap.Mmap.supported) {
-            impl.logWarn("%s: mmap is not available, so tensor %.*s (size = %zu MiB) is loaded into RAM in full\n", .{
+        if (!mod.mmap.Mmap.supported) {
+            mod.impl.logWarn("%s: mmap is not available, so tensor %.*s (size = %zu MiB) is loaded into RAM in full\n", .{
                 "add", @as(c_int, @intCast(name.len)), name.ptr, nbytes / 1024 / 1024,
             });
             return false;
         }
 
         if (w) |weight| {
-            self.rangesFor(weight.idx).append(allocator, .{ weight.offs, weight.offs +% nbytes }) catch oom();
+            self.rangesFor(weight.idx).append(std.heap.c_allocator, .{ weight.offs, weight.offs +% nbytes }) catch oom();
             if (!self.tensors.contains(name)) {
-                self.tensors.put(allocator, allocator.dupe(u8, name) catch oom(), {}) catch oom();
+                self.tensors.put(std.heap.c_allocator, std.heap.c_allocator.dupe(u8, name) catch oom(), {}) catch oom();
             }
 
-            impl.logInfo("%s: tensor %.*s (size = %zu MiB) lazy read enabled\n", .{
+            mod.impl.logInfo("%s: tensor %.*s (size = %zu MiB) lazy read enabled\n", .{
                 "add", @as(c_int, @intCast(name.len)), name.ptr, nbytes / 1024 / 1024,
             });
         }
@@ -305,13 +292,13 @@ pub const LazyRead = struct {
     }
 
     /// `ranges[idx]`: the list for file `idx`, created empty, in key order.
-    fn rangesFor(self: *LazyRead, idx: u32) *mmap.Ranges {
+    fn rangesFor(self: *LazyRead, idx: u32) *mod.mmap.Ranges {
         var pos: usize = 0;
         while (pos < self.ranges.items.len) : (pos += 1) {
             if (self.ranges.items[pos].idx == idx) return &self.ranges.items[pos].ranges;
             if (self.ranges.items[pos].idx > idx) break;
         }
-        self.ranges.insert(allocator, pos, .{ .idx = idx, .ranges = .empty }) catch oom();
+        self.ranges.insert(std.heap.c_allocator, pos, .{ .idx = idx, .ranges = .empty }) catch oom();
         return &self.ranges.items[pos].ranges;
     }
 
@@ -325,8 +312,8 @@ pub const LazyRead = struct {
     /// Ports `lazy_read`'s `has` (llama-model-loader.h:99 @b1b770d90).
     ///
     /// Return: whether `t`, by name, was recorded lazy.
-    pub fn has(self: *const LazyRead, t: *const c.ggml_tensor) bool {
-        return self.tensors.contains(gguf_meta.cString(c.ggml_get_name(t)));
+    pub fn has(self: *const LazyRead, t: *const mod.impl.c.ggml_tensor) bool {
+        return self.tensors.contains(mod.gguf_meta.cString(mod.impl.c.ggml_get_name(t)));
     }
 
     /// Ports `lazy_read`'s `for_file` (llama-model-loader.h:103 @b1b770d90).
@@ -344,19 +331,19 @@ pub const LazyRead = struct {
     ///
     /// Return: the CPU device's buffer type, or `error.Thrown` when there is
     /// no CPU device.
-    pub fn buft(exc: *Exception) Thrown!c.ggml_backend_buffer_type_t {
-        const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+    pub fn buft(exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_type_t {
+        const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
             return exc.throw(.runtime_error, "no CPU backend found", .{});
-        return c.ggml_backend_dev_buffer_type(cpu_dev);
+        return mod.impl.c.ggml_backend_dev_buffer_type(cpu_dev);
     }
 
     /// Return: nothing.
     pub fn deinit(self: *LazyRead) void {
-        for (self.ranges.items) |*e| e.ranges.deinit(allocator);
-        self.ranges.deinit(allocator);
+        for (self.ranges.items) |*e| e.ranges.deinit(std.heap.c_allocator);
+        self.ranges.deinit(std.heap.c_allocator);
         var it = self.tensors.keyIterator();
-        while (it.next()) |k| allocator.free(k.*);
-        self.tensors.deinit(allocator);
+        while (it.next()) |k| std.heap.c_allocator.free(k.*);
+        self.tensors.deinit(std.heap.c_allocator);
     }
 };
 
@@ -381,7 +368,7 @@ pub const Loader = struct {
     /// `lazy.mode` before the `createTensor` calls.
     lazy: LazyRead = .{},
 
-    files: std.ArrayList(File) = .empty,
+    files: std.ArrayList(mod.mmap.File) = .empty,
     ftype: c_uint = 0,
     fver: FileVersion = .v3,
 
@@ -390,29 +377,29 @@ pub const Loader = struct {
     weights: std.ArrayList(Weight) = .empty,
 
     /// The metadata with the caller's overrides, for the typed getters.
-    meta: gguf_meta.Meta,
+    meta: mod.gguf_meta.Meta,
     /// `metadata_ptr`: the metadata when this loader opened it.
-    owned: ?*c.gguf_context = null,
+    owned: ?*mod.impl.c.gguf_context = null,
     /// The tensor-metadata contexts, one per file.
-    contexts: std.ArrayList(*c.ggml_context) = .empty,
+    contexts: std.ArrayList(*mod.impl.c.ggml_context) = .empty,
 
     arch_name: std.ArrayList(u8) = .empty,
 
     /// The type counts `guessFtype` leaves for `dumpMetadata`.
-    n_type_counts: [c.GGML_TYPE_COUNT]u32 = @splat(0),
+    n_type_counts: [mod.impl.c.GGML_TYPE_COUNT]u32 = @splat(0),
 
     // The tensor half.
 
     /// `weights_map`'s lookup: a weight's name to its index in `weights`.
     weight_index: std.StringHashMapUnmanaged(usize) = .empty,
     /// The caller's buffer-type overrides, null-pattern terminated, or null.
-    tensor_buft_overrides: ?[*]const c.llama_model_tensor_buft_override = null,
+    tensor_buft_overrides: ?[*]const mod.impl.c.llama_model_tensor_buft_override = null,
     /// How a model built from metadata alone gets its tensors' data.
-    set_tensor_data: c.llama_model_set_tensor_data_t = null,
+    set_tensor_data: mod.impl.c.llama_model_set_tensor_data_t = null,
     set_tensor_data_ud: ?*anyopaque = null,
 
     /// `mappings`: one per file once `initMappings` has run with mmap on.
-    mappings: std.ArrayList(mmap.Mmap) = .empty,
+    mappings: std.ArrayList(mod.mmap.Mmap) = .empty,
     size_done: usize = 0,
     size_data: usize = 0,
     /// `mmaps_used`: the byte range of each mapping that tensors use.
@@ -426,13 +413,13 @@ pub const Loader = struct {
     n_tensors_moved: usize = 0,
     first_tensor_moved_name: std.ArrayList(u8) = .empty,
     first_tensor_moved_type_name: [*:0]const u8 = "",
-    first_moved_from_buft: c.ggml_backend_buffer_type_t = null,
-    first_moved_to_buft: c.ggml_backend_buffer_type_t = null,
+    first_moved_from_buft: mod.impl.c.ggml_backend_buffer_type_t = null,
+    first_moved_to_buft: mod.impl.c.ggml_backend_buffer_type_t = null,
 
     /// Mirrors `ctx_key` (llama-model-loader.h:149 @b1b770d90): lazy
     /// tensors need a context of their own.
     pub const CtxKey = struct {
-        buft: c.ggml_backend_buffer_type_t,
+        buft: mod.impl.c.ggml_backend_buffer_type_t,
         lazy: bool,
 
         /// Ports `ctx_key_comparator` (llama-model-loader.h:154 @b1b770d90):
@@ -440,7 +427,7 @@ pub const Loader = struct {
         /// types with one name are one key.
         pub fn order(lhs: CtxKey, rhs: CtxKey) std.math.Order {
             if (lhs.lazy != rhs.lazy) return if (!lhs.lazy) .lt else .gt;
-            return std.mem.order(u8, std.mem.span(c.ggml_backend_buft_name(lhs.buft)), std.mem.span(c.ggml_backend_buft_name(rhs.buft)));
+            return std.mem.order(u8, std.mem.span(mod.impl.c.ggml_backend_buft_name(lhs.buft)), std.mem.span(mod.impl.c.ggml_backend_buft_name(rhs.buft)));
         }
     };
 
@@ -448,14 +435,14 @@ pub const Loader = struct {
     /// buffers, and nulls it here.
     pub const CtxEntry = struct {
         key: CtxKey,
-        ctx: ?*c.ggml_context,
+        ctx: ?*mod.impl.c.ggml_context,
     };
 
     /// Where the model comes from: exactly one of these.
     pub const Source = union(enum) {
-        metadata: *c.gguf_context,
+        metadata: *mod.impl.c.gguf_context,
         path: [:0]const u8,
-        file: *c.FILE,
+        file: *mod.impl.c.FILE,
     };
 
     /// Ports the constructor of `llama_model_loader` (llama-model-loader.cpp:537
@@ -476,21 +463,21 @@ pub const Loader = struct {
     pub fn init(
         source: Source,
         splits: *std.ArrayList([:0]const u8),
-        load_mode: c.enum_llama_load_mode,
+        load_mode: mod.impl.c.enum_llama_load_mode,
         check_tensors: bool,
         no_alloc: bool,
         load_mtp: bool,
-        overrides: ?[*]const c.llama_model_kv_override,
-        exc: *Exception,
-    ) Thrown!Loader {
+        overrides: ?[*]const mod.impl.c.llama_model_kv_override,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!Loader {
         const trace: c_int = if (stdlib.env.getenv("LLAMA_TRACE")) |t| stdlib.num.atoiC(t) else 0;
 
-        var self: Loader = .{ .meta = gguf_meta.Meta.init(undefined, .unknown, overrides) };
+        var self: Loader = .{ .meta = mod.gguf_meta.Meta.init(undefined, .unknown, overrides) };
         errdefer self.deinit();
 
-        self.use_mmap = load_mode == c.LLAMA_LOAD_MODE_MMAP or load_mode == c.LLAMA_LOAD_MODE_MMAP_MLOCK or
-            load_mode == c.LLAMA_LOAD_MODE_AUTO;
-        self.use_direct_io = load_mode == c.LLAMA_LOAD_MODE_DIRECT_IO;
+        self.use_mmap = load_mode == mod.impl.c.LLAMA_LOAD_MODE_MMAP or load_mode == mod.impl.c.LLAMA_LOAD_MODE_MMAP_MLOCK or
+            load_mode == mod.impl.c.LLAMA_LOAD_MODE_AUTO;
+        self.use_direct_io = load_mode == mod.impl.c.LLAMA_LOAD_MODE_DIRECT_IO;
 
         const fname: []const u8 = switch (source) {
             .path => |p| p,
@@ -499,35 +486,35 @@ pub const Loader = struct {
 
         switch (source) {
             .path => |path| {
-                var ctx: ?*c.ggml_context = null;
-                self.owned = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = &ctx }) orelse
+                var ctx: ?*mod.impl.c.ggml_context = null;
+                self.owned = mod.impl.c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = &ctx }) orelse
                     return exc.throw(.runtime_error, "llama_model_loader: failed to load model from {s}", .{path});
                 self.meta.ctx = self.owned.?;
                 try self.readArch(exc);
 
-                self.files.append(allocator, try File.open(path, "rb", self.use_direct_io, exc)) catch oom();
-                self.contexts.append(allocator, ctx.?) catch oom();
+                self.files.append(std.heap.c_allocator, try mod.mmap.File.open(path, "rb", self.use_direct_io, exc)) catch oom();
+                self.contexts.append(std.heap.c_allocator, ctx.?) catch oom();
                 try self.addWeights(ctx.?, 0, self.meta.ctx, false, 0, path, exc);
 
                 try self.loadSplits(path, splits.items, exc);
             },
             .file => |fp| {
-                var ctx: ?*c.ggml_context = null;
-                self.owned = c.gguf_init_from_file_ptr(fp, .{ .no_alloc = true, .ctx = &ctx }) orelse
+                var ctx: ?*mod.impl.c.ggml_context = null;
+                self.owned = mod.impl.c.gguf_init_from_file_ptr(fp, .{ .no_alloc = true, .ctx = &ctx }) orelse
                     return exc.throw(.runtime_error, "llama_model_loader: failed to load model from file pointer", .{});
                 self.meta.ctx = self.owned.?;
 
                 // mmap places tensors at their file offsets, so an embedded GGUF must be aligned in the file too.
                 // From `llama_model_loader` (llama-model-loader.cpp:537 @b1b770d90).
-                const tensor_align = c.ggml_backend_buft_get_alignment(c.ggml_backend_cpu_buffer_type());
-                if (self.use_mmap and c.gguf_get_data_offset(self.meta.ctx) % tensor_align != 0) {
-                    return exc.throw(.runtime_error, "llama_model_loader: GGUF data section at file offset {d} is not {d} byte aligned, cannot mmap", .{ c.gguf_get_data_offset(self.meta.ctx), tensor_align });
+                const tensor_align = mod.impl.c.ggml_backend_buft_get_alignment(mod.impl.c.ggml_backend_cpu_buffer_type());
+                if (self.use_mmap and mod.impl.c.gguf_get_data_offset(self.meta.ctx) % tensor_align != 0) {
+                    return exc.throw(.runtime_error, "llama_model_loader: GGUF data section at file offset {d} is not {d} byte aligned, cannot mmap", .{ mod.impl.c.gguf_get_data_offset(self.meta.ctx), tensor_align });
                 }
 
                 try self.readArch(exc);
 
-                self.files.append(allocator, try File.borrow(fp, exc)) catch oom();
-                self.contexts.append(allocator, ctx.?) catch oom();
+                self.files.append(std.heap.c_allocator, try mod.mmap.File.borrow(fp, exc)) catch oom();
+                self.contexts.append(std.heap.c_allocator, ctx.?) catch oom();
                 try self.addWeights(ctx.?, 0, self.meta.ctx, false, 0, "(file*)", exc);
             },
             .metadata => |m| {
@@ -537,22 +524,22 @@ pub const Loader = struct {
         }
 
         std.sort.pdq(Weight, self.weights.items, {}, Weight.lessThan);
-        for (self.weights.items, 0..) |*w, i| self.weight_index.put(allocator, w.name(), i) catch oom();
+        for (self.weights.items, 0..) |*w, i| self.weight_index.put(std.heap.c_allocator, w.name(), i) catch oom();
 
-        self.n_kv = @truncate(c.gguf_get_n_kv(self.meta.ctx));
+        self.n_kv = @truncate(mod.impl.c.gguf_get_n_kv(self.meta.ctx));
         self.n_tensors = @intCast(self.weights.items.len);
-        self.fver = @fromBackingInt(@intCast(c.gguf_get_version(self.meta.ctx)));
+        self.fver = @fromBackingInt(@intCast(mod.impl.c.gguf_get_version(self.meta.ctx)));
 
         const shown: []const u8 = if (fname.len == 0) "(file*)" else fname;
-        impl.logInfo("%s: loaded meta data with %d key-value pairs and %d tensors from %.*s (version %s)\n", .{
+        mod.impl.logInfo("%s: loaded meta data with %d key-value pairs and %d tensors from %.*s (version %s)\n", .{
             "llama_model_loader", self.n_kv, self.n_tensors, @as(c_int, @intCast(shown.len)), shown.ptr, fileVersionName(self.fver).ptr,
         });
 
         try self.guessFtype(trace, exc);
         self.dumpMetadata();
 
-        if (self.use_mmap and !mmap.Mmap.supported) {
-            impl.logWarn("%s: mmap is not supported on this platform\n", .{"llama_model_loader"});
+        if (self.use_mmap and !mod.mmap.Mmap.supported) {
+            mod.impl.logWarn("%s: mmap is not supported on this platform\n", .{"llama_model_loader"});
             self.use_mmap = false;
         }
 
@@ -564,37 +551,37 @@ pub const Loader = struct {
 
     /// `get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false)`,
     /// then `llm_kv = LLM_KV(llm_arch_from_string(arch_name))`.
-    fn readArch(self: *Loader, exc: *Exception) Thrown!void {
+    fn readArch(self: *Loader, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (try self.meta.getKey([]const u8, .general_architecture, false, exc)) |name| {
             self.arch_name.clearRetainingCapacity();
-            self.arch_name.appendSlice(allocator, name) catch oom();
+            self.arch_name.appendSlice(std.heap.c_allocator, name) catch oom();
         }
-        self.meta.arch = arch.archFromString(self.arch_name.items);
+        self.meta.arch = mod.arch.archFromString(self.arch_name.items);
     }
 
     /// `ggml_get_first_tensor` over `ctx`, each tensor checked for a duplicate
     /// name and given a weight in the last file. A duplicate is allowed only
     /// where `allow_override` is set and the earlier weight is in one of the
     /// first `n_backbone_files` files: it is then replaced.
-    fn addWeights(self: *Loader, ctx: *c.ggml_context, idx: u16, gguf_ctx: *const c.gguf_context, allow_override: bool, n_backbone_files: usize, fname_split: [:0]const u8, exc: *Exception) Thrown!void {
-        var cur = c.ggml_get_first_tensor(ctx);
-        while (cur) |t| : (cur = c.ggml_get_next_tensor(ctx, t)) {
-            const name = gguf_meta.cString(c.ggml_get_name(t));
+    fn addWeights(self: *Loader, ctx: *mod.impl.c.ggml_context, idx: u16, gguf_ctx: *const mod.impl.c.gguf_context, allow_override: bool, n_backbone_files: usize, fname_split: [:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+        var cur = mod.impl.c.ggml_get_first_tensor(ctx);
+        while (cur) |t| : (cur = mod.impl.c.ggml_get_next_tensor(ctx, t)) {
+            const name = mod.gguf_meta.cString(mod.impl.c.ggml_get_name(t));
             for (self.weights.items, 0..) |*w, i| {
                 if (!std.mem.eql(u8, w.name(), name)) continue;
                 // only override tensors of the model, not of another extra shard
                 if (!allow_override or w.idx >= n_backbone_files)
                     return exc.throw(.runtime_error, "invalid model: tensor '{s}' is duplicated", .{name});
-                impl.logInfo("%s: tensor '%s' overridden by %s\n", .{ "llama_model_loader", c.ggml_get_name(t), fname_split.ptr });
-                self.n_elements -%= @bitCast(c.ggml_nelements(w.tensor));
-                self.n_bytes -%= c.ggml_nbytes(w.tensor);
+                mod.impl.logInfo("%s: tensor '%s' overridden by %s\n", .{ "llama_model_loader", mod.impl.c.ggml_get_name(t), fname_split.ptr });
+                self.n_elements -%= @bitCast(mod.impl.c.ggml_nelements(w.tensor));
+                self.n_bytes -%= mod.impl.c.ggml_nbytes(w.tensor);
                 _ = self.weights.orderedRemove(i);
                 break;
             }
-            self.n_elements +%= @bitCast(c.ggml_nelements(t));
-            self.n_bytes +%= c.ggml_nbytes(t);
+            self.n_elements +%= @bitCast(mod.impl.c.ggml_nelements(t));
+            self.n_bytes +%= mod.impl.c.ggml_nbytes(t);
             const w = try Weight.init(&self.files.items[self.files.items.len - 1], idx, gguf_ctx, t, exc);
-            self.weights.append(allocator, w) catch oom();
+            self.weights.append(std.heap.c_allocator, w) catch oom();
         }
     }
 
@@ -611,17 +598,17 @@ pub const Loader = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: nothing, or `error.Thrown`.
-    fn loadSplits(self: *Loader, fname: [:0]const u8, splits: []const [:0]const u8, exc: *Exception) Thrown!void {
+    fn loadSplits(self: *Loader, fname: [:0]const u8, splits: []const [:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         // `paths`, every entry owned here.
         var paths: std.ArrayList([:0]const u8) = .empty;
         defer {
-            for (paths.items) |p| allocator.free(p);
-            paths.deinit(allocator);
+            for (paths.items) |p| std.heap.c_allocator.free(p);
+            paths.deinit(std.heap.c_allocator);
         }
-        for (splits) |s| paths.append(allocator, allocator.dupeSentinel(u8, s, 0) catch oom()) catch oom();
+        for (splits) |s| paths.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, s, 0) catch oom()) catch oom();
 
         var n_backbone: usize = 1;
-        const kv_split_no = arch.kvName(self.meta.arch, .split_no, null);
+        const kv_split_no = mod.arch.kvName(self.meta.arch, .split_no, null);
         const n_split = (try self.meta.getKey(u16, .split_count, false, exc)) orelse 0;
 
         if (n_split > 1) {
@@ -630,37 +617,37 @@ pub const Loader = struct {
                 return exc.throw(.runtime_error, "illegal split file idx: {d} (file: {s}), model must be loaded with the first split", .{ idx0, fname });
             }
 
-            const prefix = allocator.alloc(u8, mmap.pathMax()) catch oom();
-            defer allocator.free(prefix);
+            const prefix = std.heap.c_allocator.alloc(u8, mod.mmap.pathMax()) catch oom();
+            defer std.heap.c_allocator.free(prefix);
             @memset(prefix, 0);
-            if (paths.items.len == 0 or c.llama_split_prefix(prefix.ptr, prefix.len, fname.ptr, idx0, n_split) != 0) {
+            if (paths.items.len == 0 or mod.api.llama.llama_split_prefix(prefix.ptr, prefix.len, fname.ptr, idx0, n_split) != 0) {
                 var backbone: std.ArrayList([:0]const u8) = .empty;
-                defer backbone.deinit(allocator);
-                errdefer for (backbone.items) |p| allocator.free(p);
+                defer backbone.deinit(std.heap.c_allocator);
+                errdefer for (backbone.items) |p| std.heap.c_allocator.free(p);
                 try listSplits(fname, idx0, n_split, &backbone, exc);
                 var extras: std.ArrayList([:0]const u8) = .empty;
-                defer extras.deinit(allocator);
+                defer extras.deinit(std.heap.c_allocator);
                 for (paths.items) |path| {
                     const found = for (backbone.items) |*b| {
                         if (std.mem.eql(u8, fileName(b.*), fileName(path))) break b;
                     } else null;
                     if (found) |b| {
-                        allocator.free(b.*);
+                        std.heap.c_allocator.free(b.*);
                         b.* = path; // given path wins, splits can be in different dirs
                     } else {
-                        extras.append(allocator, path) catch oom();
+                        extras.append(std.heap.c_allocator, path) catch oom();
                     }
                 }
                 paths.clearRetainingCapacity();
-                paths.appendSlice(allocator, backbone.items) catch oom();
-                paths.appendSlice(allocator, extras.items) catch oom();
+                paths.appendSlice(std.heap.c_allocator, backbone.items) catch oom();
+                paths.appendSlice(std.heap.c_allocator, extras.items) catch oom();
                 backbone.clearRetainingCapacity();
             } else if (paths.items.len != n_split) {
                 return exc.throw(.runtime_error, "invalid split count, given: {d} splits, but expected {d}", .{ paths.items.len, n_split });
             }
             n_backbone = n_split;
         } else if (paths.items.len == 0) {
-            paths.append(allocator, allocator.dupeSentinel(u8, fname, 0) catch oom()) catch oom();
+            paths.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, fname, 0) catch oom()) catch oom();
         }
 
         if (paths.items.len > std.math.maxInt(u16)) {
@@ -668,15 +655,15 @@ pub const Loader = struct {
         }
         const has_extras = paths.items.len > n_backbone;
 
-        var zkey_no: [arch.max_name + 1]u8 = undefined;
+        var zkey_no: [mod.arch.max_name + 1]u8 = undefined;
         @memcpy(zkey_no[0..kv_split_no.len], kv_split_no.slice());
         zkey_no[kv_split_no.len] = 0;
-        const kv_split_count = arch.kvName(self.meta.arch, .split_count, null);
-        var zkey_count: [arch.max_name + 1]u8 = undefined;
+        const kv_split_count = mod.arch.kvName(self.meta.arch, .split_count, null);
+        var zkey_count: [mod.arch.max_name + 1]u8 = undefined;
         @memcpy(zkey_count[0..kv_split_count.len], kv_split_count.slice());
         zkey_count[kv_split_count.len] = 0;
-        const kv_split_tensors = arch.kvName(self.meta.arch, .split_tensors_count, null);
-        var zkey_tensors: [arch.max_name + 1]u8 = undefined;
+        const kv_split_tensors = mod.arch.kvName(self.meta.arch, .split_tensors_count, null);
+        var zkey_tensors: [mod.arch.max_name + 1]u8 = undefined;
         @memcpy(zkey_tensors[0..kv_split_tensors.len], kv_split_tensors.slice());
         zkey_tensors[kv_split_tensors.len] = 0;
 
@@ -684,63 +671,63 @@ pub const Loader = struct {
         // numbering (allow flexibility)
         var skip_shard_order_validation = false;
         for (paths.items[n_backbone..]) |path| {
-            const probe = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null });
-            defer if (probe) |p| c.gguf_free(p);
+            const probe = mod.impl.c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null });
+            defer if (probe) |p| mod.impl.c.gguf_free(p);
             skip_shard_order_validation = skip_shard_order_validation or (probe != null and isPleOnly(probe.?));
         }
 
         var n_skipped: usize = 0;
         var n_backbone_files: usize = 1;
-        var n_backbone_tensors: c_int = @intCast(c.gguf_get_n_tensors(self.meta.ctx));
+        var n_backbone_tensors: c_int = @intCast(mod.impl.c.gguf_get_n_tensors(self.meta.ctx));
         var idx: usize = 1;
         while (idx < paths.items.len) : (idx += 1) {
             const fname_split = paths.items[idx];
             if (skip_shard_order_validation and idx < n_backbone) {
-                const f = c.ggml_fopen(fname_split.ptr, "rb");
+                const f = mod.impl.c.ggml_fopen(fname_split.ptr, "rb");
                 if (f == null) {
-                    impl.logInfo("%s: GGUF split %s not found, assuming it only holds the per-layer embedding table\n", .{ "llama_model_loader", fname_split.ptr });
+                    mod.impl.logInfo("%s: GGUF split %s not found, assuming it only holds the per-layer embedding table\n", .{ "llama_model_loader", fname_split.ptr });
                     n_skipped += 1;
                     continue;
                 }
-                _ = c.fclose(f);
+                _ = mod.impl.c.fclose(f);
             }
-            var ctx: ?*c.ggml_context = null;
-            const split_gguf = c.gguf_init_from_file(fname_split.ptr, .{ .no_alloc = true, .ctx = &ctx }) orelse
+            var ctx: ?*mod.impl.c.ggml_context = null;
+            const split_gguf = mod.impl.c.gguf_init_from_file(fname_split.ptr, .{ .no_alloc = true, .ctx = &ctx }) orelse
                 return exc.throw(.runtime_error, "llama_model_loader: failed to load GGUF split from {s}", .{fname_split});
-            defer c.gguf_free(split_gguf);
+            defer mod.impl.c.gguf_free(split_gguf);
             // `ctx_ptr`: freed here unless `contexts` takes it.
-            var ctx_owned: ?*c.ggml_context = ctx;
-            defer if (ctx_owned) |x| c.ggml_free(x);
+            var ctx_owned: ?*mod.impl.c.ggml_context = ctx;
+            defer if (ctx_owned) |x| mod.impl.c.ggml_free(x);
 
             var allow_override_tensor = false;
             if (idx < n_backbone) {
-                const kid = c.gguf_find_key(split_gguf, &zkey_no);
+                const kid = mod.impl.c.gguf_find_key(split_gguf, &zkey_no);
                 if (kid < 0) return exc.throw(.runtime_error, "missing key {s} in GGUF split {s}", .{ kv_split_no.slice(), fname_split });
-                if (c.gguf_get_kv_type(split_gguf, kid) != c.GGUF_TYPE_UINT16) {
+                if (mod.impl.c.gguf_get_kv_type(split_gguf, kid) != mod.impl.c.GGUF_TYPE_UINT16) {
                     return exc.throw(.runtime_error, "invalid type for {s} in GGUF split {s}", .{ kv_split_no.slice(), fname_split });
                 }
-                const idx_gguf = c.gguf_get_val_u16(split_gguf, kid);
+                const idx_gguf = mod.impl.c.gguf_get_val_u16(split_gguf, kid);
                 if (idx_gguf != idx) {
                     return exc.throw(.runtime_error, "invalid split file idx: {d} (file: {s}), expected {d}", .{ idx_gguf, fname_split, idx });
                 }
                 if (skip_shard_order_validation and isPleOnly(split_gguf)) {
-                    impl.logInfo("%s: skipping GGUF split %s, per-layer embedding table given separately\n", .{ "llama_model_loader", fname_split.ptr });
+                    mod.impl.logInfo("%s: skipping GGUF split %s, per-layer embedding table given separately\n", .{ "llama_model_loader", fname_split.ptr });
                     n_skipped += 1;
                     continue;
                 }
-                n_backbone_tensors += @intCast(c.gguf_get_n_tensors(split_gguf));
+                n_backbone_tensors += @intCast(mod.impl.c.gguf_get_n_tensors(split_gguf));
             } else {
                 // an external PLE table replaces the one in the model, if any
                 allow_override_tensor = isPleOnly(split_gguf);
-                const numbered = c.gguf_find_key(split_gguf, &zkey_no) >= 0 or
-                    c.gguf_find_key(split_gguf, &zkey_count) >= 0 or
-                    c.gguf_find_key(split_gguf, &zkey_tensors) >= 0;
+                const numbered = mod.impl.c.gguf_find_key(split_gguf, &zkey_no) >= 0 or
+                    mod.impl.c.gguf_find_key(split_gguf, &zkey_count) >= 0 or
+                    mod.impl.c.gguf_find_key(split_gguf, &zkey_tensors) >= 0;
                 const note: [*:0]const u8 = if (numbered) " (declared split numbering ignored)" else "";
-                impl.logInfo("%s: appended extra GGUF shard %s%s\n", .{ "llama_model_loader", fname_split.ptr, note });
+                mod.impl.logInfo("%s: appended extra GGUF shard %s%s\n", .{ "llama_model_loader", fname_split.ptr, note });
             }
 
-            self.files.append(allocator, try File.open(fname_split, "rb", self.use_direct_io, exc)) catch oom();
-            self.contexts.append(allocator, ctx.?) catch oom();
+            self.files.append(std.heap.c_allocator, try mod.mmap.File.open(fname_split, "rb", self.use_direct_io, exc)) catch oom();
+            self.contexts.append(std.heap.c_allocator, ctx.?) catch oom();
             ctx_owned = null;
             if (idx < n_backbone) n_backbone_files = self.files.items.len;
 
@@ -759,24 +746,24 @@ pub const Loader = struct {
         if (n_split > 1 or has_extras) {
             const required = n_split > 1 and !has_extras;
             const declared_tensors = (try self.meta.getKey(c_int, .split_tensors_count, required, exc)) orelse
-                @as(c_int, @intCast(c.gguf_get_n_tensors(self.meta.ctx)));
+                @as(c_int, @intCast(mod.impl.c.gguf_get_n_tensors(self.meta.ctx)));
             if (declared_tensors != @as(c_int, @intCast(self.weights.items.len))) {
                 if (required) {
                     return exc.throw(.runtime_error, "corrupted model: {d} tensors expected but {d} found", .{ declared_tensors, self.weights.items.len });
                 }
-                impl.logInfo("%s: using %zu registered tensors instead of %d declared tensors\n", .{ "llama_model_loader", self.weights.items.len, declared_tensors });
+                mod.impl.logInfo("%s: using %zu registered tensors instead of %d declared tensors\n", .{ "llama_model_loader", self.weights.items.len, declared_tensors });
             }
         }
         if (self.files.items.len > 1) {
-            impl.logInfo("%s: additional %zu GGUFs metadata loaded.\n", .{ "llama_model_loader", self.files.items.len - 1 });
+            mod.impl.logInfo("%s: additional %zu GGUFs metadata loaded.\n", .{ "llama_model_loader", self.files.items.len - 1 });
         }
     }
 
     /// `is_ple_only` in the constructor of `llama_model_loader`
     /// (llama-model-loader.cpp:537 @b1b770d90): a GGUF holding nothing but
     /// `per_layer_token_embd.weight`.
-    fn isPleOnly(ctx: *const c.gguf_context) bool {
-        return c.gguf_get_n_tensors(ctx) == 1 and std.mem.eql(u8, gguf_meta.cString(c.gguf_get_tensor_name(ctx, 0)), "per_layer_token_embd.weight");
+    fn isPleOnly(ctx: *const mod.impl.c.gguf_context) bool {
+        return mod.impl.c.gguf_get_n_tensors(ctx) == 1 and std.mem.eql(u8, mod.gguf_meta.cString(mod.impl.c.gguf_get_tensor_name(ctx, 0)), "per_layer_token_embd.weight");
     }
 
     /// `file_name` in the constructor of `llama_model_loader`
@@ -789,10 +776,10 @@ pub const Loader = struct {
 
     /// The file-type guess and its override, from the constructor of
     /// `llama_model_loader` (llama-model-loader.cpp:537 @b1b770d90).
-    fn guessFtype(self: *Loader, trace: c_int, exc: *Exception) Thrown!void {
-        var n_type: [c.GGML_TYPE_COUNT]u32 = @splat(0);
+    fn guessFtype(self: *Loader, trace: c_int, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+        var n_type: [mod.impl.c.GGML_TYPE_COUNT]u32 = @splat(0);
         var n_type_max: u32 = 0;
-        var type_max: c.enum_ggml_type = c.GGML_TYPE_F32;
+        var type_max: mod.impl.c.enum_ggml_type = mod.impl.c.GGML_TYPE_F32;
 
         for (self.weights.items) |*w| {
             const ty = w.tensor.type;
@@ -804,50 +791,50 @@ pub const Loader = struct {
             if (trace > 0) {
                 const sid: c_int = w.idx;
                 var shape: [256]u8 = undefined;
-                impl.logInfo("%s: - tensor split %2d: %32s %-8s [ %s ] %8.2f MiB\n", .{
-                    "llama_model_loader",                sid,                                                                                      c.ggml_get_name(w.tensor), c.ggml_type_name(ty),
-                    formatTensorShape(w.tensor, &shape), @as(f64, @floatCast(@as(f32, @floatFromInt(c.ggml_nbytes(w.tensor))) / 1024.0 / 1024.0)),
+                mod.impl.logInfo("%s: - tensor split %2d: %32s %-8s [ %s ] %8.2f MiB\n", .{
+                    "llama_model_loader",                sid,                                                                                               mod.impl.c.ggml_get_name(w.tensor), mod.impl.c.ggml_type_name(ty),
+                    formatTensorShape(w.tensor, &shape), @as(f64, @floatCast(@as(f32, @floatFromInt(mod.impl.c.ggml_nbytes(w.tensor))) / 1024.0 / 1024.0)),
                 });
             }
         }
 
         self.ftype = switch (type_max) {
-            c.GGML_TYPE_F32 => c.LLAMA_FTYPE_ALL_F32,
-            c.GGML_TYPE_F16 => c.LLAMA_FTYPE_MOSTLY_F16,
-            c.GGML_TYPE_BF16 => c.LLAMA_FTYPE_MOSTLY_BF16,
-            c.GGML_TYPE_Q4_0 => c.LLAMA_FTYPE_MOSTLY_Q4_0,
-            c.GGML_TYPE_Q4_1 => c.LLAMA_FTYPE_MOSTLY_Q4_1,
-            c.GGML_TYPE_Q5_0 => c.LLAMA_FTYPE_MOSTLY_Q5_0,
-            c.GGML_TYPE_Q5_1 => c.LLAMA_FTYPE_MOSTLY_Q5_1,
-            c.GGML_TYPE_Q8_0 => c.LLAMA_FTYPE_MOSTLY_Q8_0,
-            c.GGML_TYPE_Q2_K => c.LLAMA_FTYPE_MOSTLY_Q2_K,
-            c.GGML_TYPE_Q3_K => c.LLAMA_FTYPE_MOSTLY_Q3_K_M,
-            c.GGML_TYPE_Q4_K => c.LLAMA_FTYPE_MOSTLY_Q4_K_M,
-            c.GGML_TYPE_Q5_K => c.LLAMA_FTYPE_MOSTLY_Q5_K_M,
-            c.GGML_TYPE_Q6_K => c.LLAMA_FTYPE_MOSTLY_Q6_K,
-            c.GGML_TYPE_TQ1_0 => c.LLAMA_FTYPE_MOSTLY_TQ1_0,
-            c.GGML_TYPE_TQ2_0 => c.LLAMA_FTYPE_MOSTLY_TQ2_0,
-            c.GGML_TYPE_IQ2_XXS => c.LLAMA_FTYPE_MOSTLY_IQ2_XXS,
-            c.GGML_TYPE_IQ2_XS => c.LLAMA_FTYPE_MOSTLY_IQ2_XS,
-            c.GGML_TYPE_IQ2_S => c.LLAMA_FTYPE_MOSTLY_IQ2_S,
-            c.GGML_TYPE_IQ3_XXS => c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
-            c.GGML_TYPE_IQ1_S => c.LLAMA_FTYPE_MOSTLY_IQ1_S,
-            c.GGML_TYPE_IQ1_M => c.LLAMA_FTYPE_MOSTLY_IQ1_M,
-            c.GGML_TYPE_IQ4_NL => c.LLAMA_FTYPE_MOSTLY_IQ4_NL,
-            c.GGML_TYPE_IQ4_XS => c.LLAMA_FTYPE_MOSTLY_IQ4_XS,
-            c.GGML_TYPE_IQ3_S => c.LLAMA_FTYPE_MOSTLY_IQ3_S,
-            c.GGML_TYPE_NVFP4 => c.LLAMA_FTYPE_MOSTLY_NVFP4,
-            c.GGML_TYPE_Q1_0 => c.LLAMA_FTYPE_MOSTLY_Q1_0,
-            c.GGML_TYPE_Q2_0 => c.LLAMA_FTYPE_MOSTLY_Q2_0,
-            c.GGML_TYPE_F8_E4M3 => c.LLAMA_FTYPE_MOSTLY_F8_E4M3,
+            mod.impl.c.GGML_TYPE_F32 => mod.impl.c.LLAMA_FTYPE_ALL_F32,
+            mod.impl.c.GGML_TYPE_F16 => mod.impl.c.LLAMA_FTYPE_MOSTLY_F16,
+            mod.impl.c.GGML_TYPE_BF16 => mod.impl.c.LLAMA_FTYPE_MOSTLY_BF16,
+            mod.impl.c.GGML_TYPE_Q4_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_0,
+            mod.impl.c.GGML_TYPE_Q4_1 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_1,
+            mod.impl.c.GGML_TYPE_Q5_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_0,
+            mod.impl.c.GGML_TYPE_Q5_1 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_1,
+            mod.impl.c.GGML_TYPE_Q8_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q8_0,
+            mod.impl.c.GGML_TYPE_Q2_K => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K,
+            mod.impl.c.GGML_TYPE_Q3_K => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M,
+            mod.impl.c.GGML_TYPE_Q4_K => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M,
+            mod.impl.c.GGML_TYPE_Q5_K => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M,
+            mod.impl.c.GGML_TYPE_Q6_K => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q6_K,
+            mod.impl.c.GGML_TYPE_TQ1_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ1_0,
+            mod.impl.c.GGML_TYPE_TQ2_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ2_0,
+            mod.impl.c.GGML_TYPE_IQ2_XXS => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS,
+            mod.impl.c.GGML_TYPE_IQ2_XS => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS,
+            mod.impl.c.GGML_TYPE_IQ2_S => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S,
+            mod.impl.c.GGML_TYPE_IQ3_XXS => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
+            mod.impl.c.GGML_TYPE_IQ1_S => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S,
+            mod.impl.c.GGML_TYPE_IQ1_M => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M,
+            mod.impl.c.GGML_TYPE_IQ4_NL => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL,
+            mod.impl.c.GGML_TYPE_IQ4_XS => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS,
+            mod.impl.c.GGML_TYPE_IQ3_S => mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_S,
+            mod.impl.c.GGML_TYPE_NVFP4 => mod.impl.c.LLAMA_FTYPE_MOSTLY_NVFP4,
+            mod.impl.c.GGML_TYPE_Q1_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q1_0,
+            mod.impl.c.GGML_TYPE_Q2_0 => mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_0,
+            mod.impl.c.GGML_TYPE_F8_E4M3 => mod.impl.c.LLAMA_FTYPE_MOSTLY_F8_E4M3,
             else => blk: {
-                impl.logWarn("%s: unknown type %s\n", .{ "llama_model_loader", c.ggml_type_name(type_max) });
-                break :blk c.LLAMA_FTYPE_ALL_F32;
+                mod.impl.logWarn("%s: unknown type %s\n", .{ "llama_model_loader", mod.impl.c.ggml_type_name(type_max) });
+                break :blk mod.impl.c.LLAMA_FTYPE_ALL_F32;
             },
         };
 
         // This is a way to mark that the file type was guessed.
-        self.ftype |= c.LLAMA_FTYPE_GUESSED;
+        self.ftype |= mod.impl.c.LLAMA_FTYPE_GUESSED;
 
         if (try self.meta.getKey(u32, .general_file_type, false, exc)) |v| self.ftype = v;
 
@@ -858,29 +845,29 @@ pub const Loader = struct {
     /// `llama_model_loader` (llama-model-loader.cpp:537 @b1b770d90).
     fn dumpMetadata(self: *Loader) void {
         const ctx = self.meta.ctx;
-        impl.logInfo("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", .{"llama_model_loader"});
+        mod.impl.logInfo("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", .{"llama_model_loader"});
 
         var i: c_int = 0;
         while (i < self.n_kv) : (i += 1) {
-            const name = c.gguf_get_key(ctx, i);
-            const ty = c.gguf_get_kv_type(ctx, i);
+            const name = mod.impl.c.gguf_get_key(ctx, i);
+            const ty = mod.impl.c.gguf_get_kv_type(ctx, i);
             var type_name: [128]u8 = undefined;
-            const tn: [*:0]const u8 = if (ty == c.GGUF_TYPE_ARRAY) blk: {
-                _ = c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", c.gguf_type_name(ty), c.gguf_type_name(c.gguf_get_arr_type(ctx, i)), c.gguf_get_arr_n(ctx, i));
+            const tn: [*:0]const u8 = if (ty == mod.impl.c.GGUF_TYPE_ARRAY) blk: {
+                _ = mod.impl.c.snprintf(&type_name, type_name.len, "%s[%s,%zu]", mod.impl.c.gguf_type_name(ty), mod.impl.c.gguf_type_name(mod.impl.c.gguf_get_arr_type(ctx, i)), mod.impl.c.gguf_get_arr_n(ctx, i));
                 break :blk @ptrCast(&type_name);
-            } else c.gguf_type_name(ty);
+            } else mod.impl.c.gguf_type_name(ty);
 
             var value: std.ArrayList(u8) = .empty;
-            defer value.deinit(allocator);
+            defer value.deinit(std.heap.c_allocator);
             const max_value_len = 40;
             kvToStr(ctx, i, max_value_len, &value);
             if (value.items.len > max_value_len) {
                 value.shrinkRetainingCapacity(max_value_len - 3);
-                value.appendSlice(allocator, "...") catch oom();
+                value.appendSlice(std.heap.c_allocator, "...") catch oom();
             }
-            impl.replaceAll(&value, "\n", "\\n");
+            mod.impl.replaceAll(&value, "\n", "\\n");
 
-            impl.logInfo("%s: - kv %3d: %42s %-16s = %.*s\n", .{
+            mod.impl.logInfo("%s: - kv %3d: %42s %-16s = %.*s\n", .{
                 "llama_model_loader", i, name, tn, @as(c_int, @intCast(value.items.len)), value.items.ptr,
             });
         }
@@ -888,28 +875,28 @@ pub const Loader = struct {
         // `std::map<ggml_type, uint32_t>`: in type order, the zeros skipped.
         for (self.n_type_counts, 0..) |n, ty| {
             if (n == 0) continue;
-            impl.logInfo("%s: - type %4s: %4d tensors\n", .{ "llama_model_loader", c.ggml_type_name(@intCast(ty)), @as(c_int, @bitCast(n)) });
+            mod.impl.logInfo("%s: - type %4s: %4d tensors\n", .{ "llama_model_loader", mod.impl.c.ggml_type_name(@intCast(ty)), @as(c_int, @bitCast(n)) });
         }
     }
 
     /// Return: nothing.
     pub fn deinit(self: *Loader) void {
         for (self.mappings.items) |*m| m.deinit();
-        self.mappings.deinit(allocator);
-        self.mmaps_used.deinit(allocator);
+        self.mappings.deinit(std.heap.c_allocator);
+        self.mmaps_used.deinit(std.heap.c_allocator);
         self.lazy.deinit();
-        for (self.ctx_map.items) |e| if (e.ctx) |ctx| c.ggml_free(ctx);
-        self.ctx_map.deinit(allocator);
-        self.first_tensor_moved_name.deinit(allocator);
-        self.weight_index.deinit(allocator);
+        for (self.ctx_map.items) |e| if (e.ctx) |ctx| mod.impl.c.ggml_free(ctx);
+        self.ctx_map.deinit(std.heap.c_allocator);
+        self.first_tensor_moved_name.deinit(std.heap.c_allocator);
+        self.weight_index.deinit(std.heap.c_allocator);
         for (self.files.items) |*f| f.close();
-        self.files.deinit(allocator);
-        for (self.contexts.items) |ctx| c.ggml_free(ctx);
-        self.contexts.deinit(allocator);
-        self.weights.deinit(allocator);
-        if (self.owned) |m| c.gguf_free(m);
+        self.files.deinit(std.heap.c_allocator);
+        for (self.contexts.items) |ctx| mod.impl.c.ggml_free(ctx);
+        self.contexts.deinit(std.heap.c_allocator);
+        self.weights.deinit(std.heap.c_allocator);
+        if (self.owned) |m| mod.impl.c.gguf_free(m);
         self.meta.deinit();
-        self.arch_name.deinit(allocator);
+        self.arch_name.deinit(std.heap.c_allocator);
     }
 
     /// Ports `llama_model_loader`'s `get_arch_name` (llama-model-loader.cpp:927
@@ -920,7 +907,7 @@ pub const Loader = struct {
 
     /// Ports `llama_model_loader`'s `get_arch` (llama-model-loader.cpp:931
     /// @b1b770d90).
-    pub fn getArch(self: *const Loader) arch.Arch {
+    pub fn getArch(self: *const Loader) mod.arch_table.Arch {
         return self.meta.arch;
     }
 
@@ -933,14 +920,14 @@ pub const Loader = struct {
     /// Ports `llama_model_loader`'s `print_info` (llama-model-loader.cpp:1978
     /// @b1b770d90).
     pub fn printInfo(self: *const Loader) void {
-        impl.logInfo("%s: file format = %s\n", .{ "print_info", fileVersionName(self.fver).ptr });
-        impl.logInfo("%s: file type   = %s\n", .{ "print_info", ftypeName(self.ftype).ptr });
+        mod.impl.logInfo("%s: file format = %s\n", .{ "print_info", fileVersionName(self.fver).ptr });
+        mod.impl.logInfo("%s: file type   = %s\n", .{ "print_info", ftypeName(self.ftype).ptr });
         const bytes: f64 = @floatFromInt(self.n_bytes);
         const bpw = bytes * 8.0 / @as(f64, @floatFromInt(self.n_elements));
         if (self.n_bytes < GiB) {
-            impl.logInfo("%s: file size   = %.2f MiB (%.2f BPW) \n", .{ "print_info", bytes / 1024.0 / 1024.0, bpw });
+            mod.impl.logInfo("%s: file size   = %.2f MiB (%.2f BPW) \n", .{ "print_info", bytes / 1024.0 / 1024.0, bpw });
         } else {
-            impl.logInfo("%s: file size   = %.2f GiB (%.2f BPW) \n", .{ "print_info", bytes / 1024.0 / 1024.0 / 1024.0, bpw });
+            mod.impl.logInfo("%s: file size   = %.2f GiB (%.2f BPW) \n", .{ "print_info", bytes / 1024.0 / 1024.0 / 1024.0, bpw });
         }
     }
 
@@ -958,13 +945,13 @@ pub const Loader = struct {
 
     /// Ports `llama_model_loader`'s `require_weight` (llama-model-loader.cpp:944
     /// @b1b770d90).
-    pub fn requireWeight(self: *const Loader, name: []const u8, exc: *Exception) Thrown!*Weight {
+    pub fn requireWeight(self: *const Loader, name: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!*Weight {
         return self.getWeight(name) orelse exc.throw(.runtime_error, "require_weight: tensor '{s}' not found", .{name});
     }
 
     /// Ports `llama_model_loader`'s `get_tensor_meta` (llama-model-loader.cpp:952
     /// @b1b770d90).
-    pub fn getTensorMeta(self: *const Loader, name: []const u8) ?*c.ggml_tensor {
+    pub fn getTensorMeta(self: *const Loader, name: []const u8) ?*mod.impl.c.ggml_tensor {
         const w = self.getWeight(name) orelse return null;
         return w.tensor;
     }
@@ -975,7 +962,7 @@ pub const Loader = struct {
     /// Return: the tensor's metadata; null when it is absent and not
     /// required; `error.Thrown` when it is absent and required, or its
     /// shape is not `ne`.
-    pub fn checkTensorDims(self: *const Loader, name: []const u8, ne: []const i64, required: bool, allow_reshape: bool, exc: *Exception) Thrown!?*c.ggml_tensor {
+    pub fn checkTensorDims(self: *const Loader, name: []const u8, ne: []const i64, required: bool, allow_reshape: bool, exc: *mod.impl.Exception) mod.impl.Thrown!?*mod.impl.c.ggml_tensor {
         const cur = self.getTensorMeta(name) orelse {
             if (!required) return null;
             return exc.throw(.runtime_error, "check_tensor_dims: tensor '{s}' not found", .{name});
@@ -983,12 +970,12 @@ pub const Loader = struct {
 
         var is_ok = true;
         if (allow_reshape) {
-            const ncur = c.ggml_nelements(cur);
+            const ncur = mod.impl.c.ggml_nelements(cur);
             var nexp: i64 = 1;
             for (ne) |n| nexp *%= n;
             if (ncur != nexp) is_ok = false;
         } else {
-            for (0..c.GGML_MAX_DIMS) |i| {
+            for (0..mod.impl.c.GGML_MAX_DIMS) |i| {
                 if ((i < ne.len and ne[i] != cur.ne[i]) or (i >= ne.len and cur.ne[i] != 1)) {
                     is_ok = false;
                     break;
@@ -1026,7 +1013,7 @@ pub const Loader = struct {
     /// and absent, or skipped; `error.Thrown` where the C++ throws.
     pub fn createTensor(
         self: *Loader,
-        hparams: *const Hparams,
+        hparams: *const mod.hparams.Hparams,
         buft_list_cpu: *const BuftList,
         buft_list_input: *const BuftList,
         buft_list_output: *const BuftList,
@@ -1034,48 +1021,48 @@ pub const Loader = struct {
         tn: Tn,
         ne: []const i64,
         flags: u32,
-        exc: *Exception,
-    ) Thrown!?*c.ggml_tensor {
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!?*mod.impl.c.ggml_tensor {
         const name = tn.str();
         if (self.files.items.len == 0) {
             if (flags & tensor_skip_if_virtual != 0) return null;
-            var ty: c.enum_ggml_type = c.GGML_TYPE_F32;
-            var zname: [arch.max_name + 1]u8 = undefined;
+            var ty: mod.impl.c.enum_ggml_type = mod.impl.c.GGML_TYPE_F32;
+            var zname: [mod.arch.max_name + 1]u8 = undefined;
             const nm = zeroTerminate(&zname, name.slice());
-            const tid = c.gguf_find_tensor(self.meta.ctx, nm);
-            if (tid != -1) ty = c.gguf_get_tensor_type(self.meta.ctx, tid);
+            const tid = mod.impl.c.gguf_find_tensor(self.meta.ctx, nm);
+            if (tid != -1) ty = mod.impl.c.gguf_get_tensor_type(self.meta.ctx, tid);
 
             // For tensors that are not required some of the dimensions can be invalid.
             if (flags & tensor_not_required != 0) {
                 for (ne) |n| if (n <= 0) return null;
             }
 
-            var t_meta: c.ggml_tensor = std.mem.zeroes(c.ggml_tensor);
+            var t_meta: mod.impl.c.ggml_tensor = std.mem.zeroes(mod.impl.c.ggml_tensor);
             t_meta.type = ty;
-            for (0..c.GGML_MAX_DIMS) |dim| {
+            for (0..mod.impl.c.GGML_MAX_DIMS) |dim| {
                 t_meta.ne[dim] = if (dim < ne.len) ne[dim] else 1;
-                impl.assert(t_meta.ne[dim] >= 1, "llama-model-loader.cpp", 1411, "t_meta.ne[dim] >= 1");
+                mod.impl.assert(t_meta.ne[dim] >= 1, "llama-model-loader.cpp", 1411, "t_meta.ne[dim] >= 1");
                 if (dim == 0) {
-                    t_meta.nb[dim] = c.ggml_type_size(ty);
+                    t_meta.nb[dim] = mod.impl.c.ggml_type_size(ty);
                 } else if (dim == 1) {
-                    t_meta.nb[dim] = c.ggml_row_size(ty, t_meta.ne[dim - 1]);
+                    t_meta.nb[dim] = mod.impl.c.ggml_row_size(ty, t_meta.ne[dim - 1]);
                 } else {
                     t_meta.nb[dim] = t_meta.nb[dim - 1] *% @as(usize, @bitCast(t_meta.ne[dim - 1]));
                 }
-                impl.assert(t_meta.nb[dim] >= 1, "llama-model-loader.cpp", 1419, "t_meta.nb[dim] >= 1");
+                mod.impl.assert(t_meta.nb[dim] >= 1, "llama-model-loader.cpp", 1419, "t_meta.nb[dim] >= 1");
             }
-            _ = c.ggml_set_name(&t_meta, nm);
+            _ = mod.impl.c.ggml_set_name(&t_meta, nm);
 
             // `is_lazy` is never set on this path.
             const buft = try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, false, exc);
-            impl.assert(buft != null, "llama-model-loader.cpp", 1424, "buft != nullptr");
+            mod.impl.assert(buft != null, "llama-model-loader.cpp", 1424, "buft != nullptr");
             const ctx = try self.ctxForBuft(hparams, buft, false, exc);
-            const ret = c.ggml_dup_tensor(ctx, &t_meta);
-            _ = c.ggml_set_name(ret, nm);
+            const ret = mod.impl.c.ggml_dup_tensor(ctx, &t_meta);
+            _ = mod.impl.c.ggml_set_name(ret, nm);
             return ret;
         }
 
-        impl.logDebug("%s: loading tensor %.*s\n", .{ "create_tensor", @as(c_int, @intCast(name.len)), &name.buf });
+        mod.impl.logDebug("%s: loading tensor %.*s\n", .{ "create_tensor", @as(c_int, @intCast(name.len)), &name.buf });
         const cur = (try self.checkTensorDims(name.slice(), ne, flags & tensor_not_required == 0, flags & tensor_allow_reshape != 0, exc)) orelse return null;
 
         var is_lazy = false;
@@ -1086,39 +1073,39 @@ pub const Loader = struct {
             is_lazy = self.lazy.add(name.slice(), cur, w);
         }
 
-        var t_meta: c.ggml_tensor = cur.*;
+        var t_meta: mod.impl.c.ggml_tensor = cur.*;
         if (flags & tensor_allow_reshape != 0) {
-            for (0..c.GGML_MAX_DIMS) |dim| {
+            for (0..mod.impl.c.GGML_MAX_DIMS) |dim| {
                 t_meta.ne[dim] = if (dim < ne.len) ne[dim] else 1;
                 if (dim == 0) {
-                    t_meta.nb[dim] = c.ggml_type_size(t_meta.type);
+                    t_meta.nb[dim] = mod.impl.c.ggml_type_size(t_meta.type);
                 } else if (dim == 1) {
-                    t_meta.nb[dim] = c.ggml_row_size(t_meta.type, t_meta.ne[dim - 1]);
+                    t_meta.nb[dim] = mod.impl.c.ggml_row_size(t_meta.type, t_meta.ne[dim - 1]);
                 } else {
                     t_meta.nb[dim] = @as(usize, @bitCast(t_meta.ne[dim - 1])) *% t_meta.nb[dim - 1];
                 }
             }
         }
 
-        impl.assert(c.ggml_nbytes(&t_meta) == c.ggml_nbytes(cur), "llama-model-loader.cpp", 1456, "ggml_nbytes(&t_meta) == ggml_nbytes(cur)");
+        mod.impl.assert(mod.impl.c.ggml_nbytes(&t_meta) == mod.impl.c.ggml_nbytes(cur), "llama-model-loader.cpp", 1456, "ggml_nbytes(&t_meta) == ggml_nbytes(cur)");
 
         const buft = (try self.buftForTensor(hparams, buft_list_cpu, buft_list_input, buft_list_output, buft_list_layer, tn, &t_meta, flags, is_lazy, exc)) orelse return null;
         const ctx = try self.ctxForBuft(hparams, buft, is_lazy, exc);
 
         // If duplicated, check if the original tensor was allocated in the
         // same buffer type context and avoid creating a new one.
-        var zname: [arch.max_name + 1]u8 = undefined;
+        var zname: [mod.arch.max_name + 1]u8 = undefined;
         const nm = zeroTerminate(&zname, name.slice());
         if (flags & tensor_duplicated != 0) {
-            if (c.ggml_get_tensor(ctx, nm)) |t| return t;
+            if (mod.impl.c.ggml_get_tensor(ctx, nm)) |t| return t;
         }
 
         const duplicated = flags & tensor_duplicated != 0;
-        const tensor = c.ggml_dup_tensor(ctx, &t_meta);
-        _ = c.ggml_set_name(tensor, c.ggml_get_name(&t_meta));
+        const tensor = mod.impl.c.ggml_dup_tensor(ctx, &t_meta);
+        _ = mod.impl.c.ggml_set_name(tensor, mod.impl.c.ggml_get_name(&t_meta));
 
         if (duplicated) {
-            self.size_data +%= c.ggml_nbytes(&t_meta);
+            self.size_data +%= mod.impl.c.ggml_nbytes(&t_meta);
         } else {
             self.n_created += 1;
         }
@@ -1128,7 +1115,7 @@ pub const Loader = struct {
     /// `ctx_for_buft`, the first lambda of `create_tensor`
     /// (llama-model-loader.cpp:1211 @b1b770d90): one context per buffer
     /// type and laziness, created on first use.
-    fn ctxForBuft(self: *Loader, hparams: *const Hparams, buft: c.ggml_backend_buffer_type_t, is_lazy: bool, exc: *Exception) Thrown!*c.ggml_context {
+    fn ctxForBuft(self: *Loader, hparams: *const mod.hparams.Hparams, buft: mod.impl.c.ggml_backend_buffer_type_t, is_lazy: bool, exc: *mod.impl.Exception) mod.impl.Thrown!*mod.impl.c.ggml_context {
         const key: CtxKey = .{ .buft = buft, .lazy = is_lazy };
         var pos: usize = 0;
         while (pos < self.ctx_map.items.len) : (pos += 1) {
@@ -1143,10 +1130,10 @@ pub const Loader = struct {
         if (self.files.items.len == 0) {
             max_n_tensors +%= @as(c_int, @bitCast(hparams.nLayer() *% 256));
         }
-        const ctx_size = c.ggml_tensor_overhead() *% @as(usize, @intCast(max_n_tensors));
-        const ctx = c.ggml_init(.{ .mem_size = ctx_size, .mem_buffer = null, .no_alloc = true }) orelse
+        const ctx_size = mod.impl.c.ggml_tensor_overhead() *% @as(usize, @intCast(max_n_tensors));
+        const ctx = mod.impl.c.ggml_init(.{ .mem_size = ctx_size, .mem_buffer = null, .no_alloc = true }) orelse
             return exc.throw(.runtime_error, "failed to create ggml context", .{});
-        self.ctx_map.insert(allocator, pos, .{ .key = key, .ctx = ctx }) catch oom();
+        self.ctx_map.insert(std.heap.c_allocator, pos, .{ .key = key, .ctx = ctx }) catch oom();
         return ctx;
     }
 
@@ -1155,17 +1142,17 @@ pub const Loader = struct {
     /// tensor goes in; a lazy one, past the checks, goes in the CPU's.
     fn buftForTensor(
         self: *Loader,
-        hparams: *const Hparams,
+        hparams: *const mod.hparams.Hparams,
         buft_list_cpu: *const BuftList,
         buft_list_input: *const BuftList,
         buft_list_output: *const BuftList,
         buft_list_layer: ?*const BuftList,
         tn: Tn,
-        t_meta_: ?*c.ggml_tensor,
+        t_meta_: ?*mod.impl.c.ggml_tensor,
         flags: u32,
         is_lazy: bool,
-        exc: *Exception,
-    ) Thrown!c.ggml_backend_buffer_type_t {
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_type_t {
         const name = tn.str();
         const t_meta = t_meta_ orelse {
             if (flags & tensor_not_required != 0) return null;
@@ -1177,14 +1164,14 @@ pub const Loader = struct {
         var tn_tensor = tn.tensor;
         if (tn.tensor == .token_embd and flags & tensor_duplicated != 0) tn_tensor = .output;
 
-        var inner: Exception = .{};
-        const info = arch.tensorInfoFor(tn_tensor, &inner) catch
+        var inner: mod.impl.Exception = .{};
+        const info = mod.arch.tensorInfoFor(tn_tensor, &inner) catch
             return exc.throw(.runtime_error, "missing tensor info mapping for {s}", .{name.slice()});
 
         // Skip unused tensors.
-        if (info.op == c.GGML_OP_NONE or flags & tensor_skip != 0) {
-            const nbytes = c.ggml_nbytes(t_meta);
-            impl.logWarn("model has unused tensor %.*s (size = %zu bytes) -- ignoring\n", .{ @as(c_int, @intCast(name.len)), &name.buf, nbytes });
+        if (info.op == mod.impl.c.GGML_OP_NONE or flags & tensor_skip != 0) {
+            const nbytes = mod.impl.c.ggml_nbytes(t_meta);
+            mod.impl.logWarn("model has unused tensor %.*s (size = %zu bytes) -- ignoring\n", .{ @as(c_int, @intCast(name.len)), &name.buf, nbytes });
             self.size_data -%= nbytes;
             self.n_created += 1;
             return null;
@@ -1192,22 +1179,22 @@ pub const Loader = struct {
 
         // Tensors with a "bias" suffix are always used with ADD or ADD_ID;
         // embedded-adapter ".lora_a"/".lora_b" tensors with MUL_MAT_ID.
-        var op: c.enum_ggml_op = undefined;
+        var op: mod.impl.c.enum_ggml_op = undefined;
         if (tn.suffix != null and std.mem.eql(u8, tn.suffix.?, "bias")) {
-            op = if (info.op == c.GGML_OP_MUL_MAT_ID) c.GGML_OP_ADD_ID else c.GGML_OP_ADD;
+            op = if (info.op == mod.impl.c.GGML_OP_MUL_MAT_ID) mod.impl.c.GGML_OP_ADD_ID else mod.impl.c.GGML_OP_ADD;
         } else if (hparams.router_layer >= 0 and tn.suffix != null and
             (std.mem.eql(u8, tn.suffix.?, "lora_a") or std.mem.eql(u8, tn.suffix.?, "lora_b")))
         {
-            op = c.GGML_OP_MUL_MAT_ID;
+            op = mod.impl.c.GGML_OP_MUL_MAT_ID;
         } else {
             op = info.op;
         }
 
         // Sanity checks.
         if (info.layer == .input or info.layer == .output) {
-            if (tn.bid != -1) c.ggml_abort("llama-model-loader.cpp", 1298, "input/output layer tensor %.*s used with a layer number", @as(c_int, @intCast(name.len)), &name.buf);
+            if (tn.bid != -1) mod.impl.c.ggml_abort("llama-model-loader.cpp", 1298, "input/output layer tensor %.*s used with a layer number", @as(c_int, @intCast(name.len)), &name.buf);
         } else {
-            if (tn.bid == -1) c.ggml_abort("llama-model-loader.cpp", 1302, "repeating layer tensor %.*s used without a layer number", @as(c_int, @intCast(name.len)), &name.buf);
+            if (tn.bid == -1) mod.impl.c.ggml_abort("llama-model-loader.cpp", 1302, "repeating layer tensor %.*s used without a layer number", @as(c_int, @intCast(name.len)), &name.buf);
         }
 
         if (is_lazy) return try LazyRead.buft(exc);
@@ -1217,37 +1204,37 @@ pub const Loader = struct {
             .input => buft_list_input,
             .output => buft_list_output,
             .repeating => blk: {
-                impl.assert(buft_list_layer != null, "llama-model-loader.cpp", 1320, "buft_list_layer != nullptr");
+                mod.impl.assert(buft_list_layer != null, "llama-model-loader.cpp", 1320, "buft_list_layer != nullptr");
                 break :blk buft_list_layer.?;
             },
         };
 
-        var buft: c.ggml_backend_buffer_type_t = null;
+        var buft: mod.impl.c.ggml_backend_buffer_type_t = null;
 
         // Check overrides.
         if (self.tensor_buft_overrides) |overrides_| {
             var overrides = overrides_;
             while (overrides[0].pattern != null) : (overrides += 1) {
-                var re = regex.Regex.compile(std.mem.span(overrides[0].pattern)) catch |e|
-                    return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)});
+                var re = mod.regex.Regex.compile(std.mem.span(overrides[0].pattern)) catch |e|
+                    return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)});
                 defer re.deinit();
-                var m = regex.Match.init();
+                var m = mod.regex.Match.init();
                 defer m.deinit();
                 if (re.search(name.slice(), &m)) {
-                    if (overrides[0].buft == c.ggml_backend_cpu_buffer_type()) {
+                    if (overrides[0].buft == mod.impl.c.ggml_backend_cpu_buffer_type()) {
                         // When overriding to a CPU buffer, consider the extra buffer types.
                         buft = try selectWeightBuft(hparams, t_meta, op, buft_list_cpu, exc);
                         if (self.use_mmap and !warned_cpu_override) {
                             warned_cpu_override = true;
-                            impl.logWarn("llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance\n", .{});
+                            mod.impl.logWarn("llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance\n", .{});
                         }
                     } else {
                         buft = overrides[0].buft;
                     }
-                    impl.logDebug("tensor %.*s (%zu MiB %s) buffer type overridden to %s\n", .{
-                        @as(c_int, @intCast(name.len)),      &name.buf,
-                        c.ggml_nbytes(t_meta) / 1024 / 1024, c.ggml_type_name(t_meta.type),
-                        c.ggml_backend_buft_name(buft),
+                    mod.impl.logDebug("tensor %.*s (%zu MiB %s) buffer type overridden to %s\n", .{
+                        @as(c_int, @intCast(name.len)),               &name.buf,
+                        mod.impl.c.ggml_nbytes(t_meta) / 1024 / 1024, mod.impl.c.ggml_type_name(t_meta.type),
+                        mod.impl.c.ggml_backend_buft_name(buft),
                     });
                     break;
                 }
@@ -1260,18 +1247,18 @@ pub const Loader = struct {
         }
 
         // Avoid using a host buffer when using mmap.
-        const buft_dev = c.ggml_backend_buft_get_device(buft);
-        if (self.use_mmap and buft_dev != null and buft == c.ggml_backend_dev_host_buffer_type(buft_dev)) {
-            const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
+        const buft_dev = mod.impl.c.ggml_backend_buft_get_device(buft);
+        if (self.use_mmap and buft_dev != null and buft == mod.impl.c.ggml_backend_dev_host_buffer_type(buft_dev)) {
+            const cpu_dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) orelse
                 return exc.throw(.runtime_error, "no CPU backend found", .{});
-            buft = c.ggml_backend_dev_buffer_type(cpu_dev);
+            buft = mod.impl.c.ggml_backend_dev_buffer_type(cpu_dev);
         }
 
         if (buft != buft_list.items[0].buft) {
             if (self.n_tensors_moved == 0) {
                 self.first_tensor_moved_name.clearRetainingCapacity();
-                self.first_tensor_moved_name.appendSlice(allocator, gguf_meta.cString(&t_meta.name)) catch oom();
-                self.first_tensor_moved_type_name = c.ggml_type_name(t_meta.type);
+                self.first_tensor_moved_name.appendSlice(std.heap.c_allocator, mod.gguf_meta.cString(&t_meta.name)) catch oom();
+                self.first_tensor_moved_type_name = mod.impl.c.ggml_type_name(t_meta.type);
                 self.first_moved_from_buft = buft_list.items[0].buft;
                 self.first_moved_to_buft = buft;
             }
@@ -1284,7 +1271,7 @@ pub const Loader = struct {
     /// (llama-model-loader.cpp:1487 @b1b770d90).
     ///
     /// Return: nothing, or `error.Thrown` when the count is wrong.
-    pub fn doneGettingTensors(self: *const Loader, partial: bool, exc: *Exception) Thrown!void {
+    pub fn doneGettingTensors(self: *const Loader, partial: bool, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         if (self.n_created > self.n_tensors) {
             return exc.throw(.runtime_error, "done_getting_tensors: too many tensors created; expected {d}, got {d}", .{ self.n_tensors, self.n_created });
         }
@@ -1292,19 +1279,19 @@ pub const Loader = struct {
             if (!partial) {
                 return exc.throw(.runtime_error, "done_getting_tensors: wrong number of tensors; expected {d}, got {d}", .{ self.n_tensors, self.n_created });
             }
-            impl.logInfo("%s: partial load \xe2\x80\x94 used %d of %d tensors in the file (rest belong to a sibling model on the same .gguf)\n", .{
+            mod.impl.logInfo("%s: partial load \xe2\x80\x94 used %d of %d tensors in the file (rest belong to a sibling model on the same .gguf)\n", .{
                 "done_getting_tensors", self.n_created, self.n_tensors,
             });
         }
         if (self.n_tensors_moved > 0) {
-            impl.logDebug("%s: tensor '%.*s' (%s) (and %zu others) cannot be used with preferred buffer type %s, using %s instead\n", .{
+            mod.impl.logDebug("%s: tensor '%.*s' (%s) (and %zu others) cannot be used with preferred buffer type %s, using %s instead\n", .{
                 "done_getting_tensors",
                 @as(c_int, @intCast(self.first_tensor_moved_name.items.len)),
                 self.first_tensor_moved_name.items.ptr,
                 self.first_tensor_moved_type_name,
                 self.n_tensors_moved - 1,
-                c.ggml_backend_buft_name(self.first_moved_from_buft),
-                c.ggml_backend_buft_name(self.first_moved_to_buft),
+                mod.impl.c.ggml_backend_buft_name(self.first_moved_from_buft),
+                mod.impl.c.ggml_backend_buft_name(self.first_moved_to_buft),
             });
         }
     }
@@ -1320,36 +1307,36 @@ pub const Loader = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: nothing, or `error.Thrown` when a file cannot be mapped.
-    pub fn initMappings(self: *Loader, prefetch: bool, mlock_mmaps: ?*std.ArrayList(*mmap.Mlock), exc: *Exception) Thrown!void {
+    pub fn initMappings(self: *Loader, prefetch: bool, mlock_mmaps: ?*std.ArrayList(*mod.mmap.Mlock), exc: *mod.impl.Exception) mod.impl.Thrown!void {
         // Lazy reads need mmap too; this maps the files for them whatever
         // the load mode.
         if (self.use_mmap or self.lazy.any()) {
-            self.mappings.ensureTotalCapacity(allocator, self.files.items.len) catch oom();
-            self.mmaps_used.ensureTotalCapacity(allocator, self.files.items.len) catch oom();
+            self.mappings.ensureTotalCapacity(std.heap.c_allocator, self.files.items.len) catch oom();
+            self.mmaps_used.ensureTotalCapacity(std.heap.c_allocator, self.files.items.len) catch oom();
             for (self.files.items, 0..) |*file, idx| {
                 var is_numa = false;
-                if (c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU)) |dev| {
-                    const reg = c.ggml_backend_dev_backend_reg(dev);
-                    const is_numa_fn: ?*const fn () callconv(.c) bool = @ptrCast(@alignCast(c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_is_numa")));
+                if (mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU)) |dev| {
+                    const reg = mod.impl.c.ggml_backend_dev_backend_reg(dev);
+                    const is_numa_fn: ?*const fn () callconv(.c) bool = @ptrCast(@alignCast(mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_is_numa")));
                     if (is_numa_fn) |f| is_numa = f();
                 }
 
                 const prefetch_size: usize = if (prefetch and self.use_mmap) std.math.maxInt(usize) else 0;
 
-                const mapping = try mmap.Mmap.init(file, prefetch_size, is_numa, self.lazy.forFile(@intCast(idx)), exc);
-                self.mmaps_used.append(allocator, .{ mapping.size, 0 }) catch oom();
+                const mapping = try mod.mmap.Mmap.init(file, prefetch_size, is_numa, self.lazy.forFile(@intCast(idx)), exc);
+                self.mmaps_used.append(std.heap.c_allocator, .{ mapping.size, 0 }) catch oom();
                 if (mlock_mmaps) |locks| {
-                    const lock = allocator.create(mmap.Mlock) catch oom();
+                    const lock = std.heap.c_allocator.create(mod.mmap.Mlock) catch oom();
                     lock.* = .{};
                     lock.init(mapping.addr);
-                    locks.append(allocator, lock) catch oom();
+                    locks.append(std.heap.c_allocator, lock) catch oom();
                 }
-                self.mappings.append(allocator, mapping) catch oom();
+                self.mappings.append(std.heap.c_allocator, mapping) catch oom();
             }
         }
 
         // Compute the total size of all tensors for progress reporting.
-        for (self.weights.items) |*w| self.size_data +%= c.ggml_nbytes(w.tensor);
+        for (self.weights.items) |*w| self.size_data +%= mod.impl.c.ggml_nbytes(w.tensor);
     }
 
     /// Ports `llama_model_loader`'s `get_mapping_ranges`
@@ -1361,22 +1348,22 @@ pub const Loader = struct {
     /// contexts, as a duplicated token embedding is, is not foreign.
     ///
     /// Return: the ranges, the caller's to free with `impl.allocator`.
-    pub fn getMappingRanges(self: *const Loader, idx: u32, ctx: *c.ggml_context) []MappingRange {
-        impl.assert(idx < self.mappings.items.len, "llama-model-loader.cpp", 1586, "idx < mappings.size()");
+    pub fn getMappingRanges(self: *const Loader, idx: u32, ctx: *mod.impl.c.ggml_context) []MappingRange {
+        mod.impl.assert(idx < self.mappings.items.len, "llama-model-loader.cpp", 1586, "idx < mappings.size()");
 
         var own: std.AutoHashMapUnmanaged(*const Weight, void) = .empty;
-        defer own.deinit(allocator);
+        defer own.deinit(std.heap.c_allocator);
         var own_ranges: std.ArrayList(MappingRange) = .empty;
-        defer own_ranges.deinit(allocator);
+        defer own_ranges.deinit(std.heap.c_allocator);
         var other: std.ArrayList(MappingRange) = .empty;
-        defer other.deinit(allocator);
+        defer other.deinit(std.heap.c_allocator);
 
-        var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
-        while (t) |tensor| : (t = c.ggml_get_next_tensor(ctx, tensor)) {
-            const w = self.getWeight(gguf_meta.cString(c.ggml_get_name(tensor))) orelse continue;
+        var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
+        while (t) |tensor| : (t = mod.impl.c.ggml_get_next_tensor(ctx, tensor)) {
+            const w = self.getWeight(mod.gguf_meta.cString(mod.impl.c.ggml_get_name(tensor))) orelse continue;
             if (w.idx != idx) continue;
-            own.put(allocator, w, {}) catch oom();
-            own_ranges.append(allocator, .{ .first = w.offs, .last = w.offs +% c.ggml_nbytes(tensor) }) catch oom();
+            own.put(std.heap.c_allocator, w, {}) catch oom();
+            own_ranges.append(std.heap.c_allocator, .{ .first = w.offs, .last = w.offs +% mod.impl.c.ggml_nbytes(tensor) }) catch oom();
         }
 
         // a context the model already took is null here, as the C++'s
@@ -1384,18 +1371,18 @@ pub const Loader = struct {
         for (self.ctx_map.items) |e| {
             const octx = e.ctx orelse continue;
             if (octx == ctx) continue;
-            var ot: ?*c.ggml_tensor = c.ggml_get_first_tensor(octx);
-            while (ot) |tensor| : (ot = c.ggml_get_next_tensor(octx, tensor)) {
-                const w = self.getWeight(gguf_meta.cString(c.ggml_get_name(tensor))) orelse continue;
+            var ot: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(octx);
+            while (ot) |tensor| : (ot = mod.impl.c.ggml_get_next_tensor(octx, tensor)) {
+                const w = self.getWeight(mod.gguf_meta.cString(mod.impl.c.ggml_get_name(tensor))) orelse continue;
                 if (w.idx != idx or own.contains(w)) continue;
-                other.append(allocator, .{ .first = w.offs, .last = w.offs +% c.ggml_nbytes(tensor) }) catch oom();
+                other.append(std.heap.c_allocator, .{ .first = w.offs, .last = w.offs +% mod.impl.c.ggml_nbytes(tensor) }) catch oom();
             }
         }
 
         const own_merged = mergeRanges(own_ranges.items);
-        defer allocator.free(own_merged);
+        defer std.heap.c_allocator.free(own_merged);
         const other_merged = mergeRanges(other.items);
-        defer allocator.free(other_merged);
+        defer std.heap.c_allocator.free(other_merged);
         return subRanges(own_merged, other_merged);
     }
 
@@ -1403,7 +1390,7 @@ pub const Loader = struct {
     /// @b1b770d90).
     pub fn unmapWeight(self: *Loader, w: *const Weight) void {
         if (!self.use_mmap) return;
-        self.mappings.items[w.idx].unmapFragment(w.offs, w.offs +% c.ggml_nbytes(w.tensor));
+        self.mappings.items[w.idx].unmapFragment(w.offs, w.offs +% mod.impl.c.ggml_nbytes(w.tensor));
     }
 
     /// Ports `llama_model_loader`'s `load_data_range` (llama-model-loader.cpp:1625
@@ -1420,23 +1407,23 @@ pub const Loader = struct {
     /// Return: with mmap, a pointer into the mapping, valid while it is
     /// mapped; otherwise `buf`. `error.Thrown` when reading fails or the
     /// data is invalid.
-    pub fn loadDataRange(self: *const Loader, w: *const Weight, offs: usize, size: usize, buf: ?*anyopaque, exc: *Exception) Thrown!?*const anyopaque {
-        impl.assert(offs +% size <= c.ggml_nbytes(w.tensor), "llama-model-loader.cpp", 1626, "offs + size <= ggml_nbytes(w.tensor)");
+    pub fn loadDataRange(self: *const Loader, w: *const Weight, offs: usize, size: usize, buf: ?*anyopaque, exc: *mod.impl.Exception) mod.impl.Thrown!?*const anyopaque {
+        mod.impl.assert(offs +% size <= mod.impl.c.ggml_nbytes(w.tensor), "llama-model-loader.cpp", 1626, "offs + size <= ggml_nbytes(w.tensor)");
 
         var data: ?*const anyopaque = buf;
 
         if (self.use_mmap) {
             data = @ptrFromInt(@intFromPtr(self.mappings.items[w.idx].addr) + w.offs + offs);
         } else {
-            impl.assert(buf != null, "llama-model-loader.cpp", 1633, "buf != nullptr");
-            impl.assert(w.idx < self.files.items.len, "llama-model-loader.cpp", 1634, "w.idx < files.size()");
+            mod.impl.assert(buf != null, "llama-model-loader.cpp", 1633, "buf != nullptr");
+            mod.impl.assert(w.idx < self.files.items.len, "llama-model-loader.cpp", 1634, "w.idx < files.size()");
             const file = &self.files.items[w.idx];
-            try file.seek(w.offs + offs, c.SEEK_SET, exc);
+            try file.seek(w.offs + offs, mod.impl.c.SEEK_SET, exc);
             try file.readRaw(buf.?, size, exc);
         }
 
-        if (self.check_tensors and !c.ggml_validate_row_data(w.tensor.type, data, size)) {
-            return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(w.tensor))});
+        if (self.check_tensors and !mod.impl.c.ggml_validate_row_data(w.tensor.type, data, size)) {
+            return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{mod.gguf_meta.cString(mod.impl.c.ggml_get_name(w.tensor))});
         }
 
         return data;
@@ -1465,22 +1452,22 @@ pub const Loader = struct {
     /// Return: false when the progress callback cancelled, or `error.Thrown`.
     pub fn loadAllData(
         self: *Loader,
-        ctx: *c.ggml_context,
-        bufs: []const c.ggml_backend_buffer_t,
-        lmlocks: ?*std.ArrayList(*mmap.Mlock),
-        progress_callback: c.llama_progress_callback,
+        ctx: *mod.impl.c.ggml_context,
+        bufs: []const mod.impl.c.ggml_backend_buffer_t,
+        lmlocks: ?*std.ArrayList(*mod.mmap.Mlock),
+        progress_callback: mod.impl.c.llama_progress_callback,
         progress_callback_user_data: ?*anyopaque,
-        exc: *Exception,
-    ) Thrown!bool {
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!bool {
         if (self.files.items.len == 0) {
-            var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
-            while (t) |tensor| : (t = c.ggml_get_next_tensor(ctx, tensor)) self.set_tensor_data.?(tensor, self.set_tensor_data_ud);
+            var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
+            while (t) |tensor| : (t = mod.impl.c.ggml_get_next_tensor(ctx, tensor)) self.set_tensor_data.?(tensor, self.set_tensor_data_ud);
             return true;
         }
-        impl.assert(self.size_data != 0, "llama-model-loader.cpp", 1659, "size_data != 0 && \"call init_mappings() first\"");
+        mod.impl.assert(self.size_data != 0, "llama-model-loader.cpp", 1659, "size_data != 0 && \"call init_mappings() first\"");
 
         var validation: std.ArrayList(Validation) = .empty;
-        defer validation.deinit(allocator);
+        defer validation.deinit(std.heap.c_allocator);
 
         // 4 staging buffers for async uploads, each sized 1MB.
         const n_buffers = 4;
@@ -1488,42 +1475,42 @@ pub const Loader = struct {
         var alignment: usize = 1;
         for (self.files.items) |*file| alignment = @max(file.readAlignment(), alignment);
 
-        const buffer_size: usize = if (alignment != 1) mmap.direct_io_buffer_size + 2 * alignment else 1 * 1024 * 1024;
+        const buffer_size: usize = if (alignment != 1) mod.mmap.direct_io_buffer_size + 2 * alignment else 1 * 1024 * 1024;
 
-        var host_buffers: std.ArrayList(c.ggml_backend_buffer_t) = .empty;
-        defer host_buffers.deinit(allocator);
-        var events: std.ArrayList(c.ggml_backend_event_t) = .empty;
-        defer events.deinit(allocator);
+        var host_buffers: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty;
+        defer host_buffers.deinit(std.heap.c_allocator);
+        var events: std.ArrayList(mod.impl.c.ggml_backend_event_t) = .empty;
+        defer events.deinit(std.heap.c_allocator);
         var host_ptrs: std.ArrayList(?*anyopaque) = .empty;
-        defer host_ptrs.deinit(allocator);
+        defer host_ptrs.deinit(std.heap.c_allocator);
         var buffer_idx: usize = 0;
         const upload_backend = self.uploadBackend(bufs, n_buffers, buffer_size, &host_buffers, &events, &host_ptrs);
 
         if (upload_backend != null) {
-            impl.logDebug("%s: using async uploads for device %s, buffer type %s, backend %s\n", .{
+            mod.impl.logDebug("%s: using async uploads for device %s, buffer type %s, backend %s\n", .{
                 "load_all_data",
-                c.ggml_backend_dev_name(c.ggml_backend_get_device(upload_backend)),
-                c.ggml_backend_buft_name(c.ggml_backend_buffer_get_type(bufs[0])),
-                c.ggml_backend_name(upload_backend),
+                mod.impl.c.ggml_backend_dev_name(mod.impl.c.ggml_backend_get_device(upload_backend)),
+                mod.impl.c.ggml_backend_buft_name(mod.impl.c.ggml_backend_buffer_get_type(bufs[0])),
+                mod.impl.c.ggml_backend_name(upload_backend),
             });
         }
 
-        var tensors: std.ArrayList(*c.ggml_tensor) = .empty;
-        defer tensors.deinit(allocator);
-        var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
-        while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) tensors.append(allocator, cur) catch oom();
+        var tensors: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty;
+        defer tensors.deinit(std.heap.c_allocator);
+        var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
+        while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(ctx, cur)) tensors.append(std.heap.c_allocator, cur) catch oom();
 
         // Without mmap, tensors in non-host buffers are staged through a
         // temporary buffer sized like the tensor: `std::stable_sort`.
-        if (!self.use_mmap) std.sort.block(*c.ggml_tensor, tensors.items, {}, stagedBiggestFirst);
+        if (!self.use_mmap) std.sort.block(*mod.impl.c.ggml_tensor, tensors.items, {}, stagedBiggestFirst);
 
         // Staging buffer for non-host buffers without async uploads, reused
         // because a fresh allocation per tensor page faults on every load.
         var read_buf: []u8 = &.{};
-        defer allocator.free(read_buf);
+        defer std.heap.c_allocator.free(read_buf);
         for (tensors.items) |cur| {
             // This can happen with split experts models.
-            const weight = self.getWeight(gguf_meta.cString(c.ggml_get_name(cur))) orelse continue;
+            const weight = self.getWeight(mod.gguf_meta.cString(mod.impl.c.ggml_get_name(cur))) orelse continue;
 
             if (progress_callback) |cb| {
                 if (!cb(@as(f32, @floatFromInt(self.size_done)) / @as(f32, @floatFromInt(self.size_data)), progress_callback_user_data)) {
@@ -1532,7 +1519,7 @@ pub const Loader = struct {
                 }
             }
 
-            const n_size = c.ggml_nbytes(cur);
+            const n_size = mod.impl.c.ggml_nbytes(cur);
 
             const from_mapping = self.use_mmap or self.lazy.has(cur);
 
@@ -1542,22 +1529,22 @@ pub const Loader = struct {
 
                 // the tensors of a file can be spread across several
                 // buffers: the one holding this tensor's data
-                var buf_mmap: c.ggml_backend_buffer_t = null;
+                var buf_mmap: mod.impl.c.ggml_backend_buffer_t = null;
                 for (bufs) |buf| {
-                    const base: ?[*]const u8 = @ptrCast(c.ggml_backend_buffer_get_base(buf));
+                    const base: ?[*]const u8 = @ptrCast(mod.impl.c.ggml_backend_buffer_get_base(buf));
                     if (base) |b| {
-                        if (@intFromPtr(b) <= @intFromPtr(data) and @intFromPtr(data) + n_size <= @intFromPtr(b) + c.ggml_backend_buffer_get_size(buf)) {
+                        if (@intFromPtr(b) <= @intFromPtr(data) and @intFromPtr(data) + n_size <= @intFromPtr(b) + mod.impl.c.ggml_backend_buffer_get_size(buf)) {
                             buf_mmap = buf;
                             break;
                         }
                     }
                 }
 
-                if (self.check_tensors) validation.append(allocator, .{ .tensor = cur, .data = data, .size = n_size }) catch oom();
+                if (self.check_tensors) validation.append(std.heap.c_allocator, .{ .tensor = cur, .data = data, .size = n_size }) catch oom();
 
-                impl.assert(buf_mmap != null or cur.data != null, "llama-model-loader.cpp", 1817, "buf_mmap || cur->data");
+                mod.impl.assert(buf_mmap != null or cur.data != null, "llama-model-loader.cpp", 1817, "buf_mmap || cur->data");
                 if (buf_mmap != null and cur.data == null) {
-                    _ = c.ggml_backend_tensor_alloc(buf_mmap, cur, data);
+                    _ = mod.impl.c.ggml_backend_tensor_alloc(buf_mmap, cur, data);
                     // Locking a lazy tensor would fault all of it in, which
                     // is what lazy avoids.
                     if (lmlocks) |locks| if (!self.lazy.has(cur)) locks.items[weight.idx].growTo(weight.offs + n_size);
@@ -1566,14 +1553,14 @@ pub const Loader = struct {
                     used[0] = @min(used[0], weight.offs);
                     used[1] = @max(used[1], weight.offs + n_size);
                 } else {
-                    c.ggml_backend_tensor_set(cur, data, 0, n_size);
+                    mod.impl.c.ggml_backend_tensor_set(cur, data, 0, n_size);
                 }
             } else {
                 const file = &self.files.items[weight.idx];
-                if (c.ggml_backend_buffer_is_host(cur.buffer)) {
-                    try file.seek(weight.offs, c.SEEK_SET, exc);
+                if (mod.impl.c.ggml_backend_buffer_is_host(cur.buffer)) {
+                    try file.seek(weight.offs, mod.impl.c.SEEK_SET, exc);
                     try file.readRaw(cur.data.?, n_size, exc);
-                    if (self.check_tensors) validation.append(allocator, .{ .tensor = cur, .data = @ptrCast(cur.data.?), .size = n_size }) catch oom();
+                    if (self.check_tensors) validation.append(std.heap.c_allocator, .{ .tensor = cur, .data = @ptrCast(cur.data.?), .size = n_size }) catch oom();
                 } else if (upload_backend != null) {
                     // Load the tensor in chunks to pinned memory and upload
                     // the buffers asynchronously.
@@ -1581,7 +1568,7 @@ pub const Loader = struct {
                     alignment = file.readAlignment();
                     const aligned_offset = offset & ~(alignment - 1);
                     const offset_from_alignment = offset - aligned_offset;
-                    try file.seek(aligned_offset, c.SEEK_SET, exc);
+                    try file.seek(aligned_offset, mod.impl.c.SEEK_SET, exc);
 
                     const read_start = aligned_offset;
                     const read_end = (offset + n_size + alignment - 1) & ~(alignment - 1);
@@ -1592,7 +1579,7 @@ pub const Loader = struct {
                         const read_size = @min(buffer_size, read_end - read_start - bytes_read);
                         const ptr_dest_aligned = (@intFromPtr(host_ptrs.items[buffer_idx]) + alignment - 1) & ~(alignment - 1);
 
-                        c.ggml_backend_event_synchronize(events.items[buffer_idx]);
+                        mod.impl.c.ggml_backend_event_synchronize(events.items[buffer_idx]);
                         try file.readRawUnsafe(@ptrFromInt(ptr_dest_aligned), read_size, exc);
 
                         var ptr_data = ptr_dest_aligned;
@@ -1605,8 +1592,8 @@ pub const Loader = struct {
                             data_to_copy -= (read_end - (offset + n_size));
                         }
 
-                        c.ggml_backend_tensor_set_async(upload_backend, cur, @ptrFromInt(ptr_data), data_read, data_to_copy);
-                        c.ggml_backend_event_record(events.items[buffer_idx], upload_backend);
+                        mod.impl.c.ggml_backend_tensor_set_async(upload_backend, cur, @ptrFromInt(ptr_data), data_read, data_to_copy);
+                        mod.impl.c.ggml_backend_event_record(events.items[buffer_idx], upload_backend);
 
                         data_read += data_to_copy;
                         bytes_read += read_size;
@@ -1628,18 +1615,18 @@ pub const Loader = struct {
                     // gets too large, so peak memory stays close to one
                     // tensor. The old buffer is freed first.
                     if (read_buf.len < buf_size or read_buf.len > 2 * buf_size) {
-                        allocator.free(read_buf);
+                        std.heap.c_allocator.free(read_buf);
                         read_buf = &.{};
-                        read_buf = allocator.alloc(u8, buf_size) catch oom();
+                        read_buf = std.heap.c_allocator.alloc(u8, buf_size) catch oom();
                     }
                     const read_dst: [*]u8 = @ptrFromInt((@intFromPtr(read_buf.ptr) + align_ - 1) & ~(align_ - 1)); // GGML_PAD
-                    try file.seek(aligned_offset, c.SEEK_SET, exc);
+                    try file.seek(aligned_offset, mod.impl.c.SEEK_SET, exc);
                     try file.readRawUnsafe(read_dst, read_size, exc);
 
                     const data = read_dst + pad;
-                    c.ggml_backend_tensor_set(cur, data, 0, n_size);
-                    if (self.check_tensors and !c.ggml_validate_row_data(cur.type, data, n_size)) {
-                        return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{gguf_meta.cString(c.ggml_get_name(cur))});
+                    mod.impl.c.ggml_backend_tensor_set(cur, data, 0, n_size);
+                    if (self.check_tensors and !mod.impl.c.ggml_validate_row_data(cur.type, data, n_size)) {
+                        return exc.throw(.runtime_error, "tensor '{s}' has invalid data", .{mod.gguf_meta.cString(mod.impl.c.ggml_get_name(cur))});
                     }
                 }
             }
@@ -1653,8 +1640,8 @@ pub const Loader = struct {
         // Check validation results.
         var validation_failed = false;
         for (validation.items) |v| {
-            if (!c.ggml_validate_row_data(v.tensor.type, v.data, v.size)) {
-                impl.logError("%s: tensor '%s' has invalid data\n", .{ "load_all_data", c.ggml_get_name(v.tensor) });
+            if (!mod.impl.c.ggml_validate_row_data(v.tensor.type, v.data, v.size)) {
+                mod.impl.logError("%s: tensor '%s' has invalid data\n", .{ "load_all_data", mod.impl.c.ggml_get_name(v.tensor) });
                 validation_failed = true;
             }
         }
@@ -1679,16 +1666,16 @@ pub const Loader = struct {
         return true;
     }
 
-    const Validation = struct { tensor: *c.ggml_tensor, data: *const anyopaque, size: usize };
+    const Validation = struct { tensor: *mod.impl.c.ggml_tensor, data: *const anyopaque, size: usize };
 
     /// The `std::stable_sort` comparator of `load_all_data`
     /// (llama-model-loader.cpp:1647 @b1b770d90): staged tensors -- in a
     /// non-host buffer -- before the rest, and among them the bigger first.
-    fn stagedBiggestFirst(_: void, a: *c.ggml_tensor, b: *c.ggml_tensor) bool {
-        const staged_a = a.buffer != null and !c.ggml_backend_buffer_is_host(a.buffer);
-        const staged_b = b.buffer != null and !c.ggml_backend_buffer_is_host(b.buffer);
+    fn stagedBiggestFirst(_: void, a: *mod.impl.c.ggml_tensor, b: *mod.impl.c.ggml_tensor) bool {
+        const staged_a = a.buffer != null and !mod.impl.c.ggml_backend_buffer_is_host(a.buffer);
+        const staged_b = b.buffer != null and !mod.impl.c.ggml_backend_buffer_is_host(b.buffer);
         if (staged_a != staged_b) return staged_a;
-        return staged_a and c.ggml_nbytes(a) > c.ggml_nbytes(b);
+        return staged_a and mod.impl.c.ggml_nbytes(a) > mod.impl.c.ggml_nbytes(b);
     }
 
     /// The `upload_backend` lambda of `load_all_data`
@@ -1697,67 +1684,67 @@ pub const Loader = struct {
     /// supports it; else null.
     fn uploadBackend(
         self: *const Loader,
-        bufs: []const c.ggml_backend_buffer_t,
+        bufs: []const mod.impl.c.ggml_backend_buffer_t,
         n_buffers: usize,
         buffer_size: usize,
-        host_buffers: *std.ArrayList(c.ggml_backend_buffer_t),
-        events: *std.ArrayList(c.ggml_backend_event_t),
+        host_buffers: *std.ArrayList(mod.impl.c.ggml_backend_buffer_t),
+        events: *std.ArrayList(mod.impl.c.ggml_backend_event_t),
         host_ptrs: *std.ArrayList(?*anyopaque),
-    ) c.ggml_backend_t {
+    ) mod.impl.c.ggml_backend_t {
         const func = "load_all_data";
         if (self.use_mmap or self.check_tensors) return null;
         const buf = (if (bufs.len == 0) null else bufs[0]) orelse {
-            impl.logDebug("%s: no buffer found for async uploads\n", .{func});
+            mod.impl.logDebug("%s: no buffer found for async uploads\n", .{func});
             return null;
         };
-        const buft = c.ggml_backend_buffer_get_type(buf);
-        const dev = c.ggml_backend_buft_get_device(buft) orelse {
-            impl.logDebug("%s: no device found for buffer type %s for async uploads\n", .{ func, c.ggml_backend_buft_name(buft) });
+        const buft = mod.impl.c.ggml_backend_buffer_get_type(buf);
+        const dev = mod.impl.c.ggml_backend_buft_get_device(buft) orelse {
+            mod.impl.logDebug("%s: no device found for buffer type %s for async uploads\n", .{ func, mod.impl.c.ggml_backend_buft_name(buft) });
             return null;
         };
-        if (buft != c.ggml_backend_dev_buffer_type(dev)) {
-            impl.logDebug("%s: buffer type %s is not the default buffer type for device %s for async uploads\n", .{ func, c.ggml_backend_buft_name(buft), c.ggml_backend_dev_name(dev) });
+        if (buft != mod.impl.c.ggml_backend_dev_buffer_type(dev)) {
+            mod.impl.logDebug("%s: buffer type %s is not the default buffer type for device %s for async uploads\n", .{ func, mod.impl.c.ggml_backend_buft_name(buft), mod.impl.c.ggml_backend_dev_name(dev) });
             return null;
         }
-        var props: c.ggml_backend_dev_props = undefined;
-        c.ggml_backend_dev_get_props(dev, &props);
+        var props: mod.impl.c.ggml_backend_dev_props = undefined;
+        mod.impl.c.ggml_backend_dev_get_props(dev, &props);
         if (!props.caps.async or !props.caps.host_buffer or !props.caps.events) {
-            impl.logDebug("%s: device %s does not support async, host buffers or events\n", .{ func, c.ggml_backend_dev_name(dev) });
+            mod.impl.logDebug("%s: device %s does not support async, host buffers or events\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev) });
             return null;
         }
-        const host_buft = c.ggml_backend_dev_host_buffer_type(dev) orelse {
-            impl.logDebug("%s: no host buffer type found for device %s\n", .{ func, c.ggml_backend_dev_name(dev) });
+        const host_buft = mod.impl.c.ggml_backend_dev_host_buffer_type(dev) orelse {
+            mod.impl.logDebug("%s: no host buffer type found for device %s\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev) });
             return null;
         };
         for (0..n_buffers) |_| {
-            const hbuf = c.ggml_backend_buft_alloc_buffer(host_buft, buffer_size) orelse {
-                impl.logDebug("%s: failed to allocate host buffer for async uploads for device %s\n", .{ func, c.ggml_backend_dev_name(dev) });
+            const hbuf = mod.impl.c.ggml_backend_buft_alloc_buffer(host_buft, buffer_size) orelse {
+                mod.impl.logDebug("%s: failed to allocate host buffer for async uploads for device %s\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev) });
                 return null;
             };
-            host_buffers.append(allocator, hbuf) catch oom();
-            host_ptrs.append(allocator, c.ggml_backend_buffer_get_base(hbuf)) catch oom();
-            const event = c.ggml_backend_event_new(dev) orelse {
-                impl.logDebug("%s: failed to create event for async uploads for device %s\n", .{ func, c.ggml_backend_dev_name(dev) });
+            host_buffers.append(std.heap.c_allocator, hbuf) catch oom();
+            host_ptrs.append(std.heap.c_allocator, mod.impl.c.ggml_backend_buffer_get_base(hbuf)) catch oom();
+            const event = mod.impl.c.ggml_backend_event_new(dev) orelse {
+                mod.impl.logDebug("%s: failed to create event for async uploads for device %s\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev) });
                 return null;
             };
-            events.append(allocator, event) catch oom();
+            events.append(std.heap.c_allocator, event) catch oom();
         }
-        const backend = c.ggml_backend_dev_init(dev, null) orelse {
-            impl.logDebug("%s: failed to initialize backend for device %s for async uploads\n", .{ func, c.ggml_backend_dev_name(dev) });
+        const backend = mod.impl.c.ggml_backend_dev_init(dev, null) orelse {
+            mod.impl.logDebug("%s: failed to initialize backend for device %s for async uploads\n", .{ func, mod.impl.c.ggml_backend_dev_name(dev) });
             return null;
         };
         return backend;
     }
 
-    fn freeUploads(_: *const Loader, events: *std.ArrayList(c.ggml_backend_event_t), host_buffers: *std.ArrayList(c.ggml_backend_buffer_t), upload_backend: c.ggml_backend_t) void {
+    fn freeUploads(_: *const Loader, events: *std.ArrayList(mod.impl.c.ggml_backend_event_t), host_buffers: *std.ArrayList(mod.impl.c.ggml_backend_buffer_t), upload_backend: mod.impl.c.ggml_backend_t) void {
         for (events.items) |event| {
-            c.ggml_backend_event_synchronize(event);
-            c.ggml_backend_event_free(event);
+            mod.impl.c.ggml_backend_event_synchronize(event);
+            mod.impl.c.ggml_backend_event_free(event);
         }
         events.clearRetainingCapacity();
-        for (host_buffers.items) |buf| c.ggml_backend_buffer_free(buf);
+        for (host_buffers.items) |buf| mod.impl.c.ggml_backend_buffer_free(buf);
         host_buffers.clearRetainingCapacity();
-        c.ggml_backend_free(upload_backend);
+        mod.impl.c.ggml_backend_free(upload_backend);
     }
 };
 
@@ -1781,22 +1768,22 @@ pub const tensor_read_lazy: u32 = 1 << 5;
 /// Mirrors `LLM_TN_IMPL` (llama-arch.h:920 @b1b770d90): a tensor's name
 /// before it is formatted.
 pub const Tn = struct {
-    tensor: arch.Tensor,
+    tensor: mod.arch_table.Tensor,
     suffix: ?[]const u8 = null,
     bid: i32 = -1,
     xid: i32 = -1,
 
     /// Return: the formatted name, `LLM_TN_IMPL`'s `str`.
-    pub fn str(self: Tn) arch.Name {
-        return arch.tensorName(self.tensor, self.suffix, self.bid, self.xid);
+    pub fn str(self: Tn) mod.arch.Name {
+        return mod.arch.tensorName(self.tensor, self.suffix, self.bid, self.xid);
     }
 };
 
 /// One entry of `buft_list_t` (llama-model-loader.h:20 @b1b770d90): a device and a
 /// buffer type on it.
 pub const BuftEntry = struct {
-    dev: c.ggml_backend_dev_t,
-    buft: c.ggml_backend_buffer_type_t,
+    dev: mod.impl.c.ggml_backend_dev_t,
+    buft: mod.impl.c.ggml_backend_buffer_type_t,
 };
 
 /// `buft_list_t`, in preference order.
@@ -1816,8 +1803,8 @@ pub const MappingRange = struct {
 ///
 /// Return: the ranges, the caller's to free with `impl.allocator`.
 fn mergeRanges(ranges_in: []const MappingRange) []MappingRange {
-    const ranges = allocator.dupe(MappingRange, ranges_in) catch oom();
-    defer allocator.free(ranges);
+    const ranges = std.heap.c_allocator.dupe(MappingRange, ranges_in) catch oom();
+    defer std.heap.c_allocator.free(ranges);
     // `std::sort` on `first` alone: ranges with one `first` merge into one,
     // whatever their order
     std.mem.sort(MappingRange, ranges, {}, struct {
@@ -1832,10 +1819,10 @@ fn mergeRanges(ranges_in: []const MappingRange) []MappingRange {
             const back = &res.items[res.items.len - 1];
             back.last = @max(back.last, range.last);
         } else {
-            res.append(allocator, range) catch oom();
+            res.append(std.heap.c_allocator, range) catch oom();
         }
     }
-    return res.toOwnedSlice(allocator) catch oom();
+    return res.toOwnedSlice(std.heap.c_allocator) catch oom();
 }
 
 /// Ports `sub_ranges` (llama-model-loader.cpp:1563 @b1b770d90): the sorted,
@@ -1851,15 +1838,15 @@ fn subRanges(a: []const MappingRange, sub: []const MappingRange) []MappingRange 
                 continue;
             }
             if (y.first > cur) {
-                res.append(allocator, .{ .first = cur, .last = y.first }) catch oom();
+                res.append(std.heap.c_allocator, .{ .first = cur, .last = y.first }) catch oom();
             }
             cur = @max(cur, y.last);
         }
         if (cur < x.last) {
-            res.append(allocator, .{ .first = cur, .last = x.last }) catch oom();
+            res.append(std.heap.c_allocator, .{ .first = cur, .last = x.last }) catch oom();
         }
     }
-    return res.toOwnedSlice(allocator) catch oom();
+    return res.toOwnedSlice(std.heap.c_allocator) catch oom();
 }
 
 var warned_cpu_override = false;
@@ -1875,69 +1862,69 @@ fn zeroTerminate(buf: []u8, s: []const u8) [*:0]const u8 {
 /// a representative op node.
 ///
 /// Return: the answer, or `error.Thrown` when no context can be made.
-pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enum_ggml_op, buft: c.ggml_backend_buffer_type_t, dev: c.ggml_backend_dev_t, exc: *Exception) Thrown!bool {
-    if (op == c.GGML_OP_NONE) return true;
+pub fn weightBuftSupported(hparams: *const mod.hparams.Hparams, w: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_op, buft: mod.impl.c.ggml_backend_buffer_type_t, dev: mod.impl.c.ggml_backend_dev_t, exc: *mod.impl.Exception) mod.impl.Thrown!bool {
+    if (op == mod.impl.c.GGML_OP_NONE) return true;
 
-    const ctx = c.ggml_init(.{ .mem_size = c.ggml_tensor_overhead() * 8, .mem_buffer = null, .no_alloc = true }) orelse
+    const ctx = mod.impl.c.ggml_init(.{ .mem_size = mod.impl.c.ggml_tensor_overhead() * 8, .mem_buffer = null, .no_alloc = true }) orelse
         return exc.throw(.runtime_error, "failed to create ggml context", .{});
-    defer c.ggml_free(ctx);
+    defer mod.impl.c.ggml_free(ctx);
 
-    const op_tensor: *c.ggml_tensor = switch (op) {
-        c.GGML_OP_GET_ROWS => blk: {
-            const b = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, 512);
-            break :blk c.ggml_get_rows(ctx, w, b);
+    const op_tensor: *mod.impl.c.ggml_tensor = switch (op) {
+        mod.impl.c.GGML_OP_GET_ROWS => blk: {
+            const b = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I32, 512);
+            break :blk mod.impl.c.ggml_get_rows(ctx, w, b);
         },
-        c.GGML_OP_SET_ROWS => blk: {
+        mod.impl.c.GGML_OP_SET_ROWS => blk: {
             // w holds the row indices (e.g. d2t)
-            const a = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, w.ne[0]);
-            const b = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, w.ne[0]);
-            break :blk c.ggml_set_rows(ctx, a, b, w);
+            const a = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, 1, w.ne[0]);
+            const b = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, 1, w.ne[0]);
+            break :blk mod.impl.c.ggml_set_rows(ctx, a, b, w);
         },
-        c.GGML_OP_MUL_MAT => blk: {
-            const b = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, w.ne[0], 512, w.ne[2], w.ne[3]);
-            break :blk c.ggml_mul_mat(ctx, w, b);
+        mod.impl.c.GGML_OP_MUL_MAT => blk: {
+            const b = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0], 512, w.ne[2], w.ne[3]);
+            break :blk mod.impl.c.ggml_mul_mat(ctx, w, b);
         },
-        c.GGML_OP_MUL_MAT_ID => blk: {
+        mod.impl.c.GGML_OP_MUL_MAT_ID => blk: {
             // Used for either MoE expert routing or embedded adapter routing.
             const n_ids_used: c_int = if (hparams.router_layer >= 0) 1 else @bitCast(hparams.nExpertUsedMax());
-            impl.assert(n_ids_used > 0, "llama-model-loader.cpp", 1057, "n_ids_used > 0");
-            const b = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, w.ne[0], n_ids_used, 512);
-            const ids = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_ids_used, 512);
-            break :blk c.ggml_mul_mat_id(ctx, w, b, ids);
+            mod.impl.assert(n_ids_used > 0, "llama-model-loader.cpp", 1057, "n_ids_used > 0");
+            const b = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0], n_ids_used, 512);
+            const ids = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_I32, n_ids_used, 512);
+            break :blk mod.impl.c.ggml_mul_mat_id(ctx, w, b, ids);
         },
-        c.GGML_OP_ADD => blk: {
-            const a = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, w.ne[0], w.ne[1], w.ne[2], w.ne[3]);
-            break :blk c.ggml_add(ctx, a, w);
+        mod.impl.c.GGML_OP_ADD => blk: {
+            const a = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0], w.ne[1], w.ne[2], w.ne[3]);
+            break :blk mod.impl.c.ggml_add(ctx, a, w);
         },
-        c.GGML_OP_ADD_ID => blk: {
+        mod.impl.c.GGML_OP_ADD_ID => blk: {
             const n_expert_used: c_int = @bitCast(hparams.nExpertUsedMax());
-            impl.assert(n_expert_used > 0, "llama-model-loader.cpp", 1070, "n_expert_used > 0");
-            const a = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, w.ne[0], n_expert_used, 512);
-            const cc = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_expert_used, 512);
-            break :blk c.ggml_add_id(ctx, a, w, cc);
+            mod.impl.assert(n_expert_used > 0, "llama-model-loader.cpp", 1070, "n_expert_used > 0");
+            const a = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0], n_expert_used, 512);
+            const cc = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_I32, n_expert_used, 512);
+            break :blk mod.impl.c.ggml_add_id(ctx, a, w, cc);
         },
-        c.GGML_OP_MUL => blk: {
-            const a = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, w.ne[0], w.ne[1], w.ne[2], w.ne[3]);
-            break :blk c.ggml_mul(ctx, a, w);
+        mod.impl.c.GGML_OP_MUL => blk: {
+            const a = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0], w.ne[1], w.ne[2], w.ne[3]);
+            break :blk mod.impl.c.ggml_mul(ctx, a, w);
         },
-        c.GGML_OP_DIV => blk: {
-            const a = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, w.ne[0]);
-            break :blk c.ggml_div(ctx, a, w);
+        mod.impl.c.GGML_OP_DIV => blk: {
+            const a = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0]);
+            break :blk mod.impl.c.ggml_div(ctx, a, w);
         },
-        c.GGML_OP_ROPE => blk: {
+        mod.impl.c.GGML_OP_ROPE => blk: {
             const n_embd_head: c_int = @bitCast(hparams.nEmbdHeadV(0));
             const n_head: c_int = @bitCast(hparams.nHead(0));
-            const a = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, n_embd_head, n_head, 512);
-            const b = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, 512);
-            break :blk c.ggml_rope_ext(ctx, a, b, w, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            const a = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_head, n_head, 512);
+            const b = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I32, 512);
+            break :blk mod.impl.c.ggml_rope_ext(ctx, a, b, w, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         },
-        c.GGML_OP_SSM_CONV => blk: {
+        mod.impl.c.GGML_OP_SSM_CONV => blk: {
             const n_seq_tokens: i64 = 512;
             const n_seqs: i64 = 3;
-            const conv_x = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, w.ne[0] - 1 + n_seq_tokens, w.ne[1], n_seqs);
-            break :blk c.ggml_ssm_conv(ctx, conv_x, w);
+            const conv_x = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, w.ne[0] - 1 + n_seq_tokens, w.ne[1], n_seqs);
+            break :blk mod.impl.c.ggml_ssm_conv(ctx, conv_x, w);
         },
-        c.GGML_OP_SSM_SCAN => blk: {
+        mod.impl.c.GGML_OP_SSM_SCAN => blk: {
             // w is ssm_a, which is used to distinguish Mamba-1 and Mamba-2.
             const d_state: i64 = if (w.ne[0] == 1) hparams.ssm_d_state else w.ne[0];
             const n_head = w.ne[1];
@@ -1945,41 +1932,41 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
             const n_group: i64 = if (hparams.ssm_n_group != 0) hparams.ssm_n_group else 1;
             const n_seq_tokens: i64 = 512;
             const n_seqs: i64 = 3;
-            const s = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, d_state, head_dim, n_head, n_seqs);
-            const x = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, head_dim, n_head, n_seq_tokens, n_seqs);
-            const dt = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, n_head, n_seq_tokens, n_seqs);
-            const B = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
-            const C = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
-            const ids = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, n_seqs);
-            break :blk c.ggml_ssm_scan(ctx, s, x, dt, w, B, C, ids, 1);
+            const s = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, d_state, head_dim, n_head, n_seqs);
+            const x = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, head_dim, n_head, n_seq_tokens, n_seqs);
+            const dt = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_head, n_seq_tokens, n_seqs);
+            const B = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
+            const C = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, d_state, n_group, n_seq_tokens, n_seqs);
+            const ids = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I32, n_seqs);
+            break :blk mod.impl.c.ggml_ssm_scan(ctx, s, x, dt, w, B, C, ids, 1);
         },
-        c.GGML_OP_RWKV_WKV6 => blk: {
+        mod.impl.c.GGML_OP_RWKV_WKV6 => blk: {
             const S: i64 = 123;
             const H: i64 = 123;
             const n_tokens: i64 = 123;
             const n_seqs: i64 = 123;
-            const k = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, S, H, n_tokens);
-            const v = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, S, H, n_tokens);
-            const r = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, S, H, n_tokens);
-            const td = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, S, H, n_tokens);
-            const state = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, S, n_seqs, S, H);
-            break :blk c.ggml_rwkv_wkv6(ctx, k, v, r, w, td, state);
+            const k = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, S, H, n_tokens);
+            const v = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, S, H, n_tokens);
+            const r = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, S, H, n_tokens);
+            const td = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, S, H, n_tokens);
+            const state = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, S, n_seqs, S, H);
+            break :blk mod.impl.c.ggml_rwkv_wkv6(ctx, k, v, r, w, td, state);
         },
-        c.GGML_OP_IM2COL => blk: {
+        mod.impl.c.GGML_OP_IM2COL => blk: {
             const n_embd_inp: i64 = hparams.nEmbdInp();
-            const b = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, n_embd_inp, w.ne[1], 1, 1);
-            break :blk c.ggml_im2col(ctx, w, b, 1, 0, 0, 0, 1, 0, false, c.GGML_TYPE_F16);
+            const b = mod.impl.c.ggml_new_tensor_4d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_inp, w.ne[1], 1, 1);
+            break :blk mod.impl.c.ggml_im2col(ctx, w, b, 1, 0, 0, 0, 1, 0, false, mod.impl.c.GGML_TYPE_F16);
         },
-        c.GGML_OP_SCALE => c.ggml_scale(ctx, w, 1.0),
-        else => c.ggml_abort("llama-model-loader.cpp", 1148, "%s: missing test for op %s for tensor %s", "weight_buft_supported", c.ggml_op_name(op), &w.name),
+        mod.impl.c.GGML_OP_SCALE => mod.impl.c.ggml_scale(ctx, w, 1.0),
+        else => mod.impl.c.ggml_abort("llama-model-loader.cpp", 1148, "%s: missing test for op %s for tensor %s", "weight_buft_supported", mod.impl.c.ggml_op_name(op), &w.name),
     };
 
     // A temporary dummy buffer for the weight, so that supports_op can
     // check the buffer type.
-    impl.assert(w.buffer == null, "llama-model-loader.cpp", 1152, "w->buffer == nullptr");
-    w.buffer = c.ggml_backend_buft_alloc_buffer(buft, 0);
-    const op_supported = c.ggml_backend_dev_supports_op(dev, op_tensor);
-    c.ggml_backend_buffer_free(w.buffer);
+    mod.impl.assert(w.buffer == null, "llama-model-loader.cpp", 1152, "w->buffer == nullptr");
+    w.buffer = mod.impl.c.ggml_backend_buft_alloc_buffer(buft, 0);
+    const op_supported = mod.impl.c.ggml_backend_dev_supports_op(dev, op_tensor);
+    mod.impl.c.ggml_backend_buffer_free(w.buffer);
     w.buffer = null;
     return op_supported;
 }
@@ -1988,8 +1975,8 @@ pub fn weightBuftSupported(hparams: *const Hparams, w: *c.ggml_tensor, op: c.enu
 /// first buffer type in the list that can use the tensor.
 ///
 /// Return: the buffer type, null when none can, or `error.Thrown`.
-pub fn selectWeightBuft(hparams: *const Hparams, tensor: *c.ggml_tensor, op: c.enum_ggml_op, buft_list: *const BuftList, exc: *Exception) Thrown!c.ggml_backend_buffer_type_t {
-    impl.assert(buft_list.items.len != 0, "llama-model-loader.cpp", 1163, "!buft_list->empty()");
+pub fn selectWeightBuft(hparams: *const mod.hparams.Hparams, tensor: *mod.impl.c.ggml_tensor, op: mod.impl.c.enum_ggml_op, buft_list: *const BuftList, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_type_t {
+    mod.impl.assert(buft_list.items.len != 0, "llama-model-loader.cpp", 1163, "!buft_list->empty()");
     for (buft_list.items) |cur| {
         if (try weightBuftSupported(hparams, tensor, op, cur.buft, cur.dev, exc)) return cur.buft;
     }
@@ -1998,36 +1985,36 @@ pub fn selectWeightBuft(hparams: *const Hparams, tensor: *c.ggml_tensor, op: c.e
 
 /// Ports `llama_format_tensor_shape` for a shape (llama-impl.cpp:133 @b1b770d90).
 fn formatShape(ne: []const i64, buf: *[256]u8) []const u8 {
-    var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, ne[0])));
+    var len: usize = @intCast(mod.impl.c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, ne[0])));
     for (ne[1..]) |n| {
-        len += @intCast(c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, n)));
+        len += @intCast(mod.impl.c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, n)));
     }
     return buf[0..len];
 }
 
 /// Ports `llama_get_list_splits` (llama-model-loader.cpp:84 @b1b770d90),
 /// through the public `llama_split_prefix` and `llama_split_path`.
-fn listSplits(path: [:0]const u8, idx: u16, n_split: u16, out: *std.ArrayList([:0]const u8), exc: *Exception) Thrown!void {
+fn listSplits(path: [:0]const u8, idx: u16, n_split: u16, out: *std.ArrayList([:0]const u8), exc: *mod.impl.Exception) mod.impl.Thrown!void {
     var buf: [std.c.PATH_MAX]u8 = std.mem.zeroes([std.c.PATH_MAX]u8);
-    const ret = c.llama_split_prefix(&buf, buf.len, path.ptr, idx, n_split);
+    const ret = mod.api.llama.llama_split_prefix(&buf, buf.len, path.ptr, idx, n_split);
     if (ret == 0) return exc.throw(.runtime_error, "invalid split file name: {s}", .{path});
-    const prefix = allocator.dupeSentinel(u8, buf[0..@intCast(ret)], 0) catch oom();
-    defer allocator.free(prefix);
+    const prefix = std.heap.c_allocator.dupeSentinel(u8, buf[0..@intCast(ret)], 0) catch oom();
+    defer std.heap.c_allocator.free(prefix);
     if (prefix.len == 0) return exc.throw(.runtime_error, "invalid split file: {s}", .{path});
 
     var i: c_int = 0;
     while (i < n_split) : (i += 1) {
-        const n = c.llama_split_path(&buf, buf.len, prefix.ptr, i, n_split);
-        out.append(allocator, allocator.dupeSentinel(u8, buf[0..@intCast(n)], 0) catch oom()) catch oom();
+        const n = mod.api.llama.llama_split_path(&buf, buf.len, prefix.ptr, i, n_split);
+        out.append(std.heap.c_allocator, std.heap.c_allocator.dupeSentinel(u8, buf[0..@intCast(n)], 0) catch oom()) catch oom();
     }
 }
 
 /// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:142 @b1b770d90).
-fn formatTensorShape(t: *const c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
-    var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
+fn formatTensorShape(t: *const mod.impl.c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
+    var len: usize = @intCast(mod.impl.c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
-    while (i < c.GGML_MAX_DIMS) : (i += 1) {
-        len += @intCast(c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
+    while (i < mod.impl.c.GGML_MAX_DIMS) : (i += 1) {
+        len += @intCast(mod.impl.c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
     }
     return @ptrCast(buf);
 }
@@ -2045,19 +2032,19 @@ test {
 }
 
 test "a guessed file type carries the prefix and a stored one does not" {
-    try std.testing.expectEqualStrings("(guessed) Q4_K - Medium", ftypeName(c.LLAMA_FTYPE_MOSTLY_Q4_K_M | c.LLAMA_FTYPE_GUESSED));
-    try std.testing.expectEqualStrings("Q4_K - Medium", ftypeName(c.LLAMA_FTYPE_MOSTLY_Q4_K_M));
+    try std.testing.expectEqualStrings("(guessed) Q4_K - Medium", ftypeName(mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M | mod.impl.c.LLAMA_FTYPE_GUESSED));
+    try std.testing.expectEqualStrings("Q4_K - Medium", ftypeName(mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M));
     try std.testing.expectEqualStrings("unknown, may not work", ftypeName(999));
 }
 
 test "replace_all leaves an empty search alone and replaces every match" {
     var s: std.ArrayList(u8) = .empty;
-    defer s.deinit(allocator);
-    try s.appendSlice(allocator, "a\"b\"\\");
-    impl.replaceAll(&s, "", "x");
+    defer s.deinit(std.heap.c_allocator);
+    try s.appendSlice(std.heap.c_allocator, "a\"b\"\\");
+    mod.impl.replaceAll(&s, "", "x");
     try std.testing.expectEqualStrings("a\"b\"\\", s.items);
-    impl.replaceAll(&s, "\\", "\\\\");
-    impl.replaceAll(&s, "\"", "\\\"");
+    mod.impl.replaceAll(&s, "\\", "\\\\");
+    mod.impl.replaceAll(&s, "\"", "\\\"");
     try std.testing.expectEqualStrings("a\\\"b\\\"\\\\", s.items);
 }
 
@@ -2068,19 +2055,19 @@ test "the block index is sscanf's" {
 }
 
 test "lazy_read decides by mode and size, and records only with a weight" {
-    const ctx = c.ggml_init(.{ .mem_size = c.ggml_tensor_overhead() * 4, .mem_buffer = null, .no_alloc = true }).?;
-    defer c.ggml_free(ctx);
-    const t = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 64, 16);
-    _ = c.ggml_set_name(t, "per_layer_token_embd.weight");
+    const ctx = mod.impl.c.ggml_init(.{ .mem_size = mod.impl.c.ggml_tensor_overhead() * 4, .mem_buffer = null, .no_alloc = true }).?;
+    defer mod.impl.c.ggml_free(ctx);
+    const t = mod.impl.c.ggml_new_tensor_2d(ctx, mod.impl.c.GGML_TYPE_F32, 64, 16);
+    _ = mod.impl.c.ggml_set_name(t, "per_layer_token_embd.weight");
     const w: Weight = .{ .idx = 1, .offs = 4096, .tensor = t, .layer = -1 };
 
     var lazy: LazyRead = .{};
     defer lazy.deinit();
     try std.testing.expect(!lazy.add("per_layer_token_embd.weight", t, &w));
-    lazy.mode = c.LLAMA_LAZY_MODE_AUTO;
+    lazy.mode = mod.impl.c.LLAMA_LAZY_MODE_AUTO;
     // 4 KiB is far below the 4 GiB AUTO wants.
     try std.testing.expect(!lazy.add("per_layer_token_embd.weight", t, &w));
-    lazy.mode = c.LLAMA_LAZY_MODE_ON;
+    lazy.mode = mod.impl.c.LLAMA_LAZY_MODE_ON;
     // Asked without a weight: lazy, but nothing recorded.
     try std.testing.expect(lazy.add("per_layer_token_embd.weight", t, null));
     try std.testing.expect(!lazy.any());

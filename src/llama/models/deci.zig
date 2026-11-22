@@ -10,20 +10,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_deci`'s `load_arch_hparams` (models/deci.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
@@ -36,11 +27,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_deci`'s `load_arch_tensors` (models/deci.cpp:14 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -82,7 +73,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         }
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -105,13 +96,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// Ports `llama_model_deci`'s `build_arch_graph` (models/deci.cpp:76
 /// @b1b770d90) and the constructor of its `graph` (models/deci.cpp:80
 /// @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/deci.cpp", 83, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/deci.cpp", 84, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/deci.cpp", 83, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/deci.cpp", 84, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -120,7 +111,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
     const inp_attn = b.buildAttnInpKv();
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     const inp_out_ids = b.buildInpOutIds();
 
@@ -133,7 +124,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         const n_head: i64 = hp.nHead(ilu);
         const n_ff: i64 = hp.nFf(ilu);
 
-        var cur: *Tensor = undefined;
+        var cur: *llama.impl.c.ggml_tensor = undefined;
         if (n_head == 0) {
             // The attention-free layer of Llama-3_1-Nemotron-51B.
             cur = inpL;
@@ -164,8 +155,8 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         // The FFN-free layer of Llama-3_1-Nemotron-Ultra-253B, which leaves
         // the next layer's input where it was.
@@ -176,7 +167,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         // Llama-3_1-Nemotron-51B.
         var ffn_inp = cur;
         if (n_head > 0) {
-            ffn_inp = c.ggml_add(ctx, cur, inpSA);
+            ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
             b.cb(ffn_inp, "ffn_inp", il);
         }
         // The feed-forward network.
@@ -187,7 +178,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

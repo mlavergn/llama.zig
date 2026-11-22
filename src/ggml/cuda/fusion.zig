@@ -16,67 +16,39 @@
 //! The C's `std::initializer_list<ggml_op>` arguments are slices here.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const ggml_graph = @import("../graph.zig");
-const common = @import("common.zig");
-const mulmat = @import("mulmat.zig");
-const mmvq = @import("mmvq.zig");
-const mmvf = @import("mmvf.zig");
-const binbcast = @import("binbcast.zig");
-const norm = @import("norm.zig");
-const rope = @import("rope.zig");
-const ssm_conv = @import("ssm_conv.zig");
-const unary = @import("unary.zig");
-const softcap = @import("softcap.zig");
-const snake = @import("snake.zig");
-const gated_delta_net = @import("gated_delta_net.zig");
-const ssm_scan = @import("ssm_scan.zig");
-const topk_moe = @import("topk_moe.zig");
-const moe_weighted_reduction = @import("moe_weighted_reduction.zig");
-const mmq = @import("mmq.zig");
-const fp8 = @import("fp8.zig");
-const dsv4_hc = @import("dsv4_hc.zig");
+const ggml = @import("../module.zig");
 
-const c = impl.c;
-const Tensor = c.ggml_tensor;
-const CGraph = impl.CGraph;
-const Op = c.enum_ggml_op;
-const UnaryOp = c.enum_ggml_unary_op;
-
-fn node(cgraph: *const CGraph, i: c_int) *Tensor {
+fn node(cgraph: *const ggml.impl.CGraph, i: c_int) *ggml.impl.c.ggml_tensor {
     return cgraph.nodes[@intCast(i)].?;
 }
 
-fn src(t: *const Tensor, i: usize) *Tensor {
-    return impl.one(Tensor, t.src[i]);
+fn src(t: *const ggml.impl.c.ggml_tensor, i: usize) *ggml.impl.c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.c.ggml_tensor, t.src[i]);
 }
 
 /// `ggml_can_fuse_subgraph` and `ggml_check_edges` live in `graph.zig`,
 /// which the Vulkan host layer shares.
-const canFuseSubgraph = ggml_graph.canFuseSubgraph;
-const checkEdges = ggml_graph.checkEdges;
-
 /// Ports `ggml_cuda_should_fuse_rope_set_rows` (ggml-cuda.cu:3390 @b1b770d90).
-fn shouldFuseRopeSetRows(rope_t: *const Tensor, view: *const Tensor, set_rows: *const Tensor) bool {
-    if (rope_t.op != c.GGML_OP_ROPE or view.op != c.GGML_OP_VIEW or set_rows.op != c.GGML_OP_SET_ROWS) return false;
+fn shouldFuseRopeSetRows(rope_t: *const ggml.impl.c.ggml_tensor, view: *const ggml.impl.c.ggml_tensor, set_rows: *const ggml.impl.c.ggml_tensor) bool {
+    if (rope_t.op != ggml.impl.c.GGML_OP_ROPE or view.op != ggml.impl.c.GGML_OP_VIEW or set_rows.op != ggml.impl.c.GGML_OP_SET_ROWS) return false;
     // ne3 not tested
     if (src(rope_t, 0).ne[3] != 1) return false;
-    if (set_rows.type != c.GGML_TYPE_F32 and set_rows.type != c.GGML_TYPE_F16) return false;
-    if (src(set_rows, 1).type != c.GGML_TYPE_I64) return false;
+    if (set_rows.type != ggml.impl.c.GGML_TYPE_F32 and set_rows.type != ggml.impl.c.GGML_TYPE_F16) return false;
+    if (src(set_rows, 1).type != ggml.impl.c.GGML_TYPE_I64) return false;
     // The view should flatten two dims of rope into one dim
-    if (!c.ggml_is_contiguous(view) or view.ne[0] != rope_t.ne[0] * rope_t.ne[1]) return false;
+    if (!ggml.impl.c.ggml_is_contiguous(view) or view.ne[0] != rope_t.ne[0] * rope_t.ne[1]) return false;
     // Only norm/neox/multi shaders have the fusion code
     const mode = rope_t.op_params[2];
-    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX and
-        mode != c.GGML_ROPE_TYPE_MROPE and mode != c.GGML_ROPE_TYPE_IMROPE) return false;
+    if (mode != ggml.impl.c.GGML_ROPE_TYPE_NORMAL and mode != ggml.impl.c.GGML_ROPE_TYPE_NEOX and
+        mode != ggml.impl.c.GGML_ROPE_TYPE_MROPE and mode != ggml.impl.c.GGML_ROPE_TYPE_IMROPE) return false;
     return true;
 }
 
 /// Ports `ggml_cuda_should_fuse_rms_norm_mul_rope` (ggml-cuda.cu:3425 @b1b770d90).
-fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t: *const Tensor) bool {
-    if (rms_norm.op != c.GGML_OP_RMS_NORM or mul.op != c.GGML_OP_MUL or rope_t.op != c.GGML_OP_ROPE) return false;
+fn shouldFuseRmsNormMulRope(rms_norm: *const ggml.impl.c.ggml_tensor, mul: *const ggml.impl.c.ggml_tensor, rope_t: *const ggml.impl.c.ggml_tensor) bool {
+    if (rms_norm.op != ggml.impl.c.GGML_OP_RMS_NORM or mul.op != ggml.impl.c.GGML_OP_MUL or rope_t.op != ggml.impl.c.GGML_OP_ROPE) return false;
 
-    const F32 = c.GGML_TYPE_F32;
+    const F32 = ggml.impl.c.GGML_TYPE_F32;
     if (src(rms_norm, 0).type != F32 or rms_norm.type != F32 or
         src(mul, 0).type != F32 or src(mul, 1).type != F32 or
         mul.type != F32 or rope_t.type != F32) return false;
@@ -84,17 +56,17 @@ fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t:
     if (rope_t.src[0] != mul) return false;
 
     //if rms norm is the B operand, then we don't handle broadcast
-    if (rms_norm == mul.src[1] and !c.ggml_are_same_shape(src(mul, 0), rms_norm)) return false;
+    if (rms_norm == mul.src[1] and !ggml.impl.c.ggml_are_same_shape(src(mul, 0), rms_norm)) return false;
 
-    if (!c.ggml_are_same_shape(rms_norm, mul)) return false;
+    if (!ggml.impl.c.ggml_are_same_shape(rms_norm, mul)) return false;
 
     //rms_norm kernel assumes contiguous rows
-    if (!c.ggml_is_contiguous_rows(src(rms_norm, 0)) or
-        !c.ggml_is_contiguous_rows(src(mul, 0)) or !c.ggml_is_contiguous_rows(src(mul, 1))) return false;
+    if (!ggml.impl.c.ggml_is_contiguous_rows(src(rms_norm, 0)) or
+        !ggml.impl.c.ggml_is_contiguous_rows(src(mul, 0)) or !ggml.impl.c.ggml_is_contiguous_rows(src(mul, 1))) return false;
 
     // the fused kernel handles the norm/neox rope modes only
     const mode = rope_t.op_params[2];
-    if (mode != c.GGML_ROPE_TYPE_NORMAL and mode != c.GGML_ROPE_TYPE_NEOX) return false;
+    if (mode != ggml.impl.c.GGML_ROPE_TYPE_NORMAL and mode != ggml.impl.c.GGML_ROPE_TYPE_NEOX) return false;
 
     const n_dims = rope_t.op_params[1];
     if (@rem(n_dims, 2) != 0 or @rem(src(rope_t, 0).ne[0], 2) != 0) return false;
@@ -108,18 +80,18 @@ fn shouldFuseRmsNormMulRope(rms_norm: *const Tensor, mul: *const Tensor, rope_t:
 
 /// Ports `ggml_cuda_is_view_or_noop` (ggml-cuda.cu:3195 @b1b770d90), for the
 /// gated-delta-net match; `graph.zig` has its own copy for the compute loop.
-fn isViewOrNoop(t: *const Tensor) bool {
-    return c.ggml_is_empty(t) or t.op == c.GGML_OP_RESHAPE or t.op == c.GGML_OP_TRANSPOSE or
-        t.op == c.GGML_OP_VIEW or t.op == c.GGML_OP_PERMUTE or t.op == c.GGML_OP_NONE;
+fn isViewOrNoop(t: *const ggml.impl.c.ggml_tensor) bool {
+    return ggml.impl.c.ggml_is_empty(t) or t.op == ggml.impl.c.GGML_OP_RESHAPE or t.op == ggml.impl.c.GGML_OP_TRANSPOSE or
+        t.op == ggml.impl.c.GGML_OP_VIEW or t.op == ggml.impl.c.GGML_OP_PERMUTE or t.op == ggml.impl.c.GGML_OP_NONE;
 }
 
 /// Ports `ggml_cuda_try_gdn_cache_fusion` (ggml-cuda.cu:3479 @b1b770d90):
 /// match gated_delta_net + the strided cpy that scatters its state
 /// snapshots into the cache, so the kernel can write them and skip the cpy.
-fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *gated_delta_net.FusedCache) c_int {
+fn tryGdnCacheFusion(cgraph: *const ggml.impl.CGraph, node_idx: c_int, fused_state_cpy: *ggml.cuda.gated_delta_net.FusedCache) c_int {
     const gdn = node(cgraph, node_idx);
     // the kernel skips the snapshot tail, so the gdn output must not be a graph output
-    if (gdn.op != c.GGML_OP_GATED_DELTA_NET or gdn.type != c.GGML_TYPE_F32 or (gdn.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+    if (gdn.op != ggml.impl.c.GGML_OP_GATED_DELTA_NET or gdn.type != ggml.impl.c.GGML_TYPE_F32 or (gdn.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
 
     const src_v = src(gdn, 2);
     const S_v = src_v.ne[0];
@@ -127,20 +99,20 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
     const n_tokens = src_v.ne[2];
     const n_seqs = src_v.ne[3];
     const D = S_v * S_v * H;
-    const K: i64 = impl.getOpParamsI32(gdn, 0); // snapshot slot count
+    const K: i64 = ggml.impl.getOpParamsI32(gdn, 0); // snapshot slot count
     const n_written = @min(n_tokens, K); // newest n_written slots are written
 
     // snapshot tail starts right after the attention scores
-    const tail_off = c.ggml_row_size(c.GGML_TYPE_F32, S_v * H * n_tokens * n_seqs);
+    const tail_off = ggml.impl.c.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, S_v * H * n_tokens * n_seqs);
 
     // snapshot cpy is the first real node after the gdn (skip views/no-ops)
-    var cpy: ?*const Tensor = null;
+    var cpy: ?*const ggml.impl.c.ggml_tensor = null;
     var skip: c_int = 0;
     var j = node_idx + 1;
     while (j < cgraph.n_nodes and cpy == null) : (j += 1) {
         const n = node(cgraph, j);
         if (isViewOrNoop(n)) continue;
-        if (n.op != c.GGML_OP_CPY or (n.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+        if (n.op != ggml.impl.c.GGML_OP_CPY or (n.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
         cpy = n;
         skip = j - node_idx;
     }
@@ -150,13 +122,13 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
     const d = src(cp, 1); // cache view the kernel writes to
 
     // src must be this gdn's snapshot tail (contiguous, at the tail offset)
-    if (s.op != c.GGML_OP_VIEW or s.view_src != gdn or s.view_offs != tail_off or !c.ggml_is_contiguous(s)) return 0;
+    if (s.op != ggml.impl.c.GGML_OP_VIEW or s.view_src != gdn or s.view_offs != tail_off or !ggml.impl.c.ggml_is_contiguous(s)) return 0;
 
     // dst is the [D, n_seqs, n_written] cache view
     const expected_ne = [4]i64{ D, n_seqs, n_written, 1 };
-    if (d.op != c.GGML_OP_VIEW or d.type != c.GGML_TYPE_F32 or d.data == null or
+    if (d.op != ggml.impl.c.GGML_OP_VIEW or d.type != ggml.impl.c.GGML_TYPE_F32 or d.data == null or
         !std.mem.eql(i64, &expected_ne, &d.ne) or
-        d.nb[0] != c.ggml_type_size(c.GGML_TYPE_F32) or d.nb[1] != c.ggml_row_size(c.GGML_TYPE_F32, D)) return 0;
+        d.nb[0] != ggml.impl.c.ggml_type_size(ggml.impl.c.GGML_TYPE_F32) or d.nb[1] != ggml.impl.c.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, D)) return 0;
 
     fused_state_cpy.data = @ptrCast(@alignCast(d.data)); // rollback group 0 (newest)
     fused_state_cpy.slot_stride = if (K > 1) @intCast(d.nb[2] / @sizeOf(f32)) else 0;
@@ -168,12 +140,12 @@ fn tryGdnCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *g
 /// scatters its state snapshots into the cache, so the kernel writes them
 /// and skips the cpy. Only the Mamba-2 kernels (the group scan and SSD)
 /// write to the cache, and only for one sequence.
-fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy: *ssm_scan.FusedCache) c_int {
+fn trySsmScanCacheFusion(cgraph: *const ggml.impl.CGraph, node_idx: c_int, fused_state_cpy: *ggml.cuda.ssm_scan.FusedCache) c_int {
     const ssm = node(cgraph, node_idx);
     // the kernel skips the snapshot tail, so the scan output must not be a graph output
-    if (ssm.op != c.GGML_OP_SSM_SCAN or ssm.type != c.GGML_TYPE_F32 or (ssm.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+    if (ssm.op != ggml.impl.c.GGML_OP_SSM_SCAN or ssm.type != ggml.impl.c.GGML_TYPE_F32 or (ssm.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
 
-    const K: i64 = impl.getOpParamsI32(ssm, 0); // snapshot slot count
+    const K: i64 = ggml.impl.getOpParamsI32(ssm, 0); // snapshot slot count
 
     const s_t = src(ssm, 0);
     const x = src(ssm, 1);
@@ -191,16 +163,16 @@ fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy
     if (n_seqs != 1) return 0;
 
     const n_written = @min(n_tok, K);
-    const tail_off = c.ggml_row_size(c.GGML_TYPE_F32, c.ggml_nelements(x));
+    const tail_off = ggml.impl.c.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.ggml_nelements(x));
 
     // snapshot cpy is the first real node after the scan (skip views/no-ops)
-    var cpy: ?*const Tensor = null;
+    var cpy: ?*const ggml.impl.c.ggml_tensor = null;
     var skip: c_int = 0;
     var j = node_idx + 1;
     while (j < cgraph.n_nodes and cpy == null) : (j += 1) {
         const n = node(cgraph, j);
         if (isViewOrNoop(n)) continue;
-        if (n.op != c.GGML_OP_CPY or (n.flags & c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
+        if (n.op != ggml.impl.c.GGML_OP_CPY or (n.flags & ggml.impl.c.GGML_TENSOR_FLAG_OUTPUT) != 0) return 0;
         cpy = n;
         skip = j - node_idx;
     }
@@ -210,13 +182,13 @@ fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy
     const d = src(cp, 1); // cache view the kernel writes to
 
     // src must be this scan's snapshot tail (contiguous, at the tail offset)
-    if (s.op != c.GGML_OP_VIEW or s.view_src != ssm or s.view_offs != tail_off or !c.ggml_is_contiguous(s)) return 0;
+    if (s.op != ggml.impl.c.GGML_OP_VIEW or s.view_src != ssm or s.view_offs != tail_off or !ggml.impl.c.ggml_is_contiguous(s)) return 0;
 
     // dst is the [D, n_seqs, n_written] cache view; require nb[1] == D, the per-seq stride the kernel takes from src0->nb[3]
     const expected_ne = [4]i64{ D, n_seqs, n_written, 1 };
-    if (d.op != c.GGML_OP_VIEW or d.type != c.GGML_TYPE_F32 or d.data == null or
+    if (d.op != ggml.impl.c.GGML_OP_VIEW or d.type != ggml.impl.c.GGML_TYPE_F32 or d.data == null or
         !std.mem.eql(i64, &expected_ne, &d.ne) or
-        d.nb[0] != c.ggml_type_size(c.GGML_TYPE_F32) or d.nb[1] != c.ggml_row_size(c.GGML_TYPE_F32, D)) return 0;
+        d.nb[0] != ggml.impl.c.ggml_type_size(ggml.impl.c.GGML_TYPE_F32) or d.nb[1] != ggml.impl.c.ggml_row_size(ggml.impl.c.GGML_TYPE_F32, D)) return 0;
 
     fused_state_cpy.data = @ptrCast(@alignCast(d.data)); // rollback slot 0 (newest)
     fused_state_cpy.slot_stride = if (K > 1) @intCast(d.nb[2] / @sizeOf(f32)) else 0;
@@ -225,38 +197,38 @@ fn trySsmScanCacheFusion(cgraph: *const CGraph, node_idx: c_int, fused_state_cpy
 
 /// One row of `topk_moe_group_pattern`: `src0` and `src1` index into the
 /// table, -1 is the (biased) probs, -2 is not checked.
-const GroupStep = struct { op: Op, src0: c_int, src1: c_int };
+const GroupStep = struct { op: ggml.impl.c.enum_ggml_op, src0: c_int, src1: c_int };
 
 /// Ports `topk_moe_group_pattern` (ggml-cuda.cu:3620 @b1b770d90): expert
 /// group selection from `build_moe_ffn` (`n_expert_groups > 1`).
 const topk_moe_group_pattern = [_]GroupStep{
-    .{ .op = c.GGML_OP_RESHAPE, .src0 = -1, .src1 = -2 }, //  0: [n_exp_per_group, n_expert_groups, n_tokens]
-    .{ .op = c.GGML_OP_RESHAPE, .src0 = 0, .src1 = -2 }, //  1: [1, n_exp_per_group, n_expert_groups, n_tokens]
-    .{ .op = c.GGML_OP_ARGSORT, .src0 = 0, .src1 = -2 }, //  2
-    .{ .op = c.GGML_OP_VIEW, .src0 = 2, .src1 = -2 }, //  3: top-2 per group
-    .{ .op = c.GGML_OP_GET_ROWS, .src0 = 1, .src1 = 3 }, //  4
-    .{ .op = c.GGML_OP_RESHAPE, .src0 = 4, .src1 = -2 }, //  5
-    .{ .op = c.GGML_OP_SUM_ROWS, .src0 = 5, .src1 = -2 }, //  6: group scores
-    .{ .op = c.GGML_OP_RESHAPE, .src0 = 6, .src1 = -2 }, //  7
-    .{ .op = c.GGML_OP_ARGSORT, .src0 = 7, .src1 = -2 }, //  8
-    .{ .op = c.GGML_OP_VIEW, .src0 = 8, .src1 = -2 }, //  9: top n_group_used groups
-    .{ .op = c.GGML_OP_GET_ROWS, .src0 = 0, .src1 = 9 }, // 10
-    .{ .op = c.GGML_OP_FILL, .src0 = 0, .src1 = -2 }, // 11
-    .{ .op = c.GGML_OP_SET_ROWS, .src0 = 10, .src1 = 9 }, // 12: unused groups -> -inf
-    .{ .op = c.GGML_OP_RESHAPE, .src0 = 12, .src1 = -2 }, // 13: [n_expert, n_tokens]
+    .{ .op = ggml.impl.c.GGML_OP_RESHAPE, .src0 = -1, .src1 = -2 }, //  0: [n_exp_per_group, n_expert_groups, n_tokens]
+    .{ .op = ggml.impl.c.GGML_OP_RESHAPE, .src0 = 0, .src1 = -2 }, //  1: [1, n_exp_per_group, n_expert_groups, n_tokens]
+    .{ .op = ggml.impl.c.GGML_OP_ARGSORT, .src0 = 0, .src1 = -2 }, //  2
+    .{ .op = ggml.impl.c.GGML_OP_VIEW, .src0 = 2, .src1 = -2 }, //  3: top-2 per group
+    .{ .op = ggml.impl.c.GGML_OP_GET_ROWS, .src0 = 1, .src1 = 3 }, //  4
+    .{ .op = ggml.impl.c.GGML_OP_RESHAPE, .src0 = 4, .src1 = -2 }, //  5
+    .{ .op = ggml.impl.c.GGML_OP_SUM_ROWS, .src0 = 5, .src1 = -2 }, //  6: group scores
+    .{ .op = ggml.impl.c.GGML_OP_RESHAPE, .src0 = 6, .src1 = -2 }, //  7
+    .{ .op = ggml.impl.c.GGML_OP_ARGSORT, .src0 = 7, .src1 = -2 }, //  8
+    .{ .op = ggml.impl.c.GGML_OP_VIEW, .src0 = 8, .src1 = -2 }, //  9: top n_group_used groups
+    .{ .op = ggml.impl.c.GGML_OP_GET_ROWS, .src0 = 0, .src1 = 9 }, // 10
+    .{ .op = ggml.impl.c.GGML_OP_FILL, .src0 = 0, .src1 = -2 }, // 11
+    .{ .op = ggml.impl.c.GGML_OP_SET_ROWS, .src0 = 10, .src1 = 9 }, // 12: unused groups -> -inf
+    .{ .op = ggml.impl.c.GGML_OP_RESHAPE, .src0 = 12, .src1 = -2 }, // 13: [n_expert, n_tokens]
 };
 
 /// Ports `ggml_cuda_topk_moe_group_fusion` (ggml-cuda.cu:3637 @b1b770d90):
 /// whether `topk_moe_group_pattern` starts at `node_idx` over
 /// `selection`. The `HIP_VERSION < 60300000` arm never compiles here.
-fn topkMoeGroupFusion(cgraph: *const CGraph, node_idx: c_int, selection: *const Tensor, args: *topk_moe.Args) bool {
+fn topkMoeGroupFusion(cgraph: *const ggml.impl.CGraph, node_idx: c_int, selection: *const ggml.impl.c.ggml_tensor, args: *ggml.cuda.topk_moe.Args) bool {
     const n_ops: c_int = topk_moe_group_pattern.len;
     if (node_idx + n_ops > cgraph.n_nodes) return false;
 
     const S = struct {
-        fn srcOk(g: *const CGraph, base: c_int, sel: *const Tensor, s: ?*const Tensor, idx: c_int) bool {
+        fn srcOk(g: *const ggml.impl.CGraph, base: c_int, sel: *const ggml.impl.c.ggml_tensor, s: ?*const ggml.impl.c.ggml_tensor, idx: c_int) bool {
             if (idx == -2) return true;
-            const want: *const Tensor = if (idx == -1) sel else node(g, base + idx);
+            const want: *const ggml.impl.c.ggml_tensor = if (idx == -1) sel else node(g, base + idx);
             return s == want;
         }
     };
@@ -272,7 +244,7 @@ fn topkMoeGroupFusion(cgraph: *const CGraph, node_idx: c_int, selection: *const 
     const n_group_used: c_int = @truncate(node(cgraph, node_idx + 9).ne[0]);
 
     if (node(cgraph, node_idx + 3).ne[0] != 2 or node(cgraph, node_idx + 12).src[2] != node(cgraph, node_idx + 11) or
-        impl.getOpParamsF32(node(cgraph, node_idx + 11), 0) != -std.math.inf(f32) or n_groups > common.warp_size)
+        ggml.impl.getOpParamsF32(node(cgraph, node_idx + 11), 0) != -std.math.inf(f32) or n_groups > ggml.cuda.common.warp_size)
     {
         return false;
     }
@@ -283,7 +255,7 @@ fn topkMoeGroupFusion(cgraph: *const CGraph, node_idx: c_int, selection: *const 
 }
 
 /// Ports `ggml_cuda_topk_moe_fusion` (ggml-cuda.cu:3673 @b1b770d90).
-pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.Args) bool {
+pub fn topkMoeFusion(cgraph: *const ggml.impl.CGraph, node_idx_in: c_int, args: *ggml.cuda.topk_moe.Args) bool {
     args.sigmoid = false;
     args.sqrt_softplus = false;
     args.softmax = false;
@@ -296,14 +268,14 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
     const n_nodes = cgraph.n_nodes;
     var node_idx = node_idx_in;
 
-    if (node(cgraph, node_idx).op == c.GGML_OP_SOFT_MAX) args.softmax = true;
+    if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_SOFT_MAX) args.softmax = true;
 
-    if (node(cgraph, node_idx).op == c.GGML_OP_UNARY) {
-        const unary_op = c.ggml_get_unary_op(node(cgraph, node_idx));
-        if (unary_op == c.GGML_UNARY_OP_SIGMOID) {
+    if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_UNARY) {
+        const unary_op = ggml.impl.c.ggml_get_unary_op(node(cgraph, node_idx));
+        if (unary_op == ggml.impl.c.GGML_UNARY_OP_SIGMOID) {
             args.sigmoid = true;
-        } else if (unary_op == c.GGML_UNARY_OP_SOFTPLUS and node_idx + 1 < n_nodes and
-            node(cgraph, node_idx + 1).op == c.GGML_OP_SQRT and node(cgraph, node_idx + 1).src[0] == node(cgraph, node_idx))
+        } else if (unary_op == ggml.impl.c.GGML_UNARY_OP_SOFTPLUS and node_idx + 1 < n_nodes and
+            node(cgraph, node_idx + 1).op == ggml.impl.c.GGML_OP_SQRT and node(cgraph, node_idx + 1).src[0] == node(cgraph, node_idx))
         {
             // sqrt(softplus(x)) scoring (DeepSeek-V4)
             args.sqrt_softplus = true;
@@ -313,13 +285,13 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         }
     }
 
-    if (node(cgraph, node_idx).op == c.GGML_OP_ARGSORT) args.delayed_softmax = true;
+    if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_ARGSORT) args.delayed_softmax = true;
 
     node_idx += 1;
 
     if (args.sigmoid or args.sqrt_softplus or args.softmax) {
         // SOFTMAX -> RESHAPE
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_RESHAPE or
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_RESHAPE or
             node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) return false;
         const probs_reshaped = node(cgraph, node_idx);
         node_idx += 1;
@@ -327,8 +299,8 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         if (node_idx >= n_nodes) return false;
 
         // src of bias add is the unreshaped probs (-2 instead of -1)
-        var selection: *const Tensor = node(cgraph, node_idx - 2);
-        if (node(cgraph, node_idx).op == c.GGML_OP_ADD and node(cgraph, node_idx).src[0] == selection) {
+        var selection: *const ggml.impl.c.ggml_tensor = node(cgraph, node_idx - 2);
+        if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_ADD and node(cgraph, node_idx).src[0] == selection) {
             args.prob_bias = true;
             selection = node(cgraph, node_idx);
             node_idx += 1;
@@ -340,19 +312,19 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         }
 
         // RESHAPE/ADD/group mask -> ARGSORT
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_ARGSORT or node(cgraph, node_idx).src[0] != selection) return false;
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_ARGSORT or node(cgraph, node_idx).src[0] != selection) return false;
 
         node_idx += 1;
 
         // ARGSORT-> VIEW
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_VIEW or
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_VIEW or
             node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) return false;
 
         // kept groups must hold all used experts
         if (args.n_groups > 0 and node(cgraph, node_idx).ne[0] > args.n_group_used * @divTrunc(probs_reshaped.ne[1], args.n_groups)) return false;
         node_idx += 1;
 
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_GET_ROWS) return false;
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_GET_ROWS) return false;
 
         // GET_ROWS
         if (node(cgraph, node_idx).src[0] != probs_reshaped or node(cgraph, node_idx).src[1] != node(cgraph, node_idx - 1)) return false;
@@ -362,7 +334,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         const probs_reshaped = node(cgraph, node_idx - 2);
 
         // VIEW->ARGSORT
-        if (node_idx >= n_nodes or node(cgraph, node_idx).op != c.GGML_OP_VIEW or
+        if (node_idx >= n_nodes or node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_VIEW or
             node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) return false;
         node_idx += 1;
 
@@ -371,7 +343,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
             node(cgraph, node_idx).src[0] != probs_reshaped) return false;
         node_idx += 1;
 
-        const remaining_ops = [_]Op{ c.GGML_OP_RESHAPE, c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE };
+        const remaining_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE };
         for (remaining_ops) |op| {
             if (node_idx >= n_nodes or node(cgraph, node_idx).op != op or node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) return false;
             node_idx += 1;
@@ -382,9 +354,9 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
     // least valid till the norm
     if (node_idx >= n_nodes) return true;
 
-    if (node(cgraph, node_idx).op == c.GGML_OP_RESHAPE) {
+    if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_RESHAPE) {
         //check RESHAPE->SUM_ROWS->CLAMP->DIV->RESHAPE
-        const norm_ops = [_]Op{ c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP };
+        const norm_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP };
 
         args.norm = true;
         for (norm_ops) |op| {
@@ -397,7 +369,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         }
 
         // DIV <- CLAMP, RESHAPE
-        if (node(cgraph, node_idx).op != c.GGML_OP_DIV or node(cgraph, node_idx).src[1] != node(cgraph, node_idx - 1) or
+        if (node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_DIV or node(cgraph, node_idx).src[1] != node(cgraph, node_idx - 1) or
             node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 3))
         {
             args.norm = false;
@@ -405,7 +377,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         }
         node_idx += 1;
 
-        if (node(cgraph, node_idx).op != c.GGML_OP_RESHAPE or node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) {
+        if (node(cgraph, node_idx).op != ggml.impl.c.GGML_OP_RESHAPE or node(cgraph, node_idx).src[0] != node(cgraph, node_idx - 1)) {
             args.norm = false;
             return true;
         }
@@ -413,7 +385,7 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
         node_idx += 1;
     }
 
-    if (node(cgraph, node_idx).op == c.GGML_OP_SCALE and node(cgraph, node_idx).src[0] == node(cgraph, node_idx - 1)) {
+    if (node(cgraph, node_idx).op == ggml.impl.c.GGML_OP_SCALE and node(cgraph, node_idx).src[0] == node(cgraph, node_idx - 1)) {
         args.scale = true;
     }
 
@@ -422,21 +394,21 @@ pub fn topkMoeFusion(cgraph: *const CGraph, node_idx_in: c_int, args: *topk_moe.
 
 /// Ports `ggml_cuda_check_fusion_memory_ranges` (ggml-cuda.cu:3837 @b1b770d90):
 /// whether the write (out) nodes overwrite the read nodes in operation.
-fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c_int, out_nodes: []const c_int, is_topk_moe: bool) bool {
+fn checkFusionMemoryRanges(cgraph: *const ggml.impl.CGraph, node_idx: c_int, node_count: c_int, out_nodes: []const c_int, is_topk_moe: bool) bool {
     const S = struct {
-        fn overlap(a: *const Tensor, b: *const Tensor) bool {
+        fn overlap(a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor) bool {
             const a_start: i64 = @intCast(@intFromPtr(a.data));
-            const a_end = a_start + @as(i64, @intCast(c.ggml_backend_buft_get_alloc_size(impl.one(c.struct_ggml_backend_buffer, a.buffer).buft, a)));
+            const a_end = a_start + @as(i64, @intCast(ggml.impl.c.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.c.struct_ggml_backend_buffer, a.buffer).buft, a)));
             const b_start: i64 = @intCast(@intFromPtr(b.data));
-            const b_end = b_start + @as(i64, @intCast(c.ggml_backend_buft_get_alloc_size(impl.one(c.struct_ggml_backend_buffer, b.buffer).buft, b)));
+            const b_end = b_start + @as(i64, @intCast(ggml.impl.c.ggml_backend_buft_get_alloc_size(ggml.impl.one(ggml.impl.c.struct_ggml_backend_buffer, b.buffer).buft, b)));
             return (b_start <= a_start and a_start < b_end) or (a_start <= b_start and b_start < a_end);
         }
     };
 
     var is_ok = true;
     // one block reads all logits before it writes, so logits may alias the out nodes
-    var logits_may_alias: ?*const Tensor = null;
-    if (is_topk_moe and c.ggml_nrows(node(cgraph, node_idx)) <= topk_moe.rows_per_block) {
+    var logits_may_alias: ?*const ggml.impl.c.ggml_tensor = null;
+    if (is_topk_moe and ggml.impl.c.ggml_nrows(node(cgraph, node_idx)) <= ggml.cuda.topk_moe.rows_per_block) {
         logits_may_alias = node(cgraph, node_idx).src[0];
     }
 
@@ -450,7 +422,7 @@ fn checkFusionMemoryRanges(cgraph: *const CGraph, node_idx: c_int, node_count: c
             // node that's being elided, then disable fusion.
             for (node(cgraph, j).src) |s_opt| {
                 const s = s_opt orelse continue;
-                if (s.*.op == c.GGML_OP_NONE or s == logits_may_alias) continue;
+                if (s.*.op == ggml.impl.c.GGML_OP_NONE or s == logits_may_alias) continue;
 
                 if (S.overlap(dst, s)) {
                     var found = false;
@@ -480,10 +452,10 @@ const moe_weighted_reduction_max_experts = 15;
 
 /// Ports `ggml_cuda_moe_weighted_reduction_match` (ggml-cuda.cu:3905 @b1b770d90).
 pub const MoeWeightedReductionMatch = struct {
-    experts: ?*const Tensor = null,
-    expert_scale: ?*const Tensor = null,
-    weights: ?*const Tensor = null,
-    dst: ?*Tensor = null,
+    experts: ?*const ggml.impl.c.ggml_tensor = null,
+    expert_scale: ?*const ggml.impl.c.ggml_tensor = null,
+    weights: ?*const ggml.impl.c.ggml_tensor = null,
+    dst: ?*ggml.impl.c.ggml_tensor = null,
     node_count: c_int = 0,
 };
 
@@ -491,24 +463,24 @@ pub const MoeWeightedReductionMatch = struct {
 /// with its `split_mul`, `is_weights` and `is_experts` lambdas. The C's
 /// `std::vector`s are bounded by `moe_weighted_reduction_max_experts`, so
 /// they are fixed buffers here.
-pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: *MoeWeightedReductionMatch) bool {
+pub fn matchMoeWeightedReduction(cgraph: *const ggml.impl.CGraph, node_idx: c_int, match: *MoeWeightedReductionMatch) bool {
     const first = node(cgraph, node_idx);
-    if (first.op != c.GGML_OP_MUL or first.type != c.GGML_TYPE_F32 or !c.ggml_is_contiguous(first)) return false;
+    if (first.op != ggml.impl.c.GGML_OP_MUL or first.type != ggml.impl.c.GGML_TYPE_F32 or !ggml.impl.c.ggml_is_contiguous(first)) return false;
 
     const S = struct {
-        fn isWeights(mul: *const Tensor, tensor_opt: ?*const Tensor) bool {
+        fn isWeights(mul: *const ggml.impl.c.ggml_tensor, tensor_opt: ?*const ggml.impl.c.ggml_tensor) bool {
             const tensor = tensor_opt orelse return false;
-            return tensor.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(tensor) and tensor.ne[0] == 1 and
+            return tensor.type == ggml.impl.c.GGML_TYPE_F32 and ggml.impl.c.ggml_is_contiguous(tensor) and tensor.ne[0] == 1 and
                 tensor.ne[1] == mul.ne[1] and tensor.ne[2] == mul.ne[2] and tensor.ne[3] == mul.ne[3];
         }
 
-        fn isExperts(mul: *const Tensor, tensor_opt: ?*const Tensor) bool {
+        fn isExperts(mul: *const ggml.impl.c.ggml_tensor, tensor_opt: ?*const ggml.impl.c.ggml_tensor) bool {
             const tensor = tensor_opt orelse return false;
-            return tensor.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(tensor) and
-                c.ggml_are_same_shape(tensor, mul);
+            return tensor.type == ggml.impl.c.GGML_TYPE_F32 and ggml.impl.c.ggml_is_contiguous(tensor) and
+                ggml.impl.c.ggml_are_same_shape(tensor, mul);
         }
 
-        fn splitMul(mul: *const Tensor, full: *?*const Tensor, broadcast: *?*const Tensor) bool {
+        fn splitMul(mul: *const ggml.impl.c.ggml_tensor, full: *?*const ggml.impl.c.ggml_tensor, broadcast: *?*const ggml.impl.c.ggml_tensor) bool {
             if (isExperts(mul, mul.src[0]) and isWeights(mul, mul.src[1])) {
                 full.* = mul.src[0];
                 broadcast.* = mul.src[1];
@@ -523,10 +495,10 @@ pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: 
         }
     };
 
-    var weighted: *const Tensor = first;
-    var experts: ?*const Tensor = null;
-    var expert_scale: ?*const Tensor = null;
-    var weights: ?*const Tensor = null;
+    var weighted: *const ggml.impl.c.ggml_tensor = first;
+    var experts: ?*const ggml.impl.c.ggml_tensor = null;
+    var expert_scale: ?*const ggml.impl.c.ggml_tensor = null;
+    var weights: ?*const ggml.impl.c.ggml_tensor = null;
     var mul_count: c_int = 1;
 
     // Match both structural forms:
@@ -535,12 +507,12 @@ pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: 
     // The matcher does not depend on the model or quantization type.
     if (node_idx + 1 < cgraph.n_nodes) {
         const second = node(cgraph, node_idx + 1);
-        var scaled: ?*const Tensor = null;
-        var route: ?*const Tensor = null;
-        var raw: ?*const Tensor = null;
-        var scale: ?*const Tensor = null;
-        if (second.op == c.GGML_OP_MUL and second.type == c.GGML_TYPE_F32 and c.ggml_is_contiguous(second) and
-            S.splitMul(second, &scaled, &route) and scaled == @as(?*const Tensor, first) and S.splitMul(first, &raw, &scale))
+        var scaled: ?*const ggml.impl.c.ggml_tensor = null;
+        var route: ?*const ggml.impl.c.ggml_tensor = null;
+        var raw: ?*const ggml.impl.c.ggml_tensor = null;
+        var scale: ?*const ggml.impl.c.ggml_tensor = null;
+        if (second.op == ggml.impl.c.GGML_OP_MUL and second.type == ggml.impl.c.GGML_TYPE_F32 and ggml.impl.c.ggml_is_contiguous(second) and
+            S.splitMul(second, &scaled, &route) and scaled == @as(?*const ggml.impl.c.ggml_tensor, first) and S.splitMul(first, &raw, &scale))
         {
             weighted = second;
             experts = raw;
@@ -559,23 +531,23 @@ pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: 
     const node_count: c_int = 2 * n_expert_used + mul_count - 1;
     if (node_idx + node_count > cgraph.n_nodes) return false;
 
-    var ops_buf: [2 * moe_weighted_reduction_max_experts + 1]Op = @splat(c.GGML_OP_VIEW);
+    var ops_buf: [2 * moe_weighted_reduction_max_experts + 1]ggml.impl.c.enum_ggml_op = @splat(ggml.impl.c.GGML_OP_VIEW);
     const ops = ops_buf[0..@intCast(node_count)];
-    ops[0] = c.GGML_OP_MUL;
-    if (mul_count == 2) ops[1] = c.GGML_OP_MUL;
-    var views_buf: [moe_weighted_reduction_max_experts]*const Tensor = undefined;
+    ops[0] = ggml.impl.c.GGML_OP_MUL;
+    if (mul_count == 2) ops[1] = ggml.impl.c.GGML_OP_MUL;
+    var views_buf: [moe_weighted_reduction_max_experts]*const ggml.impl.c.ggml_tensor = undefined;
     var n_views: usize = 0;
-    var previous: ?*const Tensor = null;
+    var previous: ?*const ggml.impl.c.ggml_tensor = null;
     var n_adds: c_int = 0;
     var offset: c_int = mul_count;
     while (offset < node_count) : (offset += 1) {
         const candidate = node(cgraph, node_idx + offset);
         ops[@intCast(offset)] = candidate.op;
 
-        if (candidate.op == c.GGML_OP_VIEW) {
+        if (candidate.op == ggml.impl.c.GGML_OP_VIEW) {
             const expert: c_int = @intCast(n_views);
             if (expert >= n_expert_used or candidate.src[0] != weighted or candidate.view_src != weighted or
-                candidate.type != c.GGML_TYPE_F32 or candidate.ne[0] != weighted.ne[0] or
+                candidate.type != ggml.impl.c.GGML_TYPE_F32 or candidate.ne[0] != weighted.ne[0] or
                 candidate.ne[1] != n_tokens or candidate.ne[2] != 1 or candidate.ne[3] != 1 or
                 candidate.nb[0] != weighted.nb[0] or candidate.nb[1] != weighted.nb[2] or
                 candidate.view_offs != @as(usize, @bitCast(@as(isize, expert))) *% weighted.nb[1])
@@ -587,24 +559,24 @@ pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: 
             continue;
         }
 
-        if (candidate.op != c.GGML_OP_ADD or n_views < 2 or n_adds + 1 >= @as(c_int, @intCast(n_views))) return false;
-        const lhs: ?*const Tensor = if (n_adds == 0) views_buf[0] else previous;
-        const rhs: *const Tensor = views_buf[@intCast(n_adds + 1)];
-        if (candidate.src[0] != lhs or candidate.src[1] != rhs or candidate.type != c.GGML_TYPE_F32) return false;
+        if (candidate.op != ggml.impl.c.GGML_OP_ADD or n_views < 2 or n_adds + 1 >= @as(c_int, @intCast(n_views))) return false;
+        const lhs: ?*const ggml.impl.c.ggml_tensor = if (n_adds == 0) views_buf[0] else previous;
+        const rhs: *const ggml.impl.c.ggml_tensor = views_buf[@intCast(n_adds + 1)];
+        if (candidate.src[0] != lhs or candidate.src[1] != rhs or candidate.type != ggml.impl.c.GGML_TYPE_F32) return false;
         previous = candidate;
         n_adds += 1;
     }
 
     if (@as(c_int, @intCast(n_views)) != n_expert_used or n_adds != n_expert_used - 1 or previous == null) return false;
     const prev = previous.?;
-    if (!c.ggml_is_contiguous(prev) or prev.ne[0] != weighted.ne[0] or
+    if (!ggml.impl.c.ggml_is_contiguous(prev) or prev.ne[0] != weighted.ne[0] or
         prev.ne[1] != n_tokens or prev.ne[2] != 1 or prev.ne[3] != 1)
     {
         return false;
     }
 
     const output_idx = node_idx + node_count - 1;
-    if (!canFuseSubgraph(cgraph, node_idx, ops, &.{output_idx})) return false;
+    if (!ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{output_idx})) return false;
 
     match.experts = experts;
     match.expert_scale = expert_scale;
@@ -614,23 +586,23 @@ pub fn matchMoeWeightedReduction(cgraph: *const CGraph, node_idx: c_int, match: 
     return true;
 }
 
-fn opsEqual(a: []const Op, b: []const Op) bool {
-    return std.mem.eql(Op, a, b);
+fn opsEqual(a: []const ggml.impl.c.enum_ggml_op, b: []const ggml.impl.c.enum_ggml_op) bool {
+    return std.mem.eql(ggml.impl.c.enum_ggml_op, a, b);
 }
 
 /// Ports `ggml_cuda_can_fuse` (ggml-cuda.cu:4046 @b1b770d90). The C's
 /// `NDEBUG`-only assertion on `unary_ops.size()` compiles out.
-fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: []const UnaryOp) bool {
-    const mul_mat_bias_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_MUL_MAT, c.GGML_OP_ADD, c.GGML_OP_GLU };
-    const mul_mat_id_bias_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT_ID, c.GGML_OP_ADD_ID, c.GGML_OP_MUL_MAT_ID, c.GGML_OP_ADD_ID, c.GGML_OP_GLU };
+fn canFuse(cgraph: *const ggml.impl.CGraph, node_idx: c_int, ops: []const ggml.impl.c.enum_ggml_op, unary_ops: []const ggml.impl.c.enum_ggml_unary_op) bool {
+    const mul_mat_bias_glu_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_GLU };
+    const mul_mat_id_bias_glu_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_ADD_ID, ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_ADD_ID, ggml.impl.c.GGML_OP_GLU };
 
-    const mul_mat_id_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT_ID, c.GGML_OP_MUL_MAT_ID, c.GGML_OP_GLU };
-    const mul_mat_glu_ops = [_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT, c.GGML_OP_GLU };
+    const mul_mat_id_glu_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_GLU };
+    const mul_mat_glu_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_GLU };
 
     const n: c_int = @intCast(ops.len);
 
     if ((opsEqual(&mul_mat_bias_glu_ops, ops) or opsEqual(&mul_mat_id_bias_glu_ops, ops)) and
-        canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 4}))
+        ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 4}))
     {
         const ffn_gate = node(cgraph, node_idx);
         const ffn_gate_bias = node(cgraph, node_idx + 1);
@@ -638,34 +610,34 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
         const ffn_up_bias = node(cgraph, node_idx + 3);
         const glu = node(cgraph, node_idx + 4);
 
-        if (mulmat.shouldFuseMulMat(ffn_up, ffn_gate, glu, ffn_up_bias, ffn_gate_bias, null, null)) {
+        if (ggml.cuda.mulmat.shouldFuseMulMat(ffn_up, ffn_gate, glu, ffn_up_bias, ffn_gate_bias, null, null)) {
             return checkFusionMemoryRanges(cgraph, node_idx, n, &.{node_idx + 4}, false);
         }
     }
 
     if ((opsEqual(&mul_mat_id_glu_ops, ops) or opsEqual(&mul_mat_glu_ops, ops)) and
-        canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 2}))
+        ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 2}))
     {
         const ffn_gate = node(cgraph, node_idx);
         const ffn_up = node(cgraph, node_idx + 1);
         const glu = node(cgraph, node_idx + 2);
 
-        if (mulmat.shouldFuseMulMat(ffn_up, ffn_gate, glu, null, null, null, null)) {
+        if (ggml.cuda.mulmat.shouldFuseMulMat(ffn_up, ffn_gate, glu, null, null, null, null)) {
             return checkFusionMemoryRanges(cgraph, node_idx, n, &.{node_idx + 2}, false);
         }
     }
 
-    const rms_norm_mul_rope_ops = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE };
-    const rms_norm_mul_rope_set_rows_ops = [_]Op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
+    const rms_norm_mul_rope_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ROPE };
+    const rms_norm_mul_rope_set_rows_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_SET_ROWS };
 
-    if (opsEqual(&rms_norm_mul_rope_set_rows_ops, ops) and canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 4})) {
+    if (opsEqual(&rms_norm_mul_rope_set_rows_ops, ops) and ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 4})) {
         const rms_norm = node(cgraph, node_idx);
         const mul = node(cgraph, node_idx + 1);
         const rope_t = node(cgraph, node_idx + 2);
         const view = node(cgraph, node_idx + 3);
         const set_rows = node(cgraph, node_idx + 4);
 
-        if (checkEdges(cgraph, node_idx, &.{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 } }) and
+        if (ggml.graph.checkEdges(cgraph, node_idx, &.{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 0, 2 }, .{ 4, 0, 3 } }) and
             shouldFuseRmsNormMulRope(rms_norm, mul, rope_t) and
             shouldFuseRopeSetRows(rope_t, view, set_rows))
         {
@@ -673,7 +645,7 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
         }
     }
 
-    if (opsEqual(&rms_norm_mul_rope_ops, ops) and ggml_graph.canFuse(cgraph, node_idx, ops)) {
+    if (opsEqual(&rms_norm_mul_rope_ops, ops) and ggml.graph.canFuse(cgraph, node_idx, ops)) {
         const rms_norm = node(cgraph, node_idx);
         const mul = node(cgraph, node_idx + 1);
         const rope_t = node(cgraph, node_idx + 2);
@@ -684,9 +656,9 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
         return false;
     }
 
-    const rope_set_rows_ops = [_]Op{ c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS };
+    const rope_set_rows_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_SET_ROWS };
 
-    if (opsEqual(&rope_set_rows_ops, ops) and canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 2})) {
+    if (opsEqual(&rope_set_rows_ops, ops) and ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 2})) {
         const rope_t = node(cgraph, node_idx);
         const view = node(cgraph, node_idx + 1);
         const set_rows = node(cgraph, node_idx + 2);
@@ -697,145 +669,145 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
     }
 
     // scale_out*sigmoid(scale_in*post) as the hc_post weights (qwen4exp hc_combine)
-    const hc_post_gate_ops = [_]Op{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE, c.GGML_OP_DSV4_HC_POST };
+    const hc_post_gate_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DSV4_HC_POST };
 
-    if (opsEqual(&hc_post_gate_ops, ops) and canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 3})) {
+    if (opsEqual(&hc_post_gate_ops, ops) and ggml.graph.canFuseSubgraph(cgraph, node_idx, ops, &.{node_idx + 3})) {
         const scale_in = node(cgraph, node_idx);
         const sigmoid = node(cgraph, node_idx + 1);
         const scale_out = node(cgraph, node_idx + 2);
 
         // the chain must feed hc_post->src[2]; a bias on either scale is not handled
-        if (checkEdges(cgraph, node_idx, &.{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 2, 2 } }) and
-            c.ggml_get_unary_op(sigmoid) == c.GGML_UNARY_OP_SIGMOID and
-            impl.getOpParamsF32(scale_in, 1) == 0.0 and impl.getOpParamsF32(scale_out, 1) == 0.0 and
-            src(scale_in, 0).type == c.GGML_TYPE_F32 and scale_out.type == c.GGML_TYPE_F32 and
-            c.ggml_are_same_shape(src(scale_in, 0), scale_out))
+        if (ggml.graph.checkEdges(cgraph, node_idx, &.{ .{ 1, 0, 0 }, .{ 2, 0, 1 }, .{ 3, 2, 2 } }) and
+            ggml.impl.c.ggml_get_unary_op(sigmoid) == ggml.impl.c.GGML_UNARY_OP_SIGMOID and
+            ggml.impl.getOpParamsF32(scale_in, 1) == 0.0 and ggml.impl.getOpParamsF32(scale_out, 1) == 0.0 and
+            src(scale_in, 0).type == ggml.impl.c.GGML_TYPE_F32 and scale_out.type == ggml.impl.c.GGML_TYPE_F32 and
+            ggml.impl.c.ggml_are_same_shape(src(scale_in, 0), scale_out))
         {
             return checkFusionMemoryRanges(cgraph, node_idx, n, &.{node_idx + 3}, false);
         }
         return false;
     }
 
-    if (!ggml_graph.canFuse(cgraph, node_idx, ops)) return false;
+    if (!ggml.graph.canFuse(cgraph, node_idx, ops)) return false;
 
-    if ((ops.len == 2 or ops.len == 3) and ops[0] == c.GGML_OP_RMS_NORM and ops[1] == c.GGML_OP_MUL) {
+    if ((ops.len == 2 or ops.len == 3) and ops[0] == ggml.impl.c.GGML_OP_RMS_NORM and ops[1] == ggml.impl.c.GGML_OP_MUL) {
         const rms_norm = node(cgraph, node_idx);
         const mul = node(cgraph, node_idx + 1);
-        var add: ?*const Tensor = null;
+        var add: ?*const ggml.impl.c.ggml_tensor = null;
 
-        if (ops.len == 3 and ops[2] == c.GGML_OP_ADD) add = node(cgraph, node_idx + 2);
+        if (ops.len == 3 and ops[2] == ggml.impl.c.GGML_OP_ADD) add = node(cgraph, node_idx + 2);
 
-        impl.assert(src(rms_norm, 0).type == c.GGML_TYPE_F32, "rms_norm->src[0]->type == GGML_TYPE_F32");
-        impl.assert(rms_norm.type == c.GGML_TYPE_F32, "rms_norm->type == GGML_TYPE_F32");
+        ggml.impl.assert(src(rms_norm, 0).type == ggml.impl.c.GGML_TYPE_F32, "rms_norm->src[0]->type == GGML_TYPE_F32");
+        ggml.impl.assert(rms_norm.type == ggml.impl.c.GGML_TYPE_F32, "rms_norm->type == GGML_TYPE_F32");
 
         //rms norm only supports F32
-        if (src(mul, 0).type != c.GGML_TYPE_F32 or src(mul, 1).type != c.GGML_TYPE_F32 or mul.type != c.GGML_TYPE_F32) return false;
+        if (src(mul, 0).type != ggml.impl.c.GGML_TYPE_F32 or src(mul, 1).type != ggml.impl.c.GGML_TYPE_F32 or mul.type != ggml.impl.c.GGML_TYPE_F32) return false;
 
         if (add) |a| {
-            if (src(a, 0).type != c.GGML_TYPE_F32 or src(a, 1).type != c.GGML_TYPE_F32 or a.type != c.GGML_TYPE_F32) return false;
+            if (src(a, 0).type != ggml.impl.c.GGML_TYPE_F32 or src(a, 1).type != ggml.impl.c.GGML_TYPE_F32 or a.type != ggml.impl.c.GGML_TYPE_F32) return false;
         }
 
         //if rms norm is the B operand, then we don't handle broadcast
-        if (rms_norm == mul.src[1] and !c.ggml_are_same_shape(src(mul, 0), rms_norm)) return false;
+        if (rms_norm == mul.src[1] and !ggml.impl.c.ggml_are_same_shape(src(mul, 0), rms_norm)) return false;
 
         //rms_norm kernel assumes contiguous rows
-        if (!c.ggml_is_contiguous_rows(src(mul, 0)) or !c.ggml_is_contiguous_rows(src(mul, 1))) return false;
+        if (!ggml.impl.c.ggml_is_contiguous_rows(src(mul, 0)) or !ggml.impl.c.ggml_is_contiguous_rows(src(mul, 1))) return false;
 
         if (add) |a| {
-            if (!c.ggml_is_contiguous(src(a, 0)) or !c.ggml_is_contiguous_rows(src(a, 1))) return false;
+            if (!ggml.impl.c.ggml_is_contiguous(src(a, 0)) or !ggml.impl.c.ggml_is_contiguous_rows(src(a, 1))) return false;
         }
 
         return true;
     }
 
-    if (ops.len == 2 and ops[0] == c.GGML_OP_RMS_NORM and ops[1] == c.GGML_OP_SCALE) {
+    if (ops.len == 2 and ops[0] == ggml.impl.c.GGML_OP_RMS_NORM and ops[1] == ggml.impl.c.GGML_OP_SCALE) {
         const rms_norm = node(cgraph, node_idx);
         const scale = node(cgraph, node_idx + 1);
 
-        impl.assert(src(rms_norm, 0).type == c.GGML_TYPE_F32, "rms_norm->src[0]->type == GGML_TYPE_F32");
-        impl.assert(rms_norm.type == c.GGML_TYPE_F32, "rms_norm->type == GGML_TYPE_F32");
+        ggml.impl.assert(src(rms_norm, 0).type == ggml.impl.c.GGML_TYPE_F32, "rms_norm->src[0]->type == GGML_TYPE_F32");
+        ggml.impl.assert(rms_norm.type == ggml.impl.c.GGML_TYPE_F32, "rms_norm->type == GGML_TYPE_F32");
 
-        const bias = impl.getOpParamsF32(scale, 1);
+        const bias = ggml.impl.getOpParamsF32(scale, 1);
 
-        return bias == 0.0 and scale.type == c.GGML_TYPE_F32;
+        return bias == 0.0 and scale.type == ggml.impl.c.GGML_TYPE_F32;
     }
 
-    if (ops.len == 2 and ops[0] == c.GGML_OP_SSM_CONV and ops[1] == c.GGML_OP_UNARY and
-        unary_ops.len == 1 and unary_ops[0] == c.GGML_UNARY_OP_SILU)
+    if (ops.len == 2 and ops[0] == ggml.impl.c.GGML_OP_SSM_CONV and ops[1] == ggml.impl.c.GGML_OP_UNARY and
+        unary_ops.len == 1 and unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_SILU)
     {
         const ssm_conv_t = node(cgraph, node_idx);
         const silu = node(cgraph, node_idx + 1);
-        if (c.ggml_get_unary_op(silu) != unary_ops[0]) return false;
-        if (ssm_conv_t.type != c.GGML_TYPE_F32 or silu.type != c.GGML_TYPE_F32) return false;
+        if (ggml.impl.c.ggml_get_unary_op(silu) != unary_ops[0]) return false;
+        if (ssm_conv_t.type != ggml.impl.c.GGML_TYPE_F32 or silu.type != ggml.impl.c.GGML_TYPE_F32) return false;
         return true;
     }
 
-    if (ops.len == 3 and ops[0] == c.GGML_OP_SSM_CONV and ops[1] == c.GGML_OP_ADD and
-        ops[2] == c.GGML_OP_UNARY and unary_ops.len == 1 and unary_ops[0] == c.GGML_UNARY_OP_SILU)
+    if (ops.len == 3 and ops[0] == ggml.impl.c.GGML_OP_SSM_CONV and ops[1] == ggml.impl.c.GGML_OP_ADD and
+        ops[2] == ggml.impl.c.GGML_OP_UNARY and unary_ops.len == 1 and unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_SILU)
     {
         const ssm_conv_t = node(cgraph, node_idx);
         const add = node(cgraph, node_idx + 1);
         const silu = node(cgraph, node_idx + 2);
-        if (c.ggml_get_unary_op(silu) != unary_ops[0]) return false;
+        if (ggml.impl.c.ggml_get_unary_op(silu) != unary_ops[0]) return false;
 
-        if (ssm_conv_t.type != c.GGML_TYPE_F32 or add.type != c.GGML_TYPE_F32 or silu.type != c.GGML_TYPE_F32) return false;
+        if (ssm_conv_t.type != ggml.impl.c.GGML_TYPE_F32 or add.type != ggml.impl.c.GGML_TYPE_F32 or silu.type != ggml.impl.c.GGML_TYPE_F32) return false;
 
         // ADD must consume ssm_conv's output and broadcast a 1-D channel-wise bias.
         const bias = if (add.src[0] == ssm_conv_t) src(add, 1) else src(add, 0);
-        if (bias.type != c.GGML_TYPE_F32 or !c.ggml_is_contiguous(bias)) return false;
-        if (c.ggml_nelements(bias) != ssm_conv_t.ne[0] or bias.ne[0] != ssm_conv_t.ne[0]) return false;
+        if (bias.type != ggml.impl.c.GGML_TYPE_F32 or !ggml.impl.c.ggml_is_contiguous(bias)) return false;
+        if (ggml.impl.c.ggml_nelements(bias) != ssm_conv_t.ne[0] or bias.ne[0] != ssm_conv_t.ne[0]) return false;
 
         return true;
     }
 
-    if (ops.len == 2 and ops[0] == c.GGML_OP_UNARY and ops[1] == c.GGML_OP_MUL and unary_ops.len == 1 and
-        (unary_ops[0] == c.GGML_UNARY_OP_SILU or unary_ops[0] == c.GGML_UNARY_OP_SIGMOID or unary_ops[0] == c.GGML_UNARY_OP_SOFTPLUS))
+    if (ops.len == 2 and ops[0] == ggml.impl.c.GGML_OP_UNARY and ops[1] == ggml.impl.c.GGML_OP_MUL and unary_ops.len == 1 and
+        (unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_SILU or unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_SIGMOID or unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_SOFTPLUS))
     {
         const un = node(cgraph, node_idx);
         const mul = node(cgraph, node_idx + 1);
 
-        if (c.ggml_get_unary_op(un) != unary_ops[0]) return false;
-        if (un.type != c.GGML_TYPE_F32 and un.type != c.GGML_TYPE_F16 and un.type != c.GGML_TYPE_BF16) return false;
+        if (ggml.impl.c.ggml_get_unary_op(un) != unary_ops[0]) return false;
+        if (un.type != ggml.impl.c.GGML_TYPE_F32 and un.type != ggml.impl.c.GGML_TYPE_F16 and un.type != ggml.impl.c.GGML_TYPE_BF16) return false;
         if (un.type != mul.type) return false;
 
         const other = if (mul.src[0] == un) src(mul, 1) else src(mul, 0);
         if (other.type != un.type) return false;
-        if (!c.ggml_is_contiguous_1(other) or !c.ggml_is_contiguous_1(src(un, 0)) or !c.ggml_are_same_shape(other, un)) return false;
+        if (!ggml.impl.c.ggml_is_contiguous_1(other) or !ggml.impl.c.ggml_is_contiguous_1(src(un, 0)) or !ggml.impl.c.ggml_are_same_shape(other, un)) return false;
 
         return true;
     }
 
-    if (ops.len == 2 and ops[0] == c.GGML_OP_UNARY and ops[1] == c.GGML_OP_SQR and
-        unary_ops.len == 1 and unary_ops[0] == c.GGML_UNARY_OP_RELU)
+    if (ops.len == 2 and ops[0] == ggml.impl.c.GGML_OP_UNARY and ops[1] == ggml.impl.c.GGML_OP_SQR and
+        unary_ops.len == 1 and unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_RELU)
     {
         const un = node(cgraph, node_idx);
         const sqr = node(cgraph, node_idx + 1);
 
-        if (c.ggml_get_unary_op(un) != c.GGML_UNARY_OP_RELU) return false;
-        if (un.type != c.GGML_TYPE_F32 and un.type != c.GGML_TYPE_F16) return false;
+        if (ggml.impl.c.ggml_get_unary_op(un) != ggml.impl.c.GGML_UNARY_OP_RELU) return false;
+        if (un.type != ggml.impl.c.GGML_TYPE_F32 and un.type != ggml.impl.c.GGML_TYPE_F16) return false;
         if (un.type != sqr.type) return false;
-        if (!c.ggml_is_contiguous(src(un, 0))) return false;
+        if (!ggml.impl.c.ggml_is_contiguous(src(un, 0))) return false;
 
         return true;
     }
 
-    if (ops.len == 3 and ops[0] == c.GGML_OP_SCALE and ops[1] == c.GGML_OP_UNARY and ops[2] == c.GGML_OP_SCALE and
-        unary_ops.len == 1 and unary_ops[0] == c.GGML_UNARY_OP_TANH)
+    if (ops.len == 3 and ops[0] == ggml.impl.c.GGML_OP_SCALE and ops[1] == ggml.impl.c.GGML_OP_UNARY and ops[2] == ggml.impl.c.GGML_OP_SCALE and
+        unary_ops.len == 1 and unary_ops[0] == ggml.impl.c.GGML_UNARY_OP_TANH)
     {
         const scale = node(cgraph, node_idx);
         const tanh = node(cgraph, node_idx + 1);
         const scale2 = node(cgraph, node_idx + 2);
 
         // the fused softcap kernel is F32 only
-        if (src(scale, 0).type != c.GGML_TYPE_F32 or scale.type != c.GGML_TYPE_F32) return false;
+        if (src(scale, 0).type != ggml.impl.c.GGML_TYPE_F32 or scale.type != ggml.impl.c.GGML_TYPE_F32) return false;
 
         // TODO: make the fused softcap kernel stride aware, it reads src and writes dst as dense
-        if (!c.ggml_is_contiguous(src(scale, 0)) or !c.ggml_is_contiguous(scale2)) return false;
+        if (!ggml.impl.c.ggml_is_contiguous(src(scale, 0)) or !ggml.impl.c.ggml_is_contiguous(scale2)) return false;
 
-        if (c.ggml_get_unary_op(tanh) != c.GGML_UNARY_OP_TANH) return false;
+        if (ggml.impl.c.ggml_get_unary_op(tanh) != ggml.impl.c.GGML_UNARY_OP_TANH) return false;
 
         // Check for bias
-        if (impl.getOpParamsF32(scale, 1) != 0.0 or impl.getOpParamsF32(scale2, 1) != 0.0) return false;
+        if (ggml.impl.getOpParamsF32(scale, 1) != 0.0 or ggml.impl.getOpParamsF32(scale2, 1) != 0.0) return false;
 
         return true;
     }
@@ -850,14 +822,14 @@ fn canFuse(cgraph: *const CGraph, node_idx: c_int, ops: []const Op, unary_ops: [
 /// the routed one before its reshape, the same GLU and limit. Only checks
 /// that do not depend on the batch size, so that `graph_optimize` gives
 /// every ubatch the same topology; `tryFuse` checks the batch.
-pub fn matchSharedExpert(graph: *const CGraph, routed_idx: c_int, shared_idx: c_int) bool {
+pub fn matchSharedExpert(graph: *const ggml.impl.CGraph, routed_idx: c_int, shared_idx: c_int) bool {
     if (routed_idx + 2 >= graph.n_nodes or shared_idx + 2 >= graph.n_nodes or shared_idx < routed_idx + 3) {
         return false;
     }
     const nodes = [_]c_int{ routed_idx, routed_idx + 1, routed_idx + 2, shared_idx, shared_idx + 1, shared_idx + 2 };
-    const ops = [_]Op{ c.GGML_OP_MUL_MAT_ID, c.GGML_OP_MUL_MAT_ID, c.GGML_OP_GLU, c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT, c.GGML_OP_GLU };
+    const ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_MUL_MAT_ID, ggml.impl.c.GGML_OP_GLU, ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_GLU };
     const outputs = [_]c_int{ routed_idx + 2, shared_idx + 2 };
-    if (!ggml_graph.ggml_can_fuse_subgraph_ext(graph, &nodes, 6, &ops, &outputs, 2)) {
+    if (!ggml.graph.ggml_can_fuse_subgraph_ext(graph, &nodes, 6, &ops, &outputs, 2)) {
         return false;
     }
 
@@ -868,7 +840,7 @@ pub fn matchSharedExpert(graph: *const CGraph, routed_idx: c_int, shared_idx: c_
     const shared_gate = src(shared, 0);
     const shared_up = src(shared, 1);
     const isPair = struct {
-        fn f(g: *const CGraph, a: *const Tensor, b: *const Tensor, idx: c_int) bool {
+        fn f(g: *const ggml.impl.CGraph, a: *const ggml.impl.c.ggml_tensor, b: *const ggml.impl.c.ggml_tensor, idx: c_int) bool {
             return (a == node(g, idx) and b == node(g, idx + 1)) or
                 (b == node(g, idx) and a == node(g, idx + 1));
         }
@@ -877,29 +849,29 @@ pub fn matchSharedExpert(graph: *const CGraph, routed_idx: c_int, shared_idx: c_
     // size, otherwise ggml-alloc has to re-reserve (and the scheduler to synchronize) at runtime.
     // the MMVQ batch size check is done in ggml_cuda_try_fuse
     if (!isPair(graph, gate, up, routed_idx) or !isPair(graph, shared_gate, shared_up, shared_idx) or
-        !mulmat.shouldFuseMulMat(up, gate, routed, null, null, null, null) or
-        !mulmat.shouldFuseMulMat(shared_up, shared_gate, shared, null, null, null, null) or
+        !ggml.cuda.mulmat.shouldFuseMulMat(up, gate, routed, null, null, null, null) or
+        !ggml.cuda.mulmat.shouldFuseMulMat(shared_up, shared_gate, shared, null, null, null, null) or
         src(up, 0).buffer == null or
-        !c.ggml_is_quantized(src(up, 0).type))
+        !ggml.impl.c.ggml_is_quantized(src(up, 0).type))
     {
         return false;
     }
     const input = src(up, 1);
     const weight = src(up, 0);
     const shared_weight = src(shared_up, 0);
-    if (input.op != c.GGML_OP_RESHAPE or input.src[0] != shared_up.src[1] or
-        input.ne[1] != 1 or input.ne[3] != 1 or !c.ggml_is_contiguous(input) or
-        !c.ggml_is_contiguous(src(shared_up, 1)) or !c.ggml_is_matrix(src(shared_up, 1)) or
+    if (input.op != ggml.impl.c.GGML_OP_RESHAPE or input.src[0] != shared_up.src[1] or
+        input.ne[1] != 1 or input.ne[3] != 1 or !ggml.impl.c.ggml_is_contiguous(input) or
+        !ggml.impl.c.ggml_is_contiguous(src(shared_up, 1)) or !ggml.impl.c.ggml_is_matrix(src(shared_up, 1)) or
         weight.type != shared_weight.type or weight.ne[0] != shared_weight.ne[0] or
         weight.ne[1] != shared_weight.ne[1] or weight.nb[1] != shared_weight.nb[1] or weight.ne[3] != 1 or
-        !c.ggml_is_matrix(shared_weight) or !c.ggml_is_contiguous(shared_weight) or
-        !c.ggml_is_contiguous(src(shared_gate, 0)) or !c.ggml_is_contiguous(routed) or !c.ggml_is_contiguous(shared))
+        !ggml.impl.c.ggml_is_matrix(shared_weight) or !ggml.impl.c.ggml_is_contiguous(shared_weight) or
+        !ggml.impl.c.ggml_is_contiguous(src(shared_gate, 0)) or !ggml.impl.c.ggml_is_contiguous(routed) or !ggml.impl.c.ggml_is_contiguous(shared))
     {
         return false;
     }
-    if (shared_weight.op != c.GGML_OP_NONE or src(shared_gate, 0).op != c.GGML_OP_NONE or
-        c.ggml_get_glu_op(routed) != c.ggml_get_glu_op(shared) or
-        impl.getOpParamsF32(routed, 3) != impl.getOpParamsF32(shared, 3))
+    if (shared_weight.op != ggml.impl.c.GGML_OP_NONE or src(shared_gate, 0).op != ggml.impl.c.GGML_OP_NONE or
+        ggml.impl.c.ggml_get_glu_op(routed) != ggml.impl.c.ggml_get_glu_op(shared) or
+        ggml.impl.getOpParamsF32(routed, 3) != ggml.impl.getOpParamsF32(shared, 3))
     {
         return false;
     }
@@ -907,18 +879,18 @@ pub fn matchSharedExpert(graph: *const CGraph, routed_idx: c_int, shared_idx: c_
 }
 
 /// The C's `get_bias_tensor` lambda in `ggml_cuda_try_fuse`.
-fn getBiasTensor(bias_node: *const Tensor, mul_node: *const Tensor, op_bias: Op) ?*const Tensor {
-    if (op_bias == c.GGML_OP_ADD) {
+fn getBiasTensor(bias_node: *const ggml.impl.c.ggml_tensor, mul_node: *const ggml.impl.c.ggml_tensor, op_bias: ggml.impl.c.enum_ggml_op) ?*const ggml.impl.c.ggml_tensor {
+    if (op_bias == ggml.impl.c.GGML_OP_ADD) {
         if (bias_node.src[0] == mul_node) return src(bias_node, 1);
         if (bias_node.src[1] == mul_node) return src(bias_node, 0);
         return null;
     }
-    impl.assert(op_bias == c.GGML_OP_ADD_ID, "op_bias == GGML_OP_ADD_ID");
-    impl.assert(bias_node.src[0] == mul_node, "bias_node->src[0] == mul_node");
+    ggml.impl.assert(op_bias == ggml.impl.c.GGML_OP_ADD_ID, "op_bias == GGML_OP_ADD_ID");
+    ggml.impl.assert(bias_node.src[0] == mul_node, "bias_node->src[0] == mul_node");
     return src(bias_node, 1);
 }
 
-fn srcOpt(t: *const Tensor, i: usize) ?*const Tensor {
+fn srcOpt(t: *const ggml.impl.c.ggml_tensor, i: usize) ?*const ggml.impl.c.ggml_tensor {
     return if (t.src[i]) |s| s else null;
 }
 
@@ -929,73 +901,73 @@ fn srcOpt(t: *const Tensor, i: usize) ?*const Tensor {
 /// `graph_optimize` shares them, and lets MMVF (FP8 weights) and MMQ (NVFP4)
 /// take the scaled gate/up/GLU and the scaled matmul, cuBLASLt's FP8 GEMM
 /// the scaled FP8 `MUL_MAT`.
-pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
-    if (common.fusionDisabled()) return 0;
+pub fn tryFuse(cuda_ctx: *ggml.cuda.common.Context, cgraph: *ggml.impl.CGraph, i: c_int) c_int {
+    if (ggml.cuda.common.fusionDisabled()) return 0;
 
     const nd = node(cgraph, i);
 
-    if (nd.op == c.GGML_OP_MUL_MAT_ID and cuda_ctx.concurrent_stream_context.concurrent_events.count() == 0 and
+    if (nd.op == ggml.impl.c.GGML_OP_MUL_MAT_ID and cuda_ctx.concurrent_stream_context.concurrent_events.count() == 0 and
         matchSharedExpert(cgraph, i, i + 3) and
-        mulmat.shouldFuseMulMatVecQ(src(node(cgraph, i + 2), 1)))
+        ggml.cuda.mulmat.shouldFuseMulMatVecQ(src(node(cgraph, i + 2), 1)))
     {
         const outputs = [_]c_int{ i + 2, i + 5 };
         if (checkFusionMemoryRanges(cgraph, i, 6, &outputs, false)) {
             const routed = node(cgraph, i + 2);
             const shared = node(cgraph, i + 5);
             const up = src(routed, 1);
-            var fusion: common.MmFusionArgsHost = .{};
+            var fusion: ggml.cuda.common.MmFusionArgsHost = .{};
             fusion.gate = src(src(routed, 0), 0);
-            fusion.glu_op = c.ggml_get_glu_op(routed);
-            fusion.glu_limit = impl.getOpParamsF32(routed, 3);
+            fusion.glu_op = ggml.impl.c.ggml_get_glu_op(routed);
+            fusion.glu_limit = ggml.impl.getOpParamsF32(routed, 3);
             fusion.shared_up = src(src(shared, 1), 0);
             fusion.shared_gate = src(src(shared, 0), 0);
             fusion.shared_dst = shared;
-            mmvq.mulMatVecQ(cuda_ctx, src(up, 0), src(up, 1), src(up, 2), routed, &fusion);
+            ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(up, 0), src(up, 1), src(up, 2), routed, &fusion);
             return 5;
         }
     }
 
-    if (nd.op == c.GGML_OP_MUL) {
+    if (nd.op == ggml.impl.c.GGML_OP_MUL) {
         var match: MoeWeightedReductionMatch = .{};
         if (matchMoeWeightedReduction(cgraph, i, &match)) {
             const output_idx = i + match.node_count - 1;
             if (checkFusionMemoryRanges(cgraph, i, match.node_count, &.{output_idx}, false)) {
-                moe_weighted_reduction.opMoeWeightedReduction(cuda_ctx, match.experts.?, match.expert_scale, match.weights.?, match.dst.?);
+                ggml.cuda.moe_weighted_reduction.opMoeWeightedReduction(cuda_ctx, match.experts.?, match.expert_scale, match.weights.?, match.dst.?);
                 return match.node_count - 1;
             }
         }
     }
 
     // gated_delta_net -> cpy: scatter recurrent-state snapshots into the cache
-    if (nd.op == c.GGML_OP_GATED_DELTA_NET) {
-        var fused_state_cpy: gated_delta_net.FusedCache = undefined;
+    if (nd.op == ggml.impl.c.GGML_OP_GATED_DELTA_NET) {
+        var fused_state_cpy: ggml.cuda.gated_delta_net.FusedCache = undefined;
         const nodes_to_skip = tryGdnCacheFusion(cgraph, i, &fused_state_cpy);
         if (nodes_to_skip > 0) {
-            gated_delta_net.opGatedDeltaNetFusedCache(cuda_ctx, nd, fused_state_cpy);
+            ggml.cuda.gated_delta_net.opGatedDeltaNetFusedCache(cuda_ctx, nd, fused_state_cpy);
             return nodes_to_skip;
         }
     }
 
     // ssm_scan -> cpy: scatter recurrent-state snapshots into the cache
-    if (nd.op == c.GGML_OP_SSM_SCAN) {
-        var fused_state_cpy: ssm_scan.FusedCache = undefined;
+    if (nd.op == ggml.impl.c.GGML_OP_SSM_SCAN) {
+        var fused_state_cpy: ggml.cuda.ssm_scan.FusedCache = undefined;
         const nodes_to_skip = trySsmScanCacheFusion(cgraph, i, &fused_state_cpy);
         if (nodes_to_skip > 0) {
-            ssm_scan.opSsmScanFusedCache(cuda_ctx, nd, fused_state_cpy);
+            ggml.cuda.ssm_scan.opSsmScanFusedCache(cuda_ctx, nd, fused_state_cpy);
             return nodes_to_skip;
         }
     }
 
     //topk-moe
-    if (nd.op == c.GGML_OP_UNARY or nd.op == c.GGML_OP_SOFT_MAX or nd.op == c.GGML_OP_ARGSORT) {
-        var args: topk_moe.Args = .{};
+    if (nd.op == ggml.impl.c.GGML_OP_UNARY or nd.op == ggml.impl.c.GGML_OP_SOFT_MAX or nd.op == ggml.impl.c.GGML_OP_ARGSORT) {
+        var args: ggml.cuda.topk_moe.Args = .{};
         const can_fuse = topkMoeFusion(cgraph, i, &args);
         // two for the gating, ADD and RESHAPE, the group pattern, three for
         // the selection, five for the norm and one for the scale
-        var ops_buf: [32]Op = undefined;
+        var ops_buf: [32]ggml.impl.c.enum_ggml_op = undefined;
         var n_ops: usize = 0;
         const Append = struct {
-            fn f(buf: []Op, n: *usize, items: []const Op) void {
+            fn f(buf: []ggml.impl.c.enum_ggml_op, n: *usize, items: []const ggml.impl.c.enum_ggml_op) void {
                 for (items) |x| {
                     buf[n.*] = x;
                     n.* += 1;
@@ -1005,66 +977,66 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
 
         if (can_fuse) {
             const logits = src(nd, 0);
-            var weights: *Tensor = undefined;
-            var ids: *Tensor = undefined;
-            var bias: ?*const Tensor = null;
-            var clamp: ?*const Tensor = null;
-            var scale: ?*const Tensor = null;
+            var weights: *ggml.impl.c.ggml_tensor = undefined;
+            var ids: *ggml.impl.c.ggml_tensor = undefined;
+            var bias: ?*const ggml.impl.c.ggml_tensor = null;
+            var clamp: ?*const ggml.impl.c.ggml_tensor = null;
+            var scale: ?*const ggml.impl.c.ggml_tensor = null;
 
             if (!args.delayed_softmax) {
                 var out_nodes: [2]c_int = undefined; // nodes which can't be elided
 
                 if (args.sigmoid) {
-                    Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_UNARY});
+                    Append.f(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_UNARY});
                 } else if (args.sqrt_softplus) {
-                    Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_UNARY, c.GGML_OP_SQRT });
+                    Append.f(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQRT });
                 } else {
-                    Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_SOFT_MAX});
+                    Append.f(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_SOFT_MAX});
                 }
-                Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_RESHAPE});
+                Append.f(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_RESHAPE});
                 if (args.prob_bias) {
-                    Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_ADD});
+                    Append.f(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_ADD});
                     bias = srcOpt(node(cgraph, i + @as(c_int, @intCast(n_ops)) - 1), 1);
                 }
                 if (args.n_groups > 0) {
                     for (topk_moe_group_pattern) |p| Append.f(&ops_buf, &n_ops, &.{p.op});
                 }
-                Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS });
+                Append.f(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS });
                 out_nodes[0] = i + @as(c_int, @intCast(n_ops)) - 2;
                 ids = node(cgraph, out_nodes[0]);
 
                 if (args.norm) {
-                    Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_RESHAPE, c.GGML_OP_SUM_ROWS, c.GGML_OP_CLAMP, c.GGML_OP_DIV, c.GGML_OP_RESHAPE });
+                    Append.f(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SUM_ROWS, ggml.impl.c.GGML_OP_CLAMP, ggml.impl.c.GGML_OP_DIV, ggml.impl.c.GGML_OP_RESHAPE });
                     clamp = node(cgraph, i + @as(c_int, @intCast(n_ops)) - 3);
                 }
                 if (args.scale) {
-                    Append.f(&ops_buf, &n_ops, &.{c.GGML_OP_SCALE});
+                    Append.f(&ops_buf, &n_ops, &.{ggml.impl.c.GGML_OP_SCALE});
                     scale = node(cgraph, i + @as(c_int, @intCast(n_ops)) - 1);
                 }
 
                 weights = node(cgraph, i + @as(c_int, @intCast(n_ops)) - 1);
                 out_nodes[1] = i + @as(c_int, @intCast(n_ops)) - 1;
 
-                if (canFuseSubgraph(cgraph, i, ops_buf[0..n_ops], &out_nodes) and
-                    topk_moe.shouldUseTopkMoe(nd, logits, weights, ids) and
+                if (ggml.graph.canFuseSubgraph(cgraph, i, ops_buf[0..n_ops], &out_nodes) and
+                    ggml.cuda.topk_moe.shouldUseTopkMoe(nd, logits, weights, ids) and
                     checkFusionMemoryRanges(cgraph, i, @intCast(n_ops), &out_nodes, true))
                 {
-                    topk_moe.opTopkMoe(cuda_ctx, logits, weights, ids, clamp, scale, bias, &args);
+                    ggml.cuda.topk_moe.opTopkMoe(cuda_ctx, logits, weights, ids, clamp, scale, bias, &args);
                     return @as(c_int, @intCast(n_ops)) - 1;
                 }
             } else if (!args.norm and !args.prob_bias) {
                 //special case gpt-oss, no norm, no bias.
-                Append.f(&ops_buf, &n_ops, &.{ c.GGML_OP_ARGSORT, c.GGML_OP_VIEW, c.GGML_OP_GET_ROWS, c.GGML_OP_RESHAPE, c.GGML_OP_SOFT_MAX, c.GGML_OP_RESHAPE });
+                Append.f(&ops_buf, &n_ops, &.{ ggml.impl.c.GGML_OP_ARGSORT, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_SOFT_MAX, ggml.impl.c.GGML_OP_RESHAPE });
                 weights = node(cgraph, i + 5);
                 ids = node(cgraph, i + 1);
                 const softmax = node(cgraph, i + 4);
 
                 const out_nodes = [2]c_int{ i + 1, i + 5 };
-                if (canFuseSubgraph(cgraph, i, ops_buf[0..n_ops], &out_nodes) and
-                    topk_moe.shouldUseTopkMoe(softmax, logits, weights, ids) and
+                if (ggml.graph.canFuseSubgraph(cgraph, i, ops_buf[0..n_ops], &out_nodes) and
+                    ggml.cuda.topk_moe.shouldUseTopkMoe(softmax, logits, weights, ids) and
                     checkFusionMemoryRanges(cgraph, i, @intCast(n_ops), &out_nodes, true))
                 {
-                    topk_moe.opTopkMoe(cuda_ctx, logits, weights, ids, clamp, scale, bias, &args);
+                    ggml.cuda.topk_moe.opTopkMoe(cuda_ctx, logits, weights, ids, clamp, scale, bias, &args);
                     return @as(c_int, @intCast(n_ops)) - 1;
                 }
             }
@@ -1072,21 +1044,21 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     }
 
     //RoPE + view + set-rows
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS }, &.{})) {
-        rope.opRopeFused(cuda_ctx, node(cgraph, i), node(cgraph, i + 2));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_SET_ROWS }, &.{})) {
+        ggml.cuda.rope.opRopeFused(cuda_ctx, node(cgraph, i), node(cgraph, i + 2));
         return 2;
     }
 
     // Snake activation: y = x + sin(a*x)^2 * inv_b
     // Naive 5-op decomposition emitted by frontends: mul -> sin -> sqr -> mul -> add
-    if (canFuseSubgraph(cgraph, i, &.{ c.GGML_OP_MUL, c.GGML_OP_SIN, c.GGML_OP_SQR, c.GGML_OP_MUL, c.GGML_OP_ADD }, &.{i + 4})) {
+    if (ggml.graph.canFuseSubgraph(cgraph, i, &.{ ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_SIN, ggml.impl.c.GGML_OP_SQR, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD }, &.{i + 4})) {
         const mul0 = node(cgraph, i);
         const sqr = node(cgraph, i + 2);
         const mul1 = node(cgraph, i + 3);
         const add = node(cgraph, i + 4);
 
         // x carries the full activation shape, a is the broadcast operand
-        const x = if (c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
+        const x = if (ggml.impl.c.ggml_are_same_shape(mul0, src(mul0, 0))) src(mul0, 0) else src(mul0, 1);
         const a = if (x == mul0.src[0]) src(mul0, 1) else src(mul0, 0);
 
         // mul1 reads sqr and inv_b in either operand order
@@ -1100,51 +1072,51 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
         const dim_ok = (x.ne[2] == 1 and x.ne[3] == 1) and
             (add.ne[2] == 1 and add.ne[3] == 1) and
             (a.ne[2] == 1 and a.ne[3] == 1);
-        const shape_ok = c.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
+        const shape_ok = ggml.impl.c.ggml_are_same_shape(a, inv_b) and a.ne[0] == 1 and a.ne[1] == x.ne[1];
 
         const sin1 = node(cgraph, i + 1);
-        const types_ok = (x.type == c.GGML_TYPE_F32 or x.type == c.GGML_TYPE_F16 or x.type == c.GGML_TYPE_BF16) and
-            (a.type == c.GGML_TYPE_F32) and (inv_b.type == c.GGML_TYPE_F32) and
+        const types_ok = (x.type == ggml.impl.c.GGML_TYPE_F32 or x.type == ggml.impl.c.GGML_TYPE_F16 or x.type == ggml.impl.c.GGML_TYPE_BF16) and
+            (a.type == ggml.impl.c.GGML_TYPE_F32) and (inv_b.type == ggml.impl.c.GGML_TYPE_F32) and
             (mul0.type == x.type) and (sin1.type == x.type) and
             (sqr.type == x.type) and (mul1.type == x.type) and
             (add.type == x.type);
 
         // kernel reads x[idx] and a[c] / inv_b[c] linearly, so every
         // operand is contiguous
-        const contig_ok = c.ggml_is_contiguous(x) and c.ggml_is_contiguous(add) and
-            c.ggml_is_contiguous(a) and c.ggml_is_contiguous(inv_b);
+        const contig_ok = ggml.impl.c.ggml_is_contiguous(x) and ggml.impl.c.ggml_is_contiguous(add) and
+            ggml.impl.c.ggml_is_contiguous(a) and ggml.impl.c.ggml_is_contiguous(inv_b);
 
         if (types_ok and shape_ok and dim_ok and contig_ok and x_in_add == x) {
-            snake.opSnakeFused(cuda_ctx, x, a, inv_b, add);
+            ggml.cuda.snake.opSnakeFused(cuda_ctx, x, a, inv_b, add);
             return 4;
         }
     }
 
     // multi-(add or mul)
-    if (nd.op == c.GGML_OP_ADD or nd.op == c.GGML_OP_MUL) {
+    if (nd.op == ggml.impl.c.GGML_OP_ADD or nd.op == ggml.impl.c.GGML_OP_MUL) {
         var n_fuse: c_int = 0;
-        var ops: [8]Op = @splat(nd.op);
+        var ops: [8]ggml.impl.c.enum_ggml_op = @splat(nd.op);
 
         while (n_fuse <= 6) : (n_fuse += 1) {
-            if (!ggml_graph.canFuse(cgraph, i + n_fuse, ops[@intCast(n_fuse)..][0..2])) break;
+            if (!ggml.graph.canFuse(cgraph, i + n_fuse, ops[@intCast(n_fuse)..][0..2])) break;
             if (node(cgraph, i + n_fuse) != node(cgraph, i + n_fuse + 1).src[0]) break;
-            if (!impl.areSameLayout(src(node(cgraph, i + n_fuse), 1), src(node(cgraph, i + n_fuse + 1), 1))) break;
+            if (!ggml.impl.areSameLayout(src(node(cgraph, i + n_fuse), 1), src(node(cgraph, i + n_fuse + 1), 1))) break;
         }
         _ = &ops;
 
         n_fuse += 1;
 
         if (n_fuse > 1) {
-            var fused_node: Tensor = nd.*;
+            var fused_node: ggml.impl.c.ggml_tensor = nd.*;
             var j: c_int = 0;
             while (j < n_fuse - 1) : (j += 1) {
                 fused_node.src[@intCast(j + 2)] = node(cgraph, i + j + 1).src[1];
             }
             fused_node.data = node(cgraph, i + n_fuse - 1).data;
-            if (nd.op == c.GGML_OP_ADD) {
-                binbcast.opFused(.add, cuda_ctx, &fused_node, n_fuse);
+            if (nd.op == ggml.impl.c.GGML_OP_ADD) {
+                ggml.cuda.binbcast.opFused(.add, cuda_ctx, &fused_node, n_fuse);
             } else {
-                binbcast.opFused(.mul, cuda_ctx, &fused_node, n_fuse);
+                ggml.cuda.binbcast.opFused(.mul, cuda_ctx, &fused_node, n_fuse);
             }
             return n_fuse - 1;
         }
@@ -1154,10 +1126,10 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     var fused_node_count: c_int = 0;
 
     // gate + glu + up, with optional scale/bias on both lanes.
-    for ([_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID }) |op| {
-        const bias_op: Op = if (op == c.GGML_OP_MUL_MAT) c.GGML_OP_ADD else c.GGML_OP_ADD_ID;
+    for ([_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT_ID }) |op| {
+        const bias_op: ggml.impl.c.enum_ggml_op = if (op == ggml.impl.c.GGML_OP_MUL_MAT) ggml.impl.c.GGML_OP_ADD else ggml.impl.c.GGML_OP_ADD_ID;
 
-        if (op == c.GGML_OP_MUL_MAT) {
+        if (op == ggml.impl.c.GGML_OP_MUL_MAT) {
             for ([_]bool{ false, true }) |with_bias| {
                 const gate_idx = i;
                 const gate_scale_idx = i + 1;
@@ -1168,13 +1140,13 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 const glu_idx: c_int = if (with_bias) up_idx + 3 else up_idx + 2;
 
                 const out_nodes = [_]c_int{glu_idx};
-                const ops: []const Op = if (with_bias)
-                    &.{ op, c.GGML_OP_MUL, bias_op, op, c.GGML_OP_MUL, bias_op, c.GGML_OP_GLU }
+                const ops: []const ggml.impl.c.enum_ggml_op = if (with_bias)
+                    &.{ op, ggml.impl.c.GGML_OP_MUL, bias_op, op, ggml.impl.c.GGML_OP_MUL, bias_op, ggml.impl.c.GGML_OP_GLU }
                 else
-                    &.{ op, c.GGML_OP_MUL, op, c.GGML_OP_MUL, c.GGML_OP_GLU };
+                    &.{ op, ggml.impl.c.GGML_OP_MUL, op, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_GLU };
                 const n_ops: c_int = @intCast(ops.len);
 
-                if (!canFuseSubgraph(cgraph, i, ops, &out_nodes) or
+                if (!ggml.graph.canFuseSubgraph(cgraph, i, ops, &out_nodes) or
                     !checkFusionMemoryRanges(cgraph, i, n_ops, &out_nodes, false)) continue;
 
                 const gate_n = node(cgraph, gate_idx);
@@ -1185,45 +1157,45 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 const up_out_n = if (with_bias) node(cgraph, up_bias_idx) else up_scale_n;
                 const glu = node(cgraph, glu_idx);
 
-                if (!mulmat.shouldFuseMulMat(up_n, gate_n, glu, if (with_bias) up_out_n else null, if (with_bias) gate_out_n else null, up_scale_n, gate_scale_n)) continue;
+                if (!ggml.cuda.mulmat.shouldFuseMulMat(up_n, gate_n, glu, if (with_bias) up_out_n else null, if (with_bias) gate_out_n else null, up_scale_n, gate_scale_n)) continue;
 
-                const gate_scale = mulmat.getMulMatScale(gate_scale_n, gate_n);
-                const up_scale = mulmat.getMulMatScale(up_scale_n, up_n);
+                const gate_scale = ggml.cuda.mulmat.getMulMatScale(gate_scale_n, gate_n);
+                const up_scale = ggml.cuda.mulmat.getMulMatScale(up_scale_n, up_n);
                 if (gate_scale == null or up_scale == null) continue;
 
                 const up_bias = if (with_bias) getBiasTensor(up_out_n, up_scale_n, bias_op) else null;
                 const gate_bias = if (with_bias) getBiasTensor(gate_out_n, gate_scale_n, bias_op) else null;
-                if (with_bias and (!c.ggml_are_same_shape(src(gate_out_n, 0), src(gate_out_n, 1)) or
-                    !c.ggml_are_same_shape(src(up_out_n, 0), src(up_out_n, 1)))) continue;
+                if (with_bias and (!ggml.impl.c.ggml_are_same_shape(src(gate_out_n, 0), src(gate_out_n, 1)) or
+                    !ggml.impl.c.ggml_are_same_shape(src(up_out_n, 0), src(up_out_n, 1)))) continue;
 
-                const fusion_data: common.MmFusionArgsHost = .{
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{
                     .gate = src(gate_n, 0),
                     .x_bias = up_bias,
                     .gate_bias = gate_bias,
                     .x_scale = up_scale,
                     .gate_scale = gate_scale,
-                    .glu_op = c.ggml_get_glu_op(glu),
-                    .glu_limit = impl.getOpParamsF32(glu, 3),
+                    .glu_op = ggml.impl.c.ggml_get_glu_op(glu),
+                    .glu_limit = ggml.impl.getOpParamsF32(glu, 3),
                 };
 
-                if (mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
-                    mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
+                if (ggml.cuda.mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
+                    ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
                 }
 
-                if (mulmat.shouldFuseMulMatVecQ(up_n)) {
-                    mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
+                if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(up_n)) {
+                    ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
                 }
 
-                if (!with_bias and mulmat.shouldFuseMulMatQ(up_n, gate_n, glu, up_scale_n, gate_scale_n)) {
+                if (!with_bias and ggml.cuda.mulmat.shouldFuseMulMatQ(up_n, gate_n, glu, up_scale_n, gate_scale_n)) {
                     var fusion_q = fusion_data;
-                    fusion_q.prec_src1 = c.ggml_prec_get_src(up_n, 1);
-                    mmq.mulMatQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_q);
+                    fusion_q.prec_src1 = ggml.impl.c.ggml_prec_get_src(up_n, 1);
+                    ggml.cuda.mmq.mulMatQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_q);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
@@ -1242,13 +1214,13 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 const glu_idx: c_int = if (with_bias) up_idx + 6 else up_idx + 5;
 
                 const out_nodes = [_]c_int{glu_idx};
-                const ops: []const Op = if (with_bias)
-                    &.{ op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL, bias_op, op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL, bias_op, c.GGML_OP_GLU }
+                const ops: []const ggml.impl.c.enum_ggml_op = if (with_bias)
+                    &.{ op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL, bias_op, op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL, bias_op, ggml.impl.c.GGML_OP_GLU }
                 else
-                    &.{ op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL, op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL, c.GGML_OP_GLU };
+                    &.{ op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL, op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_GLU };
                 const n_ops: c_int = @intCast(ops.len);
 
-                if (!canFuseSubgraph(cgraph, i, ops, &out_nodes) or
+                if (!ggml.graph.canFuseSubgraph(cgraph, i, ops, &out_nodes) or
                     !checkFusionMemoryRanges(cgraph, i, n_ops, &out_nodes, false)) continue;
 
                 const gate_n = node(cgraph, gate_idx);
@@ -1259,43 +1231,43 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
                 const up_out_n = if (with_bias) node(cgraph, up_bias_idx) else up_scale_n;
                 const glu = node(cgraph, glu_idx);
 
-                if (!mulmat.shouldFuseMulMat(up_n, gate_n, glu, if (with_bias) up_out_n else null, if (with_bias) gate_out_n else null, up_scale_n, gate_scale_n)) continue;
+                if (!ggml.cuda.mulmat.shouldFuseMulMat(up_n, gate_n, glu, if (with_bias) up_out_n else null, if (with_bias) gate_out_n else null, up_scale_n, gate_scale_n)) continue;
 
-                const gate_scale = mulmat.getMulMatIdScale(node(cgraph, gate_idx + 1), node(cgraph, gate_idx + 2), node(cgraph, gate_idx + 3), gate_scale_n, gate_n);
-                const up_scale = mulmat.getMulMatIdScale(node(cgraph, up_idx + 1), node(cgraph, up_idx + 2), node(cgraph, up_idx + 3), up_scale_n, up_n);
+                const gate_scale = ggml.cuda.mulmat.getMulMatIdScale(node(cgraph, gate_idx + 1), node(cgraph, gate_idx + 2), node(cgraph, gate_idx + 3), gate_scale_n, gate_n);
+                const up_scale = ggml.cuda.mulmat.getMulMatIdScale(node(cgraph, up_idx + 1), node(cgraph, up_idx + 2), node(cgraph, up_idx + 3), up_scale_n, up_n);
                 if (gate_scale == null or up_scale == null) continue;
 
                 const up_bias = if (with_bias) getBiasTensor(up_out_n, up_scale_n, bias_op) else null;
                 const gate_bias = if (with_bias) getBiasTensor(gate_out_n, gate_scale_n, bias_op) else null;
 
-                const fusion_data: common.MmFusionArgsHost = .{
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{
                     .gate = src(gate_n, 0),
                     .x_bias = up_bias,
                     .gate_bias = gate_bias,
                     .x_scale = up_scale,
                     .gate_scale = gate_scale,
-                    .glu_op = c.ggml_get_glu_op(glu),
-                    .glu_limit = impl.getOpParamsF32(glu, 3),
+                    .glu_op = ggml.impl.c.ggml_get_glu_op(glu),
+                    .glu_limit = ggml.impl.getOpParamsF32(glu, 3),
                 };
 
-                if (mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
-                    mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
+                if (ggml.cuda.mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
+                    ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
                 }
 
-                if (mulmat.shouldFuseMulMatVecQ(up_n)) {
-                    mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
+                if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(up_n)) {
+                    ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_data);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
                 }
 
-                if (!with_bias and mulmat.shouldFuseMulMatQ(up_n, gate_n, glu, up_scale_n, gate_scale_n)) {
+                if (!with_bias and ggml.cuda.mulmat.shouldFuseMulMatQ(up_n, gate_n, glu, up_scale_n, gate_scale_n)) {
                     var fusion_q = fusion_data;
-                    fusion_q.prec_src1 = c.ggml_prec_get_src(up_n, 1);
-                    mmq.mulMatQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_q);
+                    fusion_q.prec_src1 = ggml.impl.c.ggml_prec_get_src(up_n, 1);
+                    ggml.cuda.mmq.mulMatQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), node(cgraph, glu_idx), &fusion_q);
                     fused_mul_mat_vec = true;
                     fused_node_count = n_ops;
                     break;
@@ -1305,14 +1277,14 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
             if (fused_mul_mat_vec) break;
         }
 
-        if (canFuse(cgraph, i, &.{ op, bias_op, op, bias_op, c.GGML_OP_GLU }, &.{})) {
+        if (canFuse(cgraph, i, &.{ op, bias_op, op, bias_op, ggml.impl.c.GGML_OP_GLU }, &.{})) {
             const glu = node(cgraph, i + 4);
             const gate_bias_n = src(glu, 0);
             const up_bias_n = src(glu, 1);
 
             //we don't assume the order for {gate, up}. Instead infer it from the bias tensor
-            var gate_n: *Tensor = undefined;
-            var up_n: *Tensor = undefined;
+            var gate_n: *ggml.impl.c.ggml_tensor = undefined;
+            var up_n: *ggml.impl.c.ggml_tensor = undefined;
 
             if (gate_bias_n.src[0] == node(cgraph, i) or gate_bias_n.src[1] == node(cgraph, i)) {
                 gate_n = node(cgraph, i);
@@ -1330,37 +1302,37 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
             if (up_bias_tensor == null or gate_bias_tensor == null) continue;
 
             // we don't support repeating adds
-            if (bias_op == c.GGML_OP_ADD and (!c.ggml_are_same_shape(src(gate_bias_n, 0), src(gate_bias_n, 1)) or
-                !c.ggml_are_same_shape(src(up_bias_n, 0), src(up_bias_n, 1)))) continue;
+            if (bias_op == ggml.impl.c.GGML_OP_ADD and (!ggml.impl.c.ggml_are_same_shape(src(gate_bias_n, 0), src(gate_bias_n, 1)) or
+                !ggml.impl.c.ggml_are_same_shape(src(up_bias_n, 0), src(up_bias_n, 1)))) continue;
 
-            if (mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
-                const fusion_data: common.MmFusionArgsHost = .{
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecF(up_n, gate_n)) {
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{
                     .gate = src(gate_n, 0),
                     .x_bias = up_bias_tensor,
                     .gate_bias = gate_bias_tensor,
-                    .glu_op = c.ggml_get_glu_op(glu),
-                    .glu_limit = impl.getOpParamsF32(glu, 3),
+                    .glu_op = ggml.impl.c.ggml_get_glu_op(glu),
+                    .glu_limit = ggml.impl.getOpParamsF32(glu, 3),
                 };
-                mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), glu, &fusion_data);
+                ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), glu, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = 5;
                 break;
             }
 
-            if (mulmat.shouldFuseMulMatVecQ(up_n)) {
-                const fusion_data: common.MmFusionArgsHost = .{
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(up_n)) {
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{
                     .gate = src(gate_n, 0),
                     .x_bias = up_bias_tensor,
                     .gate_bias = gate_bias_tensor,
-                    .glu_op = c.ggml_get_glu_op(glu),
-                    .glu_limit = impl.getOpParamsF32(glu, 3),
+                    .glu_op = ggml.impl.c.ggml_get_glu_op(glu),
+                    .glu_limit = ggml.impl.getOpParamsF32(glu, 3),
                 };
-                mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), glu, &fusion_data);
+                ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(up_n, 0), src(up_n, 1), srcOpt(up_n, 2), glu, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = 5;
                 break;
             }
-        } else if (canFuse(cgraph, i, &.{ op, op, c.GGML_OP_GLU }, &.{})) {
+        } else if (canFuse(cgraph, i, &.{ op, op, ggml.impl.c.GGML_OP_GLU }, &.{})) {
             const glu = node(cgraph, i + 2);
             const gate = src(glu, 0);
             const up = src(glu, 1);
@@ -1370,25 +1342,25 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
 
             if (!ok) continue;
 
-            if (mulmat.shouldFuseMulMatVecF(up, gate)) {
-                const fusion_data: common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = c.ggml_get_glu_op(glu), .glu_limit = impl.getOpParamsF32(glu, 3) };
-                mmvf.mulMatVecF(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecF(up, gate)) {
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = ggml.impl.c.ggml_get_glu_op(glu), .glu_limit = ggml.impl.getOpParamsF32(glu, 3) };
+                ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = 3;
                 break;
             }
 
-            if (mulmat.shouldFuseMulMatVecQ(up)) {
-                const fusion_data: common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = c.ggml_get_glu_op(glu), .glu_limit = impl.getOpParamsF32(glu, 3) };
-                mmvq.mulMatVecQ(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(up)) {
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = ggml.impl.c.ggml_get_glu_op(glu), .glu_limit = ggml.impl.getOpParamsF32(glu, 3) };
+                ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = 3;
                 break;
             }
 
-            if (mulmat.shouldFuseMulMatQ(up, gate, glu, null, null)) {
-                const fusion_data: common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = c.ggml_get_glu_op(glu), .glu_limit = impl.getOpParamsF32(glu, 3), .prec_src1 = c.ggml_prec_get_src(up, 1) };
-                mmq.mulMatQ(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
+            if (ggml.cuda.mulmat.shouldFuseMulMatQ(up, gate, glu, null, null)) {
+                const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{ .gate = src(gate, 0), .glu_op = ggml.impl.c.ggml_get_glu_op(glu), .glu_limit = ggml.impl.getOpParamsF32(glu, 3), .prec_src1 = ggml.impl.c.ggml_prec_get_src(up, 1) };
+                ggml.cuda.mmq.mulMatQ(cuda_ctx, src(up, 0), src(up, 1), srcOpt(up, 2), glu, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = 3;
                 break;
@@ -1402,75 +1374,75 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     fused_node_count = 0;
 
     // mul_mat + scale + optional bias
-    outer: for ([_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID }) |op| {
-        const bias_op: Op = if (op == c.GGML_OP_MUL_MAT) c.GGML_OP_ADD else c.GGML_OP_ADD_ID;
+    outer: for ([_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT_ID }) |op| {
+        const bias_op: ggml.impl.c.enum_ggml_op = if (op == ggml.impl.c.GGML_OP_MUL_MAT) ggml.impl.c.GGML_OP_ADD else ggml.impl.c.GGML_OP_ADD_ID;
 
         for ([_]bool{ false, true }) |with_bias| {
-            const ops: []const Op = if (op == c.GGML_OP_MUL_MAT)
-                (if (with_bias) &.{ op, c.GGML_OP_MUL, bias_op } else &.{ op, c.GGML_OP_MUL })
+            const ops: []const ggml.impl.c.enum_ggml_op = if (op == ggml.impl.c.GGML_OP_MUL_MAT)
+                (if (with_bias) &.{ op, ggml.impl.c.GGML_OP_MUL, bias_op } else &.{ op, ggml.impl.c.GGML_OP_MUL })
             else if (with_bias)
-                &.{ op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL, bias_op }
+                &.{ op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL, bias_op }
             else
-                &.{ op, c.GGML_OP_RESHAPE, c.GGML_OP_REPEAT, c.GGML_OP_GET_ROWS, c.GGML_OP_MUL };
+                &.{ op, ggml.impl.c.GGML_OP_RESHAPE, ggml.impl.c.GGML_OP_REPEAT, ggml.impl.c.GGML_OP_GET_ROWS, ggml.impl.c.GGML_OP_MUL };
             const n_ops: c_int = @intCast(ops.len);
             const out_nodes = [_]c_int{i + n_ops - 1};
 
-            if (!canFuseSubgraph(cgraph, i, ops, &out_nodes) or
+            if (!ggml.graph.canFuseSubgraph(cgraph, i, ops, &out_nodes) or
                 !checkFusionMemoryRanges(cgraph, i, n_ops, &out_nodes, false)) continue;
 
             const mm_node = node(cgraph, i);
-            const scale_node = if (op == c.GGML_OP_MUL_MAT) node(cgraph, i + 1) else node(cgraph, i + 4);
+            const scale_node = if (op == ggml.impl.c.GGML_OP_MUL_MAT) node(cgraph, i + 1) else node(cgraph, i + 4);
             const out_node = if (with_bias) node(cgraph, i + n_ops - 1) else scale_node;
 
-            const scale = if (op == c.GGML_OP_MUL_MAT)
-                mulmat.getMulMatScale(scale_node, mm_node)
+            const scale = if (op == ggml.impl.c.GGML_OP_MUL_MAT)
+                ggml.cuda.mulmat.getMulMatScale(scale_node, mm_node)
             else
-                mulmat.getMulMatIdScale(node(cgraph, i + 1), node(cgraph, i + 2), node(cgraph, i + 3), scale_node, mm_node);
+                ggml.cuda.mulmat.getMulMatIdScale(node(cgraph, i + 1), node(cgraph, i + 2), node(cgraph, i + 3), scale_node, mm_node);
             if (scale == null) continue;
 
             const bias = if (with_bias) getBiasTensor(out_node, scale_node, bias_op) else null;
             if (with_bias and bias == null) continue;
-            if (with_bias and bias_op == c.GGML_OP_ADD and !c.ggml_are_same_shape(src(out_node, 0), src(out_node, 1))) continue;
-            if (with_bias and bias_op == c.GGML_OP_ADD_ID and out_node.src[2] != mm_node.src[2]) continue;
+            if (with_bias and bias_op == ggml.impl.c.GGML_OP_ADD and !ggml.impl.c.ggml_are_same_shape(src(out_node, 0), src(out_node, 1))) continue;
+            if (with_bias and bias_op == ggml.impl.c.GGML_OP_ADD_ID and out_node.src[2] != mm_node.src[2]) continue;
 
             const src0 = src(mm_node, 0);
             const src1 = src(mm_node, 1);
             const ids = srcOpt(mm_node, 2);
 
-            var fusion_data: common.MmFusionArgsHost = .{ .x_bias = bias, .x_scale = scale };
+            var fusion_data: ggml.cuda.common.MmFusionArgsHost = .{ .x_bias = bias, .x_scale = scale };
 
-            if (mulmat.shouldFuseMulMatVecF(mm_node, null)) {
-                mmvf.mulMatVecF(cuda_ctx, src0, src1, ids, out_node, &fusion_data);
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecF(mm_node, null)) {
+                ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src0, src1, ids, out_node, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = n_ops;
                 break :outer;
             }
 
-            if (op == c.GGML_OP_MUL_MAT and !with_bias and src0.type == c.GGML_TYPE_F8_E4M3 and
-                impl.getOpParamsI32(mm_node, 3) != c.GGML_PREC_F32 and
-                fp8.mulMatFp8(cuda_ctx, src0, src1, scale_node, scale))
+            if (op == ggml.impl.c.GGML_OP_MUL_MAT and !with_bias and src0.type == ggml.impl.c.GGML_TYPE_F8_E4M3 and
+                ggml.impl.getOpParamsI32(mm_node, 3) != ggml.impl.c.GGML_PREC_F32 and
+                ggml.cuda.fp8.mulMatFp8(cuda_ctx, src0, src1, scale_node, scale))
             {
                 return 1;
             }
 
-            if (!with_bias and src0.type == c.GGML_TYPE_NVFP4 and src1.type == c.GGML_TYPE_F32 and mm_node.type == c.GGML_TYPE_F32) {
-                const x = common.info().devices[@intCast(cuda_ctx.device)].cc;
-                const is_id = op == c.GGML_OP_MUL_MAT_ID;
+            if (!with_bias and src0.type == ggml.impl.c.GGML_TYPE_NVFP4 and src1.type == ggml.impl.c.GGML_TYPE_F32 and mm_node.type == ggml.impl.c.GGML_TYPE_F32) {
+                const x = ggml.cuda.common.info().devices[@intCast(cuda_ctx.device)].cc;
+                const is_id = op == ggml.impl.c.GGML_OP_MUL_MAT_ID;
                 const ncols: i64 = if (is_id) src1.ne[2] else src1.ne[1];
-                const use_mmvq = if (is_id) ncols <= mmvq.getMmidMaxBatch(src0.type, x) else mmvq.shouldUseMmvq(src0.type, x, ncols);
-                const bad_padding_clear = c.ggml_backend_buffer_get_usage(src0.buffer) == c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
-                    c.ggml_nbytes(src0) != c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
+                const use_mmvq = if (is_id) ncols <= ggml.cuda.mmvq.getMmidMaxBatch(src0.type, x) else ggml.cuda.mmvq.shouldUseMmvq(src0.type, x, ncols);
+                const bad_padding_clear = ggml.impl.c.ggml_backend_buffer_get_usage(src0.buffer) == ggml.impl.c.GGML_BACKEND_BUFFER_USAGE_COMPUTE and
+                    ggml.impl.c.ggml_nbytes(src0) != ggml.impl.c.ggml_backend_buffer_get_alloc_size(src0.buffer, src0) and src0.view_src != null;
                 if (!use_mmvq and !bad_padding_clear and
-                    mmq.shouldUseMmq(src0.type, x, ncols, if (is_id) src0.ne[2] else 0))
+                    ggml.cuda.mmq.shouldUseMmq(src0.type, x, ncols, if (is_id) src0.ne[2] else 0))
                 {
-                    fusion_data.prec_src1 = c.ggml_prec_get_src(mm_node, 1);
-                    mmq.mulMatQ(cuda_ctx, src0, src1, ids, out_node, &fusion_data);
+                    fusion_data.prec_src1 = ggml.impl.c.ggml_prec_get_src(mm_node, 1);
+                    ggml.cuda.mmq.mulMatQ(cuda_ctx, src0, src1, ids, out_node, &fusion_data);
                     return n_ops - 1;
                 }
             }
 
-            if (mulmat.shouldFuseMulMatVecQ(mm_node)) {
-                mmvq.mulMatVecQ(cuda_ctx, src(mm_node, 0), src(mm_node, 1), srcOpt(mm_node, 2), out_node, &fusion_data);
+            if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(mm_node)) {
+                ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(mm_node, 0), src(mm_node, 1), srcOpt(mm_node, 2), out_node, &fusion_data);
                 fused_mul_mat_vec = true;
                 fused_node_count = n_ops;
                 break :outer;
@@ -1481,16 +1453,16 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
     if (fused_mul_mat_vec) return fused_node_count - 1;
 
     // mul_mat + add
-    for ([_]Op{ c.GGML_OP_MUL_MAT, c.GGML_OP_MUL_MAT_ID }) |op| {
-        const bias_op: Op = if (op == c.GGML_OP_MUL_MAT) c.GGML_OP_ADD else c.GGML_OP_ADD_ID;
+    for ([_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_MUL_MAT, ggml.impl.c.GGML_OP_MUL_MAT_ID }) |op| {
+        const bias_op: ggml.impl.c.enum_ggml_op = if (op == ggml.impl.c.GGML_OP_MUL_MAT) ggml.impl.c.GGML_OP_ADD else ggml.impl.c.GGML_OP_ADD_ID;
 
-        if (!ggml_graph.canFuse(cgraph, i, &.{ op, bias_op })) continue;
+        if (!ggml.graph.canFuse(cgraph, i, &.{ op, bias_op })) continue;
 
         const mm_node = node(cgraph, i);
         const bias_node = node(cgraph, i + 1);
 
-        var bias_tensor: *const Tensor = undefined;
-        if (bias_op == c.GGML_OP_ADD) {
+        var bias_tensor: *const ggml.impl.c.ggml_tensor = undefined;
+        if (bias_op == ggml.impl.c.GGML_OP_ADD) {
             if (bias_node.src[0] == mm_node) {
                 bias_tensor = src(bias_node, 1);
             } else if (bias_node.src[1] == mm_node) {
@@ -1505,20 +1477,20 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
 
         const ids = srcOpt(mm_node, 2);
 
-        if (bias_op == c.GGML_OP_ADD_ID and bias_node.src[2] != mm_node.src[2]) continue;
-        if (bias_op == c.GGML_OP_ADD and !c.ggml_are_same_shape(src(bias_node, 0), src(bias_node, 1))) continue;
+        if (bias_op == ggml.impl.c.GGML_OP_ADD_ID and bias_node.src[2] != mm_node.src[2]) continue;
+        if (bias_op == ggml.impl.c.GGML_OP_ADD and !ggml.impl.c.ggml_are_same_shape(src(bias_node, 0), src(bias_node, 1))) continue;
 
-        const fusion_data: common.MmFusionArgsHost = .{ .x_bias = bias_tensor };
+        const fusion_data: ggml.cuda.common.MmFusionArgsHost = .{ .x_bias = bias_tensor };
 
-        if (mulmat.shouldFuseMulMatVecF(mm_node, null)) {
-            mmvf.mulMatVecF(cuda_ctx, src(mm_node, 0), src(mm_node, 1), ids, bias_node, &fusion_data);
+        if (ggml.cuda.mulmat.shouldFuseMulMatVecF(mm_node, null)) {
+            ggml.cuda.mmvf.mulMatVecF(cuda_ctx, src(mm_node, 0), src(mm_node, 1), ids, bias_node, &fusion_data);
             fused_mul_mat_vec = true;
             fused_node_count = 2;
             break;
         }
 
-        if (mulmat.shouldFuseMulMatVecQ(mm_node)) {
-            mmvq.mulMatVecQ(cuda_ctx, src(mm_node, 0), src(mm_node, 1), ids, bias_node, &fusion_data);
+        if (ggml.cuda.mulmat.shouldFuseMulMatVecQ(mm_node)) {
+            ggml.cuda.mmvq.mulMatVecQ(cuda_ctx, src(mm_node, 0), src(mm_node, 1), ids, bias_node, &fusion_data);
             fused_mul_mat_vec = true;
             fused_node_count = 2;
             break;
@@ -1527,61 +1499,61 @@ pub fn tryFuse(cuda_ctx: *common.Context, cgraph: *CGraph, i: c_int) c_int {
 
     if (fused_mul_mat_vec) return fused_node_count - 1;
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE, c.GGML_OP_VIEW, c.GGML_OP_SET_ROWS }, &.{})) {
-        rope.opRmsNormMulRopeFused(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2), node(cgraph, i + 4));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ROPE, ggml.impl.c.GGML_OP_VIEW, ggml.impl.c.GGML_OP_SET_ROWS }, &.{})) {
+        ggml.cuda.rope.opRmsNormMulRopeFused(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2), node(cgraph, i + 4));
         return 4;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ROPE }, &.{})) {
-        rope.opRmsNormMulRopeFused(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2), null);
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ROPE }, &.{})) {
+        ggml.cuda.rope.opRmsNormMulRopeFused(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2), null);
         return 2;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL, c.GGML_OP_ADD }, &.{})) {
-        norm.opRmsNormFusedAdd(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL, ggml.impl.c.GGML_OP_ADD }, &.{})) {
+        ggml.cuda.norm.opRmsNormFusedAdd(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2));
         return 2;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL }, &.{})) {
-        norm.opRmsNormFused(cuda_ctx, nd, node(cgraph, i + 1));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL }, &.{})) {
+        ggml.cuda.norm.opRmsNormFused(cuda_ctx, nd, node(cgraph, i + 1));
         return 1;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_RMS_NORM, c.GGML_OP_SCALE }, &.{})) {
-        norm.opRmsNormScaleFused(cuda_ctx, nd, node(cgraph, i + 1));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_SCALE }, &.{})) {
+        ggml.cuda.norm.opRmsNormScaleFused(cuda_ctx, nd, node(cgraph, i + 1));
         return 1;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_SSM_CONV, c.GGML_OP_ADD, c.GGML_OP_UNARY }, &.{c.GGML_UNARY_OP_SILU})) {
-        ssm_conv.opSsmConv(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_SSM_CONV, ggml.impl.c.GGML_OP_ADD, ggml.impl.c.GGML_OP_UNARY }, &.{ggml.impl.c.GGML_UNARY_OP_SILU})) {
+        ggml.cuda.ssm_conv.opSsmConv(cuda_ctx, nd, node(cgraph, i + 1), node(cgraph, i + 2));
         return 2;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_SSM_CONV, c.GGML_OP_UNARY }, &.{c.GGML_UNARY_OP_SILU})) {
-        ssm_conv.opSsmConv(cuda_ctx, nd, null, node(cgraph, i + 1));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_SSM_CONV, ggml.impl.c.GGML_OP_UNARY }, &.{ggml.impl.c.GGML_UNARY_OP_SILU})) {
+        ggml.cuda.ssm_conv.opSsmConv(cuda_ctx, nd, null, node(cgraph, i + 1));
         return 1;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL }, &.{c.GGML_UNARY_OP_SILU}) or
-        canFuse(cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL }, &.{c.GGML_UNARY_OP_SIGMOID}) or
-        canFuse(cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_MUL }, &.{c.GGML_UNARY_OP_SOFTPLUS}))
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_MUL }, &.{ggml.impl.c.GGML_UNARY_OP_SILU}) or
+        canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_MUL }, &.{ggml.impl.c.GGML_UNARY_OP_SIGMOID}) or
+        canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_MUL }, &.{ggml.impl.c.GGML_UNARY_OP_SOFTPLUS}))
     {
-        unary.opUnaryMul(cuda_ctx, nd, node(cgraph, i + 1));
+        ggml.cuda.unary.opUnaryMul(cuda_ctx, nd, node(cgraph, i + 1));
         return 1;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_UNARY, c.GGML_OP_SQR }, &.{c.GGML_UNARY_OP_RELU})) {
-        unary.opReluSqr(cuda_ctx, nd, node(cgraph, i + 1));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SQR }, &.{ggml.impl.c.GGML_UNARY_OP_RELU})) {
+        ggml.cuda.unary.opReluSqr(cuda_ctx, nd, node(cgraph, i + 1));
         return 1;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE, c.GGML_OP_DSV4_HC_POST }, &.{c.GGML_UNARY_OP_SIGMOID})) {
-        dsv4_hc.opDsv4HcPost(cuda_ctx, node(cgraph, i + 3), nd, node(cgraph, i + 2));
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_DSV4_HC_POST }, &.{ggml.impl.c.GGML_UNARY_OP_SIGMOID})) {
+        ggml.cuda.dsv4_hc.opDsv4HcPost(cuda_ctx, node(cgraph, i + 3), nd, node(cgraph, i + 2));
         return 3;
     }
 
-    if (canFuse(cgraph, i, &.{ c.GGML_OP_SCALE, c.GGML_OP_UNARY, c.GGML_OP_SCALE }, &.{c.GGML_UNARY_OP_TANH})) {
-        softcap.opSoftcap(cuda_ctx, node(cgraph, i + 2), nd);
+    if (canFuse(cgraph, i, &.{ ggml.impl.c.GGML_OP_SCALE, ggml.impl.c.GGML_OP_UNARY, ggml.impl.c.GGML_OP_SCALE }, &.{ggml.impl.c.GGML_UNARY_OP_TANH})) {
+        ggml.cuda.softcap.opSoftcap(cuda_ctx, node(cgraph, i + 2), nd);
         return 2;
     }
 

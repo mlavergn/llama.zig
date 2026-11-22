@@ -25,8 +25,6 @@ const std = @import("std");
 const stdlib = @import("stdlib");
 const tools = @import("tools_common");
 
-const log = tools.log;
-
 const fd_t = std.posix.fd_t;
 
 /// A pipe end as std reads it.
@@ -198,7 +196,7 @@ pub const Waiter = struct {
         // the C library's poll on Darwin, the system call on Linux
         const e = std.posix.errno(std.posix.system.poll(pfds.items.ptr, @intCast(pfds.items.len), @intCast(timeout)));
         if (e != .SUCCESS and e != .INTR) {
-            log.err("%s: poll() failed: %s\n", .{ "wait", stdlib.errno.strerror(@backingInt(e)) });
+            tools.log.err("%s: poll() failed: %s\n", .{ "wait", stdlib.errno.strerror(@backingInt(e)) });
         }
         if (pfds.items[0].revents != 0) {
             var buf: [64]u8 = undefined;

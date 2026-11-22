@@ -10,8 +10,8 @@
 //! offset a `seekg` or `fseek` would set.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const errno = @import("errno.zig");
 
 /// The `Io` for shared code no `main` hands one to: `tools_common` is also
 /// compiled into `llama-server-core`, whose callers pass none. The global
@@ -276,8 +276,8 @@ test "a file error reads as the C library's text for its errno" {
     const io = std.testing.io;
     const missing = openIn(io, "/nonexistent/file.gguf");
     try std.testing.expectError(error.FileNotFound, missing);
-    try std.testing.expectEqualStrings(std.mem.span(errno.strerror(@backingInt(std.c.E.NOENT))), std.mem.span(errno.text(error.FileNotFound)));
-    try std.testing.expectEqualStrings("Unexpected", std.mem.span(errno.text(error.Unexpected)));
+    try std.testing.expectEqualStrings(std.mem.span(mod.errno.strerror(@backingInt(std.c.E.NOENT))), std.mem.span(mod.errno.text(error.FileNotFound)));
+    try std.testing.expectEqualStrings("Unexpected", std.mem.span(mod.errno.text(error.Unexpected)));
 }
 
 test "readFirstLine stops at the first newline and drops it" {

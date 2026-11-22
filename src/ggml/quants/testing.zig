@@ -9,11 +9,9 @@
 //! below mirror `pattern_t` in that file one for one.
 
 const std = @import("std");
-const golden = @import("golden.zig");
+const mod = @import("module.zig");
 
-pub const n_per_row = golden.n_per_row;
-pub const n_rows = golden.n_rows;
-pub const n_elem = n_per_row * n_rows;
+pub const n_elem = mod.golden.n_per_row * mod.golden.n_rows;
 
 /// The generator's LCG, matching `next_float` in `harness/quants_golden.c`.
 ///
@@ -53,7 +51,7 @@ pub fn fillSrc(pattern: Pattern, src: []f32) void {
             @memset(src, 0.001);
             // One per row, off the block boundary so it is not always the
             // first element of a block.
-            for (0..n_rows) |r| src[r * n_per_row + 7] = 100.0;
+            for (0..mod.golden.n_rows) |r| src[r * mod.golden.n_per_row + 7] = 100.0;
         },
         .alternating => {
             for (src, 0..) |*v, i| v.* = if (i & 1 != 0) -1.25 else 1.25;
@@ -76,8 +74,8 @@ pub fn fillImatrix(imatrix: []f32) void {
 }
 
 /// Looks up one type's golden record for one pattern.
-pub fn find(name: []const u8, pattern: Pattern) golden.Golden {
-    for (golden.all) |g| {
+pub fn find(name: []const u8, pattern: Pattern) mod.golden.Golden {
+    for (mod.golden.all) |g| {
         if (std.mem.eql(u8, g.name, name) and std.mem.eql(u8, g.pattern, pattern.name())) return g;
     }
     @panic("no golden record for that type and pattern");

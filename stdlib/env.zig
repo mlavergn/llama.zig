@@ -15,8 +15,8 @@
 //! until it does.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const sync = @import("sync/module.zig");
 
 /// The environment, each value allocated with a terminating NUL after its
 /// slice so `get` can hand out a C string. An `Environ.Map`, so a Windows
@@ -27,7 +27,7 @@ var copy_block: std.process.Environ = .{ .block = .empty };
 /// Set once `copy` is final; read without the lock.
 var ready: std.atomic.Value(bool) = .init(false);
 /// Guards the fallback copy of `environ`; `set` runs before any thread.
-var fallback_mutex: sync.Mutex = .{};
+var fallback_mutex: mod.sync.Mutex = .{};
 var arena_state: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
 
 /// Takes the environment `main` was given.

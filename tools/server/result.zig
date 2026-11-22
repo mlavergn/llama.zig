@@ -29,32 +29,20 @@
 //! random strings; `server-task-diff` masks both.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const common = @import("common.zig");
-const task = @import("task.zig");
 
-const c = tools.c;
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Error = common.Error;
-const Obj = common.Obj;
-const Token = common.Token;
-const TaskParams = task.TaskParams;
-const TaskResultState = task.TaskResultState;
-const CompletionTokenOutput = task.CompletionTokenOutput;
-const ResponseType = task.ResponseType;
-const StopType = task.StopType;
 
 /// Ports `llama_build_info` (build-info.cpp.in:27 @b1b770d90): `b<number>-<commit>`.
 pub const build_info = std.fmt.comptimePrint("b{d}-{s}", .{ tools.build_info.build_number, tools.build_info.commit });
 
 /// `{"event": name, "data": data}`, the shape every streamed event has.
-fn event(a: Allocator, name: []const u8, data: Value) Error!Value {
-    var o = Obj.init(a);
+fn event(a: Allocator, name: []const u8, data: json.Value) mod.common.Error!json.Value {
+    var o = mod.common.Obj.init(a);
     errdefer o.deinit();
     try o.put("event", name);
     try o.put("data", data);
@@ -65,8 +53,8 @@ fn event(a: Allocator, name: []const u8, data: Value) Error!Value {
 /// one OpenAI chat delta.
 ///
 /// Return: owned by `a`.
-pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error!Value {
-    var delta = Obj.init(a);
+pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) mod.common.Error!json.Value {
+    var delta = mod.common.Obj.init(a);
     errdefer delta.deinit();
     if (diff.reasoning_content_delta.len != 0) {
         try delta.put("reasoning_content", diff.reasoning_content_delta);
@@ -75,7 +63,7 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error
         try delta.put("content", diff.content_delta);
     }
     if (diff.tool_call_index != chat.msg.npos) {
-        var tool_call = Obj.init(a);
+        var tool_call = mod.common.Obj.init(a);
         errdefer tool_call.deinit();
         try tool_call.put("index", diff.tool_call_index);
         if (diff.tool_call_delta.id.len != 0) {
@@ -83,7 +71,7 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error
             try tool_call.put("type", "function");
         }
         if (diff.tool_call_delta.name.len != 0 or diff.tool_call_delta.arguments.len != 0) {
-            var function = Obj.init(a);
+            var function = mod.common.Obj.init(a);
             errdefer function.deinit();
             if (diff.tool_call_delta.name.len != 0) {
                 try function.put("name", diff.tool_call_delta.name);
@@ -93,7 +81,7 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error
             }
             try tool_call.put("function", function.done());
         }
-        var arr = Value.emptyArray();
+        var arr = json.Value.emptyArray();
         errdefer arr.deinit(a);
         try arr.pushBack(a, tool_call.done());
         try delta.put("tool_calls", arr);
@@ -108,11 +96,11 @@ pub fn chatMsgDiffToJsonOaicompat(a: Allocator, diff: *const chat.MsgDiff) Error
 /// `content` is in the result's arena.
 pub const CmplFinal = struct {
     content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
-    tokens: []const Token = &.{},
+    tokens: []const mod.common.Token = &.{},
 
     stream: bool = false,
     include_usage: bool = false,
-    stats: common.SlotStats = .{},
+    stats: mod.common.SlotStats = .{},
     prompt: []const u8 = "",
 
     truncated: bool = false,
@@ -122,17 +110,17 @@ pub const CmplFinal = struct {
     n_tokens_cached: i32 = 0,
     has_new_line: bool = false,
     stopping_word: []const u8 = "",
-    stop: StopType = .none,
+    stop: mod.task.StopType = .none,
 
     post_sampling_probs: bool = false,
-    probs_output: []const CompletionTokenOutput = &.{},
+    probs_output: []const mod.task.CompletionTokenOutput = &.{},
     response_fields: []const []const u8 = &.{},
 
-    generation_params: TaskParams = .{},
+    generation_params: mod.task.TaskParams = .{},
 
     // response formatting
     verbose: bool = false,
-    res_type: ResponseType = .none,
+    res_type: mod.task.ResponseType = .none,
     oaicompat_model: []const u8 = "",
     oaicompat_cmpl_id: []const u8 = "",
     oaicompat_msg: chat.Msg = .{}, // to be populated by update()
@@ -150,7 +138,7 @@ pub const CmplFinal = struct {
 /// `content` is in the result's arena.
 pub const CmplPartial = struct {
     content: chat.input.Input = .{ .gpa = std.heap.c_allocator },
-    tokens: []const Token = &.{},
+    tokens: []const mod.common.Token = &.{},
 
     n_decoded: i32 = 0,
     n_prompt_tokens: i32 = 0,
@@ -161,13 +149,13 @@ pub const CmplPartial = struct {
     is_begin: bool = false, // whether to send 200 status to HTTP client (begin of SSE stream)
     // ref: https://github.com/ggml-org/llama.cpp/pull/23884
     audio_commit_drained: bool = false, // realtime: non-final commit has fully decoded
-    prob_output: CompletionTokenOutput = .{},
-    stats: common.SlotStats = .{},
-    progress: task.ResultPromptProgress = .{},
+    prob_output: mod.task.CompletionTokenOutput = .{},
+    stats: mod.common.SlotStats = .{},
+    progress: mod.task.ResultPromptProgress = .{},
 
     // response formatting
     verbose: bool = false,
-    res_type: ResponseType = .none,
+    res_type: mod.task.ResponseType = .none,
     oaicompat_model: []const u8 = "",
     oaicompat_cmpl_id: []const u8 = "",
     oaicompat_msg_diffs: std.ArrayList(chat.MsgDiff) = .empty, // to be populated by update()
@@ -195,7 +183,7 @@ pub const Embd = struct {
     n_tokens: i32 = 0,
 
     // response formatting
-    res_type: ResponseType = .none,
+    res_type: mod.task.ResponseType = .none,
 };
 
 /// Ports `server_task_result_realtime` (server-task.h:559 @b1b770d90): one
@@ -234,7 +222,7 @@ pub const Decision = struct {
 
 /// Ports `server_task_result_error` (server-task.h:599 @b1b770d90).
 pub const ErrorResult = struct {
-    err_type: common.ErrorType = .server,
+    err_type: mod.common.ErrorType = .server,
     err_msg: []const u8 = "",
 
     // for ERROR_TYPE_EXCEED_CONTEXT_SIZE
@@ -249,7 +237,7 @@ pub const MetricsResult = struct {
     n_processing_slots: c_int = 0,
     n_tasks_deferred: c_int = 0,
 
-    metrics: common.Metrics = .{},
+    metrics: mod.common.Metrics = .{},
 };
 
 /// Ports `server_task_result_metrics`'s `metric_item` (server-task.h:624 @b1b770d90).
@@ -265,7 +253,7 @@ pub const Slots = struct {
 
     // while we can also use std::vector<server_slot> this requires copying the slot object which can be quite messy
     // therefore, we use json to temporarily store the slot.to_json() result
-    slots_data: Value = .{ .array = .empty },
+    slots_data: json.Value = .{ .array = .empty },
 };
 
 /// Ports `server_task_result_slot_save_load` (server-task.h:643 @b1b770d90).
@@ -293,9 +281,9 @@ pub const Control = struct {
 pub const GetLora = struct {
     /// Ports `server_task_result_get_lora`'s `lora` (server-task.h:674 @b1b770d90).
     pub const Lora = struct {
-        info: common.LoraInfo,
+        info: mod.common.LoraInfo,
         alora_invocation_string: []const u8 = "",
-        alora_invocation_tokens: []const Token = &.{},
+        alora_invocation_tokens: []const mod.common.Token = &.{},
     };
     loras: []const Lora = &.{},
 };
@@ -303,7 +291,7 @@ pub const GetLora = struct {
 /// Ports `server_task_result_router` (server-task.h:761 @b1b770d90): used
 /// exclusively by router mode.
 pub const Router = struct {
-    data: Value = .null,
+    data: json.Value = .null,
 };
 
 // -----------------------------------------------------------------------------
@@ -342,7 +330,7 @@ pub const Result = struct {
 
     /// `new server_task_result_X()`: a result of the given kind, its members
     /// at their defaults; set them through `kind` and allocate with `alloc`.
-    pub fn create(gpa: Allocator, comptime tag: std.meta.Tag(Kind)) Error!*Result {
+    pub fn create(gpa: Allocator, comptime tag: std.meta.Tag(Kind)) mod.common.Error!*Result {
         const r = try gpa.create(Result);
         const T = @FieldType(Kind, @tagName(tag));
         const v: T = if (T == void) {} else .{};
@@ -381,7 +369,7 @@ pub const Result = struct {
     /// Ports `update` (server-task.h:374 @b1b770d90), a virtual member of
     /// `server_task_result`: a completion result parses the text it carries
     /// into the task's chat state.
-    pub fn update(self: *Result, state: *TaskResultState) Error!void {
+    pub fn update(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
         switch (self.kind) {
             .cmpl_final => try self.updateFinal(state),
             .cmpl_partial => try self.updatePartial(state),
@@ -391,7 +379,7 @@ pub const Result = struct {
 
     /// Ports `clone` (server-task.h:379 @b1b770d90), a virtual member of
     /// `server_task_result`: only router results copy.
-    pub fn clone(self: *Result, gpa: Allocator) Error!*Result {
+    pub fn clone(self: *Result, gpa: Allocator) mod.common.Error!*Result {
         switch (self.kind) {
             .router => |r| {
                 const out = try create(gpa, .router);
@@ -403,7 +391,7 @@ pub const Result = struct {
                 return out;
             },
             else => {
-                _ = c.ggml_abort("server-task.h", 380, "not implemented for this task type");
+                _ = tools.c.ggml_abort("server-task.h", 380, "not implemented for this task type");
                 unreachable;
             },
         }
@@ -413,7 +401,7 @@ pub const Result = struct {
     /// `server_task_result`, through each subclass's.
     ///
     /// Return: owned by `a`.
-    pub fn toJson(self: *Result, a: Allocator) Error!Value {
+    pub fn toJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         return switch (self.kind) {
             .cmpl_final => self.finalToJson(a),
             .cmpl_partial => self.partialToJson(a),
@@ -438,7 +426,7 @@ pub const Result = struct {
     // server_task_result_cmpl_final
 
     /// Ports `server_task_result_cmpl_final`'s `update` (server-task.h:453 @b1b770d90).
-    fn updateFinal(self: *Result, state: *TaskResultState) Error!void {
+    fn updateFinal(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
         const ar = self.alloc();
         const f = &self.kind.cmpl_final;
         f.is_updated = true;
@@ -451,7 +439,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json` (server-task.cpp:312 @b1b770d90).
-    fn finalToJson(self: *Result, a: Allocator) Error!Value {
+    fn finalToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         tools.ggml.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
         return switch (f.res_type) {
@@ -469,9 +457,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_non_oaicompat` (server-task.cpp:332 @b1b770d90).
-    fn finalNonOaicompat(self: *Result, a: Allocator) Error!Value {
+    fn finalNonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("index", self.index);
         try res.put("content", f.content.text.items);
@@ -485,28 +473,28 @@ pub const Result = struct {
         try res.put("prompt", f.prompt);
         try res.put("has_new_line", f.has_new_line);
         try res.put("truncated", f.truncated);
-        try res.put("stop_type", task.stopTypeToStr(f.stop));
+        try res.put("stop_type", mod.task.stopTypeToStr(f.stop));
         try res.put("stopping_word", f.stopping_word);
         try res.put("tokens_cached", f.n_tokens_cached);
         try res.put("timings", try f.stats.toJson(a));
         if (!f.stream and f.probs_output.len != 0) {
-            try res.put("completion_probabilities", try CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
+            try res.put("completion_probabilities", try mod.task.CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
         }
         if (f.response_fields.len == 0) return res.done();
         var full = res.done();
         defer full.deinit(a);
-        return common.jsonGetNestedValues(a, f.response_fields, &full);
+        return mod.common.jsonGetNestedValues(a, f.response_fields, &full);
     }
 
     /// Ports `server_task_result_cmpl_final`'s `usage_json_oaicompat` (server-task.cpp:357 @b1b770d90).
-    fn finalUsageJsonOaicompat(self: *Result, a: Allocator) Error!Value {
+    fn finalUsageJsonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("completion_tokens", f.n_decoded);
         try o.put("prompt_tokens", f.n_prompt_tokens);
         try o.put("total_tokens", f.n_decoded +% f.n_prompt_tokens);
-        var details = Obj.init(a);
+        var details = mod.common.Obj.init(a);
         errdefer details.deinit();
         try details.put("cached_tokens", f.n_prompt_tokens_cache);
         try o.put("prompt_tokens_details", details.done());
@@ -514,33 +502,33 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat` (server-task.cpp:366 @b1b770d90).
-    fn finalOaicompat(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const t = stdlib.clock.timeSeconds();
-        var logprobs: Value = .null; // OAI default to null
+        var logprobs: json.Value = .null; // OAI default to null
         errdefer logprobs.deinit(a);
         if (!f.stream and f.probs_output.len > 0) {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
-            try o.put("content", try CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
+            try o.put("content", try mod.task.CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
             logprobs = o.done();
         }
         var finish_reason: []const u8 = "length";
         if (f.stop == .word or f.stop == .eos) {
             finish_reason = "stop";
         }
-        var choice = Obj.init(a);
+        var choice = mod.common.Obj.init(a);
         errdefer choice.deinit();
         try choice.put("text", f.content.text.items);
         try choice.put("index", self.index);
         try choice.put("logprobs", logprobs);
         logprobs = .null;
         try choice.put("finish_reason", finish_reason);
-        var choices = Value.emptyArray();
+        var choices = json.Value.emptyArray();
         errdefer choices.deinit(a);
         try choices.pushBack(a, choice.done());
 
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("choices", choices);
         choices = .null;
@@ -572,7 +560,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat` (server-task.cpp:406 @b1b770d90).
-    fn finalOaicompatChat(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompatChat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var finish_reason: []const u8 = "length";
         const msg = finalMsg(f);
@@ -580,25 +568,25 @@ pub const Result = struct {
             finish_reason = if (msg.tool_calls.items.len == 0) "stop" else "tool_calls";
         }
 
-        var choice = Obj.init(a);
+        var choice = mod.common.Obj.init(a);
         errdefer choice.deinit();
         try choice.put("finish_reason", finish_reason);
         try choice.put("index", self.index);
         try choice.put("message", try msg.toJsonOaicompat(a, false));
 
         if (!f.stream and f.probs_output.len > 0) {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
-            try o.put("content", try CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
+            try o.put("content", try mod.task.CompletionTokenOutput.probsVectorToJson(a, f.probs_output, f.post_sampling_probs));
             try choice.put("logprobs", o.done());
         }
 
         const t = stdlib.clock.timeSeconds();
 
-        var choices = Value.emptyArray();
+        var choices = json.Value.emptyArray();
         errdefer choices.deinit(a);
         try choices.pushBack(a, choice.done());
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("choices", choices);
         choices = .null;
@@ -621,22 +609,22 @@ pub const Result = struct {
     }
 
     /// One `chat.completion.chunk`, as both stream formatters build it.
-    fn chunk(self: *Result, a: Allocator, t: i64, finish_reason: Value, delta: Value, cmpl_id: []const u8, model: []const u8) Error!Value {
+    fn chunk(self: *Result, a: Allocator, t: i64, finish_reason: json.Value, delta: json.Value, cmpl_id: []const u8, model: []const u8) mod.common.Error!json.Value {
         var fr = finish_reason;
         var d = delta;
         errdefer fr.deinit(a);
         errdefer d.deinit(a);
-        var choice = Obj.init(a);
+        var choice = mod.common.Obj.init(a);
         errdefer choice.deinit();
         try choice.put("finish_reason", fr);
         fr = .null;
         try choice.put("index", self.index);
         try choice.put("delta", d);
         d = .null;
-        var choices = Value.emptyArray();
+        var choices = json.Value.emptyArray();
         errdefer choices.deinit(a);
         try choices.pushBack(a, choice.done());
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("choices", choices);
         choices = .null;
@@ -649,7 +637,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat_stream` (server-task.cpp:454 @b1b770d90).
-    fn finalOaicompatChatStream(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompatChatStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const t = stdlib.clock.timeSeconds();
         var finish_reason: []const u8 = "length";
@@ -657,20 +645,20 @@ pub const Result = struct {
             finish_reason = if (f.oaicompat_msg.tool_calls.items.len == 0) "stop" else "tool_calls";
         }
 
-        var deltas = Value.emptyArray();
+        var deltas = json.Value.emptyArray();
         errdefer deltas.deinit(a);
         for (f.oaicompat_msg_diffs.items) |*diff| {
             try deltas.pushBack(a, try self.chunk(a, t, .null, try chatMsgDiffToJsonOaicompat(a, diff), f.oaicompat_cmpl_id, f.oaicompat_model));
         }
 
-        try deltas.pushBack(a, try self.chunk(a, t, try Value.initString(a, finish_reason), Value.emptyObject(), f.oaicompat_cmpl_id, f.oaicompat_model));
+        try deltas.pushBack(a, try self.chunk(a, t, try json.Value.initString(a, finish_reason), json.Value.emptyObject(), f.oaicompat_cmpl_id, f.oaicompat_model));
 
         if (f.include_usage) {
             // OpenAI API spec for chat.completion.chunks specifies an empty `choices` array for the last chunk when including usage
             // https://platform.openai.com/docs/api-reference/chat_streaming/streaming#chat_streaming/streaming-choices
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
-            try o.put("choices", Value.emptyArray());
+            try o.put("choices", json.Value.emptyArray());
             try o.put("created", t);
             try o.put("id", f.oaicompat_cmpl_id);
             try o.put("model", f.oaicompat_model);
@@ -693,30 +681,30 @@ pub const Result = struct {
     }
 
     /// `{"type": "output_text", "annotations": [], "logprobs": [], "text": text}`.
-    fn outputText(a: Allocator, text: []const u8) Error!Value {
-        var o = Obj.init(a);
+    fn outputText(a: Allocator, text: []const u8) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("type", "output_text");
-        try o.put("annotations", Value.emptyArray());
-        try o.put("logprobs", Value.emptyArray());
+        try o.put("annotations", json.Value.emptyArray());
+        try o.put("logprobs", json.Value.emptyArray());
         try o.put("text", text);
         return o.done();
     }
 
     /// `{"text": text, "type": "reasoning_text"}` in an array.
-    fn reasoningContent(a: Allocator, text: []const u8) Error!Value {
-        var o = Obj.init(a);
+    fn reasoningContent(a: Allocator, text: []const u8) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("text", text);
         try o.put("type", "reasoning_text");
-        var arr = Value.emptyArray();
+        var arr = json.Value.emptyArray();
         errdefer arr.deinit(a);
         try arr.pushBack(a, o.done());
         return arr;
     }
 
-    fn functionCallItem(a: Allocator, tool_call: chat.ToolCall) Error!Value {
-        var o = Obj.init(a);
+    fn functionCallItem(a: Allocator, tool_call: chat.ToolCall) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         const fc_id = try std.mem.concat(a, u8, &.{ "fc_", tool_call.id });
         defer a.free(fc_id);
@@ -731,13 +719,13 @@ pub const Result = struct {
         return o.done();
     }
 
-    fn respUsage(f: *const CmplFinal, a: Allocator) Error!Value {
-        var u = Obj.init(a);
+    fn respUsage(f: *const CmplFinal, a: Allocator) mod.common.Error!json.Value {
+        var u = mod.common.Obj.init(a);
         errdefer u.deinit();
         try u.put("input_tokens", f.n_prompt_tokens);
         try u.put("output_tokens", f.n_decoded);
         try u.put("total_tokens", f.n_decoded +% f.n_prompt_tokens);
-        var details = Obj.init(a);
+        var details = mod.common.Obj.init(a);
         errdefer details.deinit();
         try details.put("cached_tokens", f.n_prompt_tokens_cache);
         try u.put("input_tokens_details", details.done());
@@ -745,22 +733,22 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp` (server-task.cpp:520 @b1b770d90).
-    fn finalOaicompatResp(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompatResp(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         const msg = finalMsg(f);
 
-        var output = Value.emptyArray();
+        var output = json.Value.emptyArray();
         errdefer output.deinit(a);
 
         if (msg.reasoning_content.len != 0) {
-            const rid = try common.randomString(a);
+            const rid = try mod.common.randomString(a);
             defer a.free(rid);
             const id = try std.mem.concat(a, u8, &.{ "rs_", rid });
             defer a.free(id);
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("id", id);
-            try o.put("summary", Value.emptyArray());
+            try o.put("summary", json.Value.emptyArray());
             try o.put("type", "reasoning");
             try o.put("content", try reasoningContent(a, msg.reasoning_content));
             try o.put("encrypted_content", "");
@@ -769,14 +757,14 @@ pub const Result = struct {
         }
 
         if (msg.content.len != 0) {
-            var content = Value.emptyArray();
+            var content = json.Value.emptyArray();
             errdefer content.deinit(a);
             try content.pushBack(a, try outputText(a, msg.content));
-            const rid = try common.randomString(a);
+            const rid = try mod.common.randomString(a);
             defer a.free(rid);
             const id = try std.mem.concat(a, u8, &.{ "msg_", rid });
             defer a.free(id);
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("content", content);
             content = .null;
@@ -792,7 +780,7 @@ pub const Result = struct {
         }
 
         const t = stdlib.clock.timeSeconds();
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("completed_at", t);
         try res.put("created_at", t);
@@ -807,8 +795,8 @@ pub const Result = struct {
         return res.done();
     }
 
-    fn outputItemDone(a: Allocator, item: *const Value, output_index: usize) Error!Value {
-        var d = Obj.init(a);
+    fn outputItemDone(a: Allocator, item: *const json.Value, output_index: usize) mod.common.Error!json.Value {
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "response.output_item.done");
         try d.put("output_index", output_index);
@@ -817,21 +805,21 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_resp_stream` (server-task.cpp:591 @b1b770d90).
-    fn finalOaicompatRespStream(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompatRespStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        var server_sent_events = Value.emptyArray();
+        var server_sent_events = json.Value.emptyArray();
         errdefer server_sent_events.deinit(a);
-        var output = Value.emptyArray();
+        var output = json.Value.emptyArray();
         errdefer output.deinit(a);
         var output_index: usize = 0;
 
         if (f.oaicompat_msg.reasoning_content.len != 0) {
             const item_output_index = output_index;
             output_index += 1;
-            var item = Obj.init(a);
+            var item = mod.common.Obj.init(a);
             errdefer item.deinit();
             try item.put("id", f.oai_resp_reasoning_id);
-            try item.put("summary", Value.emptyArray());
+            try item.put("summary", json.Value.emptyArray());
             try item.put("type", "reasoning");
             try item.put("content", try reasoningContent(a, f.oaicompat_msg.reasoning_content));
             try item.put("encrypted_content", "");
@@ -846,7 +834,7 @@ pub const Result = struct {
             const item_output_index = output_index;
             output_index += 1;
             {
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.output_text.done");
                 try d.put("item_id", f.oai_resp_message_id);
@@ -860,7 +848,7 @@ pub const Result = struct {
             defer content_part.deinit(a);
 
             {
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.content_part.done");
                 try d.put("item_id", f.oai_resp_message_id);
@@ -869,10 +857,10 @@ pub const Result = struct {
                 try d.put("part", try content_part.clone(a));
                 try server_sent_events.pushBack(a, try event(a, "response.content_part.done", d.done()));
             }
-            var parts = Value.emptyArray();
+            var parts = json.Value.emptyArray();
             errdefer parts.deinit(a);
             try parts.pushBack(a, try content_part.clone(a));
-            var item = Obj.init(a);
+            var item = mod.common.Obj.init(a);
             errdefer item.deinit();
             try item.put("type", "message");
             try item.put("status", "completed");
@@ -897,7 +885,7 @@ pub const Result = struct {
         }
 
         const t = stdlib.clock.timeSeconds();
-        var response = Obj.init(a);
+        var response = mod.common.Obj.init(a);
         errdefer response.deinit();
         try response.put("id", f.oai_resp_id);
         try response.put("object", "response");
@@ -907,7 +895,7 @@ pub const Result = struct {
         try response.put("output", output);
         output = .null;
         try response.put("usage", try respUsage(f, a));
-        var d = Obj.init(a);
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "response.completed");
         try d.put("response", response.done());
@@ -921,19 +909,19 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_asr` (server-task.cpp:719 @b1b770d90).
-    fn finalOaicompatAsr(self: *Result, a: Allocator) Error!Value {
+    fn finalOaicompatAsr(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        var usage = Obj.init(a);
+        var usage = mod.common.Obj.init(a);
         errdefer usage.deinit();
         try usage.put("type", "tokens");
         try usage.put("input_tokens", f.n_prompt_tokens);
         try usage.put("output_tokens", f.n_decoded);
         try usage.put("total_tokens", f.n_decoded +% f.n_prompt_tokens);
-        var details = Obj.init(a);
+        var details = mod.common.Obj.init(a);
         errdefer details.deinit();
         try details.put("cached_tokens", f.n_prompt_tokens_cache);
         try usage.put("input_tokens_details", details.done());
-        var ev = Obj.init(a);
+        var ev = mod.common.Obj.init(a);
         errdefer ev.deinit();
         try ev.put("type", "transcript.text.done");
         try ev.put("text", f.oaicompat_msg.content);
@@ -941,26 +929,26 @@ pub const Result = struct {
         return ev.done();
     }
 
-    fn stopSequence(a: Allocator, stopping_word: []const u8) Error!Value {
-        return if (stopping_word.len == 0) .null else Value.initString(a, stopping_word);
+    fn stopSequence(a: Allocator, stopping_word: []const u8) mod.common.Error!json.Value {
+        return if (stopping_word.len == 0) .null else json.Value.initString(a, stopping_word);
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic` (server-task.cpp:734 @b1b770d90).
-    fn finalAnthropic(self: *Result, a: Allocator) Error!Value {
+    fn finalAnthropic(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
         var stop_reason: []const u8 = "max_tokens";
         if (f.stop == .word or f.stop == .eos) {
             stop_reason = if (f.oaicompat_msg.tool_calls.items.len == 0) "end_turn" else "tool_use";
         }
 
-        var content_blocks = Value.emptyArray();
+        var content_blocks = json.Value.emptyArray();
         errdefer content_blocks.deinit(a);
 
         const msg = finalMsg(f);
 
         // thinking block comes first (Anthropic extended thinking format)
         if (msg.reasoning_content.len != 0) {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("type", "thinking");
             try o.put("thinking", msg.reasoning_content);
@@ -969,7 +957,7 @@ pub const Result = struct {
         }
 
         if (msg.content.len != 0) {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("type", "text");
             try o.put("text", msg.content);
@@ -977,14 +965,14 @@ pub const Result = struct {
         }
 
         for (msg.tool_calls.items) |tool_call| {
-            var tool_use_block = Obj.init(a);
+            var tool_use_block = mod.common.Obj.init(a);
             errdefer tool_use_block.deinit();
             try tool_use_block.put("type", "tool_use");
             try tool_use_block.put("id", tool_call.id);
             try tool_use_block.put("name", tool_call.name);
 
             const input = json.parse(a, tool_call.arguments) catch |e| switch (e) {
-                error.JsonError => Value.emptyObject(),
+                error.JsonError => json.Value.emptyObject(),
                 error.OutOfMemory => return error.OutOfMemory,
             };
             try tool_use_block.put("input", input);
@@ -992,13 +980,13 @@ pub const Result = struct {
             try content_blocks.pushBack(a, tool_use_block.done());
         }
 
-        var usage = Obj.init(a);
+        var usage = mod.common.Obj.init(a);
         errdefer usage.deinit();
         try usage.put("cache_read_input_tokens", f.n_prompt_tokens_cache);
         try usage.put("input_tokens", f.n_prompt_tokens -% f.n_prompt_tokens_cache);
         try usage.put("output_tokens", f.n_decoded);
 
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("id", f.oaicompat_cmpl_id);
         try res.put("type", "message");
@@ -1014,8 +1002,8 @@ pub const Result = struct {
     }
 
     /// `content_block_start`.
-    fn blockStart(a: Allocator, index: usize, block: Value) Error!Value {
-        var d = Obj.init(a);
+    fn blockStart(a: Allocator, index: usize, block: json.Value) mod.common.Error!json.Value {
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_start");
         try d.put("index", index);
@@ -1024,8 +1012,8 @@ pub const Result = struct {
     }
 
     /// `content_block_delta`.
-    fn blockDelta(a: Allocator, index: usize, delta: Value) Error!Value {
-        var d = Obj.init(a);
+    fn blockDelta(a: Allocator, index: usize, delta: json.Value) mod.common.Error!json.Value {
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_delta");
         try d.put("index", index);
@@ -1034,24 +1022,24 @@ pub const Result = struct {
     }
 
     /// `content_block_stop`.
-    fn blockStop(a: Allocator, index: usize) Error!Value {
-        var d = Obj.init(a);
+    fn blockStop(a: Allocator, index: usize) mod.common.Error!json.Value {
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", "content_block_stop");
         try d.put("index", index);
         return event(a, "content_block_stop", d.done());
     }
 
-    fn pair(a: Allocator, k1: []const u8, v1: []const u8, k2: []const u8, v2: []const u8) Error!Value {
-        var o = Obj.init(a);
+    fn pair(a: Allocator, k1: []const u8, v1: []const u8, k2: []const u8, v2: []const u8) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put(k1, v1);
         try o.put(k2, v2);
         return o.done();
     }
 
-    fn toolUseBlock(a: Allocator, id: []const u8, name: []const u8) Error!Value {
-        var o = Obj.init(a);
+    fn toolUseBlock(a: Allocator, id: []const u8, name: []const u8) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("type", "tool_use");
         try o.put("id", id);
@@ -1060,9 +1048,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_final`'s `to_json_anthropic_stream` (server-task.cpp:800 @b1b770d90).
-    fn finalAnthropicStream(self: *Result, a: Allocator) Error!Value {
+    fn finalAnthropicStream(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const f = &self.kind.cmpl_final;
-        var events = Value.emptyArray();
+        var events = json.Value.emptyArray();
         errdefer events.deinit(a);
 
         var stop_reason: []const u8 = "max_tokens";
@@ -1139,14 +1127,14 @@ pub const Result = struct {
         }
 
         {
-            var delta = Obj.init(a);
+            var delta = mod.common.Obj.init(a);
             errdefer delta.deinit();
             try delta.put("stop_reason", stop_reason);
             try delta.put("stop_sequence", try stopSequence(a, f.stopping_word));
-            var usage = Obj.init(a);
+            var usage = mod.common.Obj.init(a);
             errdefer usage.deinit();
             try usage.put("output_tokens", f.n_decoded);
-            var d = Obj.init(a);
+            var d = mod.common.Obj.init(a);
             errdefer d.deinit();
             try d.put("type", "message_delta");
             try d.put("delta", delta.done());
@@ -1155,7 +1143,7 @@ pub const Result = struct {
         }
 
         {
-            var d = Obj.init(a);
+            var d = mod.common.Obj.init(a);
             errdefer d.deinit();
             try d.put("type", "message_stop");
             try events.pushBack(a, try event(a, "message_stop", d.done()));
@@ -1170,7 +1158,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_partial`'s `update` (server-task.cpp:991 @b1b770d90): the
     /// state as it was before this chunk is copied in, then advanced for
     /// the next one.
-    fn updatePartial(self: *Result, state: *TaskResultState) Error!void {
+    fn updatePartial(self: *Result, state: *mod.task.TaskResultState) mod.common.Error!void {
         const ar = self.alloc();
         const p = &self.kind.cmpl_partial;
         p.is_updated = true;
@@ -1211,7 +1199,7 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json` (server-task.cpp:1029 @b1b770d90).
-    fn partialToJson(self: *Result, a: Allocator) Error!Value {
+    fn partialToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         tools.ggml.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
         if (p.is_begin) {
@@ -1232,10 +1220,10 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_non_oaicompat` (server-task.cpp:1052 @b1b770d90).
-    fn partialNonOaicompat(self: *Result, a: Allocator) Error!Value {
+    fn partialNonOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         // non-OAI-compat JSON
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("index", self.index);
         try res.put("content", p.content.text.items);
@@ -1252,34 +1240,34 @@ pub const Result = struct {
             try res.put("prompt_progress", try p.progress.toJson(a));
         }
         if (p.prob_output.probs.len != 0) {
-            try res.put("completion_probabilities", try CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
+            try res.put("completion_probabilities", try mod.task.CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
         }
         return res.done();
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat` (server-task.cpp:1076 @b1b770d90).
-    fn partialOaicompat(self: *Result, a: Allocator) Error!Value {
+    fn partialOaicompat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         const t = stdlib.clock.timeSeconds();
-        var logprobs: Value = .null; // OAI default to null
+        var logprobs: json.Value = .null; // OAI default to null
         errdefer logprobs.deinit(a);
         if (p.prob_output.probs.len > 0) {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
-            try o.put("content", try CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
+            try o.put("content", try mod.task.CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
             logprobs = o.done();
         }
-        var choice = Obj.init(a);
+        var choice = mod.common.Obj.init(a);
         errdefer choice.deinit();
         try choice.put("text", p.content.text.items);
         try choice.put("index", self.index);
         try choice.put("logprobs", logprobs);
         logprobs = .null;
-        try choice.put("finish_reason", @as(Value, .null));
-        var choices = Value.emptyArray();
+        try choice.put("finish_reason", @as(json.Value, .null));
+        var choices = json.Value.emptyArray();
         errdefer choices.deinit(a);
         try choices.pushBack(a, choice.done());
-        var res = Obj.init(a);
+        var res = mod.common.Obj.init(a);
         errdefer res.deinit();
         try res.put("choices", choices);
         choices = .null;
@@ -1304,19 +1292,19 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_chat` (server-task.cpp:1114 @b1b770d90).
-    fn partialOaicompatChat(self: *Result, a: Allocator) Error!Value {
+    fn partialOaicompatChat(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         const first = p.n_decoded == 1;
         const t = stdlib.clock.timeSeconds();
 
-        var deltas = Value.emptyArray();
+        var deltas = json.Value.emptyArray();
         errdefer deltas.deinit(a);
         // We have to send an initial update to conform to openai behavior
         if (first or p.is_progress) {
-            var d = Obj.init(a);
+            var d = mod.common.Obj.init(a);
             errdefer d.deinit();
             try d.put("role", "assistant");
-            try d.put("content", @as(Value, .null));
+            try d.put("content", @as(json.Value, .null));
             try deltas.pushBack(a, try self.chunk(a, t, .null, d.done(), p.oaicompat_cmpl_id, p.oaicompat_model));
         }
 
@@ -1329,9 +1317,9 @@ pub const Result = struct {
             tools.ggml.ggmlAssert((try last_json.at("choices")).size() >= 1, "server-task.cpp", 1150, "last_json.at(\"choices\").size() >= 1");
 
             if (p.prob_output.probs.len > 0) {
-                var o = Obj.init(a);
+                var o = mod.common.Obj.init(a);
                 errdefer o.deinit();
-                try o.put("content", try CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
+                try o.put("content", try mod.task.CompletionTokenOutput.probsVectorToJson(a, (&p.prob_output)[0..1], p.post_sampling_probs));
                 try (try (try last_json.at("choices")).atIndex(0)).set(a, "logprobs", o.done());
             }
 
@@ -1346,13 +1334,13 @@ pub const Result = struct {
         return deltas;
     }
 
-    fn inProgress(a: Allocator, name: []const u8, id: []const u8) Error!Value {
-        var r = Obj.init(a);
+    fn inProgress(a: Allocator, name: []const u8, id: []const u8) mod.common.Error!json.Value {
+        var r = mod.common.Obj.init(a);
         errdefer r.deinit();
         try r.put("id", id);
         try r.put("object", "response");
         try r.put("status", "in_progress");
-        var d = Obj.init(a);
+        var d = mod.common.Obj.init(a);
         errdefer d.deinit();
         try d.put("type", name);
         try d.put("response", r.done());
@@ -1366,9 +1354,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_resp` (server-task.cpp:1169 @b1b770d90).
-    fn partialOaicompatResp(self: *Result, a: Allocator) Error!Value {
+    fn partialOaicompatResp(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
-        var events = Value.emptyArray();
+        var events = json.Value.emptyArray();
         errdefer events.deinit(a);
 
         if (!p.oai_resp_created) {
@@ -1381,15 +1369,15 @@ pub const Result = struct {
         for (p.oaicompat_msg_diffs.items) |diff| {
             if (diff.reasoning_content_delta.len != 0) {
                 if (!p.thinking_block_started) {
-                    var item = Obj.init(a);
+                    var item = mod.common.Obj.init(a);
                     errdefer item.deinit();
                     try item.put("id", p.oai_resp_reasoning_id);
-                    try item.put("summary", Value.emptyArray());
+                    try item.put("summary", json.Value.emptyArray());
                     try item.put("type", "reasoning");
-                    try item.put("content", Value.emptyArray());
+                    try item.put("content", json.Value.emptyArray());
                     try item.put("encrypted_content", "");
                     try item.put("status", "in_progress");
-                    var d = Obj.init(a);
+                    var d = mod.common.Obj.init(a);
                     errdefer d.deinit();
                     try d.put("type", "response.output_item.added");
                     try d.put("output_index", 0);
@@ -1397,7 +1385,7 @@ pub const Result = struct {
                     try events.pushBack(a, try event(a, "response.output_item.added", d.done()));
                     p.thinking_block_started = true;
                 }
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.reasoning_text.delta");
                 try d.put("output_index", 0);
@@ -1411,14 +1399,14 @@ pub const Result = struct {
                 const text_output_index: c_int = if (p.anthropic_has_reasoning) 1 else 0;
                 if (!p.text_block_started) {
                     {
-                        var item = Obj.init(a);
+                        var item = mod.common.Obj.init(a);
                         errdefer item.deinit();
-                        try item.put("content", Value.emptyArray());
+                        try item.put("content", json.Value.emptyArray());
                         try item.put("id", p.oai_resp_message_id);
                         try item.put("role", "assistant");
                         try item.put("status", "in_progress");
                         try item.put("type", "message");
-                        var d = Obj.init(a);
+                        var d = mod.common.Obj.init(a);
                         errdefer d.deinit();
                         try d.put("type", "response.output_item.added");
                         try d.put("output_index", text_output_index);
@@ -1426,7 +1414,7 @@ pub const Result = struct {
                         try events.pushBack(a, try event(a, "response.output_item.added", d.done()));
                     }
                     {
-                        var d = Obj.init(a);
+                        var d = mod.common.Obj.init(a);
                         errdefer d.deinit();
                         try d.put("type", "response.content_part.added");
                         try d.put("item_id", p.oai_resp_message_id);
@@ -1437,7 +1425,7 @@ pub const Result = struct {
                     }
                     p.text_block_started = true;
                 }
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.output_text.delta");
                 try d.put("item_id", p.oai_resp_message_id);
@@ -1452,7 +1440,7 @@ pub const Result = struct {
                 defer a.free(fc_id);
                 const call_id = try std.mem.concat(a, u8, &.{ "call_", diff.tool_call_delta.id });
                 defer a.free(call_id);
-                var item = Obj.init(a);
+                var item = mod.common.Obj.init(a);
                 errdefer item.deinit();
                 try item.put("id", fc_id);
                 try item.put("arguments", "");
@@ -1460,7 +1448,7 @@ pub const Result = struct {
                 try item.put("name", diff.tool_call_delta.name);
                 try item.put("type", "function_call");
                 try item.put("status", "in_progress");
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.output_item.added");
                 try d.put("output_index", toolOutputIndex(p, &diff));
@@ -1472,7 +1460,7 @@ pub const Result = struct {
             if (diff.tool_call_delta.arguments.len != 0) {
                 const item_id = try std.mem.concat(a, u8, &.{ "fc_", p.oai_resp_fc_id });
                 defer a.free(item_id);
-                var d = Obj.init(a);
+                var d = mod.common.Obj.init(a);
                 errdefer d.deinit();
                 try d.put("type", "response.function_call_arguments.delta");
                 try d.put("delta", diff.tool_call_delta.arguments);
@@ -1496,37 +1484,37 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat_asr` (server-task.cpp:1329 @b1b770d90).
-    fn partialOaicompatAsr(self: *Result, a: Allocator) Error!Value {
+    fn partialOaicompatAsr(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
         return pair(a, "type", "transcript.text.delta", "delta", p.content.text.items);
     }
 
     /// Ports `server_task_result_cmpl_partial`'s `to_json_anthropic` (server-task.cpp:1337 @b1b770d90).
-    fn partialAnthropic(self: *Result, a: Allocator) Error!Value {
+    fn partialAnthropic(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const p = &self.kind.cmpl_partial;
-        var events = Value.emptyArray();
+        var events = json.Value.emptyArray();
         errdefer events.deinit(a);
         const first = (p.n_decoded == 1);
         // use member variables to track block state across streaming calls
         // (anthropic_thinking_block_started, anthropic_text_block_started)
 
         if (first) {
-            var usage = Obj.init(a);
+            var usage = mod.common.Obj.init(a);
             errdefer usage.deinit();
             try usage.put("cache_read_input_tokens", p.n_prompt_tokens_cache);
             try usage.put("input_tokens", p.n_prompt_tokens -% p.n_prompt_tokens_cache);
             try usage.put("output_tokens", @as(c_int, 0));
-            var message = Obj.init(a);
+            var message = mod.common.Obj.init(a);
             errdefer message.deinit();
             try message.put("id", p.oaicompat_cmpl_id);
             try message.put("type", "message");
             try message.put("role", "assistant");
-            try message.put("content", Value.emptyArray());
+            try message.put("content", json.Value.emptyArray());
             try message.put("model", p.oaicompat_model);
-            try message.put("stop_reason", @as(Value, .null));
-            try message.put("stop_sequence", @as(Value, .null));
+            try message.put("stop_reason", @as(json.Value, .null));
+            try message.put("stop_sequence", @as(json.Value, .null));
             try message.put("usage", usage.done());
-            var d = Obj.init(a);
+            var d = mod.common.Obj.init(a);
             errdefer d.deinit();
             try d.put("type", "message_start");
             try d.put("message", message.done());
@@ -1587,9 +1575,9 @@ pub const Result = struct {
 
     /// Ports `server_task_result_embd`'s `to_json` (server-task.cpp:1479 @b1b770d90)
     /// and its two formatters.
-    fn embdToJson(self: *Result, a: Allocator) Error!Value {
+    fn embdToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const e = &self.kind.embd;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         if (e.res_type == .oai_embd) {
             // `to_json_oaicompat` (server-task.cpp:1492 @b1b770d90)
@@ -1605,9 +1593,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_rerank`'s `to_json` (server-task.cpp:1503 @b1b770d90).
-    fn rerankToJson(self: *Result, a: Allocator) Error!Value {
+    fn rerankToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const r = &self.kind.rerank;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("index", self.index);
         try o.put("score", r.score);
@@ -1616,9 +1604,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_realtime`'s `to_json` (server-task.cpp:1514 @b1b770d90).
-    fn realtimeToJson(self: *Result, a: Allocator) Error!Value {
+    fn realtimeToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const r = &self.kind.realtime;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("text", r.content.text.items);
         try o.put("n_samples", r.audio.len);
@@ -1629,9 +1617,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_tts`'s `to_json` (server-task.cpp:1524 @b1b770d90).
-    fn ttsToJson(self: *Result, a: Allocator) Error!Value {
+    fn ttsToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const r = &self.kind.tts;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("sample_rate", r.sample_rate);
         try o.put("n_bytes", r.audio.len);
@@ -1640,9 +1628,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_decision`'s `to_json` (server-task.cpp:1535 @b1b770d90).
-    fn decisionToJson(self: *Result, a: Allocator) Error!Value {
+    fn decisionToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const r = &self.kind.decision;
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("index", self.index);
         try o.put("scores", r.scores);
@@ -1651,13 +1639,13 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_error`'s `to_json` (server-task.cpp:1546 @b1b770d90).
-    fn errorToJson(self: *Result, a: Allocator) Error!Value {
+    fn errorToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const e = &self.kind.err;
-        var res = try common.formatErrorResponse(a, e.err_msg, e.err_type);
+        var res = try mod.common.formatErrorResponse(a, e.err_msg, e.err_type);
         errdefer res.deinit(a);
         if (e.err_type == .exceed_context_size) {
-            try res.set(a, "n_prompt_tokens", try Value.from(a, e.n_prompt_tokens));
-            try res.set(a, "n_ctx", try Value.from(a, e.n_ctx));
+            try res.set(a, "n_prompt_tokens", try json.Value.from(a, e.n_prompt_tokens));
+            try res.set(a, "n_ctx", try json.Value.from(a, e.n_ctx));
         }
         return res;
     }
@@ -1666,7 +1654,7 @@ pub const Result = struct {
     /// Prometheus text for `/metrics`.
     ///
     /// Return: owned by `a`.
-    pub fn toMetrics(self: *Result, a: Allocator) Error![]u8 {
+    pub fn toMetrics(self: *Result, a: Allocator) mod.common.Error![]u8 {
         const m = &self.kind.metrics;
         const metrics = &m.metrics;
         const counters = [_]MetricItem{
@@ -1709,7 +1697,7 @@ pub const Result = struct {
         return prometheus.toOwnedSlice(a);
     }
 
-    fn addItems(a: Allocator, prometheus: *std.ArrayList(u8), ty: []const u8, items: []const MetricItem) Error!void {
+    fn addItems(a: Allocator, prometheus: *std.ArrayList(u8), ty: []const u8, items: []const MetricItem) mod.common.Error!void {
         for (items) |item| {
             var buf: [64]u8 = undefined;
             const v = ostreamDouble(&buf, item.value);
@@ -1720,12 +1708,12 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_slot_save_load`'s `to_json` (server-task.cpp:1667 @b1b770d90).
-    fn slotSaveLoadToJson(self: *Result, a: Allocator) Error!Value {
+    fn slotSaveLoadToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const s = &self.kind.slot_save_load;
-        var timings = Obj.init(a);
+        var timings = mod.common.Obj.init(a);
         errdefer timings.deinit();
         try timings.put(if (s.is_save) "save_ms" else "restore_ms", s.t_ms);
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("id_slot", self.id_slot);
         try o.put("filename", s.filename);
@@ -1736,8 +1724,8 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_slot_erase`'s `to_json` (server-task.cpp:1694 @b1b770d90).
-    fn slotEraseToJson(self: *Result, a: Allocator) Error!Value {
-        var o = Obj.init(a);
+    fn slotEraseToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("id_slot", self.id_slot);
         try o.put("n_erased", self.kind.slot_erase.n_erased);
@@ -1745,9 +1733,9 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_control`'s `to_json` (server-task.h:664 @b1b770d90).
-    fn controlToJson(self: *Result, a: Allocator) Error!Value {
+    fn controlToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
         const ctl = &self.kind.control;
-        var out = Obj.init(a);
+        var out = mod.common.Obj.init(a);
         errdefer out.deinit();
         try out.put("success", ctl.success);
         if (ctl.message.len != 0) {
@@ -1757,11 +1745,11 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_get_lora`'s `to_json` (server-task.cpp:1705 @b1b770d90).
-    fn getLoraToJson(self: *Result, a: Allocator) Error!Value {
-        var result = Value.emptyArray();
+    fn getLoraToJson(self: *Result, a: Allocator) mod.common.Error!json.Value {
+        var result = json.Value.emptyArray();
         errdefer result.deinit(a);
         for (self.kind.get_lora.loras, 0..) |lora, i| {
-            var entry = Obj.init(a);
+            var entry = mod.common.Obj.init(a);
             errdefer entry.deinit();
             try entry.put("id", i);
             try entry.put("path", lora.info.path);
@@ -1778,8 +1766,8 @@ pub const Result = struct {
     }
 
     /// Ports `server_task_result_apply_lora`'s `to_json` (server-task.cpp:1729 @b1b770d90).
-    fn applyLoraToJson(a: Allocator) Error!Value {
-        var o = Obj.init(a);
+    fn applyLoraToJson(a: Allocator) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("success", true);
         return o.done();
@@ -1788,7 +1776,7 @@ pub const Result = struct {
 
 /// `std::ostream << double` at the default precision: `%g` with 6 digits.
 fn ostreamDouble(buf: *[64]u8, v: f64) []const u8 {
-    const n = libc.snprintf(buf, buf.len, "%g", v);
+    const n = stdlib.libc.snprintf(buf, buf.len, "%g", v);
     return buf[0..@intCast(n)];
 }
 

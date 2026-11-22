@@ -15,11 +15,8 @@
 //! position here.
 
 const std = @import("std");
-const errors = @import("errors.zig");
-const dtoa = @import("dtoa.zig");
+const mod = @import("module.zig");
 const Value = @import("value.zig").Value;
-
-const Error = errors.Error;
 
 /// `error_handler_t`: what `dump` does with a string that is not UTF-8.
 pub const ErrorHandler = enum {
@@ -102,7 +99,7 @@ fn appendU16(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u16) !void {
 ///
 /// Return: `error.JsonError` (`type_error.316`) for invalid UTF-8 under
 /// `.strict`; `error.OutOfMemory`.
-pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8, ensure_ascii: bool, handler: ErrorHandler) Error!void {
+pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8, ensure_ascii: bool, handler: ErrorHandler) mod.errors.Error!void {
     var codepoint: u32 = 0;
     var state: u8 = utf8_accept;
 
@@ -147,7 +144,7 @@ pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8,
             },
             utf8_reject => { // decode found invalid UTF-8 byte
                 switch (handler) {
-                    .strict => return errors.fail(.type_error, 316, "invalid UTF-8 byte at index {d}: 0x{s}", .{ i, &hexByte(byte) }),
+                    .strict => return mod.errors.fail(.type_error, 316, "invalid UTF-8 byte at index {d}: 0x{s}", .{ i, &hexByte(byte) }),
                     .ignore, .replace => {
                         // in case we saw this character the first time, we
                         // would like to read it again, because the byte may
@@ -186,7 +183,7 @@ pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8,
     if (state != utf8_accept) {
         // we finish reading, but do not accept: string was incomplete
         switch (handler) {
-            .strict => return errors.fail(.type_error, 316, "incomplete UTF-8 string; last byte: 0x{s}", .{&hexByte(s[s.len - 1])}),
+            .strict => return mod.errors.fail(.type_error, 316, "incomplete UTF-8 string; last byte: 0x{s}", .{&hexByte(s[s.len - 1])}),
             .ignore => out.shrinkRetainingCapacity(bytes_after_last_accept),
             .replace => {
                 out.shrinkRetainingCapacity(bytes_after_last_accept);
@@ -200,8 +197,8 @@ pub fn dumpEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8,
 /// infinities, `to_chars` otherwise.
 fn dumpFloat(out: *std.ArrayList(u8), a: std.mem.Allocator, x: f64) !void {
     if (!std.math.isFinite(x)) return out.appendSlice(a, "null");
-    var buf: [dtoa.max_len]u8 = undefined;
-    try out.appendSlice(a, dtoa.toChars(&buf, x));
+    var buf: [mod.dtoa.max_len]u8 = undefined;
+    try out.appendSlice(a, mod.dtoa.toChars(&buf, x));
 }
 
 /// `indent_string`: the serializer's 512 copies of `indent_char`, which
@@ -221,7 +218,7 @@ fn indentBy(out: *std.ArrayList(u8), a: std.mem.Allocator, c: u8, n: usize) !voi
 /// deeper is written by `dumpIteratively` without the call stack, in the
 /// same bytes. Integers are `dump_integer` (json.hpp:19686 @b1b770d90),
 /// which is plain decimal.
-fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) Error!void {
+fn dumpValue(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, depth: usize) mod.errors.Error!void {
     switch (val.*) {
         .object => |m| {
             if (depth >= dump_depth_limit) return dumpIteratively(out, a, val, pretty_print, opts, indent_step, current_indent);
@@ -312,7 +309,7 @@ const DumpFrame = struct {
 /// everything below it, in the bytes `dumpValue` writes, keeping the
 /// containers it has entered on an explicit stack instead of the call
 /// stack. Reached only for a value nested deeper than `dump_depth_limit`.
-fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) Error!void {
+fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize) mod.errors.Error!void {
     // Scalars, empty containers and binary values are written by
     // dumpValueShallow alone: only a container with elements is pushed.
     var stack: std.ArrayList(DumpFrame) = .empty;
@@ -367,7 +364,7 @@ fn dumpIteratively(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Va
 /// elements of a container. An object or array with elements is opened and
 /// pushed onto `stack` for `dumpIteratively` to walk; anything else is
 /// written out in full by `dumpValue`.
-fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, stack: *std.ArrayList(DumpFrame)) Error!void {
+fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, pretty_print: bool, opts: Options, indent_step: usize, current_indent: usize, stack: *std.ArrayList(DumpFrame)) mod.errors.Error!void {
     const open: u8 = switch (val.*) {
         .object => |m| if (m.members.items.len != 0) '{' else 0,
         .array => |arr| if (arr.items.len != 0) '[' else 0,
@@ -400,7 +397,7 @@ fn dumpValueShallow(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const V
 ///
 /// Return: `error.JsonError` (`type_error.316`) for a string that is not
 /// UTF-8 under `.strict`; `error.OutOfMemory`.
-pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, opts: Options) Error!void {
+pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, opts: Options) mod.errors.Error!void {
     if (opts.indent >= 0) {
         try dumpValue(out, a, val, true, opts, @intCast(opts.indent), 0, 0);
     } else {
@@ -417,7 +414,7 @@ pub fn dumpTo(out: *std.ArrayList(u8), a: std.mem.Allocator, val: *const Value, 
 /// - `indent`: below 0 compact, otherwise spaces per level.
 ///
 /// Return: the text, owned by the caller.
-pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) Error![]u8 {
+pub fn dump(a: std.mem.Allocator, val: *const Value, indent: i32) mod.errors.Error![]u8 {
     return dumpOptions(a, val, .{ .indent = indent });
 }
 
@@ -435,7 +432,7 @@ pub fn dumpSafe(a: std.mem.Allocator, val: *const Value, indent: i32) error{OutO
 /// `basic_json::dump` with every parameter.
 ///
 /// Return: the text, owned by the caller.
-pub fn dumpOptions(a: std.mem.Allocator, val: *const Value, opts: Options) Error![]u8 {
+pub fn dumpOptions(a: std.mem.Allocator, val: *const Value, opts: Options) mod.errors.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
     try dumpTo(&out, a, val, opts);
@@ -464,9 +461,9 @@ test "dump_escaped with ensure_ascii writes surrogate pairs and \\u007f" {
 
 test "dump_escaped strict reports the byte and its index" {
     try std.testing.expectError(error.JsonError, escaped("ab\xc3(", false, .strict));
-    try std.testing.expectEqualStrings("[json.exception.type_error.316] invalid UTF-8 byte at index 3: 0x28", errors.what());
+    try std.testing.expectEqualStrings("[json.exception.type_error.316] invalid UTF-8 byte at index 3: 0x28", mod.errors.what());
     try std.testing.expectError(error.JsonError, escaped("ab\xe2\x82", false, .strict));
-    try std.testing.expectEqualStrings("[json.exception.type_error.316] incomplete UTF-8 string; last byte: 0x82", errors.what());
+    try std.testing.expectEqualStrings("[json.exception.type_error.316] incomplete UTF-8 string; last byte: 0x82", mod.errors.what());
     const got = try escaped("a\x80b\xe2\x82", true, .ignore);
     defer std.testing.allocator.free(got);
     try std.testing.expectEqualStrings("ab", got);

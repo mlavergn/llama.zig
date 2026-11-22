@@ -14,10 +14,11 @@
 //! keeps its decoders internal (`vendor/`, `std.crypto`).
 
 const std = @import("std");
+const mod = @import("module.zig");
 
 comptime {
     @setEvalBranchQuota(100_000);
-    for (.{ @import("mtmd.zig"), @import("helper.zig"), @import("helper_gen.zig") }) |file| {
+    for (.{ mod.mtmd, mod.helper, mod.helper_gen }) |file| {
         for (@typeInfo(file).@"struct".decl_names) |name| {
             if (!std.mem.startsWith(u8, name, "mtmd_")) continue;
             const f = @field(file, name);

@@ -9,15 +9,7 @@
 //! (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const m = @import("module.zig");
-
-const c = impl.c;
-const BackendCtx = m.context.BackendCtx;
-const Context = m.submit.Context;
-const Tensor = c.ggml_tensor;
-const push = m.push;
-const ops = m.ops;
+const ggml = @import("../module.zig");
 
 /// Stores `v` into `pc.name` the way a C++ implicit conversion does: an
 /// integer narrowed to the field's width, two's complement kept.
@@ -32,18 +24,18 @@ fn set(pc: anytype, comptime name: []const u8, v: i64) void {
     };
 }
 
-fn param(t: *const Tensor, i: usize) i64 {
+fn param(t: *const ggml.impl.c.ggml_tensor, i: usize) i64 {
     return t.op_params[i];
 }
 
 /// `dst`'s device address, as the im2col shaders write through it.
-fn dstAddr(dst: *const Tensor) u64 {
-    const buf = m.buffer.tensorBuffer(dst);
-    return buf.bda_addr + m.buffer.tensorOffset(dst) + dst.view_offs;
+fn dstAddr(dst: *const ggml.impl.c.ggml_tensor) u64 {
+    const buf = ggml.vulkan.buffer.tensorBuffer(dst);
+    return buf.bda_addr + ggml.vulkan.buffer.tensorOffset(dst) + dst.view_offs;
 }
 
 /// Ports `ggml_vk_im2col` (ggml-vulkan.cpp:12184 @b1b770d90).
-pub fn im2col(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
+pub fn im2col(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
     const is_2D = dst.op_params[6] == 1;
     const IC = src1.ne[if (is_2D) 2 else 1];
     const IH: i64 = if (is_2D) src1.ne[1] else 1;
@@ -58,8 +50,8 @@ pub fn im2col(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *co
     const batch = src1.ne[if (is_2D) 3 else 2];
 
     // The C++ multiplies these as uint32_t, so they wrap at 32 bits.
-    const u = ops.u32Of;
-    var pc = std.mem.zeroes(push.Im2col);
+    const u = ggml.vulkan.ops.u32Of;
+    var pc = std.mem.zeroes(ggml.vulkan.push.Im2col);
     pc.dst_addr = dstAddr(dst);
     set(&pc, "batch_offset", batch_offset);
     set(&pc, "offset_delta", offset_delta);
@@ -79,11 +71,11 @@ pub fn im2col(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *co
     set(&pc, "d0", param(dst, 4));
     set(&pc, "d1", param(dst, 5));
     pc.batch_IC = u(batch) *% u(IC);
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_IM2COL, pc);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.c.GGML_OP_IM2COL, pc);
 }
 
 /// Ports `ggml_vk_im2col_3d` (ggml-vulkan.cpp:12224 @b1b770d90).
-pub fn im2col3d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
+pub fn im2col3d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
     const IC = param(dst, 9);
     const N = @divTrunc(src1.ne[3], IC);
     const ID = src1.ne[2];
@@ -95,9 +87,9 @@ pub fn im2col3d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *
     const OD = @divTrunc(dst.ne[3], N);
     const OH = dst.ne[2];
     const OW = dst.ne[1];
-    const ts: u64 = c.ggml_type_size(src1.type);
+    const ts: u64 = ggml.impl.c.ggml_type_size(src1.type);
 
-    var pc: push.Im2col3d = std.mem.zeroes(push.Im2col3d);
+    var pc: ggml.vulkan.push.Im2col3d = std.mem.zeroes(ggml.vulkan.push.Im2col3d);
     pc.dst_addr = dstAddr(dst);
     set(&pc, "nb10", @intCast(src1.nb[0] / ts));
     set(&pc, "nb11", @intCast(src1.nb[1] / ts));
@@ -127,28 +119,28 @@ pub fn im2col3d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *
     set(&pc, "OD_OH_OW_IC_KD_KH_KW", OD *% OH *% OW *% IC *% KD *% KH *% KW);
     set(&pc, "OH_OW_IC_KD_KH_KW", OH *% OW *% IC *% KD *% KH *% KW);
     set(&pc, "OW_IC_KD_KH_KW", OW *% IC *% KD *% KH *% KW);
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_IM2COL_3D, pc);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.c.GGML_OP_IM2COL_3D, pc);
 }
 
 /// Ports `ggml_vk_timestep_embedding` (ggml-vulkan.cpp:12290 @b1b770d90).
-pub fn timestepEmbedding(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
-    var pc = std.mem.zeroes(push.TimestepEmbedding);
-    set(&pc, "nb1", @intCast(dst.nb[1] / c.ggml_type_size(dst.type)));
+pub fn timestepEmbedding(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    var pc = std.mem.zeroes(ggml.vulkan.push.TimestepEmbedding);
+    set(&pc, "nb1", @intCast(dst.nb[1] / ggml.impl.c.ggml_type_size(dst.type)));
     set(&pc, "dim", param(dst, 0));
     set(&pc, "max_period", param(dst, 1));
-    ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_TIMESTEP_EMBEDDING, pc);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.c.GGML_OP_TIMESTEP_EMBEDDING, pc);
 }
 
 /// Ports `ggml_vk_conv_transpose_1d` (ggml-vulkan.cpp:12300 @b1b770d90).
 /// src0 is the kernel (K, Cout, Cin), src1 the input (L, Cin).
-pub fn convTranspose1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    impl.assert(src0.nb[0] == @sizeOf(f32), "nb00 == sizeof(float)");
-    impl.assert(src1.nb[0] == @sizeOf(f32), "nb10 == sizeof(float)");
+pub fn convTranspose1d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "nb00 == sizeof(float)");
+    ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "nb10 == sizeof(float)");
 
-    var p = std.mem.zeroes(push.ConvTranspose1d);
+    var p = std.mem.zeroes(ggml.vulkan.push.ConvTranspose1d);
     set(&p, "Cout", src0.ne[1]);
     set(&p, "Cin", src0.ne[2]);
     set(&p, "K", src0.ne[0]);
@@ -159,32 +151,32 @@ pub fn convTranspose1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, 
     set(&p, "nb11", @intCast(src1.nb[1] / src1.nb[0]));
     set(&p, "nb1", @intCast(dst.nb[1] / dst.nb[0]));
     set(&p, "s0", param(dst, 0));
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_CONV_TRANSPOSE_1D, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.c.GGML_OP_CONV_TRANSPOSE_1D, p);
 }
 
 /// Ports `ggml_vk_col2im_1d` (ggml-vulkan.cpp:12331 @b1b770d90): src0 is
 /// [K_OC, T_in] columns from a matmul, dst [T_out, OC].
-pub fn col2im1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
-    const K_OC = ops.u32Of(src0.ne[0]);
+pub fn col2im1d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    const K_OC = ggml.vulkan.ops.u32Of(src0.ne[0]);
     const OC: u32 = @bitCast(dst.op_params[1]);
-    var p = std.mem.zeroes(push.Col2im1d);
-    p.T_out = ops.u32Of(dst.ne[0]);
+    var p = std.mem.zeroes(ggml.vulkan.push.Col2im1d);
+    p.T_out = ggml.vulkan.ops.u32Of(dst.ne[0]);
     p.OC = OC;
     p.K_OC = K_OC;
-    p.T_in = ops.u32Of(src0.ne[1]);
+    p.T_in = ggml.vulkan.ops.u32Of(src0.ne[1]);
     p.K = K_OC / OC;
     set(&p, "stride", param(dst, 0));
     set(&p, "p0", param(dst, 2));
-    ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_COL2IM_1D, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.c.GGML_OP_COL2IM_1D, p);
 }
 
 /// Ports `ggml_vk_pool_1d` (ggml-vulkan.cpp:12392 @b1b770d90).
-pub fn pool1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
-    const u = ops.u32Of;
+pub fn pool1d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    const u = ggml.vulkan.ops.u32Of;
     const N = u(dst.ne[3] *% dst.ne[2]);
     const OC = u(dst.ne[1]);
     const OL = u(dst.ne[0]);
-    var p = std.mem.zeroes(push.Pool1d);
+    var p = std.mem.zeroes(ggml.vulkan.push.Pool1d);
     p.IL = u(src0.ne[0]);
     p.OL = OL;
     p.OC = OC;
@@ -193,17 +185,17 @@ pub fn pool1d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Ten
     set(&p, "k0", param(dst, 1));
     set(&p, "s0", param(dst, 2));
     set(&p, "p0", param(dst, 3));
-    ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_POOL_1D, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.c.GGML_OP_POOL_1D, p);
 }
 
 /// Ports `ggml_vk_pool_2d` (ggml-vulkan.cpp:12415 @b1b770d90).
-pub fn pool2d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
-    const u = ops.u32Of;
+pub fn pool2d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    const u = ggml.vulkan.ops.u32Of;
     const N = u(dst.ne[3]);
     const OC = u(dst.ne[2]);
     const OH = u(dst.ne[1]);
     const OW = u(dst.ne[0]);
-    var p = std.mem.zeroes(push.Pool2d);
+    var p = std.mem.zeroes(ggml.vulkan.push.Pool2d);
     p.IW = u(src0.ne[0]);
     p.IH = u(src0.ne[1]);
     p.OW = OW;
@@ -217,20 +209,20 @@ pub fn pool2d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Ten
     set(&p, "s1", param(dst, 3));
     set(&p, "p0", param(dst, 6));
     set(&p, "p1", param(dst, 5));
-    ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_POOL_2D, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.c.GGML_OP_POOL_2D, p);
 }
 
-fn convAsserts(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) void {
-    impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
-    impl.assert(src0.nb[0] == @sizeOf(f32) or src0.nb[0] == @sizeOf(c.ggml_fp16_t), "nb00 == sizeof(float) || nb00 == sizeof(ggml_fp16_t)");
-    impl.assert(src1.nb[0] == @sizeOf(f32), "nb10 == sizeof(float)");
-    impl.assert(dst.nb[0] == @sizeOf(f32), "nb0 == sizeof(float)");
+fn convAsserts(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) void {
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32) or src0.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t), "nb00 == sizeof(float) || nb00 == sizeof(ggml_fp16_t)");
+    ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "nb10 == sizeof(float)");
+    ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "nb0 == sizeof(float)");
 }
 
 /// The nine element strides both direct convolutions pass.
-fn convStrides(p: anytype, src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) void {
+fn convStrides(p: anytype, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) void {
     set(p, "nb01", @intCast(src0.nb[1] / src0.nb[0]));
     set(p, "nb02", @intCast(src0.nb[2] / src0.nb[0]));
     set(p, "nb03", @intCast(src0.nb[3] / src0.nb[0]));
@@ -244,36 +236,36 @@ fn convStrides(p: anytype, src0: *const Tensor, src1: *const Tensor, dst: *const
 
 /// Ports `ggml_vk_conv_2d` (ggml-vulkan.cpp:12443 @b1b770d90), forward and
 /// transposed.
-pub fn conv2d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
+pub fn conv2d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
     convAsserts(src0, src1, dst);
-    const transpose = dst.op == c.GGML_OP_CONV_TRANSPOSE_2D;
+    const transpose = dst.op == ggml.impl.c.GGML_OP_CONV_TRANSPOSE_2D;
 
-    var p = std.mem.zeroes(push.Conv2d);
+    var p = std.mem.zeroes(ggml.vulkan.push.Conv2d);
     set(&p, "Cout", if (!transpose) src0.ne[3] else src0.ne[2]);
     set(&p, "Cin", if (!transpose) src0.ne[2] else src0.ne[3]);
     set(&p, "N", src1.ne[3]);
-    impl.assert(p.Cout == dst.ne[2], "p.Cout == ne2");
-    impl.assert(p.Cin == src1.ne[2], "p.Cin == ne12");
+    ggml.impl.assert(p.Cout == dst.ne[2], "p.Cout == ne2");
+    ggml.impl.assert(p.Cin == src1.ne[2], "p.Cin == ne12");
 
     set(&p, "W", src1.ne[0]);
     set(&p, "H", src1.ne[1]);
     set(&p, "OW", dst.ne[0]);
     set(&p, "OH", dst.ne[1]);
     convStrides(&p, src0, src1, dst);
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, dst.op, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, dst.op, p);
 }
 
 /// Ports `ggml_vk_conv_3d` (ggml-vulkan.cpp:12483 @b1b770d90).
-pub fn conv3d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
+pub fn conv3d(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
     convAsserts(src0, src1, dst);
 
-    var p = std.mem.zeroes(push.Conv3d);
+    var p = std.mem.zeroes(ggml.vulkan.push.Conv3d);
     set(&p, "IC", param(dst, 9));
     set(&p, "N", param(dst, 10));
     set(&p, "OC", param(dst, 11));
-    impl.assert(src0.ne[3] == @as(i64, p.IC) * p.OC, "src0->ne[3] == (int64_t)p.IC * p.OC");
-    impl.assert(src1.ne[3] == @as(i64, p.IC) * p.N, "src1->ne[3] == (int64_t)p.IC * p.N");
-    impl.assert(dst.ne[3] == @as(i64, p.OC) * p.N, "dst->ne[3] == (int64_t)p.OC * p.N");
+    ggml.impl.assert(src0.ne[3] == @as(i64, p.IC) * p.OC, "src0->ne[3] == (int64_t)p.IC * p.OC");
+    ggml.impl.assert(src1.ne[3] == @as(i64, p.IC) * p.N, "src1->ne[3] == (int64_t)p.IC * p.N");
+    ggml.impl.assert(dst.ne[3] == @as(i64, p.OC) * p.N, "dst->ne[3] == (int64_t)p.OC * p.N");
 
     set(&p, "IW", src1.ne[0]);
     set(&p, "IH", src1.ne[1]);
@@ -284,16 +276,16 @@ pub fn conv3d(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *co
 
     // The shader clamps source addresses in uint32, so the input element
     // count must fit in one.
-    impl.assert(@as(u64, p.IC) *% p.N *% p.IW *% p.IH *% p.ID <= 0xFFFFFFFF, "(uint64_t)p.IC * p.N * p.IW * p.IH * p.ID <= 0xFFFFFFFFull");
+    ggml.impl.assert(@as(u64, p.IC) *% p.N *% p.IW *% p.IH *% p.ID <= 0xFFFFFFFF, "(uint64_t)p.IC * p.N * p.IW * p.IH * p.ID <= 0xFFFFFFFFull");
 
     convStrides(&p, src0, src1, dst);
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_CONV_3D, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.c.GGML_OP_CONV_3D, p);
 }
 
 /// Ports `ggml_vk_conv_2d_dw` (ggml-vulkan.cpp:12528 @b1b770d90).
-pub fn conv2dDw(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *const Tensor, dst: *Tensor) void {
-    var p = std.mem.zeroes(push.Conv2dDw);
-    set(&p, "ne", c.ggml_nelements(dst));
+pub fn conv2dDw(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    var p = std.mem.zeroes(ggml.vulkan.push.Conv2dDw);
+    set(&p, "ne", ggml.impl.c.ggml_nelements(dst));
     set(&p, "channels", dst.ne[2]);
     set(&p, "batches", dst.ne[3]);
     set(&p, "dst_w", dst.ne[0]);
@@ -308,16 +300,16 @@ pub fn conv2dDw(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: *
     set(&p, "pad_y", param(dst, 3));
     set(&p, "dilation_x", param(dst, 4));
     set(&p, "dilation_y", param(dst, 5));
-    impl.assert(src0.ne[3] == p.channels, "src0->ne[3] == p.channels");
-    impl.assert(src1.ne[3] == p.batches, "src1->ne[3] == p.batches");
-    ops.opF32(ctx, subctx, src0, src1, null, null, dst, c.GGML_OP_CONV_2D_DW, p);
+    ggml.impl.assert(src0.ne[3] == p.channels, "src0->ne[3] == p.channels");
+    ggml.impl.assert(src1.ne[3] == p.batches, "src1->ne[3] == p.batches");
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, src1, null, null, dst, ggml.impl.c.GGML_OP_CONV_2D_DW, p);
 }
 
 /// Ports `ggml_vk_leaky_relu` (ggml-vulkan.cpp:12552 @b1b770d90).
-pub fn leakyRelu(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tensor) void {
-    var p = ops.unaryPushConstantsInit(src0, dst, 0);
+pub fn leakyRelu(ctx: *ggml.vulkan.context.BackendCtx, subctx: *ggml.vulkan.submit.Context, src0: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) void {
+    var p = ggml.vulkan.ops.unaryPushConstantsInit(src0, dst, 0);
     p.param1 = @bitCast(dst.op_params[0]);
-    ops.opF32(ctx, subctx, src0, null, null, null, dst, c.GGML_OP_LEAKY_RELU, p);
+    ggml.vulkan.ops.opF32(ctx, subctx, src0, null, null, null, dst, ggml.impl.c.GGML_OP_LEAKY_RELU, p);
 }
 
 // -----------------------------------------------------------------------------

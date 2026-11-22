@@ -31,39 +31,13 @@
 //! and `pending`: under OpenMP the C drops those three fields.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const win32 = @import("../win32.zig");
-const types = @import("../types.zig");
-const graph = @import("../graph.zig");
-const context = @import("../context.zig");
-const defs = @import("defs.zig");
-const plan = @import("plan.zig");
-const forward = @import("forward.zig");
-const features = @import("features.zig");
-const c = impl.c;
-
-const Tensor = defs.Tensor;
-const CGraph = defs.CGraph;
-const Threadpool = defs.Threadpool;
-const ComputeState = defs.ComputeState;
-const ComputeParams = defs.ComputeParams;
 
 /// `ggml.c`'s aligned allocator, ported in `src/ggml/runtime.zig`.
-extern fn ggml_aligned_malloc(size: usize) ?*anyopaque;
-extern fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void;
-
 /// `ggml.c`'s default threadpool parameters, ported in `src/ggml/runtime.zig`.
-extern fn ggml_threadpool_params_default(n_threads: c_int) c.struct_ggml_threadpool_params;
-
-/// The fused RMS-norm kernel, still C++ in `ggml-cpu/ops.cpp`.
-extern fn ggml_compute_forward_rms_norm_mul_fused(
-    params: *const ComputeParams,
-    dst_rms_norm: *Tensor,
-    dst_mul: *Tensor,
-) void;
+/// The fused RMS-norm kernel, `ops/norm.zig`'s.
 
 // -----------------------------------------------------------------------------
 // The barrier
@@ -85,8 +59,8 @@ extern fn ggml_compute_forward_rms_norm_mul_fused(
 ///
 /// Parameters:
 /// - `tp`: the threadpool whose threads are synchronising.
-pub export fn ggml_barrier(tp: *Threadpool) void {
-    const n_threads = tp.n_graph.load(.monotonic) & defs.n_threads_mask;
+pub export fn ggml_barrier(tp: *ggml.cpu.defs.Threadpool) void {
+    const n_threads = tp.n_graph.load(.monotonic) & ggml.cpu.defs.n_threads_mask;
     if (n_threads == 1) return;
 
     const n_passed = tp.n_barrier_passed.load(.monotonic);
@@ -102,7 +76,7 @@ pub export fn ggml_barrier(tp: *Threadpool) void {
     }
 
     while (tp.n_barrier_passed.load(.monotonic) == n_passed) {
-        defs.cpuRelax();
+        ggml.cpu.defs.cpuRelax();
     }
 
     // Exit the barrier. The C wants a standalone `atomic_thread_fence` here
@@ -118,7 +92,7 @@ pub export fn ggml_barrier(tp: *Threadpool) void {
 /// Parameters:
 /// - `tp`: the threadpool.
 /// - `value`: the next chunk index to hand out.
-pub export fn ggml_threadpool_chunk_set(tp: *Threadpool, value: c_int) void {
+pub export fn ggml_threadpool_chunk_set(tp: *ggml.cpu.defs.Threadpool, value: c_int) void {
     tp.current_chunk.store(value, .monotonic);
 }
 
@@ -130,7 +104,7 @@ pub export fn ggml_threadpool_chunk_set(tp: *Threadpool, value: c_int) void {
 ///
 /// Return: the cursor's value before the add, which is the chunk the caller
 /// has just claimed.
-pub export fn ggml_threadpool_chunk_add(tp: *Threadpool, value: c_int) c_int {
+pub export fn ggml_threadpool_chunk_add(tp: *ggml.cpu.defs.Threadpool, value: c_int) c_int {
     return tp.current_chunk.fetchAdd(value, .monotonic);
 }
 
@@ -181,7 +155,7 @@ const NumaNode = struct {
 /// (ggml-cpu.c:562, 583 @b1b770d90). Off glibc Linux nothing writes it, and
 /// `n_nodes` stays 0.
 var numa: struct {
-    numa_strategy: c.enum_ggml_numa_strategy = 0,
+    numa_strategy: ggml.impl.c.enum_ggml_numa_strategy = 0,
     nodes: [numa_max_nodes]NumaNode = @splat(.{}),
     n_nodes: u32 = 0,
     total_cpus: u32 = 0,
@@ -189,16 +163,11 @@ var numa: struct {
     cpuset: CpuSet = .{},
 } = .{};
 
-/// The C's `__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ > 33)`: the
-/// glibc this build links has a `getcpu` wrapper.
-const glibc_has_getcpu = is_gnu_linux and
-    builtin.os.version_range.linux.glibc.order(.{ .major = 2, .minor = 34, .patch = 0 }) != .lt;
-
 /// `stat(path, &st) == 0`, asked through `statx` because Zig 0.17 declares
 /// no `struct stat` for Linux -- the move `llama/mmap.zig` makes too.
 fn pathExists(path: [*:0]const u8) bool {
     var st: std.os.linux.Statx = undefined;
-    return libc.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st) == 0;
+    return std.os.linux.errno(std.os.linux.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st)) == .SUCCESS;
 }
 
 /// Ports `ggml_get_numa_affinity` (ggml-cpu.c:632 @b1b770d90), the
@@ -206,7 +175,7 @@ fn pathExists(path: [*:0]const u8) bool {
 /// `numactl` is the set it was started with.
 fn getNumaAffinity() CpuSet {
     var cpuset: CpuSet = .{};
-    _ = libc.pthread_getaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &cpuset);
+    _ = stdlib.thread.getAffinity(@sizeOf(CpuSet), &cpuset);
     return cpuset;
 }
 
@@ -220,9 +189,9 @@ fn getNumaAffinity() CpuSet {
 ///
 /// Parameters:
 /// - `numa_flag`: the strategy `set_numa_thread_affinity` will apply.
-pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
+pub export fn ggml_numa_init(numa_flag: ggml.impl.c.enum_ggml_numa_strategy) void {
     if (numa.n_nodes > 0) {
-        impl.fprintfStderr("ggml_numa_init: NUMA already initialized\n", .{});
+        ggml.impl.fprintfStderr("ggml_numa_init: NUMA already initialized\n", .{});
         return;
     }
     if (comptime !is_gnu_linux) return;
@@ -234,26 +203,25 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
 
     // enumerate nodes
     while (numa.n_nodes < numa_max_nodes) {
-        const rv = libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u", numa.n_nodes);
-        impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+        const rv = stdlib.libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u", numa.n_nodes);
+        ggml.impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
         if (!pathExists(@ptrCast(&path))) break;
         numa.n_nodes += 1;
     }
 
     // enumerate CPUs
     while (numa.total_cpus < numa_max_cpus) {
-        const rv = libc.snprintf(&path, path.len, "/sys/devices/system/cpu/cpu%u", numa.total_cpus);
-        impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+        const rv = stdlib.libc.snprintf(&path, path.len, "/sys/devices/system/cpu/cpu%u", numa.total_cpus);
+        ggml.impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
         if (!pathExists(@ptrCast(&path))) break;
         numa.total_cpus += 1;
     }
 
     // figure out which node we're on. The C calls glibc's `getcpu` from 2.34
-    // and the raw syscall before it; both fill the same two words.
+    // and the raw syscall before it; both fill the same two words, so the
+    // syscall stands for both.
     var current_cpu: c_uint = 0;
-    const getcpu_ret: c_int = if (comptime glibc_has_getcpu)
-        libc.getcpu(&current_cpu, &numa.current_node)
-    else getcpu: {
+    const getcpu_ret: c_int = getcpu: {
         var cpu: usize = 0;
         var node: usize = 0;
         const r = std.os.linux.getcpu(&cpu, &node);
@@ -271,8 +239,8 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
         node.n_cpus = 0;
         var cpu: c_uint = 0;
         while (cpu < numa.total_cpus) : (cpu += 1) {
-            const rv = libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u/cpu%u", @as(c_uint, @intCast(n)), cpu);
-            impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
+            const rv = stdlib.libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u/cpu%u", @as(c_uint, @intCast(n)), cpu);
+            ggml.impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
             if (pathExists(@ptrCast(&path))) {
                 node.cpus[node.n_cpus] = cpu;
                 node.n_cpus += 1;
@@ -281,12 +249,12 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
     }
 
     if (ggml_is_numa()) {
-        if (libc.fopen("/proc/sys/kernel/numa_balancing", "r")) |fptr| {
+        if (stdlib.libc.fopen("/proc/sys/kernel/numa_balancing", "r")) |fptr| {
             var buf: [42]u8 = undefined;
-            if (libc.fgets(&buf, buf.len, fptr) != null and libc.strncmp(&buf, "0\n", buf.len) != 0) {
-                impl.logWarn("/proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n", .{});
+            if (stdlib.libc.fgets(&buf, buf.len, fptr) != null and !std.mem.eql(u8, std.mem.sliceTo(&buf, 0), "0\n")) {
+                ggml.impl.logWarn("/proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n", .{});
             }
-            _ = libc.fclose(fptr);
+            _ = stdlib.libc.fclose(fptr);
         }
     }
 }
@@ -313,13 +281,13 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
     const setsize = CpuSet.allocSize(numa.total_cpus);
     const node_num: u32 = switch (numa.numa_strategy) {
         // run thread on node_num thread_n / (threads per node)
-        c.GGML_NUMA_STRATEGY_DISTRIBUTE => @as(u32, @intCast(thread_n)) % numa.n_nodes,
+        ggml.impl.c.GGML_NUMA_STRATEGY_DISTRIBUTE => @as(u32, @intCast(thread_n)) % numa.n_nodes,
         // run thread on current_node
-        c.GGML_NUMA_STRATEGY_ISOLATE => numa.current_node,
+        ggml.impl.c.GGML_NUMA_STRATEGY_ISOLATE => numa.current_node,
         // use the cpuset that numactl gave us
-        c.GGML_NUMA_STRATEGY_NUMACTL => {
-            const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &numa.cpuset);
-            if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
+        ggml.impl.c.GGML_NUMA_STRATEGY_NUMACTL => {
+            const rv = stdlib.thread.setAffinity(setsize, &numa.cpuset);
+            if (rv != 0) ggml.impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
             return;
         },
         else => return,
@@ -329,8 +297,8 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
     var cpus: CpuSet = .{};
     for (node.cpus[0..node.n_cpus]) |cpu| cpus.set(cpu, setsize);
 
-    const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
+    const rv = stdlib.thread.setAffinity(setsize, &cpus);
+    if (rv != 0) ggml.impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
 }
 
 /// Ports `clear_numa_thread_affinity`, `clear_numa_thread_affinity`
@@ -345,8 +313,8 @@ fn clearNumaThreadAffinity() void {
     var i: usize = 0;
     while (i < numa.total_cpus) : (i += 1) cpus.set(i, setsize);
 
-    const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
+    const rv = stdlib.thread.setAffinity(setsize, &cpus);
+    if (rv != 0) ggml.impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
 }
 
 // -----------------------------------------------------------------------------
@@ -367,8 +335,6 @@ const SchedParam = if (is_linux) extern struct {
     __opaque: [4]u8 = @splat(0),
 };
 
-extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const SchedParam) c_int;
-
 /// `_WIN32`, which selects the C's SRW-lock threading defs and the Windows
 /// arms of thread affinity and priority.
 const is_windows = builtin.os.tag == .windows;
@@ -388,13 +354,13 @@ fn threadApplyAffinity(mask: []const bool) bool {
     if (comptime !is_linux) return true;
 
     var cpuset: CpuSet = .{};
-    for (mask[0..c.GGML_MAX_N_THREADS], 0..) |bit, i| {
+    for (mask[0..ggml.impl.c.GGML_MAX_N_THREADS], 0..) |bit, i| {
         if (bit) cpuset.set(i, @sizeOf(CpuSet));
     }
 
-    const err = libc.pthread_setaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &cpuset);
+    const err = stdlib.thread.setAffinity(@sizeOf(CpuSet), &cpuset);
     if (err != 0) {
-        impl.fprintfStderr("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), stdlib.errno.strerror(err), err });
+        ggml.impl.fprintfStderr("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), stdlib.errno.strerror(err), err });
         return false;
     }
     return true;
@@ -402,10 +368,10 @@ fn threadApplyAffinity(mask: []const bool) bool {
 
 /// The Windows arm of `ggml_thread_apply_affinity` (ggml-cpu.c:2537 @b1b770d90).
 fn threadApplyAffinityWindows(mask: []const bool) bool {
-    const h = win32.GetCurrentThread();
+    const h = ggml.win32.GetCurrentThread();
     var bitmask: u64 = 0;
 
-    comptime std.debug.assert(c.GGML_MAX_N_THREADS >= 64);
+    comptime std.debug.assert(ggml.impl.c.GGML_MAX_N_THREADS >= 64);
 
     var i: u6 = 0;
     while (true) : (i += 1) {
@@ -413,14 +379,14 @@ fn threadApplyAffinityWindows(mask: []const bool) bool {
         if (i == 63) break;
     }
 
-    for (mask[64..c.GGML_MAX_N_THREADS]) |bit| {
+    for (mask[64..ggml.impl.c.GGML_MAX_N_THREADS]) |bit| {
         if (bit) {
-            impl.fprintfStderr("warn: setting thread-affinity for > 64 CPUs isn't supported on windows!\n", .{});
+            ggml.impl.fprintfStderr("warn: setting thread-affinity for > 64 CPUs isn't supported on windows!\n", .{});
             break;
         }
     }
 
-    const m = win32.SetThreadAffinityMask(h, bitmask);
+    const m = ggml.win32.SetThreadAffinityMask(h, bitmask);
     return m != 0;
 }
 
@@ -431,35 +397,35 @@ fn threadApplyAffinityWindows(mask: []const bool) bool {
 /// -- and NORMAL then keeps the inherited priority.
 fn threadApplyPriorityWindows(prio: i32) bool {
     const p: c_int = switch (prio) {
-        c.GGML_SCHED_PRIO_LOW => win32.THREAD_PRIORITY_BELOW_NORMAL,
-        c.GGML_SCHED_PRIO_NORMAL => win32.THREAD_PRIORITY_NORMAL,
-        c.GGML_SCHED_PRIO_MEDIUM => win32.THREAD_PRIORITY_ABOVE_NORMAL,
-        c.GGML_SCHED_PRIO_HIGH => win32.THREAD_PRIORITY_HIGHEST,
-        c.GGML_SCHED_PRIO_REALTIME => win32.THREAD_PRIORITY_TIME_CRITICAL,
-        else => win32.THREAD_PRIORITY_NORMAL,
+        ggml.impl.c.GGML_SCHED_PRIO_LOW => ggml.win32.THREAD_PRIORITY_BELOW_NORMAL,
+        ggml.impl.c.GGML_SCHED_PRIO_NORMAL => ggml.win32.THREAD_PRIORITY_NORMAL,
+        ggml.impl.c.GGML_SCHED_PRIO_MEDIUM => ggml.win32.THREAD_PRIORITY_ABOVE_NORMAL,
+        ggml.impl.c.GGML_SCHED_PRIO_HIGH => ggml.win32.THREAD_PRIORITY_HIGHEST,
+        ggml.impl.c.GGML_SCHED_PRIO_REALTIME => ggml.win32.THREAD_PRIORITY_TIME_CRITICAL,
+        else => ggml.win32.THREAD_PRIORITY_NORMAL,
     };
 
-    if (prio != c.GGML_SCHED_PRIO_LOW) {
+    if (prio != ggml.impl.c.GGML_SCHED_PRIO_LOW) {
         // `_WIN32_WINNT` is MinGW's default, 0xa00, so the C's `>= 0x0602`
         // guard is open.
-        var t: win32.THREAD_POWER_THROTTLING_STATE = .{
-            .Version = win32.THREAD_POWER_THROTTLING_CURRENT_VERSION,
-            .ControlMask = win32.THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+        var t: ggml.win32.THREAD_POWER_THROTTLING_STATE = .{
+            .Version = ggml.win32.THREAD_POWER_THROTTLING_CURRENT_VERSION,
+            .ControlMask = ggml.win32.THREAD_POWER_THROTTLING_EXECUTION_SPEED,
             .StateMask = 0,
         };
-        if (win32.SetThreadInformation(win32.GetCurrentThread(), win32.ThreadPowerThrottling, &t, @sizeOf(win32.THREAD_POWER_THROTTLING_STATE)) == 0) {
-            impl.logDebug("failed to disable thread power throttling %d : (%d)\n", .{ prio, @as(c_int, @bitCast(win32.GetLastError())) });
+        if (ggml.win32.SetThreadInformation(ggml.win32.GetCurrentThread(), ggml.win32.ThreadPowerThrottling, &t, @sizeOf(ggml.win32.THREAD_POWER_THROTTLING_STATE)) == 0) {
+            ggml.impl.logDebug("failed to disable thread power throttling %d : (%d)\n", .{ prio, @as(c_int, @bitCast(ggml.win32.GetLastError())) });
             return false;
         }
     }
 
-    if (prio == c.GGML_SCHED_PRIO_NORMAL) {
+    if (prio == ggml.impl.c.GGML_SCHED_PRIO_NORMAL) {
         // Keep inherited policy/priority
         return true;
     }
 
-    if (win32.SetThreadPriority(win32.GetCurrentThread(), p) == 0) {
-        impl.fprintfStderr("warn: failed to set thread priority %d : (%d)\n", .{ prio, @as(c_int, @bitCast(win32.GetLastError())) });
+    if (ggml.win32.SetThreadPriority(ggml.win32.GetCurrentThread(), p) == 0) {
+        ggml.impl.fprintfStderr("warn: failed to set thread priority %d : (%d)\n", .{ prio, @as(c_int, @bitCast(ggml.win32.GetLastError())) });
         return false;
     }
 
@@ -484,23 +450,23 @@ fn threadApplyPriority(prio: i32) bool {
     var policy: c_int = sched_other;
 
     switch (prio) {
-        c.GGML_SCHED_PRIO_LOW => {
+        ggml.impl.c.GGML_SCHED_PRIO_LOW => {
             policy = if (is_linux) sched_batch else sched_other;
             p.sched_priority = 0;
         },
-        c.GGML_SCHED_PRIO_NORMAL => {
+        ggml.impl.c.GGML_SCHED_PRIO_NORMAL => {
             policy = sched_other;
             p.sched_priority = 0;
         },
-        c.GGML_SCHED_PRIO_MEDIUM => {
+        ggml.impl.c.GGML_SCHED_PRIO_MEDIUM => {
             policy = sched_fifo;
             p.sched_priority = 40;
         },
-        c.GGML_SCHED_PRIO_HIGH => {
+        ggml.impl.c.GGML_SCHED_PRIO_HIGH => {
             policy = sched_fifo;
             p.sched_priority = 80;
         },
-        c.GGML_SCHED_PRIO_REALTIME => {
+        ggml.impl.c.GGML_SCHED_PRIO_REALTIME => {
             policy = sched_fifo;
             p.sched_priority = 90;
         },
@@ -508,11 +474,11 @@ fn threadApplyPriority(prio: i32) bool {
     }
 
     // Keep the inherited policy and priority.
-    if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
+    if (prio == ggml.impl.c.GGML_SCHED_PRIO_NORMAL) return true;
 
-    const err = pthread_setschedparam(libc.pthread_self(), policy, &p);
+    const err = stdlib.libc.pthread_setschedparam(stdlib.libc.pthread_self(), policy, &p);
     if (err != 0) {
-        impl.fprintfStderr("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, stdlib.errno.strerror(err), err });
+        ggml.impl.fprintfStderr("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, stdlib.errno.strerror(err), err });
         return false;
     }
 
@@ -539,8 +505,8 @@ fn cpumaskIsValid(mask: []const bool) bool {
 /// - `strict`: one core per worker rather than the whole mask.
 /// - `iter`: cursor into `global_mask`, advanced past the core taken.
 fn cpumaskNext(
-    global_mask: *const [c.GGML_MAX_N_THREADS]bool,
-    local_mask: *[c.GGML_MAX_N_THREADS]bool,
+    global_mask: *const [ggml.impl.c.GGML_MAX_N_THREADS]bool,
+    local_mask: *[ggml.impl.c.GGML_MAX_N_THREADS]bool,
     strict: bool,
     iter: *i32,
 ) void {
@@ -551,10 +517,10 @@ fn cpumaskNext(
 
     local_mask.* = @splat(false);
     const base_idx = iter.*;
-    for (0..c.GGML_MAX_N_THREADS) |i| {
+    for (0..ggml.impl.c.GGML_MAX_N_THREADS) |i| {
         var idx = base_idx + @as(i32, @intCast(i));
         // A cheaper modulo, per the C.
-        if (idx >= c.GGML_MAX_N_THREADS) idx -= c.GGML_MAX_N_THREADS;
+        if (idx >= ggml.impl.c.GGML_MAX_N_THREADS) idx -= ggml.impl.c.GGML_MAX_N_THREADS;
 
         if (global_mask[@intCast(idx)]) {
             local_mask[@intCast(idx)] = true;
@@ -568,35 +534,35 @@ fn cpumaskNext(
 // Threadpool lifecycle
 
 /// Ports `ggml_mutex_lock`, `ggml_mutex_lock` (ggml-cpu.c:444, 464 @b1b770d90).
-inline fn lock(threadpool: *Threadpool) void {
+inline fn lock(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.mutex.lock();
 }
 
 /// Ports `ggml_mutex_unlock`, `ggml_mutex_unlock` (ggml-cpu.c:445, 465 @b1b770d90).
-inline fn unlock(threadpool: *Threadpool) void {
+inline fn unlock(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.mutex.unlock();
 }
 
 /// Ports `ggml_mutex_lock_shared`, `ggml_mutex_lock_shared` (ggml-cpu.c:446,
 /// 466 @b1b770d90). The same as `lock`, as on the C's pthread arm: the lock
 /// has no shared mode.
-inline fn lockShared(threadpool: *Threadpool) void {
+inline fn lockShared(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.mutex.lock();
 }
 
 /// Ports `ggml_mutex_unlock_shared`, `ggml_mutex_unlock_shared`
 /// (ggml-cpu.c:447, 467 @b1b770d90).
-inline fn unlockShared(threadpool: *Threadpool) void {
+inline fn unlockShared(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.mutex.unlock();
 }
 
 /// Ports `ggml_cond_wait`, `ggml_cond_wait` (ggml-cpu.c:451, 481 @b1b770d90).
-inline fn condWait(threadpool: *Threadpool) void {
+inline fn condWait(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.cond.wait(&threadpool.mutex);
 }
 
 /// Ports `ggml_cond_broadcast`, `ggml_cond_broadcast` (ggml-cpu.c:452, 482 @b1b770d90).
-inline fn condBroadcast(threadpool: *Threadpool) void {
+inline fn condBroadcast(threadpool: *ggml.cpu.defs.Threadpool) void {
     threadpool.cond.broadcast();
 }
 
@@ -608,11 +574,11 @@ inline fn condBroadcast(threadpool: *Threadpool) void {
 ///
 /// Return: the pool, owned by the caller; free it with `ggml_threadpool_free`.
 fn threadpoolNewImpl(
-    tpp: *c.struct_ggml_threadpool_params,
-    cgraph: ?*const CGraph,
-    cplan: ?*const c.ggml_cplan,
-) *Threadpool {
-    const threadpool: *Threadpool = @ptrCast(@alignCast(ggml_aligned_malloc(@sizeOf(Threadpool)).?));
+    tpp: *ggml.impl.c.struct_ggml_threadpool_params,
+    cgraph: ?*const ggml.impl.CGraph,
+    cplan: ?*const ggml.impl.c.ggml_cplan,
+) *ggml.cpu.defs.Threadpool {
+    const threadpool: *ggml.cpu.defs.Threadpool = @ptrCast(@alignCast(ggml.runtime.ggml_aligned_malloc(@sizeOf(ggml.cpu.defs.Threadpool)).?));
 
     threadpool.* = .{
         .mutex = undefined,
@@ -630,12 +596,12 @@ fn threadpoolNewImpl(
         .n_threads = tpp.n_threads,
         .poll = tpp.poll,
         .prio = tpp.prio,
-        .ec = c.GGML_STATUS_SUCCESS,
+        .ec = ggml.impl.c.GGML_STATUS_SUCCESS,
     };
 
     const n: usize = @intCast(tpp.n_threads);
-    const workers_size = @sizeOf(ComputeState) * n;
-    const workers: [*]ComputeState = @ptrCast(@alignCast(ggml_aligned_malloc(workers_size).?));
+    const workers_size = @sizeOf(ggml.cpu.defs.ComputeState) * n;
+    const workers: [*]ggml.cpu.defs.ComputeState = @ptrCast(@alignCast(ggml.runtime.ggml_aligned_malloc(workers_size).?));
 
     for (0..n) |j| {
         workers[j] = .{
@@ -662,7 +628,7 @@ fn threadpoolNewImpl(
     for (1..n) |j| {
         cpumaskNext(&tpp.cpumask, &workers[j].cpumask, tpp.strict_cpu, &cpumask_iter);
         workers[j].thrd = std.Thread.spawn(.{}, secondaryThread, .{&workers[j]}) catch
-            impl.abort("rc == 0");
+            ggml.impl.abort("rc == 0");
     }
 
     cpumaskNext(&tpp.cpumask, &workers[0].cpumask, tpp.strict_cpu, &cpumask_iter);
@@ -684,7 +650,7 @@ fn threadpoolNewImpl(
 /// - `tpp`: the pool's configuration.
 ///
 /// Return: an idle pool, with no graph attached yet.
-pub export fn ggml_threadpool_new(tpp: *c.struct_ggml_threadpool_params) *Threadpool {
+pub export fn ggml_threadpool_new(tpp: *ggml.impl.c.struct_ggml_threadpool_params) *ggml.cpu.defs.Threadpool {
     return threadpoolNewImpl(tpp, null, null);
 }
 
@@ -694,7 +660,7 @@ pub export fn ggml_threadpool_new(tpp: *c.struct_ggml_threadpool_params) *Thread
 ///
 /// Parameters:
 /// - `threadpool_opt`: the pool, or null, which the C tolerates.
-pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
+pub export fn ggml_threadpool_free(threadpool_opt: ?*ggml.cpu.defs.Threadpool) void {
     const threadpool = threadpool_opt orelse return;
 
     const n: usize = @intCast(threadpool.n_threads);
@@ -712,15 +678,15 @@ pub export fn ggml_threadpool_free(threadpool_opt: ?*Threadpool) void {
     // `ggml_cond_destroy` (ggml-cpu.c:443, 450, 463, 480 @b1b770d90): nothing
     // to release.
 
-    ggml_aligned_free(workers, @sizeOf(ComputeState) * n);
-    ggml_aligned_free(threadpool, @sizeOf(Threadpool));
+    ggml.runtime.ggml_aligned_free(workers, @sizeOf(ggml.cpu.defs.ComputeState) * n);
+    ggml.runtime.ggml_aligned_free(threadpool, @sizeOf(ggml.cpu.defs.Threadpool));
 }
 
 /// Ports `ggml_threadpool_pause_locked` (ggml-cpu.c:2784 @b1b770d90).
 ///
 /// The caller must hold `threadpool.mutex`.
-fn pauseLocked(threadpool: *Threadpool) void {
-    impl.printDebug("Pausing threadpool\n", .{});
+fn pauseLocked(threadpool: *ggml.cpu.defs.Threadpool) void {
+    ggml.impl.printDebug("Pausing threadpool\n", .{});
     threadpool.pause.store(true, .monotonic);
     condBroadcast(threadpool);
 }
@@ -728,14 +694,14 @@ fn pauseLocked(threadpool: *Threadpool) void {
 /// Ports `ggml_threadpool_resume_locked` (ggml-cpu.c:2790 @b1b770d90).
 ///
 /// The caller must hold `threadpool.mutex`.
-fn resumeLocked(threadpool: *Threadpool) void {
-    impl.printDebug("Resuming threadpool\n", .{});
+fn resumeLocked(threadpool: *ggml.cpu.defs.Threadpool) void {
+    ggml.impl.printDebug("Resuming threadpool\n", .{});
     threadpool.pause.store(false, .monotonic);
     condBroadcast(threadpool);
 }
 
 /// Ports `ggml_threadpool_pause` (ggml-cpu.c:2797 @b1b770d90).
-pub export fn ggml_threadpool_pause(threadpool: *Threadpool) void {
+pub export fn ggml_threadpool_pause(threadpool: *ggml.cpu.defs.Threadpool) void {
     lock(threadpool);
     defer unlock(threadpool);
 
@@ -743,7 +709,7 @@ pub export fn ggml_threadpool_pause(threadpool: *Threadpool) void {
 }
 
 /// Ports `ggml_threadpool_resume` (ggml-cpu.c:2809 @b1b770d90).
-pub export fn ggml_threadpool_resume(threadpool: *Threadpool) void {
+pub export fn ggml_threadpool_resume(threadpool: *ggml.cpu.defs.Threadpool) void {
     lock(threadpool);
     defer unlock(threadpool);
 
@@ -766,31 +732,31 @@ pub export fn ggml_threadpool_resume(threadpool: *Threadpool) void {
 /// the caller adds it to `node_n` after the loop's own increment, so 1 here
 /// means two nodes were computed.
 fn tryFuseOps(
-    cgraph: *const CGraph,
+    cgraph: *const ggml.impl.CGraph,
     node_n: c_int,
-    params: *const ComputeParams,
-    cplan: *const c.ggml_cplan,
+    params: *const ggml.cpu.defs.ComputeParams,
+    cplan: *const ggml.impl.c.ggml_cplan,
 ) c_int {
-    if (features.disable_fusion or cplan.use_ref) return 0;
+    if (ggml.cpu.features.disable_fusion or cplan.use_ref) return 0;
 
     const node = cgraph.nodes[@intCast(node_n)].?;
 
-    if (node.op == c.GGML_OP_RMS_NORM) {
-        const fuse_ops = [_]c.enum_ggml_op{ c.GGML_OP_RMS_NORM, c.GGML_OP_MUL };
-        if (graph.canFuse(cgraph, node_n, &fuse_ops)) {
+    if (node.op == ggml.impl.c.GGML_OP_RMS_NORM) {
+        const fuse_ops = [_]ggml.impl.c.enum_ggml_op{ ggml.impl.c.GGML_OP_RMS_NORM, ggml.impl.c.GGML_OP_MUL };
+        if (ggml.graph.canFuse(cgraph, node_n, &fuse_ops)) {
             const mul_node = cgraph.nodes[@intCast(node_n + 1)].?;
             const mul_w = if (mul_node.src[0] == node)
-                impl.one(Tensor, mul_node.src[1])
+                ggml.impl.one(ggml.impl.c.ggml_tensor, mul_node.src[1])
             else
-                impl.one(Tensor, mul_node.src[0]);
+                ggml.impl.one(ggml.impl.c.ggml_tensor, mul_node.src[0]);
 
-            if (impl.one(Tensor, node.src[0]).type == c.GGML_TYPE_F32 and
-                mul_node.type == c.GGML_TYPE_F32 and
-                mul_w.type == c.GGML_TYPE_F32 and
+            if (ggml.impl.one(ggml.impl.c.ggml_tensor, node.src[0]).type == ggml.impl.c.GGML_TYPE_F32 and
+                mul_node.type == ggml.impl.c.GGML_TYPE_F32 and
+                mul_w.type == ggml.impl.c.GGML_TYPE_F32 and
                 mul_w.ne[0] == node.ne[0] and
                 mul_w.nb[0] == @sizeOf(f32))
             {
-                ggml_compute_forward_rms_norm_mul_fused(params, node, mul_node);
+                ggml.cpu.ops.norm.ggml_compute_forward_rms_norm_mul_fused(params, node, mul_node);
                 return 1;
             }
         }
@@ -807,7 +773,7 @@ fn tryFuseOps(
 ///
 /// Parameters:
 /// - `state`: this thread's slot in the pool.
-fn graphComputeThread(state: *ComputeState) void {
+fn graphComputeThread(state: *ggml.cpu.defs.ComputeState) void {
     const tp = state.threadpool;
 
     const cgraph = tp.cgraph.?;
@@ -815,9 +781,9 @@ fn graphComputeThread(state: *ComputeState) void {
 
     setNumaThreadAffinity(state.ith);
 
-    const params = ComputeParams{
+    const params = ggml.cpu.defs.ComputeParams{
         .ith = state.ith,
-        .nth = tp.n_graph.load(.monotonic) & defs.n_threads_mask,
+        .nth = tp.n_graph.load(.monotonic) & ggml.cpu.defs.n_threads_mask,
         .wsize = cplan.work_size,
         .wdata = cplan.work_data,
         .threadpool = tp,
@@ -828,8 +794,8 @@ fn graphComputeThread(state: *ComputeState) void {
     while (node_n < cgraph.n_nodes and tp.abort.load(.monotonic) != node_n) : (node_n += 1) {
         const node = cgraph.nodes[@intCast(node_n)].?;
 
-        if (impl.opIsEmpty(node.op)) continue;
-        if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
+        if (ggml.impl.opIsEmpty(node.op)) continue;
+        if ((node.flags & ggml.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
 
         // The C notes this belongs in `ggml_graph_plan`, so the decision is
         // made once rather than per thread per graph.
@@ -837,14 +803,14 @@ fn graphComputeThread(state: *ComputeState) void {
         if (n_fused > 0) {
             node_n += n_fused;
         } else {
-            forward.computeForward(&params, node);
+            ggml.cpu.forward.computeForward(&params, node);
         }
 
         if (state.ith == 0) {
             if (cplan.abort_callback) |cb| {
                 if (cb(cplan.abort_callback_data)) {
                     tp.abort.store(node_n + 1, .monotonic);
-                    tp.ec = c.GGML_STATUS_ABORTED;
+                    tp.ec = ggml.impl.c.GGML_STATUS_ABORTED;
                 }
             }
         }
@@ -859,7 +825,7 @@ fn graphComputeThread(state: *ComputeState) void {
 ///
 /// Return: true when the polling or sleeping loop should exit; `state.pending`
 /// says whether that is because there is work.
-fn threadReady(state: *ComputeState) bool {
+fn threadReady(state: *ggml.cpu.defs.ComputeState) bool {
     const threadpool = state.threadpool;
 
     if (state.pending or threadpool.stop.load(.monotonic) or threadpool.pause.load(.monotonic)) {
@@ -867,7 +833,7 @@ fn threadReady(state: *ComputeState) bool {
     }
 
     const n_graph = threadpool.n_graph.load(.monotonic);
-    const n_threads = n_graph & defs.n_threads_mask;
+    const n_threads = n_graph & ggml.cpu.defs.n_threads_mask;
     if (n_graph != state.last_graph) {
         // A graph running fewer threads than the pool has leaves the tail
         // idle, so `pending` is not simply true here.
@@ -886,14 +852,14 @@ fn threadReady(state: *ComputeState) bool {
 ///
 /// Adding zero rather than fencing, for the reason given in `ggml_barrier`.
 /// This is also exactly the C's thread-sanitizer fallback, on the same field.
-fn threadSync(state: *ComputeState) void {
+fn threadSync(state: *ggml.cpu.defs.ComputeState) void {
     _ = state.threadpool.n_graph.fetchAdd(0, .seq_cst);
 }
 
 /// Ports `ggml_graph_compute_poll_for_work` (ggml-cpu.c:3217 @b1b770d90).
 ///
 /// Return: whether work arrived before the polling budget ran out.
-fn pollForWork(state: *ComputeState) bool {
+fn pollForWork(state: *ggml.cpu.defs.ComputeState) bool {
     const threadpool = state.threadpool;
 
     // The C's note: this makes 0..100 a reasonable range for the polling
@@ -902,7 +868,7 @@ fn pollForWork(state: *ComputeState) bool {
 
     var i: u64 = 0;
     while (!threadReady(state) and i < n_rounds) : (i += 1) {
-        defs.cpuRelax();
+        ggml.cpu.defs.cpuRelax();
     }
 
     return state.pending;
@@ -912,7 +878,7 @@ fn pollForWork(state: *ComputeState) bool {
 ///
 /// Polls first, then sleeps on the condition variable. The hybrid is why the
 /// kickoff always takes the mutex.
-fn checkForWork(state: *ComputeState) bool {
+fn checkForWork(state: *ggml.cpu.defs.ComputeState) bool {
     const threadpool = state.threadpool;
 
     if (pollForWork(state)) {
@@ -922,7 +888,7 @@ fn checkForWork(state: *ComputeState) bool {
 
     lockShared(threadpool);
     while (!threadReady(state)) {
-        impl.printDebug("thread #%d waiting for work (sleeping)\n", .{state.ith});
+        ggml.impl.printDebug("thread #%d waiting for work (sleeping)\n", .{state.ith});
         condWait(threadpool);
     }
     unlockShared(threadpool);
@@ -934,7 +900,7 @@ fn checkForWork(state: *ComputeState) bool {
 ///
 /// The worker loop: sleep while paused, exit on stop, otherwise wait for a
 /// graph and run this thread's share of it.
-fn secondaryThread(state: *ComputeState) void {
+fn secondaryThread(state: *ggml.cpu.defs.ComputeState) void {
     const threadpool = state.threadpool;
 
     _ = threadApplyPriority(threadpool.prio);
@@ -944,12 +910,12 @@ fn secondaryThread(state: *ComputeState) void {
 
     while (true) {
         while (threadpool.pause.load(.monotonic)) {
-            impl.printDebug("thread #%d inside pause loop\n", .{state.ith});
+            ggml.impl.printDebug("thread #%d inside pause loop\n", .{state.ith});
             lockShared(threadpool);
             if (threadpool.pause.load(.monotonic)) {
                 condWait(threadpool);
             }
-            impl.printDebug("thread #%d resuming after wait\n", .{state.ith});
+            ggml.impl.printDebug("thread #%d resuming after wait\n", .{state.ith});
             unlockShared(threadpool);
         }
 
@@ -974,14 +940,14 @@ fn secondaryThread(state: *ComputeState) void {
 /// Parameters:
 /// - `threadpool`: the pool.
 /// - `n_threads`: how many of its threads this graph will use.
-fn kickoff(threadpool: *Threadpool, n_threads: c_int) void {
+fn kickoff(threadpool: *ggml.cpu.defs.Threadpool, n_threads: c_int) void {
     lock(threadpool);
 
     // Bump the graph counter and stamp in the active thread count.
-    var n_graph = threadpool.n_graph.load(.monotonic) >> defs.n_threads_bits;
-    n_graph = ((n_graph + 1) << defs.n_threads_bits) | (n_threads & defs.n_threads_mask);
+    var n_graph = threadpool.n_graph.load(.monotonic) >> ggml.cpu.defs.n_threads_bits;
+    n_graph = ((n_graph + 1) << ggml.cpu.defs.n_threads_bits) | (n_threads & ggml.cpu.defs.n_threads_mask);
 
-    impl.printDebug("compute-kickoff: n_threads %d n_graph %d\n", .{ n_threads, n_graph });
+    ggml.impl.printDebug("compute-kickoff: n_threads %d n_graph %d\n", .{ n_threads, n_graph });
 
     // Sequentially consistent because of the polling threads: `threadSync`
     // pairs with this store.
@@ -1011,17 +977,17 @@ fn kickoff(threadpool: *Threadpool, n_threads: c_int) void {
 ///
 /// Return: the graph's status; `GGML_STATUS_ABORTED` if the abort callback
 /// asked to stop.
-pub export fn ggml_graph_compute(cgraph: *const CGraph, cplan: *c.ggml_cplan) c.enum_ggml_status {
-    features.ggml_cpu_init();
+pub export fn ggml_graph_compute(cgraph: *const ggml.impl.CGraph, cplan: *ggml.impl.c.ggml_cplan) ggml.impl.c.enum_ggml_status {
+    ggml.cpu.features.ggml_cpu_init();
 
-    impl.assert(cplan.n_threads > 0, "cplan->n_threads > 0");
-    impl.assert(
+    ggml.impl.assert(cplan.n_threads > 0, "cplan->n_threads > 0");
+    ggml.impl.assert(
         cplan.work_size == 0 or cplan.work_data != null,
         "cplan->work_size == 0 || cplan->work_data != NULL",
     );
 
     var n_threads = cplan.n_threads;
-    var threadpool: *Threadpool = undefined;
+    var threadpool: *ggml.cpu.defs.Threadpool = undefined;
 
     var disposable_threadpool = false;
 
@@ -1032,15 +998,15 @@ pub export fn ggml_graph_compute(cgraph: *const CGraph, cplan: *c.ggml_cplan) c.
         threadpool.cplan = cplan;
         threadpool.current_chunk.store(0, .monotonic);
         threadpool.abort.store(-1, .monotonic);
-        threadpool.ec = c.GGML_STATUS_SUCCESS;
+        threadpool.ec = ggml.impl.c.GGML_STATUS_SUCCESS;
     } else {
         disposable_threadpool = true;
-        var ttp = ggml_threadpool_params_default(n_threads);
+        var ttp = ggml.runtime.ggml_threadpool_params_default(n_threads);
         threadpool = threadpoolNewImpl(&ttp, cgraph, cplan);
     }
 
     if (n_threads > threadpool.n_threads) {
-        impl.logWarn(
+        ggml.impl.logWarn(
             "cplan requested more threads (%d) than available (%d)\n",
             .{ n_threads, threadpool.n_threads },
         );
@@ -1073,12 +1039,12 @@ pub export fn ggml_graph_compute(cgraph: *const CGraph, cplan: *c.ggml_cplan) c.
 ///
 /// Return: the graph's status.
 pub export fn ggml_graph_compute_with_ctx(
-    ctx: *context.Context,
-    cgraph: *const CGraph,
+    ctx: *ggml.context.Context,
+    cgraph: *const ggml.impl.CGraph,
     n_threads: c_int,
-) c.enum_ggml_status {
-    var cplan = plan.ggml_graph_plan(cgraph, n_threads, null);
-    cplan.work_data = @ptrCast(context.ggml_new_buffer(ctx, cplan.work_size));
+) ggml.impl.c.enum_ggml_status {
+    var cplan = ggml.cpu.plan.ggml_graph_plan(cgraph, n_threads, null);
+    cplan.work_data = @ptrCast(ggml.context.ggml_new_buffer(ctx, cplan.work_size));
     return ggml_graph_compute(cgraph, &cplan);
 }
 
@@ -1092,7 +1058,7 @@ test {
 test "a single-threaded barrier returns without touching the counters" {
     // The early return is what makes the one-thread case free, and it reads
     // `n_graph`'s low bits to find out. A wrong mask here would spin forever.
-    var tp: Threadpool = undefined;
+    var tp: ggml.cpu.defs.Threadpool = undefined;
     tp.n_graph = .init(1);
     tp.n_barrier = .init(0);
     tp.n_barrier_passed = .init(0);
@@ -1106,14 +1072,14 @@ test "a single-threaded barrier returns without touching the counters" {
 test "the graph counter packs a count and a generation" {
     // `kickoff` shifts the generation up and ORs the thread count in; every
     // reader masks it back out. The two have to agree on the split.
-    const n_graph: c_int = ((3 + 1) << defs.n_threads_bits) | (5 & defs.n_threads_mask);
+    const n_graph: c_int = ((3 + 1) << ggml.cpu.defs.n_threads_bits) | (5 & ggml.cpu.defs.n_threads_mask);
 
-    try std.testing.expectEqual(@as(c_int, 5), n_graph & defs.n_threads_mask);
-    try std.testing.expectEqual(@as(c_int, 4), n_graph >> defs.n_threads_bits);
+    try std.testing.expectEqual(@as(c_int, 5), n_graph & ggml.cpu.defs.n_threads_mask);
+    try std.testing.expectEqual(@as(c_int, 4), n_graph >> ggml.cpu.defs.n_threads_bits);
 }
 
 test "the chunk cursor hands out each index once" {
-    var tp: Threadpool = undefined;
+    var tp: ggml.cpu.defs.Threadpool = undefined;
     tp.current_chunk = .init(0);
 
     ggml_threadpool_chunk_set(&tp, 4);
@@ -1123,11 +1089,11 @@ test "the chunk cursor hands out each index once" {
 }
 
 test "cpumask_next hands out one core each in strict mode" {
-    var global: [c.GGML_MAX_N_THREADS]bool = @splat(false);
+    var global: [ggml.impl.c.GGML_MAX_N_THREADS]bool = @splat(false);
     global[2] = true;
     global[5] = true;
 
-    var local: [c.GGML_MAX_N_THREADS]bool = @splat(false);
+    var local: [ggml.impl.c.GGML_MAX_N_THREADS]bool = @splat(false);
     var iter: i32 = 0;
 
     cpumaskNext(&global, &local, true, &iter);
@@ -1146,11 +1112,11 @@ test "cpumask_next hands out one core each in strict mode" {
 }
 
 test "cpumask_next copies the whole mask when not strict" {
-    var global: [c.GGML_MAX_N_THREADS]bool = @splat(false);
+    var global: [ggml.impl.c.GGML_MAX_N_THREADS]bool = @splat(false);
     global[2] = true;
     global[5] = true;
 
-    var local: [c.GGML_MAX_N_THREADS]bool = @splat(false);
+    var local: [ggml.impl.c.GGML_MAX_N_THREADS]bool = @splat(false);
     var iter: i32 = 0;
 
     cpumaskNext(&global, &local, false, &iter);
@@ -1160,7 +1126,7 @@ test "cpumask_next copies the whole mask when not strict" {
 }
 
 test "an all-zero cpumask is not valid, which is what leaves placement alone" {
-    var mask: [c.GGML_MAX_N_THREADS]bool = @splat(false);
+    var mask: [ggml.impl.c.GGML_MAX_N_THREADS]bool = @splat(false);
     try std.testing.expect(!cpumaskIsValid(&mask));
 
     mask[7] = true;
@@ -1168,7 +1134,7 @@ test "an all-zero cpumask is not valid, which is what leaves placement alone" {
 }
 
 test "a threadpool starts, pauses, resumes and frees" {
-    var tpp = ggml_threadpool_params_default(2);
+    var tpp = ggml.runtime.ggml_threadpool_params_default(2);
     const tp = ggml_threadpool_new(&tpp);
 
     try std.testing.expectEqual(@as(c_int, 2), tp.n_threads);
@@ -1191,6 +1157,6 @@ test "NUMA stays off, which keeps mul_mat's chunking on" {
 
     // Calling init on a platform with no NUMA support changes nothing, and
     // may be called more than once.
-    ggml_numa_init(c.GGML_NUMA_STRATEGY_DISABLED);
+    ggml_numa_init(ggml.impl.c.GGML_NUMA_STRATEGY_DISABLED);
     try std.testing.expect(!ggml_is_numa());
 }

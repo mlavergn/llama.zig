@@ -19,17 +19,8 @@
 //! rest reach it the way the C++ base class reaches the override.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const model_mod = @import("../model.zig");
-const module = @import("module.zig");
-const c = impl.c;
-const gpa = impl.gpa;
-const T = graph.T;
-const ne = graph.ne;
-const nb = graph.nb;
+const mtmd = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// `chunk_size` (mtmd/models/models.h:278 @b1b770d90), a static member of
 /// `mtmd_graph_gemma4a`: the model's `attention_chunk_size`.
@@ -41,48 +32,48 @@ pub const max_past: i64 = 12;
 /// Ports `list_gemma4a_state_slots` (gemma4a.cpp:13 @b1b770d90): the state of
 /// the streaming encoder, a zero state is a cold start. The caller frees the
 /// slice with `module.freeSlots`.
-pub fn listStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.Model) clip.Error![]module.StateSlot {
-    var slots: std.ArrayList(module.StateSlot) = .empty;
+pub fn listStateSlots(hparams: *const mtmd.model.Hparams, model: *const mtmd.model.Model) mtmd.clip.Error![]mtmd.models.StateSlot {
+    var slots: std.ArrayList(mtmd.models.StateSlot) = .empty;
     errdefer {
-        for (slots.items) |sl| gpa.free(sl.name);
-        slots.deinit(gpa);
+        for (slots.items) |sl| std.heap.c_allocator.free(sl.name);
+        slots.deinit(std.heap.c_allocator);
     }
 
     const n_mel: i64 = hparams.n_mel_bins;
-    const n_ch = ne(model.sscp_conv_w[0], 3);
+    const n_ch = mtmd.graph.ne(model.sscp_conv_w[0], 3);
 
-    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "pos", 0), .ne0 = 1, .ne1 = 1 });
-    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "sscp_0", 0), .ne0 = n_mel, .ne1 = 1 });
-    try slots.append(gpa, .{ .name = try gpa.dupeSentinel(u8, "sscp_1", 0), .ne0 = @divTrunc(n_mel - 1, 2) + 1, .ne1 = n_ch });
+    try slots.append(std.heap.c_allocator, .{ .name = try std.heap.c_allocator.dupeSentinel(u8, "pos", 0), .ne0 = 1, .ne1 = 1 });
+    try slots.append(std.heap.c_allocator, .{ .name = try std.heap.c_allocator.dupeSentinel(u8, "sscp_0", 0), .ne0 = n_mel, .ne1 = 1 });
+    try slots.append(std.heap.c_allocator, .{ .name = try std.heap.c_allocator.dupeSentinel(u8, "sscp_1", 0), .ne0 = @divTrunc(n_mel - 1, 2) + 1, .ne1 = n_ch });
     for (model.layers.items, 0..) |*layer, il| {
         if (layer.q_w != null and layer.k_w != null and layer.v_w != null and layer.o_w != null) {
-            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "k_%zu", .{il}), .ne0 = ne(layer.k_w, 1), .ne1 = max_past });
-            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "v_%zu", .{il}), .ne0 = ne(layer.v_w, 1), .ne1 = max_past });
+            try slots.append(std.heap.c_allocator, .{ .name = try mtmd.impl.stringFormat(std.heap.c_allocator, "k_%zu", .{il}), .ne0 = mtmd.graph.ne(layer.k_w, 1), .ne1 = max_past });
+            try slots.append(std.heap.c_allocator, .{ .name = try mtmd.impl.stringFormat(std.heap.c_allocator, "v_%zu", .{il}), .ne0 = mtmd.graph.ne(layer.v_w, 1), .ne1 = max_past });
         }
         if (layer.norm_conv_w != null and layer.conv_pw1_w != null and layer.conv_dw_w != null and layer.conv_pw2_w != null) {
-            try slots.append(gpa, .{ .name = try impl.stringFormat(gpa, "conv_%zu", .{il}), .ne0 = ne(layer.conv_dw_w, 0) - 1, .ne1 = ne(layer.conv_dw_w, 1) });
+            try slots.append(std.heap.c_allocator, .{ .name = try mtmd.impl.stringFormat(std.heap.c_allocator, "conv_%zu", .{il}), .ne0 = mtmd.graph.ne(layer.conv_dw_w, 0) - 1, .ne1 = mtmd.graph.ne(layer.conv_dw_w, 1) });
         }
     }
 
-    return slots.toOwnedSlice(gpa);
+    return slots.toOwnedSlice(std.heap.c_allocator);
 }
 
 /// A named `state_out` entry.
-const StateOut = struct { name: [:0]const u8, t: T };
+const StateOut = struct { name: [:0]const u8, t: mtmd.graph.T };
 
 /// The graph's state tensors, as the C++'s `build` and its `extract_blocks`
 /// lambda capture them.
 const State = struct {
     arena: std.mem.Allocator,
-    state_in: std.StringHashMapUnmanaged(T) = .empty,
+    state_in: std.StringHashMapUnmanaged(mtmd.graph.T) = .empty,
     state_out: std.ArrayList(StateOut) = .empty,
 
     /// `std::map::at` on a missing key: an uncaught `std::out_of_range`.
-    fn at(self: *const State, name: []const u8) T {
-        return self.state_in.get(name) orelse impl.abortUncaught("std::out_of_range", "map::at:  key not found");
+    fn at(self: *const State, name: []const u8) mtmd.graph.T {
+        return self.state_in.get(name) orelse mtmd.impl.abortUncaught("std::out_of_range", "map::at:  key not found");
     }
 
-    fn out(self: *State, name: [:0]const u8, t: T) clip.Error!void {
+    fn out(self: *State, name: [:0]const u8, t: mtmd.graph.T) mtmd.clip.Error!void {
         try self.state_out.append(self.arena, .{ .name = name, .t = t });
     }
 };
@@ -91,23 +82,23 @@ const State = struct {
 /// K/V block context through an overlapping view. The P cached positions go
 /// in front, the right is padded to S*B, then the view strides C in the
 /// block dimension.
-fn extractBlocks(g: *const graph.Graph, st: *State, t_in: T, name: [:0]const u8, S: i64, B: i64, P: i64, C: i64, n_pos: i64) clip.Error!T {
+fn extractBlocks(g: *const mtmd.graph.Graph, st: *State, t_in: mtmd.graph.T, name: [:0]const u8, S: i64, B: i64, P: i64, C: i64, n_pos: i64) mtmd.clip.Error!mtmd.graph.T {
     const ctx0 = g.ctx0;
-    var t = c.ggml_concat(ctx0, c.ggml_reshape_3d(ctx0, st.at(name), g.d_head, g.n_head, P), t_in, 2);
-    const tail = c.ggml_view_3d(ctx0, t, g.d_head, g.n_head, P, nb(t, 1), nb(t, 2), @as(usize, @intCast(n_pos)) * nb(t, 2));
-    try st.out(name, c.ggml_reshape_2d(ctx0, c.ggml_cont(ctx0, tail), @as(i64, g.d_head) * g.n_head, P));
-    t = c.ggml_pad_ext(ctx0, t, 0, 0, 0, 0, 0, @truncate(S * B - P - n_pos), 0, 0); // [D, H, S*B]
+    var t = mtmd.impl.c.ggml_concat(ctx0, mtmd.impl.c.ggml_reshape_3d(ctx0, st.at(name), g.d_head, g.n_head, P), t_in, 2);
+    const tail = mtmd.impl.c.ggml_view_3d(ctx0, t, g.d_head, g.n_head, P, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(t, 2));
+    try st.out(name, mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_cont(ctx0, tail), @as(i64, g.d_head) * g.n_head, P));
+    t = mtmd.impl.c.ggml_pad_ext(ctx0, t, 0, 0, 0, 0, 0, @truncate(S * B - P - n_pos), 0, 0); // [D, H, S*B]
     // Overlapping view: stride for B dim is C positions, not S
     // ne = [D, H, S, B], data_size = D*H*S*B*sizeof = source_nbytes (exact fit)
     // nb1=D*sizeof, nb2=D*H*sizeof, nb3=C*D*H*sizeof (overlap: C < S)
-    t = c.ggml_view_4d(ctx0, t, g.d_head, g.n_head, S, B, nb(t, 1), nb(t, 2), @as(usize, @intCast(C)) * nb(t, 2), 0);
-    t = c.ggml_cont(ctx0, t); // materialize overlapping windows
+    t = mtmd.impl.c.ggml_view_4d(ctx0, t, g.d_head, g.n_head, S, B, mtmd.graph.nb(t, 1), mtmd.graph.nb(t, 2), @as(usize, @intCast(C)) * mtmd.graph.nb(t, 2), 0);
+    t = mtmd.impl.c.ggml_cont(ctx0, t); // materialize overlapping windows
     return t;
 }
 
 /// Ports `build` (gemma4a.cpp:36 @b1b770d90), a member of
 /// `mtmd_graph_gemma4a`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     g.mm_hook = buildMm;
     const ctx0 = g.ctx0;
@@ -119,63 +110,63 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const res_weight: f32 = 0.5;
     const norm_eps: f32 = 1e-6;
 
-    var arena_state: std.heap.ArenaAllocator = .init(gpa);
+    var arena_state: std.heap.ArenaAllocator = .init(std.heap.c_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
     var st: State = .{ .arena = arena };
     {
         const slots = try listStateSlots(hparams, model);
-        defer module.freeSlots(slots);
+        defer mtmd.models.freeSlots(slots);
         for (slots) |slot| {
-            const t = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, slot.ne0, slot.ne1);
-            const name = try impl.stringFormat(arena, "state_in_%s", .{slot.name.ptr});
-            _ = c.ggml_set_name(t, name.ptr);
-            c.ggml_set_input(t);
+            const t = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+            const name = try mtmd.impl.stringFormat(arena, "state_in_%s", .{slot.name.ptr});
+            _ = mtmd.impl.c.ggml_set_name(t, name.ptr);
+            mtmd.impl.c.ggml_set_input(t);
             try st.state_in.put(arena, try arena.dupe(u8, slot.name), t);
         }
     }
 
     // 1. Input
     const inp = g.buildInpRaw(1);
-    var cur = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, inp));
+    var cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, inp));
 
     // 2. Subsampling Conv2D (padding=1, matching PyTorch)
     // in time, the left pad comes from the state
     {
         for (0..2) |i| {
-            const name = try impl.stringFormat(arena, "sscp_%zu", .{i});
-            const left = c.ggml_reshape_3d(ctx0, st.at(name), ne(cur, 0), 1, ne(cur, 2));
-            cur = c.ggml_concat(ctx0, left, cur, 1);
-            const last = c.ggml_view_3d(ctx0, cur, ne(cur, 0), 1, ne(cur, 2), nb(cur, 1), nb(cur, 2), @as(usize, @intCast(ne(cur, 1) - 1)) * nb(cur, 1));
-            try st.out(name, c.ggml_reshape_2d(ctx0, c.ggml_cont(ctx0, last), ne(cur, 0), ne(cur, 2)));
-            cur = c.ggml_pad_ext(ctx0, cur, 0, 0, 0, 1, 0, 0, 0, 0);
-            cur = c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 0, 1, 1);
+            const name = try mtmd.impl.stringFormat(arena, "sscp_%zu", .{i});
+            const left = mtmd.impl.c.ggml_reshape_3d(ctx0, st.at(name), mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2));
+            cur = mtmd.impl.c.ggml_concat(ctx0, left, cur, 1);
+            const last = mtmd.impl.c.ggml_view_3d(ctx0, cur, mtmd.graph.ne(cur, 0), 1, mtmd.graph.ne(cur, 2), mtmd.graph.nb(cur, 1), mtmd.graph.nb(cur, 2), @as(usize, @intCast(mtmd.graph.ne(cur, 1) - 1)) * mtmd.graph.nb(cur, 1));
+            try st.out(name, mtmd.impl.c.ggml_reshape_2d(ctx0, mtmd.impl.c.ggml_cont(ctx0, last), mtmd.graph.ne(cur, 0), mtmd.graph.ne(cur, 2)));
+            cur = mtmd.impl.c.ggml_pad_ext(ctx0, cur, 0, 0, 0, 1, 0, 0, 0, 0);
+            cur = mtmd.impl.c.ggml_conv_2d(ctx0, model.sscp_conv_w[i], cur, 2, 2, 1, 0, 1, 1);
             if (model.sscp_conv_b[i] != null) {
-                cur = c.ggml_add(ctx0, cur, model.sscp_conv_b[i]);
+                cur = mtmd.impl.c.ggml_add(ctx0, cur, model.sscp_conv_b[i]);
             }
             // nn.LayerNorm(channels): permute ch to ne[0], normalize, permute back
             if (model.sscp_norm_w[i] != null) {
-                cur = c.ggml_cont(ctx0, c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
-                cur = c.ggml_norm(ctx0, cur, norm_eps);
-                cur = c.ggml_mul(ctx0, cur, model.sscp_norm_w[i]);
-                cur = c.ggml_cont(ctx0, c.ggml_permute(ctx0, cur, 2, 0, 1, 3));
+                cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
+                cur = mtmd.impl.c.ggml_norm(ctx0, cur, norm_eps);
+                cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.sscp_norm_w[i]);
+                cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 2, 0, 1, 3));
             }
-            cur = c.ggml_relu(ctx0, cur);
+            cur = mtmd.impl.c.ggml_relu(ctx0, cur);
         }
         // Flatten [freq, time, ch, 1] -> [ch*freq, time]
-        cur = c.ggml_cont(ctx0, c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
-        cur = c.ggml_reshape_2d(ctx0, cur, ne(cur, 0) * ne(cur, 1), ne(cur, 2));
+        cur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, cur, 1, 2, 0, 3));
+        cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0) * mtmd.graph.ne(cur, 1), mtmd.graph.ne(cur, 2));
         if (model.sscp_inp_proj_w != null) {
             cur = g.buildMm(model.sscp_inp_proj_w, cur);
             if (model.sscp_inp_proj_b != null) {
-                cur = c.ggml_add(ctx0, cur, model.sscp_inp_proj_b);
+                cur = mtmd.impl.c.ggml_add(ctx0, cur, model.sscp_inp_proj_b);
             }
         }
     }
 
-    const n_pos = ne(cur, 1);
-    try st.out("pos", c.ggml_scale_bias(ctx0, st.at("pos"), 1.0, @floatFromInt(n_pos)));
+    const n_pos = mtmd.graph.ne(cur, 1);
+    try st.out("pos", mtmd.impl.c.ggml_scale_bias(ctx0, st.at("pos"), 1.0, @floatFromInt(n_pos)));
 
     // Chunked local attention parameters
     const C: i64 = chunk_size;
@@ -187,13 +178,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const pad_seq = Np - n_pos;
 
     // Input tensors: blocked RPE and blocked attention mask
-    const pos_emb = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, @as(i64, n_head) * d_head, R);
-    _ = c.ggml_set_name(pos_emb, "pos_emb");
-    c.ggml_set_input(pos_emb);
+    const pos_emb = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, @as(i64, n_head) * d_head, R);
+    _ = mtmd.impl.c.ggml_set_name(pos_emb, "pos_emb");
+    mtmd.impl.c.ggml_set_input(pos_emb);
 
-    const kq_mask = c.ggml_new_tensor_3d(ctx0, c.GGML_TYPE_F32, S, C, B);
-    _ = c.ggml_set_name(kq_mask, "kq_mask");
-    c.ggml_set_input(kq_mask);
+    const kq_mask = mtmd.impl.c.ggml_new_tensor_3d(ctx0, mtmd.impl.c.GGML_TYPE_F32, S, C, B);
+    _ = mtmd.impl.c.ggml_set_name(kq_mask, "kq_mask");
+    mtmd.impl.c.ggml_set_input(kq_mask);
 
     // 3. Conformer Blocks
     var il: c_int = 0;
@@ -208,13 +199,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             if (layer.ff_post_norm_w != null) {
                 cur = g.buildNorm(cur, layer.ff_post_norm_w, null, .rms, norm_eps, il);
             }
-            residual = c.ggml_add(ctx0, residual, c.ggml_scale(ctx0, cur, res_weight));
+            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, res_weight));
         }
 
         // Chunked local self-attention with RPE
         if (layer.q_w != null and layer.k_w != null and layer.v_w != null and layer.o_w != null) {
-            const q_scale = (1.0 / libm.sqrtfInt(d_head)) / libm.logf(2.0);
-            const k_scale = libm.logf(1.0 + libm.expf(1.0)) / libm.logf(2.0);
+            const q_scale = (1.0 / stdlib.libm.sqrtfInt(d_head)) / stdlib.libm.logf(2.0);
+            const k_scale = stdlib.libm.logf(1.0 + stdlib.libm.expf(1.0)) / stdlib.libm.logf(2.0);
             const softcap: f32 = 50.0;
 
             const attn_norm_w = if (layer.attn_pre_norm_w != null) layer.attn_pre_norm_w else layer.ln_1_w;
@@ -225,94 +216,94 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             var Vcur = g.buildMm(layer.v_w, cur);
 
             // [n_embd, n_pos] -> [D, H, N]
-            Qcur = c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_pos);
-            Kcur = c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_pos);
-            Vcur = c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_pos);
+            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, n_head, n_pos);
+            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, d_head, n_head, n_pos);
+            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, d_head, n_head, n_pos);
 
             // Q/K scaling
-            Qcur = c.ggml_scale(ctx0, Qcur, q_scale);
+            Qcur = mtmd.impl.c.ggml_scale(ctx0, Qcur, q_scale);
             if (layer.per_dim_scale_w != null) {
-                Qcur = c.ggml_mul(ctx0, Qcur, c.ggml_reshape_3d(ctx0, layer.per_dim_scale_w, d_head, 1, 1));
+                Qcur = mtmd.impl.c.ggml_mul(ctx0, Qcur, mtmd.impl.c.ggml_reshape_3d(ctx0, layer.per_dim_scale_w, d_head, 1, 1));
             }
-            Kcur = c.ggml_scale(ctx0, Kcur, k_scale);
+            Kcur = mtmd.impl.c.ggml_scale(ctx0, Kcur, k_scale);
             if (layer.per_dim_k_scale_w != null) {
-                Kcur = c.ggml_mul(ctx0, Kcur, c.ggml_reshape_3d(ctx0, layer.per_dim_k_scale_w, d_head, 1, 1));
+                Kcur = mtmd.impl.c.ggml_mul(ctx0, Kcur, mtmd.impl.c.ggml_reshape_3d(ctx0, layer.per_dim_k_scale_w, d_head, 1, 1));
             }
 
             // Q blocking: [D, H, N] -> pad to Np -> reshape [D, H, C, B]
             // ggml permute: ne[ax_i] = src->ne[i], so (0,3,1,2) sends H->3, C->1, B->2
-            Qcur = c.ggml_pad(ctx0, Qcur, 0, 0, @intCast(pad_seq), 0); // [D, H, Np]
-            Qcur = c.ggml_reshape_4d(ctx0, Qcur, d_head, n_head, C, B); // [D, H, C, B]
-            Qcur = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Qcur, 0, 3, 1, 2)); // [D, C, B, H]
+            Qcur = mtmd.impl.c.ggml_pad(ctx0, Qcur, 0, 0, @intCast(pad_seq), 0); // [D, H, Np]
+            Qcur = mtmd.impl.c.ggml_reshape_4d(ctx0, Qcur, d_head, n_head, C, B); // [D, H, C, B]
+            Qcur = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Qcur, 0, 3, 1, 2)); // [D, C, B, H]
 
-            var Kblk = try extractBlocks(g, &st, Kcur, try impl.stringFormat(arena, "k_%d", .{il}), S, B, P, C, n_pos);
+            var Kblk = try extractBlocks(g, &st, Kcur, try mtmd.impl.stringFormat(arena, "k_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [D, S, B, H] via permute(0,3,1,2)
-            Kblk = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Kblk, 0, 3, 1, 2));
+            Kblk = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Kblk, 0, 3, 1, 2));
 
-            var Vblk = try extractBlocks(g, &st, Vcur, try impl.stringFormat(arena, "v_%d", .{il}), S, B, P, C, n_pos);
+            var Vblk = try extractBlocks(g, &st, Vcur, try mtmd.impl.stringFormat(arena, "v_%d", .{il}), S, B, P, C, n_pos);
             // [D, H, S, B] -> [S, D, B, H] via permute(1,3,0,2)
-            Vblk = c.ggml_cont(ctx0, c.ggml_permute(ctx0, Vblk, 1, 3, 0, 2));
+            Vblk = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, Vblk, 1, 3, 0, 2));
 
             // Content attention: Q @ K^T
             // Kblk=[D,S,B,H], Qcur=[D,C,B,H] -> mul_mat contracts on D -> [S,C,B,H]
-            var matrix_ac = c.ggml_mul_mat(ctx0, Kblk, Qcur);
+            var matrix_ac = mtmd.impl.c.ggml_mul_mat(ctx0, Kblk, Qcur);
 
             // Relative position attention
             if (layer.attn_k_rel_w != null) {
                 // RPE: [n_embd, R] -> project -> [D, H, R] -> [D, R, H]
-                var p = c.ggml_mul_mat(ctx0, layer.attn_k_rel_w, pos_emb);
-                p = c.ggml_reshape_3d(ctx0, p, d_head, n_head, R);
-                p = c.ggml_cont(ctx0, c.ggml_permute(ctx0, p, 0, 2, 1, 3)); // [D, R, H]
+                var p = mtmd.impl.c.ggml_mul_mat(ctx0, layer.attn_k_rel_w, pos_emb);
+                p = mtmd.impl.c.ggml_reshape_3d(ctx0, p, d_head, n_head, R);
+                p = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, p, 0, 2, 1, 3)); // [D, R, H]
 
                 // Q_flat @ RPE^T: [D, C*B, H] @ [D, R, H] -> [R, C*B, H]
-                const Q_flat = c.ggml_reshape_3d(ctx0, Qcur, d_head, C * B, n_head);
-                var matrix_bd = c.ggml_mul_mat(ctx0, p, Q_flat); // [R, C*B, H]
-                matrix_bd = c.ggml_reshape_4d(ctx0, matrix_bd, R, C, B, n_head); // [R, C, B, H]
+                const Q_flat = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, d_head, C * B, n_head);
+                var matrix_bd = mtmd.impl.c.ggml_mul_mat(ctx0, p, Q_flat); // [R, C*B, H]
+                matrix_bd = mtmd.impl.c.ggml_reshape_4d(ctx0, matrix_bd, R, C, B, n_head); // [R, C, B, H]
 
                 // Blocked relative shift (appendix B of Transformer-XL)
                 {
-                    matrix_bd = c.ggml_pad(ctx0, matrix_bd, @intCast(S + 1 - R), 0, 0, 0); // [S+1, C, B, H]
-                    matrix_bd = c.ggml_reshape_3d(ctx0, matrix_bd, (S + 1) * C, B, n_head);
-                    matrix_bd = c.ggml_view_3d(ctx0, matrix_bd, C * S, B, n_head, nb(matrix_bd, 1), nb(matrix_bd, 2), 0);
-                    matrix_bd = c.ggml_cont(ctx0, matrix_bd); // [C*S, B, H]
-                    matrix_bd = c.ggml_reshape_4d(ctx0, matrix_bd, S, C, B, n_head); // [S, C, B, H]
+                    matrix_bd = mtmd.impl.c.ggml_pad(ctx0, matrix_bd, @intCast(S + 1 - R), 0, 0, 0); // [S+1, C, B, H]
+                    matrix_bd = mtmd.impl.c.ggml_reshape_3d(ctx0, matrix_bd, (S + 1) * C, B, n_head);
+                    matrix_bd = mtmd.impl.c.ggml_view_3d(ctx0, matrix_bd, C * S, B, n_head, mtmd.graph.nb(matrix_bd, 1), mtmd.graph.nb(matrix_bd, 2), 0);
+                    matrix_bd = mtmd.impl.c.ggml_cont(ctx0, matrix_bd); // [C*S, B, H]
+                    matrix_bd = mtmd.impl.c.ggml_reshape_4d(ctx0, matrix_bd, S, C, B, n_head); // [S, C, B, H]
                 }
 
-                matrix_ac = c.ggml_add(ctx0, matrix_ac, matrix_bd);
+                matrix_ac = mtmd.impl.c.ggml_add(ctx0, matrix_ac, matrix_bd);
             }
 
             var scores = matrix_ac; // [S, C, B, H]
 
             // Softcap
-            scores = c.ggml_scale(ctx0, scores, 1.0 / softcap);
-            scores = c.ggml_tanh(ctx0, scores);
-            scores = c.ggml_scale(ctx0, scores, softcap);
+            scores = mtmd.impl.c.ggml_scale(ctx0, scores, 1.0 / softcap);
+            scores = mtmd.impl.c.ggml_tanh(ctx0, scores);
+            scores = mtmd.impl.c.ggml_scale(ctx0, scores, softcap);
 
             // Blocked attention mask: [S, C, B] broadcasts over H
-            scores = c.ggml_add(ctx0, scores, kq_mask);
+            scores = mtmd.impl.c.ggml_add(ctx0, scores, kq_mask);
 
-            const attn = c.ggml_soft_max(ctx0, scores);
+            const attn = mtmd.impl.c.ggml_soft_max(ctx0, scores);
 
             // attn @ V: [S,C,B,H] @ [S,D,B,H] -> [D,C,B,H]
-            var x = c.ggml_mul_mat(ctx0, Vblk, attn);
+            var x = mtmd.impl.c.ggml_mul_mat(ctx0, Vblk, attn);
 
             // [D,C,B,H] -> [D,H,C,B] via permute(0,2,3,1) -> flatten -> trim
-            x = c.ggml_cont(ctx0, c.ggml_permute(ctx0, x, 0, 2, 3, 1));
-            x = c.ggml_cont_2d(ctx0, x, @as(i64, d_head) * n_head, C * B);
+            x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, x, 0, 2, 3, 1));
+            x = mtmd.impl.c.ggml_cont_2d(ctx0, x, @as(i64, d_head) * n_head, C * B);
             if (pad_seq > 0) {
-                x = c.ggml_view_2d(ctx0, x, @as(i64, d_head) * n_head, n_pos, nb(x, 1), 0);
-                x = c.ggml_cont(ctx0, x);
+                x = mtmd.impl.c.ggml_view_2d(ctx0, x, @as(i64, d_head) * n_head, n_pos, mtmd.graph.nb(x, 1), 0);
+                x = mtmd.impl.c.ggml_cont(ctx0, x);
             }
 
             x = g.buildMm(layer.o_w, x);
             if (layer.o_b != null) {
-                x = c.ggml_add(ctx0, x, layer.o_b);
+                x = mtmd.impl.c.ggml_add(ctx0, x, layer.o_b);
             }
 
             if (layer.attn_post_norm_w != null) {
                 x = g.buildNorm(x, layer.attn_post_norm_w, null, .rms, norm_eps, il);
             }
-            residual = c.ggml_add(ctx0, residual, x);
+            residual = mtmd.impl.c.ggml_add(ctx0, residual, x);
         }
 
         // Convolution Module
@@ -322,31 +313,31 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
             // GLU
             {
-                const d = @divTrunc(ne(x, 0), 2);
-                const gate = c.ggml_sigmoid(ctx0, c.ggml_cont(ctx0, c.ggml_view_2d(ctx0, x, d, ne(x, 1), nb(x, 1), @as(usize, @intCast(d)) * nb(x, 0))));
-                x = c.ggml_mul(ctx0, c.ggml_view_2d(ctx0, x, d, ne(x, 1), nb(x, 1), 0), gate);
-                x = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, x));
+                const d = @divTrunc(mtmd.graph.ne(x, 0), 2);
+                const gate = mtmd.impl.c.ggml_sigmoid(ctx0, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(d)) * mtmd.graph.nb(x, 0))));
+                x = mtmd.impl.c.ggml_mul(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), 0), gate);
+                x = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_transpose(ctx0, x));
             }
 
             // Causal depthwise Conv1D via ggml_ssm_conv, the left context comes from the state
             {
-                const d_conv = ne(layer.conv_dw_w, 0) - 1;
-                const name = try impl.stringFormat(arena, "conv_%d", .{il});
-                x = c.ggml_concat(ctx0, st.at(name), x, 0);
-                try st.out(name, c.ggml_cont(ctx0, c.ggml_view_2d(ctx0, x, d_conv, ne(x, 1), nb(x, 1), @as(usize, @intCast(n_pos)) * nb(x, 0))));
+                const d_conv = mtmd.graph.ne(layer.conv_dw_w, 0) - 1;
+                const name = try mtmd.impl.stringFormat(arena, "conv_%d", .{il});
+                x = mtmd.impl.c.ggml_concat(ctx0, st.at(name), x, 0);
+                try st.out(name, mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_view_2d(ctx0, x, d_conv, mtmd.graph.ne(x, 1), mtmd.graph.nb(x, 1), @as(usize, @intCast(n_pos)) * mtmd.graph.nb(x, 0))));
             }
-            x = c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
+            x = mtmd.impl.c.ggml_ssm_conv(ctx0, x, layer.conv_dw_w);
             if (layer.conv_dw_b != null) {
-                x = c.ggml_add(ctx0, x, layer.conv_dw_b);
+                x = mtmd.impl.c.ggml_add(ctx0, x, layer.conv_dw_b);
             }
 
             if (layer.conv_norm_w != null) {
-                x = c.ggml_rms_norm(ctx0, x, norm_eps);
-                x = c.ggml_mul(ctx0, x, layer.conv_norm_w);
+                x = mtmd.impl.c.ggml_rms_norm(ctx0, x, norm_eps);
+                x = mtmd.impl.c.ggml_mul(ctx0, x, layer.conv_norm_w);
             }
-            x = c.ggml_silu(ctx0, x);
+            x = mtmd.impl.c.ggml_silu(ctx0, x);
             x = g.buildMm(layer.conv_pw2_w, x);
-            residual = c.ggml_add(ctx0, residual, x);
+            residual = mtmd.impl.c.ggml_add(ctx0, residual, x);
         }
 
         // FFN 2 (half-step)
@@ -356,7 +347,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
             if (layer.ff_post_norm_1_w != null) {
                 cur = g.buildNorm(cur, layer.ff_post_norm_1_w, null, .rms, norm_eps, il);
             }
-            residual = c.ggml_add(ctx0, residual, c.ggml_scale(ctx0, cur, res_weight));
+            residual = mtmd.impl.c.ggml_add(ctx0, residual, mtmd.impl.c.ggml_scale(ctx0, cur, res_weight));
         }
 
         // Layer output norm
@@ -367,14 +358,14 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     if (model.audio_out_proj_w != null) {
         cur = g.buildMm(model.audio_out_proj_w, cur);
         if (model.audio_out_proj_b != null) {
-            cur = c.ggml_add(ctx0, cur, model.audio_out_proj_b);
+            cur = mtmd.impl.c.ggml_add(ctx0, cur, model.audio_out_proj_b);
         }
     }
 
     // 5. Audio Multimodal Embedder
-    cur = c.ggml_rms_norm(ctx0, cur, norm_eps);
+    cur = mtmd.impl.c.ggml_rms_norm(ctx0, cur, norm_eps);
     if (model.mm_soft_emb_norm_w != null) {
-        cur = c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
+        cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_soft_emb_norm_w);
     }
     if (model.mm_input_proj_w != null) {
         cur = g.buildMm(model.mm_input_proj_w, cur);
@@ -382,13 +373,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     // the embeddings must stay the last node
     for (st.state_out.items) |so| {
-        const name = try impl.stringFormat(arena, "state_out_%s", .{so.name.ptr});
-        _ = c.ggml_set_name(so.t, name.ptr);
-        c.ggml_set_output(so.t);
-        c.ggml_build_forward_expand(g.gf, so.t);
+        const name = try mtmd.impl.stringFormat(arena, "state_out_%s", .{so.name.ptr});
+        _ = mtmd.impl.c.ggml_set_name(so.t, name.ptr);
+        mtmd.impl.c.ggml_set_output(so.t);
+        mtmd.impl.c.ggml_build_forward_expand(g.gf, so.t);
     }
 
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 
@@ -402,12 +393,12 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 ///   - `x`: the input.
 ///
 /// Return: `w @ x`, clamped where the model says so.
-pub fn buildMm(g: *const graph.Graph, w: T, x: T) T {
+pub fn buildMm(g: *const mtmd.graph.Graph, w: mtmd.graph.T, x: mtmd.graph.T) mtmd.graph.T {
     const ctx0 = g.ctx0;
-    const ci = g.model.clamp_info_map.get(std.mem.sliceTo(&w.?.name, 0)) orelse return c.ggml_mul_mat(ctx0, w, x);
-    const clamped = c.ggml_clamp(ctx0, x, ci.inp_min, ci.inp_max);
-    const out = c.ggml_mul_mat(ctx0, w, clamped);
-    return c.ggml_clamp(ctx0, out, ci.out_min, ci.out_max);
+    const ci = g.model.clamp_info_map.get(std.mem.sliceTo(&w.?.name, 0)) orelse return mtmd.impl.c.ggml_mul_mat(ctx0, w, x);
+    const clamped = mtmd.impl.c.ggml_clamp(ctx0, x, ci.inp_min, ci.inp_max);
+    const out = mtmd.impl.c.ggml_mul_mat(ctx0, w, clamped);
+    return mtmd.impl.c.ggml_clamp(ctx0, out, ci.out_min, ci.out_max);
 }
 
 // -----------------------------------------------------------------------------

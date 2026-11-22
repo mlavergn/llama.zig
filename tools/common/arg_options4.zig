@@ -18,26 +18,14 @@
 //! is where this port refuses it.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const num = @import("stdlib").num;
 const c = @import("tools_h");
-const arg = @import("arg.zig");
-const params_mod = @import("params.zig");
-const io = @import("io.zig");
-const options1 = @import("arg_options.zig");
-const options2 = @import("arg_options2.zig");
 
-const Params = params_mod.Params;
-const SpeculativeType = params_mod.SpeculativeType;
-const Arg = arg.Arg;
-const Context = arg.Context;
-const throwStr = arg.throwStr;
 const S = [:0]const u8;
 
-const kvCacheTypeFromStr = options2.kvCacheTypeFromStr;
-
 /// The examples nearly every speculative option takes.
-const spec_examples = [_]params_mod.Example{ .speculative, .server, .cli };
+const spec_examples = [_]mod.params.Example{ .speculative, .server, .cli };
 
 fn tf(b: bool) [*:0]const u8 {
     return if (b) "true" else "false";
@@ -45,12 +33,12 @@ fn tf(b: bool) [*:0]const u8 {
 
 /// Ports `arg_removed` (arg.cpp:321 @b1b770d90).
 fn argRemoved(comptime msg: []const u8) error{Throw} {
-    return throwStr("the argument has been removed. " ++ msg);
+    return mod.arg.throwStr("the argument has been removed. " ++ msg);
 }
 
 /// Ports `common_speculative_type_from_name_map` (speculative.cpp:72 @b1b770d90),
 /// in the `std::map`'s key order.
-const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
+const type_from_name_map = [_]struct { []const u8, mod.params.SpeculativeType }{
     .{ "draft-dflash", .draft_dflash }, .{ "draft-dspark", .draft_dspark },
     .{ "draft-eagle3", .draft_eagle3 }, .{ "draft-mtp", .draft_mtp },
     .{ "draft-simple", .draft_simple }, .{ "ngram-cache", .ngram_cache },
@@ -60,7 +48,7 @@ const type_from_name_map = [_]struct { []const u8, SpeculativeType }{
 };
 
 /// Ports `common_speculative_type_name_str` (speculative.cpp:2512 @b1b770d90).
-fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const u8 {
+fn typeNameStr(a: std.mem.Allocator, types: []const mod.params.SpeculativeType) ![:0]const u8 {
     var result: std.ArrayList(u8) = .empty;
     for (types, 0..) |t, i| {
         if (i > 0) try result.append(a, ',');
@@ -71,21 +59,21 @@ fn typeNameStr(a: std.mem.Allocator, types: []const SpeculativeType) ![:0]const 
 
 /// Ports `common_speculative_all_types_str` (speculative.cpp:2524 @b1b770d90).
 fn allTypesStr(a: std.mem.Allocator) ![:0]const u8 {
-    var types: [@backingInt(SpeculativeType.count)]SpeculativeType = undefined;
+    var types: [@backingInt(mod.params.SpeculativeType.count)]mod.params.SpeculativeType = undefined;
     for (&types, 0..) |*t, i| t.* = @fromBackingInt(@intCast(i));
     return typeNameStr(a, &types);
 }
 
 /// Ports `common_speculative_types_from_names` (speculative.cpp:2553 @b1b770d90).
-fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayList(SpeculativeType) {
-    var types: std.ArrayList(SpeculativeType) = .empty;
+fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayList(mod.params.SpeculativeType) {
+    var types: std.ArrayList(mod.params.SpeculativeType) = .empty;
     for (names) |name| {
         const found = for (type_from_name_map) |e| {
             if (std.mem.eql(u8, e[0], name)) break e[1];
         } else null;
         if (found) |t| {
             if (t == .none) {
-                var only: std.ArrayList(SpeculativeType) = .empty;
+                var only: std.ArrayList(mod.params.SpeculativeType) = .empty;
                 try only.append(a, .none);
                 return only;
             }
@@ -93,7 +81,7 @@ fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayLis
             continue;
         }
         var buf: [4096]u8 = undefined;
-        return throwStr(std.fmt.bufPrint(&buf, "unknown speculative type: {s}", .{name}) catch "unknown speculative type");
+        return mod.arg.throwStr(std.fmt.bufPrint(&buf, "unknown speculative type: {s}", .{name}) catch "unknown speculative type");
     }
     return types;
 }
@@ -102,352 +90,352 @@ fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) !std.ArrayLis
 ///
 /// Return: the value and how many bytes it read.
 fn stod(text: []const u8) !struct { f64, usize } {
-    const p = num.strtod(std.mem.sliceTo(text, 0));
-    if (p.range) return throwStr("stod: out of range");
-    if (p.end == 0) return throwStr("stod: no conversion");
+    const p = stdlib.num.strtod(std.mem.sliceTo(text, 0));
+    if (p.range) return mod.arg.throwStr("stod: out of range");
+    if (p.end == 0) return mod.arg.throwStr("stod: no conversion");
     return .{ p.value, p.end };
 }
 
 /// The handler of the `--spec-ngram-*-size-n` and `-size-m` options: a
 /// size in [1, 1024], or `msg`.
 fn ngramSize(value: c_int, comptime msg: []const u8) !u16 {
-    if (value < 1 or value > 1024) return throwStr(msg);
+    if (value < 1 or value > 1024) return mod.arg.throwStr(msg);
     return @intCast(value);
 }
 
 /// The handler of the `--spec-ngram-*-min-hits` options: at least 1.
 fn ngramMinHits(value: c_int) !u16 {
-    if (value < 1) return throwStr("ngram min hits must be at least 1");
+    if (value < 1) return mod.arg.throwStr("ngram min hits must be at least 1");
     return @truncate(@as(c_uint, @bitCast(value)));
 }
 
 /// The table, part four.
-pub fn add(ctx: *Context) !void {
+pub fn add(ctx: *mod.arg.Context) !void {
     const p = ctx.params;
-    const kv_types = try options2.allKvCacheTypes(p.arena);
+    const kv_types = try mod.arg_options2.allKvCacheTypes(p.arena);
 
     //
     // speculative parameters
     //
 
     // arg.cpp:4030
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft" }, .value_hint = "<user>/<model>[:quant]", .help = "Same as --hf-repo, but for the draft model (default: unused)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.mparams.hf_repo = try arg.dupe(q, value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft" }, .value_hint = "<user>/<model>[:quant]", .help = "Same as --hf-repo, but for the draft model (default: unused)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.mparams.hf_repo = try mod.arg.dupe(q, value);
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_HF_REPO"));
     // arg.cpp:4037
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-threads", "-td", "--threads-draft" }, .value_hint = "N", .help = "number of threads to use during generation (default: same as --threads)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-threads", "-td", "--threads-draft" }, .value_hint = "N", .help = "number of threads to use during generation (default: same as --threads)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams.n_threads = value;
             if (q.speculative.draft.cpuparams.n_threads <= 0) q.speculative.draft.cpuparams.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4047
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-threads-batch", "-tbd", "--threads-batch-draft" }, .value_hint = "N", .help = "number of threads to use during batch and prompt processing (default: same as --threads-draft)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-threads-batch", "-tbd", "--threads-batch-draft" }, .value_hint = "N", .help = "number of threads to use during batch and prompt processing (default: same as --threads-draft)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams_batch.n_threads = value;
             if (q.speculative.draft.cpuparams_batch.n_threads <= 0) q.speculative.draft.cpuparams_batch.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4057
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-mask", "-Cd", "--cpu-mask-draft" }, .value_hint = "M", .help = "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)", .handler = .{ .string = struct {
-        fn f(q: *Params, mask: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-mask", "-Cd", "--cpu-mask-draft" }, .value_hint = "M", .help = "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, mask: S) !void {
             q.speculative.draft.cpuparams.mask_valid = true;
-            if (!options1.parseCpuMask(mask, &q.speculative.draft.cpuparams.cpumask)) return throwStr("invalid cpumask");
+            if (!mod.arg_options.parseCpuMask(mask, &q.speculative.draft.cpuparams.cpumask)) return mod.arg.throwStr("invalid cpumask");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4067
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-range", "-Crd", "--cpu-range-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft", .handler = .{ .string = struct {
-        fn f(q: *Params, range: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-range", "-Crd", "--cpu-range-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, range: S) !void {
             q.speculative.draft.cpuparams.mask_valid = true;
-            if (!try options1.parseCpuRange(range, &q.speculative.draft.cpuparams.cpumask)) return throwStr("invalid range");
+            if (!try mod.arg_options.parseCpuRange(range, &q.speculative.draft.cpuparams.cpumask)) return mod.arg.throwStr("invalid range");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4077
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-strict", "--cpu-strict-draft" }, .value_hint = "<0|1>", .help = "Use strict CPU placement for draft model (default: same as --cpu-strict)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-strict", "--cpu-strict-draft" }, .value_hint = "<0|1>", .help = "Use strict CPU placement for draft model (default: same as --cpu-strict)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams.strict_cpu = value != 0;
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4084
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-prio", "--prio-draft" }, .value_hint = "N", .help = try ctx.fmt("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", .{@as(c_int, @intCast(p.speculative.draft.cpuparams.priority))}), .handler = .{ .int = struct {
-        fn f(q: *Params, prio: c_int) !void {
-            if (prio < 0 or prio > 3) return throwStr("invalid value");
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-prio", "--prio-draft" }, .value_hint = "N", .help = try ctx.fmt("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", .{@as(c_int, @intCast(p.speculative.draft.cpuparams.priority))}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, prio: c_int) !void {
+            if (prio < 0 or prio > 3) return mod.arg.throwStr("invalid value");
             q.speculative.draft.cpuparams.priority = @intCast(prio);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4094
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-poll", "--poll-draft" }, .value_hint = "<0|1>", .help = "Use polling to wait for draft model work (default: same as --poll)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-poll", "--poll-draft" }, .value_hint = "<0|1>", .help = "Use polling to wait for draft model work (default: same as --poll)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams.poll = @bitCast(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4101
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-mask-batch", "-Cbd", "--cpu-mask-batch-draft" }, .value_hint = "M", .help = "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)", .handler = .{ .string = struct {
-        fn f(q: *Params, mask: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-mask-batch", "-Cbd", "--cpu-mask-batch-draft" }, .value_hint = "M", .help = "Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, mask: S) !void {
             q.speculative.draft.cpuparams_batch.mask_valid = true;
-            if (!options1.parseCpuMask(mask, &q.speculative.draft.cpuparams_batch.cpumask)) return throwStr("invalid cpumask");
+            if (!mod.arg_options.parseCpuMask(mask, &q.speculative.draft.cpuparams_batch.cpumask)) return mod.arg.throwStr("invalid cpumask");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4111
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-range-batch", "-Crbd", "--cpu-range-batch-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft-batch)", .handler = .{ .string = struct {
-        fn f(q: *Params, range: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-range-batch", "-Crbd", "--cpu-range-batch-draft" }, .value_hint = "lo-hi", .help = "Ranges of CPUs for affinity. Complements --cpu-mask-draft-batch)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, range: S) !void {
             q.speculative.draft.cpuparams_batch.mask_valid = true;
-            if (!try options1.parseCpuRange(range, &q.speculative.draft.cpuparams_batch.cpumask)) return throwStr("invalid cpumask");
+            if (!try mod.arg_options.parseCpuRange(range, &q.speculative.draft.cpuparams_batch.cpumask)) return mod.arg.throwStr("invalid cpumask");
         }
     }.f } }).setSpec().setExamples(&.{.speculative}));
     // arg.cpp:4121
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-cpu-strict-batch", "--cpu-strict-batch-draft" }, .value_hint = "<0|1>", .help = "Use strict CPU placement for draft model (default: --cpu-strict-draft)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-cpu-strict-batch", "--cpu-strict-batch-draft" }, .value_hint = "<0|1>", .help = "Use strict CPU placement for draft model (default: --cpu-strict-draft)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams_batch.strict_cpu = value != 0;
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4128
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-prio-batch", "--prio-batch-draft" }, .value_hint = "N", .help = try ctx.fmt("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", .{@as(c_int, @intCast(p.speculative.draft.cpuparams_batch.priority))}), .handler = .{ .int = struct {
-        fn f(q: *Params, prio: c_int) !void {
-            if (prio < 0 or prio > 3) return throwStr("invalid value");
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-prio-batch", "--prio-batch-draft" }, .value_hint = "N", .help = try ctx.fmt("set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: %d)\n", .{@as(c_int, @intCast(p.speculative.draft.cpuparams_batch.priority))}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, prio: c_int) !void {
+            if (prio < 0 or prio > 3) return mod.arg.throwStr("invalid value");
             q.speculative.draft.cpuparams_batch.priority = @intCast(prio);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4138
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-poll-batch", "--poll-batch-draft" }, .value_hint = "<0|1>", .help = "Use polling to wait for draft model work (default: --poll-draft)", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-poll-batch", "--poll-batch-draft" }, .value_hint = "<0|1>", .help = "Use polling to wait for draft model work (default: --poll-draft)", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.cpuparams_batch.poll = @bitCast(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4145
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-type-k", "-ctkd", "--cache-type-k-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_k) }), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.cache_type_k = try kvCacheTypeFromStr(value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-k", "-ctkd", "--cache-type-k-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for K for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_k) }), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.cache_type_k = try mod.arg_options2.kvCacheTypeFromStr(value);
         }
     }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K"));
     // arg.cpp:4158
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-type-v", "-ctvd", "--cache-type-v-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_v) }), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.cache_type_v = try kvCacheTypeFromStr(value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-type-v", "-ctvd", "--cache-type-v-draft" }, .value_hint = "TYPE", .help = try ctx.fmt("KV cache data type for V for the draft model\nallowed values: %s\n(default: %s)", .{ kv_types.ptr, c.ggml_type_name(p.speculative.draft.cache_type_v) }), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.cache_type_v = try mod.arg_options2.kvCacheTypeFromStr(value);
         }
     }.f } }).setEnv("LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V"));
     // arg.cpp:4171
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-override-tensor", "-otd", "--override-tensor-draft" }, .value_hint = "<tensor name pattern>=<buffer type>,...", .help = "override tensor buffer type for draft model", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            try options2.parseTensorBufferOverrides(q, value, &q.speculative.draft.tensor_buft_overrides);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-override-tensor", "-otd", "--override-tensor-draft" }, .value_hint = "<tensor name pattern>=<buffer type>,...", .help = "override tensor buffer type for draft model", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            try mod.arg_options2.parseTensorBufferOverrides(q, value, &q.speculative.draft.tensor_buft_overrides);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4177
-    try ctx.add((Arg{
+    try ctx.add((mod.arg.Arg{
         .args = &.{ "--spec-draft-cpu-moe", "-cmoed", "--cpu-moe-draft" },
         .help = "keep all Mixture of Experts (MoE) weights in the CPU for the draft model",
         .handler = .{
             .void_ = struct {
-                fn f(q: *Params) !void {
+                fn f(q: *mod.params.Params) !void {
                     // `llm_ffn_exps_cpu_override` (common/common.h:1287 @b1b770d90)
-                    try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
+                    try q.speculative.draft.tensor_buft_overrides.append(q.arena, .{ .pattern = mod.arg_options2.llm_ffn_exps_regex, .buft = c.ggml_backend_cpu_buffer_type() });
                 }
             }.f,
         },
     }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_CPU_MOE"));
     // arg.cpp:4184
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-n-cpu-moe", "--spec-draft-ncmoe", "-ncmoed", "--n-cpu-moe-draft" }, .value_hint = "N", .help = "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU for the draft model", .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0) return throwStr("invalid value");
-            try options2.llmAddNCpuFfnOverrides(q, value, options2.llm_ffn_exps_regex, &q.speculative.draft.tensor_buft_overrides);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-n-cpu-moe", "--spec-draft-ncmoe", "-ncmoed", "--n-cpu-moe-draft" }, .value_hint = "N", .help = "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU for the draft model", .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 0) return mod.arg.throwStr("invalid value");
+            try mod.arg_options2.llmAddNCpuFfnOverrides(q, value, mod.arg_options2.llm_ffn_exps_regex, &q.speculative.draft.tensor_buft_overrides);
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_N_CPU_MOE"));
     // arg.cpp:4195
-    try ctx.add((Arg{ .args = &.{"--spec-draft-n-max"}, .value_hint = "N", .help = try ctx.fmt("number of tokens to draft for speculative decoding (default: %d)", .{p.speculative.draft.n_max}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0) return throwStr("invalid value");
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-draft-n-max"}, .value_hint = "N", .help = try ctx.fmt("number of tokens to draft for speculative decoding (default: %d)", .{p.speculative.draft.n_max}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 0) return mod.arg.throwStr("invalid value");
             q.speculative.draft.n_max = value;
         }
     }.f } }).setSpec().setExamples(&.{ .speculative, .lookup, .server, .cli }).setEnv("LLAMA_ARG_SPEC_DRAFT_N_MAX"));
     // arg.cpp:4205
-    try ctx.add((Arg{ .args = &.{"--spec-draft-n-min"}, .value_hint = "N", .help = try ctx.fmt("minimum number of draft tokens to use for speculative decoding (default: %d)", .{p.speculative.draft.n_min}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-draft-n-min"}, .value_hint = "N", .help = try ctx.fmt("minimum number of draft tokens to use for speculative decoding (default: %d)", .{p.speculative.draft.n_min}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.draft.n_min = value;
         }
     }.f } }).setSpec().setExamples(&.{ .speculative, .lookup, .server, .cli }).setEnv("LLAMA_ARG_SPEC_DRAFT_N_MIN"));
     // arg.cpp:4212
-    try ctx.add((Arg{ .args = &.{"--spec-draft-n-ubatch"}, .value_hint = "N", .help = try ctx.fmt("physical maximum batch size of the draft context, use a smaller value to spare VRAM (default: %d - same as --n-ubatch)", .{p.speculative.draft.n_ubatch}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0) return throwStr("invalid value");
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-draft-n-ubatch"}, .value_hint = "N", .help = try ctx.fmt("physical maximum batch size of the draft context, use a smaller value to spare VRAM (default: %d - same as --n-ubatch)", .{p.speculative.draft.n_ubatch}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 0) return mod.arg.throwStr("invalid value");
             q.speculative.draft.n_ubatch = value;
         }
     }.f } }).setSpec().setExamples(&.{ .speculative, .server, .cli }).setEnv("LLAMA_ARG_SPEC_DRAFT_N_UBATCH"));
     // arg.cpp:4222
-    try ctx.add((Arg{ .args = &.{"--spec-synth-len"}, .value_hint = "L", .help = "target mean synthetic acceptance length, including the target token (benchmarking only)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-synth-len"}, .value_hint = "L", .help = "target mean synthetic acceptance length, including the target token (benchmarking only)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
             const text = stdlib.strings.strip(value);
             const length, const pos = try stod(text);
-            if (pos != text.len or length == -1.0) return throwStr("invalid value");
+            if (pos != text.len or length == -1.0) return mod.arg.throwStr("invalid value");
             q.speculative.synth_len = length;
         }
     }.f } }).setSpec().setExamples(&.{ .server, .cli }).setEnv("LLAMA_ARG_SPEC_SYNTH_LEN"));
     // arg.cpp:4235
-    try ctx.add((Arg{ .args = &.{"--spec-synth-rates"}, .value_hint = "P0,P1,...", .help = "comma-separated unconditional per-position synthetic acceptance probabilities (benchmarking only)", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-synth-rates"}, .value_hint = "P0,P1,...", .help = "comma-separated unconditional per-position synthetic acceptance probabilities (benchmarking only)", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
             const values = try stdlib.strings.split(q.arena, value, ',');
             var rates: std.ArrayList(f64) = .empty;
             for (values.items) |raw| {
                 const text = stdlib.strings.strip(raw);
                 const rate, const pos = try stod(text);
-                if (pos != text.len) return throwStr("invalid value");
+                if (pos != text.len) return mod.arg.throwStr("invalid value");
                 try rates.append(q.arena, rate);
             }
             q.speculative.synth_rates = rates;
         }
     }.f } }).setSpec().setExamples(&.{ .server, .cli }).setEnv("LLAMA_ARG_SPEC_SYNTH_RATES"));
     // arg.cpp:4255
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-p-split", "--draft-p-split" }, .value_hint = "P", .help = try ctx.fmt("speculative decoding split probability (default: %.2f)", .{@as(f64, p.speculative.draft.p_split)}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.p_split = try arg.stof(value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-p-split", "--draft-p-split" }, .value_hint = "P", .help = try ctx.fmt("speculative decoding split probability (default: %.2f)", .{@as(f64, p.speculative.draft.p_split)}), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.p_split = try mod.arg.stof(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_P_SPLIT"));
     // arg.cpp:4262
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-p-min", "--draft-p-min" }, .value_hint = "P", .help = try ctx.fmt("minimum speculative decoding probability (greedy) (default: %.2f)", .{@as(f64, p.speculative.draft.p_min)}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.p_min = try arg.stof(value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-p-min", "--draft-p-min" }, .value_hint = "P", .help = try ctx.fmt("minimum speculative decoding probability (greedy) (default: %.2f)", .{@as(f64, p.speculative.draft.p_min)}), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.p_min = try mod.arg.stof(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_P_MIN"));
     // arg.cpp:4269
-    try ctx.add((Arg{ .args = &.{"--spec-draft-backend-sampling"}, .args_neg = &.{"--no-spec-draft-backend-sampling"}, .help = try ctx.fmt("offload draft sampling to the backend (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.backend_sampling) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
-        fn f(q: *Params, value: bool) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-draft-backend-sampling"}, .args_neg = &.{"--no-spec-draft-backend-sampling"}, .help = try ctx.fmt("offload draft sampling to the backend (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.backend_sampling) "enabled" else "disabled")}), .handler = .{ .bool_ = struct {
+        fn f(q: *mod.params.Params, value: bool) !void {
             q.speculative.draft.backend_sampling = value;
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_BACKEND_SAMPLING"));
     // arg.cpp:4278
-    try ctx.add((Arg{ .args = &.{"--spec-draft-sampling"}, .value_hint = "{greedy,probabilistic}", .help = try ctx.fmt("how the draft is sampled: greedy takes its argmax, probabilistic samples it and has the target verify by rejection sampling (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.probabilistic) "probabilistic" else "greedy")}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-draft-sampling"}, .value_hint = "{greedy,probabilistic}", .help = try ctx.fmt("how the draft is sampled: greedy takes its argmax, probabilistic samples it and has the target verify by rejection sampling (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.probabilistic) "probabilistic" else "greedy")}), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "greedy")) {
                 q.speculative.draft.probabilistic = false;
             } else if (std.mem.eql(u8, value, "probabilistic")) {
                 q.speculative.draft.probabilistic = true;
             } else {
-                return arg.throwStr("invalid value, must be one of: greedy, probabilistic");
+                return mod.arg.throwStr("invalid value, must be one of: greedy, probabilistic");
             }
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_DRAFT_SAMPLING"));
     // arg.cpp:4293
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-device", "-devd", "--device-draft" }, .value_hint = "<dev1,dev2,..>", .help = "comma-separated list of devices to use for offloading the draft model (none = don't offload, default: follows --device)\nuse --list-devices to see a list of available devices", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.speculative.draft.devices = try options2.parseDeviceList(q, value);
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-device", "-devd", "--device-draft" }, .value_hint = "<dev1,dev2,..>", .help = "comma-separated list of devices to use for offloading the draft model (none = don't offload, default: follows --device)\nuse --list-devices to see a list of available devices", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.speculative.draft.devices = try mod.arg_options2.parseDeviceList(q, value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4302
     std.debug.assert(p.speculative.draft.n_gpu_layers < 0); // string_format would need to be extended for a default >= 0
-    try ctx.add((Arg{ .args = &.{ "--spec-draft-ngl", "-ngld", "--gpu-layers-draft", "--n-gpu-layers-draft" }, .value_hint = "N", .help = try ctx.fmt("max. number of draft model layers to store in VRAM, either an exact number, 'auto', or 'all' (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.n_gpu_layers == -1) "auto" else "all")}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--spec-draft-ngl", "-ngld", "--gpu-layers-draft", "--n-gpu-layers-draft" }, .value_hint = "N", .help = try ctx.fmt("max. number of draft model layers to store in VRAM, either an exact number, 'auto', or 'all' (default: %s)", .{@as([*:0]const u8, if (p.speculative.draft.n_gpu_layers == -1) "auto" else "all")}), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
             if (std.mem.eql(u8, value, "auto")) {
                 q.speculative.draft.n_gpu_layers = -1;
             } else if (std.mem.eql(u8, value, "all")) {
                 q.speculative.draft.n_gpu_layers = -2;
             } else {
-                q.speculative.draft.n_gpu_layers = try arg.stoi(value);
+                q.speculative.draft.n_gpu_layers = try mod.arg.stoi(value);
             }
             if (!c.llama_supports_gpu_offload()) {
-                io.eprintf("warning: no usable GPU found, --gpu-layers-draft option will be ignored\n", .{});
-                io.eprintf("warning: one possible reason is that llama.cpp was compiled without GPU support\n", .{});
-                io.eprintf("warning: consult docs/build.md for compilation instructions\n", .{});
+                mod.io.eprintf("warning: no usable GPU found, --gpu-layers-draft option will be ignored\n", .{});
+                mod.io.eprintf("warning: one possible reason is that llama.cpp was compiled without GPU support\n", .{});
+                mod.io.eprintf("warning: consult docs/build.md for compilation instructions\n", .{});
             }
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_N_GPU_LAYERS_DRAFT"));
     // arg.cpp:4321
-    try ctx.add((Arg{
+    try ctx.add((mod.arg.Arg{
         .args = &.{ "--spec-draft-model", "-md", "--model-draft" },
         .value_hint = "FNAME",
         .help = "draft model for speculative decoding (default: unused)",
         .handler = .{
             .string = struct {
-                fn f(q: *Params, value: S) !void {
-                    q.speculative.draft.mparams.path = try arg.dupe(q, value);
+                fn f(q: *mod.params.Params, value: S) !void {
+                    q.speculative.draft.mparams.path = try mod.arg.dupe(q, value);
                     q.speculative.draft.mparams.hf_file = q.speculative.draft.mparams.path; // will be used if --spec-draft-hf is set
                 }
             }.f,
         },
     }).setSpec().setExamples(&.{ .speculative, .server, .cli, .imatrix }).setEnv("LLAMA_ARG_SPEC_DRAFT_MODEL"));
     // arg.cpp:4329
-    try ctx.add((Arg{ .args = &.{"--spec-type"}, .value_hint = try allTypesStr(p.arena), .help = try ctx.fmt("comma-separated list of types of speculative decoding to use (default: %s)\n", .{(try typeNameStr(p.arena, p.speculative.types.items)).ptr}), .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-type"}, .value_hint = try allTypesStr(p.arena), .help = try ctx.fmt("comma-separated list of types of speculative decoding to use (default: %s)\n", .{(try typeNameStr(p.arena, p.speculative.types.items)).ptr}), .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
             const types_str = try stdlib.strings.split(q.arena, value, ',');
             const types = try typesFromNames(q.arena, types_str.items);
             try q.speculative.types.appendSlice(q.arena, types.items);
         }
     }.f } }).setSpec().setExamples(&spec_examples).setEnv("LLAMA_ARG_SPEC_TYPE"));
     // arg.cpp:4339
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-mod-n-min"}, .value_hint = "N", .help = try ctx.fmt("minimum number of ngram tokens to use for ngram-based speculative decoding (default: %d)", .{p.speculative.ngram_mod.n_min}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0 or value > 1024) return throwStr("ngram n-min must be between 0 and 1024 inclusive");
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-mod-n-min"}, .value_hint = "N", .help = try ctx.fmt("minimum number of ngram tokens to use for ngram-based speculative decoding (default: %d)", .{p.speculative.ngram_mod.n_min}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 0 or value > 1024) return mod.arg.throwStr("ngram n-min must be between 0 and 1024 inclusive");
             q.speculative.ngram_mod.n_min = value;
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4349
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-mod-n-max"}, .value_hint = "N", .help = try ctx.fmt("maximum number of ngram tokens to use for ngram-based speculative decoding (default: %d)", .{p.speculative.ngram_mod.n_max}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 0 or value > 1024) return throwStr("ngram n-max must be between 0 and 1024 inclusive");
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-mod-n-max"}, .value_hint = "N", .help = try ctx.fmt("maximum number of ngram tokens to use for ngram-based speculative decoding (default: %d)", .{p.speculative.ngram_mod.n_max}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 0 or value > 1024) return mod.arg.throwStr("ngram n-max must be between 0 and 1024 inclusive");
             q.speculative.ngram_mod.n_max = value;
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4359
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-mod-n-match"}, .value_hint = "N", .help = try ctx.fmt("ngram-mod lookup length (default: %d)", .{p.speculative.ngram_mod.n_match}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
-            if (value < 1 or value > 1024) return throwStr("ngram size N must be between 1 and 1024 inclusive");
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-mod-n-match"}, .value_hint = "N", .help = try ctx.fmt("ngram-mod lookup length (default: %d)", .{p.speculative.ngram_mod.n_match}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
+            if (value < 1 or value > 1024) return mod.arg.throwStr("ngram size N must be between 1 and 1024 inclusive");
             q.speculative.ngram_mod.n_match = value;
         }
     }.f } }).setSpec().setExamples(&spec_examples));
 
     // arg.cpp:4370
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-simple-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-simple speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_simple.size_n)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-simple-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-simple speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_simple.size_n)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_simple.size_n = try ngramSize(value, "ngram size N must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4380
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-simple-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-simple speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_simple.size_m)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-simple-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-simple speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_simple.size_m)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_simple.size_m = try ngramSize(value, "ngram size M must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4390
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-simple-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-simple speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_simple.min_hits)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-simple-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-simple speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_simple.min_hits)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_simple.min_hits = try ngramMinHits(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
 
     // arg.cpp:4401
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-map-k speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.size_n)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-map-k speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.size_n)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k.size_n = try ngramSize(value, "ngram size N must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4411
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-map-k speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.size_m)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-map-k speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.size_m)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k.size_m = try ngramSize(value, "ngram size M must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4421
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-map-k speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.min_hits)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-map-k speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_map_k.min_hits)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k.min_hits = try ngramMinHits(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
 
     // arg.cpp:4432
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k4v-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-map-k4v speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.size_n)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k4v-size-n"}, .value_hint = "N", .help = try ctx.fmt("ngram size N for ngram-map-k4v speculative decoding, length of lookup n-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.size_n)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k4v.size_n = try ngramSize(value, "ngram size N must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4442
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k4v-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-map-k4v speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.size_m)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k4v-size-m"}, .value_hint = "N", .help = try ctx.fmt("ngram size M for ngram-map-k4v speculative decoding, length of draft m-gram (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.size_m)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k4v.size_m = try ngramSize(value, "ngram size M must be between 1 and 1024 inclusive");
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4452
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-map-k4v-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-map-k4v speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.min_hits)}), .handler = .{ .int = struct {
-        fn f(q: *Params, value: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-map-k4v-min-hits"}, .value_hint = "N", .help = try ctx.fmt("minimum hits for ngram-map-k4v speculative decoding (default: %d)", .{@as(c_int, p.speculative.ngram_map_k4v.min_hits)}), .handler = .{ .int = struct {
+        fn f(q: *mod.params.Params, value: c_int) !void {
             q.speculative.ngram_map_k4v.min_hits = try ngramMinHits(value);
         }
     }.f } }).setSpec().setExamples(&spec_examples));
@@ -457,32 +445,32 @@ pub fn add(ctx: *Context) !void {
     //
 
     // arg.cpp:4467
-    try ctx.add((Arg{ .args = &.{ "--draft", "--draft-n", "--draft-max" }, .value_hint = "N", .help = "the argument has been removed. use --spec-draft-n-max or --spec-ngram-mod-n-max", .handler = .{ .int = struct {
-        fn f(_: *Params, _: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--draft", "--draft-n", "--draft-max" }, .value_hint = "N", .help = "the argument has been removed. use --spec-draft-n-max or --spec-ngram-mod-n-max", .handler = .{ .int = struct {
+        fn f(_: *mod.params.Params, _: c_int) !void {
             return argRemoved("use --spec-draft-n-max or --spec-ngram-mod-n-max");
         }
     }.f } }).setSpec().setExamples(&.{ .speculative, .lookup, .server, .cli }).setEnv("LLAMA_ARG_DRAFT_MAX"));
     // arg.cpp:4474
-    try ctx.add((Arg{ .args = &.{ "--draft-min", "--draft-n-min" }, .value_hint = "N", .help = "the argument has been removed. use --spec-draft-n-min or --spec-ngram-mod-n-min", .handler = .{ .int = struct {
-        fn f(_: *Params, _: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{ "--draft-min", "--draft-n-min" }, .value_hint = "N", .help = "the argument has been removed. use --spec-draft-n-min or --spec-ngram-mod-n-min", .handler = .{ .int = struct {
+        fn f(_: *mod.params.Params, _: c_int) !void {
             return argRemoved("use --spec-draft-n-min or --spec-ngram-mod-n-min");
         }
     }.f } }).setSpec().setExamples(&.{ .speculative, .lookup, .server, .cli }).setEnv("LLAMA_ARG_DRAFT_MIN"));
     // arg.cpp:4481
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-size-n"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-size-n or --spec-ngram-mod-n-match", .handler = .{ .int = struct {
-        fn f(_: *Params, _: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-size-n"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-size-n or --spec-ngram-mod-n-match", .handler = .{ .int = struct {
+        fn f(_: *mod.params.Params, _: c_int) !void {
             return argRemoved("use the respective --spec-ngram-*-size-n");
         }
     }.f } }).setSpec().setExamples(&.{.server}));
     // arg.cpp:4488
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-size-m"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-size-m", .handler = .{ .int = struct {
-        fn f(_: *Params, _: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-size-m"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-size-m", .handler = .{ .int = struct {
+        fn f(_: *mod.params.Params, _: c_int) !void {
             return argRemoved("use the respective --spec-ngram-*-size-m");
         }
     }.f } }).setSpec().setExamples(&.{.server}));
     // arg.cpp:4495
-    try ctx.add((Arg{ .args = &.{"--spec-ngram-min-hits"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-min-hits", .handler = .{ .int = struct {
-        fn f(_: *Params, _: c_int) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-ngram-min-hits"}, .value_hint = "N", .help = "the argument has been removed. use the respective --spec-ngram-*-min-hits", .handler = .{ .int = struct {
+        fn f(_: *mod.params.Params, _: c_int) !void {
             return argRemoved("use the respective --spec-ngram-*-min-hits");
         }
     }.f } }).setSpec().setExamples(&.{.server}));
@@ -492,26 +480,26 @@ pub fn add(ctx: *Context) !void {
     //
 
     // arg.cpp:4507
-    try ctx.add((Arg{ .args = &.{"--tts-lang"}, .value_hint = "FNAME", .help = "language (ISO 639-1) for audio generation\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.tts_lang = try arg.dupe(q, value);
+    try ctx.add((mod.arg.Arg{ .args = &.{"--tts-lang"}, .value_hint = "FNAME", .help = "language (ISO 639-1) for audio generation\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.tts_lang = try mod.arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{ .tts, .server }));
     // arg.cpp:4515
-    try ctx.add((Arg{ .args = &.{"--tts-voice"}, .value_hint = "VOICE", .help = "voice for audio generation (model-dependent)\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.tts_voice = try arg.dupe(q, value);
+    try ctx.add((mod.arg.Arg{ .args = &.{"--tts-voice"}, .value_hint = "VOICE", .help = "voice for audio generation (model-dependent)\nsee tts/README.md for per-model usage notes", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.tts_voice = try mod.arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{ .tts, .server }));
     // arg.cpp:4523
-    try ctx.add((Arg{ .args = &.{"--tts-speaker-file"}, .value_hint = "FNAME", .help = "speaker file path for audio generation", .handler = .{ .string = struct {
-        fn f(q: *Params, value: S) !void {
-            q.tts_speaker_file = try arg.dupe(q, value);
+    try ctx.add((mod.arg.Arg{ .args = &.{"--tts-speaker-file"}, .value_hint = "FNAME", .help = "speaker file path for audio generation", .handler = .{ .string = struct {
+        fn f(q: *mod.params.Params, value: S) !void {
+            q.tts_speaker_file = try mod.arg.dupe(q, value);
         }
     }.f } }).setExamples(&.{.tts}));
     // arg.cpp:4617
-    try ctx.add((Arg{ .args = &.{"--check"}, .help = try ctx.fmt("check rather than generate results (default: %s)", .{tf(p.check)}), .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--check"}, .help = try ctx.fmt("check rather than generate results (default: %s)", .{tf(p.check)}), .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.check = true;
         }
     }.f } }).setExamples(&.{.results}));
@@ -519,8 +507,8 @@ pub fn add(ctx: *Context) !void {
     // presets
 
     // arg.cpp:4648
-    try ctx.add((Arg{ .args = &.{"--embd-gemma-default"}, .help = "use default EmbeddingGemma model (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--embd-gemma-default"}, .help = "use default EmbeddingGemma model (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.model.hf_repo = "ggml-org/embeddinggemma-300M-qat-q4_0-GGUF";
             q.model.hf_file = "embeddinggemma-300M-qat-Q4_0.gguf";
             q.port = 8011;
@@ -533,77 +521,77 @@ pub fn add(ctx: *Context) !void {
         }
     }.f } }).setExamples(&.{ .embedding, .server }));
     // arg.cpp:4664
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-1.5b-default"}, .help = "use default Qwen 2.5 Coder 1.5B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-1.5b-default"}, .help = "use default Qwen 2.5 Coder 1.5B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             fimPreset(q, "ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF", "qwen2.5-coder-1.5b-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4678
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-3b-default"}, .help = "use default Qwen 2.5 Coder 3B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-3b-default"}, .help = "use default Qwen 2.5 Coder 3B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             fimPreset(q, "ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF", "qwen2.5-coder-3b-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4692
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-7b-default"}, .help = "use default Qwen 2.5 Coder 7B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-7b-default"}, .help = "use default Qwen 2.5 Coder 7B (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             fimPreset(q, "ggml-org/Qwen2.5-Coder-7B-Q8_0-GGUF", "qwen2.5-coder-7b-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4706
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-7b-spec"}, .help = "use Qwen 2.5 Coder 7B + 0.5B draft for speculative decoding (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-7b-spec"}, .help = "use Qwen 2.5 Coder 7B + 0.5B draft for speculative decoding (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.speculative.draft.mparams.hf_repo = "ggml-org/Qwen2.5-Coder-0.5B-Q8_0-GGUF";
             q.speculative.draft.mparams.hf_file = "qwen2.5-coder-0.5b-q8_0.gguf";
             fimPreset(q, "ggml-org/Qwen2.5-Coder-7B-Q8_0-GGUF", "qwen2.5-coder-7b-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4722
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-14b-spec"}, .help = "use Qwen 2.5 Coder 14B + 0.5B draft for speculative decoding (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-14b-spec"}, .help = "use Qwen 2.5 Coder 14B + 0.5B draft for speculative decoding (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.speculative.draft.mparams.hf_repo = "ggml-org/Qwen2.5-Coder-0.5B-Q8_0-GGUF";
             q.speculative.draft.mparams.hf_file = "qwen2.5-coder-0.5b-q8_0.gguf";
             fimPreset(q, "ggml-org/Qwen2.5-Coder-14B-Q8_0-GGUF", "qwen2.5-coder-14b-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4738
-    try ctx.add((Arg{ .args = &.{"--fim-qwen-30b-default"}, .help = "use default Qwen 3 Coder 30B A3B Instruct (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--fim-qwen-30b-default"}, .help = "use default Qwen 3 Coder 30B A3B Instruct (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             fimPreset(q, "ggml-org/Qwen3-Coder-30B-A3B-Instruct-Q8_0-GGUF", "qwen3-coder-30b-a3b-instruct-q8_0.gguf");
         }
     }.f } }).setExamples(&.{.server}));
     // arg.cpp:4752
-    try ctx.add((Arg{ .args = &.{"--gpt-oss-20b-default"}, .help = "use gpt-oss-20b (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--gpt-oss-20b-default"}, .help = "use gpt-oss-20b (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.model.hf_repo = "ggml-org/gpt-oss-20b-GGUF";
             q.model.hf_file = "gpt-oss-20b-mxfp4.gguf";
             gptOssPreset(q);
         }
     }.f } }).setExamples(&.{ .server, .cli }));
     // arg.cpp:4771
-    try ctx.add((Arg{ .args = &.{"--gpt-oss-120b-default"}, .help = "use gpt-oss-120b (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--gpt-oss-120b-default"}, .help = "use gpt-oss-120b (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.model.hf_repo = "ggml-org/gpt-oss-120b-GGUF";
             gptOssPreset(q);
         }
     }.f } }).setExamples(&.{ .server, .cli }));
     // arg.cpp:4789
-    try ctx.add((Arg{ .args = &.{"--vision-gemma-4b-default"}, .help = "use Gemma 3 4B QAT (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--vision-gemma-4b-default"}, .help = "use Gemma 3 4B QAT (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.model.hf_repo = "ggml-org/gemma-3-4b-it-qat-GGUF";
             visionPreset(q);
         }
     }.f } }).setExamples(&.{ .server, .cli }));
     // arg.cpp:4800
-    try ctx.add((Arg{ .args = &.{"--vision-gemma-12b-default"}, .help = "use Gemma 3 12B QAT (note: can download weights from the internet)", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--vision-gemma-12b-default"}, .help = "use Gemma 3 12B QAT (note: can download weights from the internet)", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             q.model.hf_repo = "ggml-org/gemma-3-12b-it-qat-GGUF";
             visionPreset(q);
         }
     }.f } }).setExamples(&.{ .server, .cli }));
     // arg.cpp:4811
-    try ctx.add((Arg{ .args = &.{"--spec-default"}, .help = "enable default speculative decoding config", .handler = .{ .void_ = struct {
-        fn f(q: *Params) !void {
+    try ctx.add((mod.arg.Arg{ .args = &.{"--spec-default"}, .help = "enable default speculative decoding config", .handler = .{ .void_ = struct {
+        fn f(q: *mod.params.Params) !void {
             try q.speculative.types.append(q.arena, .ngram_mod);
             q.speculative.ngram_mod.n_match = 24;
             q.speculative.ngram_mod.n_min = 48;
@@ -614,7 +602,7 @@ pub fn add(ctx: *Context) !void {
 
 /// What the six `--fim-qwen-*` presets share, from arg.cpp's line 4562 on:
 /// the repository and file, then the same port, batch and context.
-fn fimPreset(q: *Params, repo: []const u8, file: []const u8) void {
+fn fimPreset(q: *mod.params.Params, repo: []const u8, file: []const u8) void {
     q.model.hf_repo = repo;
     q.model.hf_file = file;
     q.port = 8012;
@@ -626,7 +614,7 @@ fn fimPreset(q: *Params, repo: []const u8, file: []const u8) void {
 
 /// What the two `--gpt-oss-*` presets, arg.cpp's lines 4693 and 4712,
 /// share after the repository.
-fn gptOssPreset(q: *Params) void {
+fn gptOssPreset(q: *mod.params.Params) void {
     q.port = 8013;
     q.n_ubatch = 2048;
     q.n_batch = 32768;
@@ -641,7 +629,7 @@ fn gptOssPreset(q: *Params) void {
 
 /// What the two `--vision-gemma-*` presets, arg.cpp's lines 4730 and 4741,
 /// share after the repository.
-fn visionPreset(q: *Params) void {
+fn visionPreset(q: *mod.params.Params) void {
     q.port = 8014;
     q.n_ctx = 0;
     q.use_jinja = true;

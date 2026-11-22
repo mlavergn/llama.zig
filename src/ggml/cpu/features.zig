@@ -23,11 +23,9 @@
 //! hardcoded.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const convert = @import("convert.zig");
-const c = impl.c;
 
 /// True when this build targets AArch64 and the named feature is enabled.
 ///
@@ -272,8 +270,6 @@ pub const golden_generic = builtin.cpu.arch == .aarch64 and
 /// section `ggml_cpu_init` takes.
 var is_first_call = true;
 
-extern fn ggml_time_us() i64;
-
 /// Ports `ggml_cpu_init` (ggml-cpu.c:3874 @b1b770d90).
 ///
 /// Fills the lookup tables and reads `GGML_CPU_DISABLE_FUSION`, once per
@@ -283,23 +279,23 @@ pub export fn ggml_cpu_init() void {
     // Needed to initialise ggml's time base. The context is created and freed
     // purely for that side effect, which is what the C does.
     {
-        const params = c.struct_ggml_init_params{
+        const params = ggml.impl.c.struct_ggml_init_params{
             .mem_size = 0,
             .mem_buffer = null,
             .no_alloc = false,
         };
-        ggml_free(ggml_init(params));
+        ggml.context.ggml_free(ggml.context.ggml_init(params));
     }
 
-    c.ggml_critical_section_start();
+    ggml.impl.c.ggml_critical_section_start();
 
     if (is_first_call) {
-        const t_start = ggml_time_us();
+        const t_start = ggml.runtime.ggml_time_us();
 
-        convert.initTables();
+        ggml.cpu.convert.initTables();
 
-        const t_end = ggml_time_us();
-        impl.printDebug(
+        const t_end = ggml.runtime.ggml_time_us();
+        ggml.impl.printDebug(
             "ggml_cpu_init: GELU, Quick GELU, SILU and EXP tables initialized in %f ms\n",
             .{@as(f64, @floatFromInt(t_end - t_start)) / 1000.0},
         );
@@ -313,7 +309,7 @@ pub export fn ggml_cpu_init() void {
         is_first_call = false;
     }
 
-    c.ggml_critical_section_end();
+    ggml.impl.c.ggml_critical_section_end();
 }
 
 /// Ports `ggml_init_arm_arch_features` (ggml-cpu.c:741 @b1b770d90).
@@ -327,9 +323,6 @@ fn initArmArchFeatures() void {
         @compileError("SVE builds must fill ggml_arm_arch_features.sve_cnt from svcntb()");
     }
 }
-
-extern fn ggml_init(params: c.struct_ggml_init_params) ?*anyopaque;
-extern fn ggml_free(ctx: ?*anyopaque) void;
 
 // -----------------------------------------------------------------------------
 // Unit Tests
@@ -383,10 +376,10 @@ test "llamafile is on unless the CPU has SVE or i8mm, as ggml-cpu.c:45 decides" 
 
 test "init is idempotent and fills the tables" {
     ggml_cpu_init();
-    const first = convert.ggml_table_f32_f16[0x3C00]; // 1.0 as a half
+    const first = ggml.cpu.convert.ggml_table_f32_f16[0x3C00]; // 1.0 as a half
     try std.testing.expectEqual(@as(f32, 1.0), first);
 
     ggml_cpu_init();
-    try std.testing.expectEqual(first, convert.ggml_table_f32_f16[0x3C00]);
-    try std.testing.expectEqual(@as(f32, 0.5), convert.ggml_table_f32_ue4m3[0x38]);
+    try std.testing.expectEqual(first, ggml.cpu.convert.ggml_table_f32_f16[0x3C00]);
+    try std.testing.expectEqual(@as(f32, 0.5), ggml.cpu.convert.ggml_table_f32_ue4m3[0x38]);
 }

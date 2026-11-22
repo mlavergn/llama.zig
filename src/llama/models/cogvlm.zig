@@ -9,22 +9,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_cogvlm`'s `load_arch_hparams` (src/models/cogvlm.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
@@ -35,9 +24,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_cogvlm`'s `load_arch_tensors` (src/models/cogvlm.cpp:12 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -47,7 +36,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -61,7 +50,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.visexp_attn_wqkv = try self.createTensor(.{ .tensor = .visexp_attn_qkv, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_head_k * l.n_head * 3 }, 0, exc);
         layer.visexp_attn_wo = try self.createTensor(.{ .tensor = .visexp_attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd_head_k * l.n_head, l.n_embd }, 0, exc);
 
-        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | (if (i != 0) loader.tensor_duplicated else 0), exc);
+        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | (if (i != 0) llama.loader.tensor_duplicated else 0), exc);
 
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         layer.ffn_gate = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff }, 0, exc);
@@ -82,7 +71,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// - `il`: the layer.
 ///
 /// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     // A plain ggml_rope.
@@ -99,20 +88,20 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 }
 
 /// Ports `llama_model_cogvlm`'s `build_arch_graph` (src/models/cogvlm.cpp:65 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_cogvlm`'s `graph` (src/models/cogvlm.cpp:69
 /// @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cogvlm.cpp", 74, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/cogvlm.cpp", 75, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cogvlm.cpp", 74, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/cogvlm.cpp", 75, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -129,12 +118,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const layer = &model.layers[@intCast(il)];
 
         // The text weights, or the image's.
-        var wqkv: *Tensor = undefined;
-        var wo: *Tensor = undefined;
-        var wo_s: ?*Tensor = undefined;
-        var ffn_gate: *Tensor = undefined;
-        var ffn_down: *Tensor = undefined;
-        var ffn_up: *Tensor = undefined;
+        var wqkv: *llama.impl.c.ggml_tensor = undefined;
+        var wo: *llama.impl.c.ggml_tensor = undefined;
+        var wo_s: ?*llama.impl.c.ggml_tensor = undefined;
+        var ffn_gate: *llama.impl.c.ggml_tensor = undefined;
+        var ffn_down: *llama.impl.c.ggml_tensor = undefined;
+        var ffn_up: *llama.impl.c.ggml_tensor = undefined;
 
         if (is_text) {
             wqkv = layer.wqkv.?;
@@ -160,9 +149,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const qkv = b.buildLoraMm(wqkv, cur, null);
 
             // Q, K and V, split from the first dimension.
-            var Qcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 0);
-            var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(b.n_embd)) * c.ggml_element_size(qkv));
-            const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 2 * @as(usize, @intCast(b.n_embd)) * c.ggml_element_size(qkv));
+            var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 0);
+            var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(b.n_embd)) * llama.impl.c.ggml_element_size(qkv));
+            const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, n_embd_head, b.n_head_kv, b.n_tokens, @as(usize, @intCast(n_embd_head)) * @sizeOf(f32), qkv.nb[1], 2 * @as(usize, @intCast(b.n_embd)) * llama.impl.c.ggml_element_size(qkv));
 
             Qcur = b.buildRope(Qcur, inp_pos, il);
             Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -171,7 +160,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "attn_out", il);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -179,7 +168,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         cur = b.buildFfn(cur, ffn_up, null, null, ffn_gate, null, null, ffn_down, null, null, null, .silu, .par, il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

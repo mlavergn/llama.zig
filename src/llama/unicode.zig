@@ -32,14 +32,11 @@
 //! reproduced.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const regex = @import("regex.zig");
-const data = @import("unicode_data.zig");
-
-const allocator = impl.allocator;
+const stdlib = @import("stdlib");
+const mod = @import("module.zig");
 
 fn oom() noreturn {
-    impl.abort("unicode", 0, "out of memory");
+    mod.impl.abort("unicode", 0, "out of memory");
 }
 
 /// Ports `MAX_CODEPOINTS` (unicode-data.h:19 @b1b770d90).
@@ -193,7 +190,7 @@ pub fn cptToUtf8(cpt: u32, buf: *[4]u8) error{InvalidCodepoint}![]const u8 {
 /// Return: nothing, or `error.InvalidCodepoint`.
 pub fn appendCptUtf8(out: *std.ArrayList(u8), cpt: u32) error{InvalidCodepoint}!void {
     var buf: [4]u8 = undefined;
-    out.appendSlice(allocator, try cptToUtf8(cpt, &buf)) catch oom();
+    out.appendSlice(std.heap.c_allocator, try cptToUtf8(cpt, &buf)) catch oom();
 }
 
 // `unicode_cpts_to_utf8` (src/unicode.cpp:22 @b1b770d90) is a `static`
@@ -210,16 +207,16 @@ pub fn appendCptUtf8(out: *std.ArrayList(u8), cpt: u32) error{InvalidCodepoint}!
 /// `impl.allocator`.
 pub fn cptsFromUtf8(utf8: []const u8) []u32 {
     var result: std.ArrayList(u32) = .empty;
-    result.ensureTotalCapacity(allocator, utf8.len) catch oom();
+    result.ensureTotalCapacity(std.heap.c_allocator, utf8.len) catch oom();
     var offset: usize = 0;
     while (offset < utf8.len) {
         const cpt = cptFromUtf8(utf8, &offset) catch blk: {
             offset += 1;
             break :blk 0xFFFD;
         };
-        result.append(allocator, cpt) catch oom();
+        result.append(std.heap.c_allocator, cpt) catch oom();
     }
-    return result.toOwnedSlice(allocator) catch oom();
+    return result.toOwnedSlice(std.heap.c_allocator) catch oom();
 }
 
 // -----------------------------------------------------------------------------
@@ -232,7 +229,7 @@ const wchar_bits = if (@import("builtin").os.tag == .windows) 16 else 32;
 /// function-local `static` is.
 var flags_table: [max_codepoints]CptFlags = undefined;
 var flags_ready: std.atomic.Value(bool) = .init(false);
-var flags_mutex: impl.Mutex = .{};
+var flags_mutex: stdlib.sync.Mutex = .{};
 
 /// Ports `unicode_cpt_flags_array` (src/unicode.cpp:125 @b1b770d90): each
 /// range's flags, then the whitespace bit, then the case and NFD bits on
@@ -240,18 +237,18 @@ var flags_mutex: impl.Mutex = .{};
 fn buildFlagsTable() void {
     @memset(&flags_table, CptFlags.fromUint(CptFlags.undefined_));
     var i: usize = 1;
-    while (i < data.ranges_flags.len) : (i += 1) {
-        const range_ini = data.ranges_flags[i - 1];
-        const range_end = data.ranges_flags[i];
+    while (i < mod.unicode_data.ranges_flags.len) : (i += 1) {
+        const range_ini = mod.unicode_data.ranges_flags[i - 1];
+        const range_end = mod.unicode_data.ranges_flags[i];
         var cpt = range_ini[0];
         while (cpt < range_end[0]) : (cpt += 1) {
             flags_table[cpt] = CptFlags.fromUint(range_ini[1]);
         }
     }
-    for (data.set_whitespace) |cpt| flags_table[cpt].is_whitespace = true;
-    for (data.map_lowercase) |p| flags_table[p[1]].is_lowercase = true;
-    for (data.map_uppercase) |p| flags_table[p[1]].is_uppercase = true;
-    for (data.ranges_nfd) |range| flags_table[range.nfd].is_nfd = true;
+    for (mod.unicode_data.set_whitespace) |cpt| flags_table[cpt].is_whitespace = true;
+    for (mod.unicode_data.map_lowercase) |p| flags_table[p[1]].is_lowercase = true;
+    for (mod.unicode_data.map_uppercase) |p| flags_table[p[1]].is_uppercase = true;
+    for (mod.unicode_data.ranges_nfd) |range| flags_table[range.nfd].is_nfd = true;
 }
 
 /// Ports `unicode_cpt_flags_from_cpt` (src/unicode.cpp:1407 @b1b770d90).
@@ -289,12 +286,12 @@ pub fn cptFlagsFromUtf8(utf8: []const u8) error{InvalidCharacter}!CptFlags {
 /// Return: the mapped code point, or `cpt` when it has none.
 pub fn tolower(cpt: u32) u32 {
     var lo: usize = 0;
-    var hi: usize = data.map_lowercase.len;
+    var hi: usize = mod.unicode_data.map_lowercase.len;
     while (lo < hi) {
         const mid = lo + (hi - lo) / 2;
-        if (data.map_lowercase[mid][0] < cpt) lo = mid + 1 else hi = mid;
+        if (mod.unicode_data.map_lowercase[mid][0] < cpt) lo = mid + 1 else hi = mid;
     }
-    if (lo != data.map_lowercase.len and data.map_lowercase[lo][0] == cpt) return data.map_lowercase[lo][1];
+    if (lo != mod.unicode_data.map_lowercase.len and mod.unicode_data.map_lowercase[lo][0] == cpt) return mod.unicode_data.map_lowercase[lo][1];
     return cpt;
 }
 
@@ -320,17 +317,17 @@ pub fn cptIsHan(cpt: u32) bool {
 ///
 /// Return: the mapped code points, the same length, owned by the caller.
 pub fn cptsNormalizeNfd(cpts: []const u32) []u32 {
-    const result = allocator.alloc(u32, cpts.len) catch oom();
+    const result = std.heap.c_allocator.alloc(u32, cpts.len) catch oom();
     for (cpts, result) |cpt, *r| {
         // `std::upper_bound` on `first`, minus one. The first range starts
         // at 0, so the step back is always in bounds.
         var lo: usize = 0;
-        var hi: usize = data.ranges_nfd.len;
+        var hi: usize = mod.unicode_data.ranges_nfd.len;
         while (lo < hi) {
             const mid = lo + (hi - lo) / 2;
-            if (cpt < data.ranges_nfd[mid].first) hi = mid else lo = mid + 1;
+            if (cpt < mod.unicode_data.ranges_nfd[mid].first) hi = mid else lo = mid + 1;
         }
-        const it = data.ranges_nfd[lo - 1];
+        const it = mod.unicode_data.ranges_nfd[lo - 1];
         r.* = if (it.first <= cpt and cpt <= it.last) it.nfd else cpt;
     }
     return result;
@@ -341,24 +338,24 @@ pub fn cptsNormalizeNfd(cpts: []const u32) []u32 {
 /// Return: the canonical combining class, 0 for a code point the table lacks.
 fn canonicalClass(cpt: u32) u8 {
     var lo: usize = 0;
-    var hi: usize = data.combining_class.len;
+    var hi: usize = mod.unicode_data.combining_class.len;
     while (lo < hi) {
         const mid = lo + (hi - lo) / 2;
-        if (data.combining_class[mid][0] < cpt) lo = mid + 1 else hi = mid;
+        if (mod.unicode_data.combining_class[mid][0] < cpt) lo = mid + 1 else hi = mid;
     }
-    if (lo != data.combining_class.len and data.combining_class[lo][0] == cpt) return data.combining_class[lo][1];
+    if (lo != mod.unicode_data.combining_class.len and mod.unicode_data.combining_class[lo][0] == cpt) return mod.unicode_data.combining_class[lo][1];
     return 0;
 }
 
 /// The `unicode_decomposition` entry of `cpt`, or null.
 fn decompositionOf(cpt: u32) ?[2]u32 {
     var lo: usize = 0;
-    var hi: usize = data.decomposition.len;
+    var hi: usize = mod.unicode_data.decomposition.len;
     while (lo < hi) {
         const mid = lo + (hi - lo) / 2;
-        if (data.decomposition[mid][0] < cpt) lo = mid + 1 else hi = mid;
+        if (mod.unicode_data.decomposition[mid][0] < cpt) lo = mid + 1 else hi = mid;
     }
-    if (lo != data.decomposition.len and data.decomposition[lo][0] == cpt) return .{ data.decomposition[lo][1], data.decomposition[lo][2] };
+    if (lo != mod.unicode_data.decomposition.len and mod.unicode_data.decomposition[lo][0] == cpt) return .{ mod.unicode_data.decomposition[lo][1], mod.unicode_data.decomposition[lo][2] };
     return null;
 }
 
@@ -366,23 +363,23 @@ fn decompositionOf(cpt: u32) ?[2]u32 {
 /// full canonical decomposition of `cpt` appended to `result`, through an
 /// explicit stack.
 fn canonicalDecompose(cpt_in: u32, result: *std.ArrayList(u32), pending: *std.ArrayList(u32)) void {
-    pending.append(allocator, cpt_in) catch oom();
+    pending.append(std.heap.c_allocator, cpt_in) catch oom();
     while (pending.items.len != 0) {
         const cpt = pending.pop().?;
         // Hangul syllables use algorithmic decomposition (UAX #15).
         if (cpt >= 0xAC00 and cpt < 0xAC00 + 11172) {
             const index = cpt - 0xAC00;
-            result.append(allocator, 0x1100 + index / 588) catch oom();
-            result.append(allocator, 0x1161 + (index % 588) / 28) catch oom();
-            if (index % 28 != 0) result.append(allocator, 0x11A7 + index % 28) catch oom();
+            result.append(std.heap.c_allocator, 0x1100 + index / 588) catch oom();
+            result.append(std.heap.c_allocator, 0x1161 + (index % 588) / 28) catch oom();
+            if (index % 28 != 0) result.append(std.heap.c_allocator, 0x11A7 + index % 28) catch oom();
             continue;
         }
         const it = decompositionOf(cpt) orelse {
-            result.append(allocator, cpt) catch oom();
+            result.append(std.heap.c_allocator, cpt) catch oom();
             continue;
         };
-        if (it[1] != 0) pending.append(allocator, it[1]) catch oom();
-        pending.append(allocator, it[0]) catch oom();
+        if (it[1] != 0) pending.append(std.heap.c_allocator, it[1]) catch oom();
+        pending.append(std.heap.c_allocator, it[0]) catch oom();
     }
 }
 
@@ -398,12 +395,12 @@ fn canonicalCompose(first: u32, second: u32) u32 {
     }
     const key = (@as(u64, first) << 32) | second;
     var lo: usize = 0;
-    var hi: usize = data.composition.len;
+    var hi: usize = mod.unicode_data.composition.len;
     while (lo < hi) {
         const mid = lo + (hi - lo) / 2;
-        if (data.composition[mid][0] < key) lo = mid + 1 else hi = mid;
+        if (mod.unicode_data.composition[mid][0] < key) lo = mid + 1 else hi = mid;
     }
-    if (lo != data.composition.len and data.composition[lo][0] == key) return data.composition[lo][1];
+    if (lo != mod.unicode_data.composition.len and mod.unicode_data.composition[lo][0] == key) return mod.unicode_data.composition[lo][1];
     return 0;
 }
 
@@ -422,10 +419,10 @@ fn canonicalCompose(first: u32, second: u32) u32 {
 /// `impl.allocator`.
 pub fn cptsNormalizeNfc(cpts: []const u32) []u32 {
     var decomposed: std.ArrayList(u32) = .empty;
-    defer decomposed.deinit(allocator);
-    decomposed.ensureTotalCapacity(allocator, cpts.len) catch oom();
+    defer decomposed.deinit(std.heap.c_allocator);
+    decomposed.ensureTotalCapacity(std.heap.c_allocator, cpts.len) catch oom();
     var pending: std.ArrayList(u32) = .empty;
-    defer pending.deinit(allocator);
+    defer pending.deinit(std.heap.c_allocator);
     for (cpts) |cpt| canonicalDecompose(cpt, &decomposed, &pending);
 
     // Sort each run of combining marks; equal classes retain their order.
@@ -444,7 +441,7 @@ pub fn cptsNormalizeNfc(cpts: []const u32) []u32 {
     }
 
     var result: std.ArrayList(u32) = .empty;
-    result.ensureTotalCapacity(allocator, d.len) catch oom();
+    result.ensureTotalCapacity(std.heap.c_allocator, d.len) catch oom();
     var starter: usize = 0;
     var previous_class: u8 = 0;
     for (d) |cpt| {
@@ -457,11 +454,11 @@ pub fn cptsNormalizeNfc(cpts: []const u32) []u32 {
             result.items[starter] = composite;
         } else {
             if (current_class == 0) starter = result.items.len;
-            result.append(allocator, cpt) catch oom();
+            result.append(std.heap.c_allocator, cpt) catch oom();
             previous_class = current_class;
         }
     }
-    return result.toOwnedSlice(allocator) catch oom();
+    return result.toOwnedSlice(std.heap.c_allocator) catch oom();
 }
 
 // -----------------------------------------------------------------------------
@@ -566,7 +563,7 @@ const Span = struct {
     /// `_add_token`: the token ending at `end`, if it is not empty.
     fn add(self: *Span, end: usize) usize {
         const len = end -% self.prev_end;
-        if (len > 0) self.out.append(allocator, len) catch oom();
+        if (len > 0) self.out.append(std.heap.c_allocator, len) catch oom();
         self.prev_end = end;
         return len;
     }
@@ -1018,7 +1015,7 @@ fn splitCustomNewlines(cpts: []const u32, offsets: []const usize, out: *std.Arra
             const is_newline = cpts[pos] == '\n';
             const run_start = pos;
             while (pos < offset_end and (cpts[pos] == '\n') == is_newline) pos += 1;
-            out.append(allocator, pos - run_start) catch oom();
+            out.append(std.heap.c_allocator, pos - run_start) catch oom();
         }
     }
 }
@@ -1063,11 +1060,11 @@ fn splitCustom(cpts: []const u32, regex_expr: []const u8, offsets: []const usize
 /// of `offsets` cut at every match of `pattern`, compiled with
 /// `optimize | nosubs`, the text between matches kept as its own piece.
 /// An empty match yields an empty piece, as there.
-fn splitStl(comptime CharT: type, text: []const CharT, pattern: []const CharT, offsets: []const usize, out: *std.ArrayList(usize)) regex.Error!void {
-    const Re = regex.BasicRegex(CharT);
+fn splitStl(comptime CharT: type, text: []const CharT, pattern: []const CharT, offsets: []const usize, out: *std.ArrayList(usize)) mod.regex.Error!void {
+    const Re = mod.regex.BasicRegex(CharT);
     var expr = try Re.compileWith(pattern, .{ .nosubs = true });
     defer expr.deinit();
-    out.ensureTotalCapacity(allocator, offsets.len) catch oom();
+    out.ensureTotalCapacity(std.heap.c_allocator, offsets.len) catch oom();
     var start: usize = 0;
     for (offsets) |offset| {
         var it = try Re.Iterator.init(&expr, text, start, start + offset);
@@ -1077,13 +1074,13 @@ fn splitStl(comptime CharT: type, text: []const CharT, pattern: []const CharT, o
         while (it.valid()) {
             const position: i64 = @intCast(it.position());
             const length: i64 = @intCast(it.length());
-            if (position > start_idx) out.append(allocator, @intCast(position - start_idx)) catch oom();
-            out.append(allocator, @intCast(length)) catch oom();
+            if (position > start_idx) out.append(std.heap.c_allocator, @intCast(position - start_idx)) catch oom();
+            out.append(std.heap.c_allocator, @intCast(length)) catch oom();
             start_idx = position + length;
             try it.next();
         }
 
-        if (start_idx < @as(i64, @intCast(offset))) out.append(allocator, offset - @as(usize, @intCast(start_idx))) catch oom();
+        if (start_idx < @as(i64, @intCast(offset))) out.append(std.heap.c_allocator, offset - @as(usize, @intCast(start_idx))) catch oom();
         start += offset;
     }
 }
@@ -1159,12 +1156,12 @@ pub const Words = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *Words) void {
-        self.buf.deinit(allocator);
-        self.ends.deinit(allocator);
+        self.buf.deinit(std.heap.c_allocator);
+        self.ends.deinit(std.heap.c_allocator);
     }
 
     fn finish(self: *Words) void {
-        self.ends.append(allocator, self.buf.items.len) catch oom();
+        self.ends.append(std.heap.c_allocator, self.buf.items.len) catch oom();
     }
 };
 
@@ -1189,14 +1186,14 @@ pub const SplitError = error{
 fn byteEncodingProcess(words: *const Words) Words {
     var out: Words = .{};
     var text_utf: std.ArrayList(u8) = .empty;
-    defer text_utf.deinit(allocator);
+    defer text_utf.deinit(std.heap.c_allocator);
     for (0..words.len()) |i| {
         const word = words.get(i);
         text_utf.clearRetainingCapacity();
         const utf_word = cptsFromUtf8(word);
-        defer allocator.free(utf_word);
+        defer std.heap.c_allocator.free(utf_word);
         for (utf_word) |cpt| appendCptUtf8(&text_utf, cpt) catch unreachable; // decoded from valid UTF-8
-        for (text_utf.items) |ch| out.buf.appendSlice(allocator, byteToUtf8(ch)) catch oom();
+        for (text_utf.items) |ch| out.buf.appendSlice(std.heap.c_allocator, byteToUtf8(ch)) catch oom();
         out.finish();
     }
     return out;
@@ -1230,13 +1227,13 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
     }
 
     const cpts = cptsFromUtf8(text);
-    defer allocator.free(cpts);
+    defer std.heap.c_allocator.free(cpts);
 
     // The "collapsed" text: one byte per code point.
     var text_collapsed: []u8 = &.{};
-    defer if (need_collapse) allocator.free(text_collapsed);
+    defer if (need_collapse) std.heap.c_allocator.free(text_collapsed);
     if (need_collapse) {
-        text_collapsed = allocator.alloc(u8, cpts.len) catch oom();
+        text_collapsed = std.heap.c_allocator.alloc(u8, cpts.len) catch oom();
         for (cpts, text_collapsed) |cpt, *tc| {
             if (cpt < 128) {
                 tc.* = @intCast(cpt);
@@ -1256,10 +1253,10 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
     }
 
     var bpe_offsets: std.ArrayList(usize) = .empty;
-    defer bpe_offsets.deinit(allocator);
-    bpe_offsets.append(allocator, cpts.len) catch oom();
+    defer bpe_offsets.deinit(std.heap.c_allocator);
+    bpe_offsets.append(std.heap.c_allocator, cpts.len) catch oom();
     var tmp: std.ArrayList(usize) = .empty;
-    defer tmp.deinit(allocator);
+    defer tmp.deinit(std.heap.c_allocator);
 
     for (regex_exprs) |regex_expr| {
         tmp.clearRetainingCapacity();
@@ -1271,28 +1268,28 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
 
         const use_collapsed = usesCategory(regex_expr);
         const cpts_regex = cptsFromUtf8(regex_expr);
-        defer allocator.free(cpts_regex);
+        defer std.heap.c_allocator.free(cpts_regex);
 
-        const r: regex.Error!void = blk: {
+        const r: mod.regex.Error!void = blk: {
             if (use_collapsed) {
                 for (cpts_regex) |cr| {
                     if (cr >= 128) return error.CategoryWithNonAscii;
                 }
 
                 var collapsed: std.ArrayList(u8) = .empty;
-                defer collapsed.deinit(allocator);
+                defer collapsed.deinit(std.heap.c_allocator);
                 // Inside `[]`, where a category contributes its members
                 // without a bracket of its own.
                 var inside = false;
                 var i: usize = 0;
                 while (i < regex_expr.len) : (i += 1) {
                     if (regex_expr[i] == '[' and (i == 0 or regex_expr[i - 1] != '\\')) {
-                        collapsed.append(allocator, '[') catch oom();
+                        collapsed.append(std.heap.c_allocator, '[') catch oom();
                         inside = true;
                         continue;
                     }
                     if (inside and regex_expr[i] == ']' and regex_expr[i - 1] != '\\') {
-                        collapsed.append(allocator, ']') catch oom();
+                        collapsed.append(std.heap.c_allocator, ']') catch oom();
                         inside = false;
                         continue;
                     }
@@ -1300,17 +1297,17 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
                         if (std.mem.findScalarPos(u8, regex_expr, i + 3, '}')) |closing_brace| {
                             if (closing_brace <= i + 10) {
                                 if (ucatLookup(regex_expr[i .. closing_brace + 1])) |cat| {
-                                    if (!inside) collapsed.append(allocator, '[') catch oom();
-                                    collapsed.append(allocator, ucatCpt(cat).?) catch oom();
-                                    collapsed.appendSlice(allocator, ucatMap(cat)) catch oom();
-                                    if (!inside) collapsed.append(allocator, ']') catch oom();
+                                    if (!inside) collapsed.append(std.heap.c_allocator, '[') catch oom();
+                                    collapsed.append(std.heap.c_allocator, ucatCpt(cat).?) catch oom();
+                                    collapsed.appendSlice(std.heap.c_allocator, ucatMap(cat)) catch oom();
+                                    if (!inside) collapsed.append(std.heap.c_allocator, ']') catch oom();
                                     i = closing_brace;
                                     continue;
                                 }
                             }
                         }
                     }
-                    collapsed.append(allocator, regex_expr[i]) catch oom();
+                    collapsed.append(std.heap.c_allocator, regex_expr[i]) catch oom();
                 }
 
                 tmp.clearRetainingCapacity();
@@ -1321,10 +1318,10 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
                 // to `wchar_t`, which is 16 bits on Windows: there the pattern
                 // and the text both lose everything above U+FFFF, and the
                 // whitespace test reads the narrowed value.
-                const wtext = allocator.dupe(u32, cpts) catch oom();
-                defer allocator.free(wtext);
-                const wexpr = allocator.dupe(u32, cpts_regex) catch oom();
-                defer allocator.free(wexpr);
+                const wtext = std.heap.c_allocator.dupe(u32, cpts) catch oom();
+                defer std.heap.c_allocator.free(wtext);
+                const wexpr = std.heap.c_allocator.dupe(u32, cpts_regex) catch oom();
+                defer std.heap.c_allocator.free(wexpr);
                 if (comptime wchar_bits == 16) {
                     for (wtext) |*w| w.* = @as(u16, @truncate(w.*));
                     for (wexpr) |*w| w.* = @as(u16, @truncate(w.*));
@@ -1337,8 +1334,8 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
             }
         };
         r catch |err| {
-            impl.writeStderr(&.{ "Failed to process regex: '", regex_expr, "'\n" });
-            impl.writeStderr(&.{ "Regex error: ", regex.errorText(err), "\n" });
+            mod.impl.writeStderr(&.{ "Failed to process regex: '", regex_expr, "'\n" });
+            mod.impl.writeStderr(&.{ "Regex error: ", mod.regex.errorText(err), "\n" });
             return error.RegexFailed;
         };
         std.mem.swap(std.ArrayList(usize), &bpe_offsets, &tmp);
@@ -1346,7 +1343,7 @@ pub fn regexSplit(text: []const u8, regex_exprs: []const []const u8, byte_encode
 
     var words: Words = .{};
     errdefer words.deinit();
-    words.ends.ensureTotalCapacity(allocator, bpe_offsets.items.len) catch oom();
+    words.ends.ensureTotalCapacity(std.heap.c_allocator, bpe_offsets.items.len) catch oom();
     var start: usize = 0;
     for (bpe_offsets.items) |offset| {
         for (cpts[start .. start + offset]) |cpt| try appendCptUtf8(&words.buf, cpt);
@@ -1378,7 +1375,7 @@ test "the flag bits sit where the C++ bit-field puts them" {
 
 test "a malformed byte decodes as U+FFFD and decoding resumes after it" {
     const cpts = cptsFromUtf8("a\xffb\xc3\xa9");
-    defer allocator.free(cpts);
+    defer std.heap.c_allocator.free(cpts);
     try std.testing.expectEqualSlices(u32, &.{ 'a', 0xFFFD, 'b', 0xE9 }, cpts);
 }
 
@@ -1429,7 +1426,7 @@ test "NFC composes, reorders marks and composes Hangul" {
     };
     for (cases) |cs| {
         const got = cptsNormalizeNfc(cs.in);
-        defer allocator.free(got);
+        defer std.heap.c_allocator.free(got);
         try std.testing.expectEqualSlices(u32, cs.want, got);
     }
 }

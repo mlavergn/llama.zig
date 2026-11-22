@@ -15,11 +15,9 @@
 //! `console::log`/`error` (`llama-mtmd-cli` calls none of them).
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const c = @import("tools_h");
-const io = @import("io.zig");
 
 const is_windows = builtin.os.tag == .windows;
 
@@ -36,10 +34,6 @@ const ansi_bold = "\x1b[1m";
 
 // WEOF, as `char32_t`: `wint_t` is 16 bits on Windows
 const weof: u32 = if (is_windows) 0xFFFF else std.math.maxInt(u32);
-extern fn fscanf(f: ?*anyopaque, fmt: [*:0]const u8, ...) c_int;
-extern fn getwchar() u32;
-extern fn wcwidth(wc: u32) c_int;
-extern fn iswspace(wc: u32) c_int;
 
 // Ports `advanced_display` and the console state (console.cpp:71 @b1b770d90)
 var advanced_display: bool = false;
@@ -116,8 +110,6 @@ const win32 = struct {
     extern "kernel32" fn SetConsoleCursorPosition(console: HANDLE, position: Coord) callconv(.winapi) c_int;
     extern "kernel32" fn WriteConsoleA(console: HANDLE, text: [*]const u8, n: u32, written: *u32, reserved: ?*anyopaque) callconv(.winapi) c_int;
     extern "kernel32" fn WideCharToMultiByte(codepage: u32, flags: u32, wide: [*]const u16, n: c_int, multi: ?[*]u8, size: c_int, default: ?[*]const u8, used: ?*c_int) callconv(.winapi) c_int;
-    extern "c" fn _setmode(fd: c_int, mode: c_int) c_int;
-    extern "c" fn _fileno(stream: ?*anyopaque) c_int;
 };
 
 // The display: `stdout`, through the stream the tools share, until `init`
@@ -127,7 +119,7 @@ const win32 = struct {
 
 fn outWrite(bytes: []const u8) void {
     if (out_stream) |f| {
-        _ = libc.fwrite(bytes.ptr, 1, bytes.len, f);
+        _ = stdlib.libc.fwrite(bytes.ptr, 1, bytes.len, f);
     } else stdlib.stdio.stdout().write(bytes);
 }
 
@@ -137,17 +129,15 @@ fn outPutc(ch: u8) void {
 
 fn outPrintf(comptime fmt: [*:0]const u8, args: anytype) void {
     if (out_stream) |f| {
-        _ = @call(.auto, libc.fprintf, .{ f, fmt } ++ args);
-    } else io.printf(fmt, args);
+        _ = @call(.auto, stdlib.libc.fprintf, .{ f, fmt } ++ args);
+    } else mod.io.printf(fmt, args);
 }
 
 fn outFlush() void {
     if (out_stream) |f| {
-        _ = libc.fflush(f);
+        _ = stdlib.libc.fflush(f);
     } else stdlib.stdio.stdout().flush();
 }
-
-const lc_all: c_int = if (builtin.os.tag.isDarwin()) 0 else 6;
 
 /// Ports `init` (console.cpp:90 @b1b770d90), its `_WIN32` arm.
 fn initWindows() void {
@@ -174,7 +164,7 @@ fn initWindows() void {
     const con_in = win32.GetStdHandle(win32.std_input_handle);
     if (con_in != win32.invalid_handle and win32.GetConsoleMode(con_in, &mode) != 0) {
         // Set console input codepage to UTF16
-        _ = win32._setmode(win32._fileno(stdlib.stdio.cStream(.stdin)), win32.o_wtext);
+        _ = stdlib.libc._setmode(stdlib.libc._fileno(stdlib.stdio.cStream(.stdin)), win32.o_wtext);
 
         // Set ICANON (ENABLE_LINE_INPUT) and ECHO (ENABLE_ECHO_INPUT)
         if (simple_io) {
@@ -184,7 +174,7 @@ fn initWindows() void {
         }
         if (win32.SetConsoleMode(con_in, mode) == 0) simple_io = true;
     }
-    if (simple_io) _ = win32._setmode(win32._fileno(stdlib.stdio.cStream(.stdin)), win32.o_u8text);
+    if (simple_io) _ = stdlib.libc._setmode(stdlib.libc._fileno(stdlib.stdio.cStream(.stdin)), win32.o_u8text);
 }
 
 /// Ports `init` (console.cpp:90 @b1b770d90).
@@ -202,11 +192,11 @@ pub fn init(use_simple_io: bool, use_advanced_display: bool) void {
         new_termios.cc[@backingInt(std.c.V.TIME)] = 0;
         _ = std.c.tcsetattr(std.posix.STDIN_FILENO, .NOW, &new_termios);
 
-        tty = libc.fopen("/dev/tty", "w+");
+        tty = stdlib.libc.fopen("/dev/tty", "w+");
         if (tty != null) out_stream = tty;
     }
 
-    _ = libc.setlocale(lc_all, "");
+    _ = stdlib.libc.setlocale(stdlib.libc.LC.ALL, "");
 }
 
 /// Ports `cleanup` (console.cpp:152 @b1b770d90).
@@ -219,7 +209,7 @@ pub fn cleanup() void {
     if (!simple_io) {
         if (tty != null) {
             out_stream = null;
-            _ = libc.fclose(tty);
+            _ = stdlib.libc.fclose(tty);
             tty = null;
         }
         _ = std.c.tcsetattr(std.posix.STDIN_FILENO, .NOW, &initial_state);
@@ -293,7 +283,7 @@ fn getchar32Windows() u32 {
 fn getchar32() u32 {
     if (comptime is_windows) return getchar32Windows();
     stdlib.stdio.flushLineBuffered();
-    const wc = getwchar();
+    const wc = stdlib.libc.getwchar();
     if (wc == weof) return weof;
     return wc;
 }
@@ -323,7 +313,7 @@ fn popCursor() void {
 /// Ports `estimateWidth` (console.cpp:287 @b1b770d90).
 fn estimateWidth(codepoint: u32) c_int {
     if (comptime is_windows) return 1;
-    return wcwidth(codepoint);
+    return stdlib.libc.wcwidth(codepoint);
 }
 
 /// Ports `put_codepoint` (console.cpp:296 @b1b770d90), its `_WIN32` arm:
@@ -361,18 +351,18 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
         return expected_width;
     }
 
-    _ = libc.fputs("\x1b[6n", tty); // Query cursor position
+    _ = stdlib.libc.fputs("\x1b[6n", tty); // Query cursor position
     var x1: c_int = 0;
     var y1: c_int = 0;
     var x2: c_int = 0;
     var y2: c_int = 0;
     var results: c_int = 0;
-    results = fscanf(tty, "\x1b[%d;%dR", &y1, &x1);
+    results = stdlib.libc.fscanf(tty, "\x1b[%d;%dR", &y1, &x1);
 
-    _ = libc.fwrite(utf8.ptr, utf8.len, 1, tty);
+    _ = stdlib.libc.fwrite(utf8.ptr, utf8.len, 1, tty);
 
-    _ = libc.fputs("\x1b[6n", tty); // Query cursor position
-    results += fscanf(tty, "\x1b[%d;%dR", &y2, &x2);
+    _ = stdlib.libc.fputs("\x1b[6n", tty); // Query cursor position
+    results += stdlib.libc.fscanf(tty, "\x1b[%d;%dR", &y2, &x2);
 
     if (results != 4) return expected_width;
 
@@ -381,7 +371,7 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
         // Calculate the width considering text wrapping
         var w: extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 } = undefined;
         const tiocgwinsz: c_ulong = if (builtin.os.tag.isDarwin()) 0x40087468 else 0x5413;
-        _ = libc.ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
+        _ = stdlib.libc.ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
         width += w.ws_col;
     }
     return width;
@@ -641,7 +631,7 @@ fn hasCtrlModifier(params: []const u8) bool {
 
 /// Ports `is_space_codepoint` (console.cpp:578 @b1b770d90).
 fn isSpaceCodepoint(cp: u32) bool {
-    return iswspace(cp) != 0;
+    return stdlib.libc.iswspace(cp) != 0;
 }
 
 /// Ports `move_cursor` (console.cpp:667 @b1b770d90), the POSIX arm.
@@ -978,9 +968,9 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
 fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var buf: ?[*]u8 = null;
     var cap: usize = 0;
-    defer libc.free(buf);
+    defer stdlib.libc.free(buf);
     stdlib.stdio.flushLineBuffered();
-    const n = libc.getline(&buf, &cap, stdlib.stdio.cStream(.stdin));
+    const n = stdlib.libc.getline(&buf, &cap, stdlib.stdio.cStream(.stdin));
     if (n < 0) return false;
     var got = buf.?[0..@intCast(n)];
     if (got.len != 0 and got[got.len - 1] == '\n') got = got[0 .. got.len - 1];
@@ -999,7 +989,7 @@ fn readLineWindows(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var any = false;
     while (true) {
         stdlib.stdio.flushLineBuffered();
-        const wc = libc.fgetwc(stdlib.stdio.cStream(.stdin));
+        const wc = stdlib.libc.fgetwc(stdlib.stdio.cStream(.stdin));
         if (wc == weof) break;
         any = true;
         if (wc == '\n') break;

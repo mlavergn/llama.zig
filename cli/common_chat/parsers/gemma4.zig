@@ -12,51 +12,36 @@
 //! since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const msg_mod = @import("../msg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Node = json.schema.Node;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const Mapper = chat_peg.Mapper;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 // -----------------------------------------------------------------------------
 // Gemma 4 value parsers
 
-fn gemma4Dict(b: *peg.Builder) peg.Error!ParserId {
+fn gemma4Dict(b: *peg.Builder) peg.Error!peg.ParserId {
     const ws = try b.space();
     const m = try b.ref("gemma4-dict-kv");
     const members = try b.sequence(&.{ m, try b.zeroOrMore(try b.sequence(&.{ try b.literal(","), ws, m })) });
-    return b.tag(Mapper.GEMMA4_DICT, try b.sequence(&.{
+    return b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT, try b.sequence(&.{
         try b.literal("{"),                                                                            ws,
         try b.choice(&.{ try b.literal("}"), try b.sequence(&.{ members, ws, try b.literal("}") }) }),
     }));
 }
 
-fn gemma4Array(b: *peg.Builder) peg.Error!ParserId {
+fn gemma4Array(b: *peg.Builder) peg.Error!peg.ParserId {
     const ws = try b.space();
     const value = try b.ref("gemma4-value");
     const elements = try b.sequence(&.{ value, try b.zeroOrMore(try b.sequence(&.{ try b.literal(","), ws, value })) });
-    return b.tag(Mapper.GEMMA4_ARRAY, try b.sequence(&.{
+    return b.tag(common_chat.chat_peg.Mapper.GEMMA4_ARRAY, try b.sequence(&.{
         try b.literal("["),                                                                             ws,
         try b.choice(&.{ try b.literal("]"), try b.sequence(&.{ elements, ws, try b.literal("]") }) }),
     }));
 }
 
-fn gemma4Value(b: *peg.Builder) peg.Error!ParserId {
+fn gemma4Value(b: *peg.Builder) peg.Error!peg.ParserId {
     return b.choice(&.{
         try b.ref("gemma4-string"), try b.ref("gemma4-dict"), try b.ref("gemma4-array"),
         try b.ref("gemma4-number"), try b.ref("gemma4-bool"), try b.ref("gemma4-null"),
@@ -64,9 +49,9 @@ fn gemma4Value(b: *peg.Builder) peg.Error!ParserId {
 }
 
 /// `p.literal(q) + p.tag(DICT_KEY_NAME, p.chars(cls, 1, -1)) + p.literal(q)`.
-fn quotedKeyName(b: *peg.Builder, quote: []const u8, cls: []const u8) peg.Error!ParserId {
+fn quotedKeyName(b: *peg.Builder, quote: []const u8, cls: []const u8) peg.Error!peg.ParserId {
     const open = try b.literal(quote);
-    const name = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.chars(cls, 1, -1));
+    const name = try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY_NAME, try b.chars(cls, 1, -1));
     return b.plus(try b.plus(open, name), try b.literal(quote));
 }
 
@@ -76,32 +61,32 @@ fn quotedKeyName(b: *peg.Builder, quote: []const u8, cls: []const u8) peg.Error!
 fn valueRules(b: *peg.Builder) peg.Error!void {
     {
         const open = try b.literal("<|\"|>");
-        const content = try b.tag(Mapper.GEMMA4_STRING_CONTENT, try b.until("<|\"|>"));
+        const content = try b.tag(common_chat.chat_peg.Mapper.GEMMA4_STRING_CONTENT, try b.until("<|\"|>"));
         const body = try b.plus(try b.plus(open, content), try b.literal("<|\"|>"));
-        _ = try b.rule("gemma4-string", try b.tag(Mapper.GEMMA4_STRING, body), false);
+        _ = try b.rule("gemma4-string", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_STRING, body), false);
     }
 
-    _ = try b.rule("gemma4-bool", try b.tag(Mapper.GEMMA4_BOOL, try b.jsonBool()), false);
+    _ = try b.rule("gemma4-bool", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_BOOL, try b.jsonBool()), false);
 
-    _ = try b.rule("gemma4-null", try b.tag(Mapper.GEMMA4_NULL, try b.jsonNull()), false);
+    _ = try b.rule("gemma4-null", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_NULL, try b.jsonNull()), false);
 
-    _ = try b.rule("gemma4-number", try b.tag(Mapper.GEMMA4_NUMBER, try b.jsonNumber()), false);
+    _ = try b.rule("gemma4-number", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_NUMBER, try b.jsonNumber()), false);
 
     // Keys are bare in the template, but Gemma 4 occasionally wraps them in quotes
     {
         const delim = try b.literal("<|\"|>");
-        const delim_name = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.until("<|\"|>"));
+        const delim_name = try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY_NAME, try b.until("<|\"|>"));
         const alt0 = try b.plus(try b.plus(delim, delim_name), try b.literal("<|\"|>"));
         const alt1 = try quotedKeyName(b, "\"", "[^\"]");
         const alt2 = try quotedKeyName(b, "'", "[^']");
-        const alt3 = try b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try b.chars("[^:}]", 1, -1));
+        const alt3 = try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY_NAME, try b.chars("[^:}]", 1, -1));
         const key = try b.plus(try b.choice(&.{ alt0, alt1, alt2, alt3 }), try b.literal(":"));
-        _ = try b.rule("gemma4-dict-key", try b.tag(Mapper.GEMMA4_DICT_KEY, key), false);
+        _ = try b.rule("gemma4-dict-key", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY, key), false);
     }
 
     {
         const kv = try b.plus(try b.plus(try b.ref("gemma4-dict-key"), try b.space()), try b.ref("gemma4-value"));
-        _ = try b.rule("gemma4-dict-kv", try b.tag(Mapper.GEMMA4_DICT_KV, kv), false);
+        _ = try b.rule("gemma4-dict-kv", try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KV, kv), false);
     }
 
     _ = try b.ruleFn("gemma4-dict", b, gemma4Dict, false);
@@ -122,16 +107,16 @@ const SchemaParser = struct {
     root: []const u8,
     depth: c_int = 0,
     /// `refs_`: each `$ref` target's rule name, keyed by the target
-    refs: std.AutoHashMapUnmanaged(*const Node, []const u8) = .empty,
+    refs: std.AutoHashMapUnmanaged(*const json.schema.Node, []const u8) = .empty,
 
-    fn visitRoot(self: *SchemaParser, node: *const Node) peg.Error!ParserId {
+    fn visitRoot(self: *SchemaParser, node: *const json.schema.Node) peg.Error!peg.ParserId {
         return self.visit(node, self.root);
     }
 
     /// Ports `visit` (parsers/gemma4.cpp:88 @b1b770d90), the overload taking
     /// a name; its `depth_guard` (parsers/gemma4.cpp:14 @b1b770d90) throws
     /// past `COMMON_RECURSIVE_LIMIT`.
-    fn visit(self: *SchemaParser, node: *const Node, name: []const u8) peg.Error!ParserId {
+    fn visit(self: *SchemaParser, node: *const json.schema.Node, name: []const u8) peg.Error!peg.ParserId {
         self.depth += 1;
         defer self.depth -= 1;
         if (self.depth > json.schema.recursive_limit) {
@@ -150,7 +135,7 @@ const SchemaParser = struct {
 
     /// Ports `shaped` (parsers/gemma4.cpp:102 @b1b770d90): whether a schema
     /// contributes a shape of its own, as opposed to accepting any value.
-    fn shaped(node: *const Node) bool {
+    fn shaped(node: *const json.schema.Node) bool {
         return switch (node.*) {
             .ref => |r| r.target != null,
             .any_of => |children| for (children) |child| {
@@ -163,12 +148,12 @@ const SchemaParser = struct {
     }
 
     /// `p_.tag(DICT_KEY_NAME, p_.literal(key))`, the lambda `name` in `key`.
-    fn keyName(self: *SchemaParser, k: []const u8) peg.Error!ParserId {
-        return self.b.tag(Mapper.GEMMA4_DICT_KEY_NAME, try self.b.literal(k));
+    fn keyName(self: *SchemaParser, k: []const u8) peg.Error!peg.ParserId {
+        return self.b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY_NAME, try self.b.literal(k));
     }
 
     /// `lit + name() + lit`.
-    fn quoted(self: *SchemaParser, quote: []const u8, k: []const u8) peg.Error!ParserId {
+    fn quoted(self: *SchemaParser, quote: []const u8, k: []const u8) peg.Error!peg.ParserId {
         const open = try self.b.literal(quote);
         const name = try self.keyName(k);
         return self.b.plus(try self.b.plus(open, name), try self.b.literal(quote));
@@ -178,14 +163,14 @@ const SchemaParser = struct {
     /// keys bare. Models keep that for identifiers and quote anything else,
     /// with single or double quotes or the string delimiter, so those are
     /// accepted as well.
-    fn key(self: *SchemaParser, k: []const u8) peg.Error!ParserId {
+    fn key(self: *SchemaParser, k: []const u8) peg.Error!peg.ParserId {
         const b = self.b;
         var identifier = k.len != 0 and !std.ascii.isDigit(k[0]);
         for (k) |c| {
             if (!std.ascii.isAlphanumeric(c) and c != '_') identifier = false;
         }
         if (identifier) {
-            return b.tag(Mapper.GEMMA4_DICT_KEY, try b.plus(try self.keyName(k), try b.literal(":")));
+            return b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY, try b.plus(try self.keyName(k), try b.literal(":")));
         }
 
         var alts = try b.choiceEmpty();
@@ -201,15 +186,15 @@ const SchemaParser = struct {
         if (std.mem.indexOfScalar(u8, k, '"') == null) {
             try b.orAssign(&alts, try self.quoted("\"", k));
         }
-        return b.tag(Mapper.GEMMA4_DICT_KEY, try b.plus(alts, try b.literal(":")));
+        return b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KEY, try b.plus(alts, try b.literal(":")));
     }
 
     const RefRule = struct {
         self: *SchemaParser,
-        target: *const Node,
+        target: *const json.schema.Node,
         name: []const u8,
 
-        fn build(ctx: *const RefRule) peg.Error!ParserId {
+        fn build(ctx: *const RefRule) peg.Error!peg.ParserId {
             return ctx.self.visit(ctx.target, ctx.name);
         }
     };
@@ -217,7 +202,7 @@ const SchemaParser = struct {
     /// Ports `visit_ref` (parsers/gemma4.cpp:157 @b1b770d90): a target
     /// reached from several places gets one rule, named by the order it was
     /// first seen.
-    fn visitRef(self: *SchemaParser, r: *const json.schema.Ref) peg.Error!ParserId {
+    fn visitRef(self: *SchemaParser, r: *const json.schema.Ref) peg.Error!peg.ParserId {
         const target = r.target orelse return self.b.ref("gemma4-value");
         if (self.refs.get(target)) |rule| return self.b.ref(rule);
         const rule = try std.fmt.allocPrint(self.a, "{s}-ref-{d}", .{ self.root, self.refs.count() });
@@ -229,7 +214,7 @@ const SchemaParser = struct {
     /// Ports `visit_any_of` (parsers/gemma4.cpp:172 @b1b770d90): shaped
     /// alternatives are tried first, then anything else collapses into one
     /// generic value.
-    fn visitAnyOf(self: *SchemaParser, node: *const Node, children: []const *Node, name: []const u8) peg.Error!ParserId {
+    fn visitAnyOf(self: *SchemaParser, node: *const json.schema.Node, children: []const *json.schema.Node, name: []const u8) peg.Error!peg.ParserId {
         const b = self.b;
         if (!shaped(node)) return b.ref("gemma4-value");
         if (children.len == 1) return self.visit(children[0], name);
@@ -247,13 +232,13 @@ const SchemaParser = struct {
     }
 
     /// Ports `visit_all_of` (parsers/gemma4.cpp:194 @b1b770d90).
-    fn visitAllOf(self: *SchemaParser, children: []const *Node, name: []const u8) peg.Error!ParserId {
+    fn visitAllOf(self: *SchemaParser, children: []const *json.schema.Node, name: []const u8) peg.Error!peg.ParserId {
         if (children.len == 1) return self.visit(children[0], name);
         return self.b.ref("gemma4-value");
     }
 
     /// Ports `visit_array` (parsers/gemma4.cpp:201 @b1b770d90).
-    fn visitArray(self: *SchemaParser, arr: *const json.schema.Array, name: []const u8) peg.Error!ParserId {
+    fn visitArray(self: *SchemaParser, arr: *const json.schema.Array, name: []const u8) peg.Error!peg.ParserId {
         const b = self.b;
         const ws = try b.space();
         const item = if (shaped(arr.items))
@@ -264,11 +249,11 @@ const SchemaParser = struct {
         const head = try b.plus(try b.literal("["), ws);
         const empty = try b.literal("]");
         const full = try b.plus(try b.plus(elements, ws), try b.literal("]"));
-        return b.rule(name, try b.tag(Mapper.GEMMA4_ARRAY, try b.plus(head, try b.orr(empty, full))), false);
+        return b.rule(name, try b.tag(common_chat.chat_peg.Mapper.GEMMA4_ARRAY, try b.plus(head, try b.orr(empty, full))), false);
     }
 
     /// Ports `visit_tuple` (parsers/gemma4.cpp:209 @b1b770d90).
-    fn visitTuple(self: *SchemaParser, items: []const *Node, name: []const u8) peg.Error!ParserId {
+    fn visitTuple(self: *SchemaParser, items: []const *json.schema.Node, name: []const u8) peg.Error!peg.ParserId {
         const b = self.b;
         const ws = try b.space();
         var seq = try b.sequenceEmpty();
@@ -283,17 +268,17 @@ const SchemaParser = struct {
         body = try b.plus(body, seq);
         body = try b.plus(body, ws);
         body = try b.plus(body, try b.literal("]"));
-        return b.rule(name, try b.tag(Mapper.GEMMA4_ARRAY, body), false);
+        return b.rule(name, try b.tag(common_chat.chat_peg.Mapper.GEMMA4_ARRAY, body), false);
     }
 
     /// `parser + *rest`, or the parser alone without `rest`: the lambda
     /// `then_rest` in `visit_object`.
-    fn thenRest(b: *peg.Builder, rest: ?ParserId, parser: ParserId) peg.Error!ParserId {
+    fn thenRest(b: *peg.Builder, rest: ?peg.ParserId, parser: peg.ParserId) peg.Error!peg.ParserId {
         return if (rest) |r| b.plus(parser, r) else parser;
     }
 
     /// `p_.literal(",") + ws + kv`.
-    fn commaKv(b: *peg.Builder, ws: ParserId, kv: ParserId) peg.Error!ParserId {
+    fn commaKv(b: *peg.Builder, ws: peg.ParserId, kv: peg.ParserId) peg.Error!peg.ParserId {
         return b.plus(try b.plus(try b.literal(","), ws), kv);
     }
 
@@ -304,7 +289,7 @@ const SchemaParser = struct {
     }
 
     /// Ports `visit_object` (parsers/gemma4.cpp:221 @b1b770d90).
-    fn visitObject(self: *SchemaParser, obj: *const json.schema.Object, name: []const u8) peg.Error!ParserId {
+    fn visitObject(self: *SchemaParser, obj: *const json.schema.Object, name: []const u8) peg.Error!peg.ParserId {
         const b = self.b;
         const ws = try b.space();
 
@@ -324,11 +309,11 @@ const SchemaParser = struct {
         if (props.len == 0) {
             if (obj.additional_properties != null) return b.ref("gemma4-dict");
             const body = try b.plus(try b.plus(try b.literal("{"), ws), try b.literal("}"));
-            return b.rule(name, try b.tag(Mapper.GEMMA4_DICT, body), false);
+            return b.rule(name, try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT, body), false);
         }
 
-        var rest: ?ParserId = null;
-        var first: ?ParserId = null;
+        var rest: ?peg.ParserId = null;
+        var first: ?peg.ParserId = null;
         if (obj.additional_properties != null) {
             const kv = try b.ref("gemma4-dict-kv");
             rest = try b.zeroOrMore(try commaKv(b, ws, kv));
@@ -342,7 +327,7 @@ const SchemaParser = struct {
             const k = try self.key(prop.name);
             const kws = try b.plus(k, ws);
             const value = try self.visit(prop.schema, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ name, i }));
-            const kv = try b.tag(Mapper.GEMMA4_DICT_KV, try b.plus(kws, value));
+            const kv = try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT_KV, try b.plus(kws, value));
 
             var rest_i = try thenRest(b, rest, try commaKv(b, ws, kv));
             var first_i = try thenRest(b, rest, kv);
@@ -361,7 +346,7 @@ const SchemaParser = struct {
         body = try b.plus(body, first.?);
         body = try b.plus(body, ws);
         body = try b.plus(body, try b.literal("}"));
-        return b.rule(name, try b.tag(Mapper.GEMMA4_DICT, body), false);
+        return b.rule(name, try b.tag(common_chat.chat_peg.Mapper.GEMMA4_DICT, body), false);
     }
 };
 
@@ -370,16 +355,16 @@ const SchemaParser = struct {
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
-    cb: *ChatBuilder = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    tool_choice: peg.ParserId = undefined,
     /// the `what()` of the last throw `schemaArgs` caught
     what: []const u8 = "",
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const start = try b.rule("start", try b.optional(try b.literal("<|turn>model\n")), false);
@@ -407,7 +392,7 @@ const Build = struct {
 
             self.tool_choice = try b.choiceEmpty();
 
-            parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+            common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
 
             const min: c_int = if (self.inputs.tool_choice == .required) 1 else 0;
             const max: c_int = if (self.inputs.parallel_tool_calls) -1 else 1;
@@ -431,28 +416,28 @@ const Build = struct {
         return b.plus(start, try b.oneOrMore(message));
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        const name = try parsers.functionName(t);
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        const name = try common_chat.parsers.functionName(t);
 
         // Arguments follow the shape of the parameter schema when it is an object,
         // see gemma4_schema_parser, and are a generic dict otherwise.
-        var args = self.cb.b.ref("gemma4-dict") catch |e| return util.fromPeg(e);
+        var args = self.cb.b.ref("gemma4-dict") catch |e| return common_chat.util.fromPeg(e);
         if (self.schemaArgs(tool_index, function)) |shaped| {
             if (shaped) |x| args = x;
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            log.wrn("{s}: tool {s} uses the generic argument parser: {s}\n", .{ "operator()", name, self.what });
+            common_chat.log.wrn("{s}: tool {s} uses the generic argument parser: {s}\n", .{ "operator()", name, self.what });
         }
-        self.toolPeg(tool_index, name, args) catch |e| return util.fromPeg(e);
+        self.toolPeg(tool_index, name, args) catch |e| return common_chat.util.fromPeg(e);
     }
 
     /// The `try` block of the tool lambda: the arguments shaped by the
     /// parameter schema, or null when it is not an object. A throw sets
     /// `self.what`, the `e.what()` the `catch` logs.
-    fn schemaArgs(self: *Build, tool_index: usize, function: *const Value) anyerror!?ParserId {
-        var params = msg_mod.toolParameters(self.a, function) catch |e| {
-            self.what = exception.what(e);
+    fn schemaArgs(self: *Build, tool_index: usize, function: *const json.Value) anyerror!?peg.ParserId {
+        var params = common_chat.msg.toolParameters(self.a, function) catch |e| {
+            self.what = common_chat.exception.what(e);
             return e;
         };
         _ = &params;
@@ -465,7 +450,7 @@ const Build = struct {
         var sp: SchemaParser = .{
             .a = self.a,
             .b = &self.cb.b,
-            .root = try parsers.indexName(self.a, "tool-", tool_index, "-args"),
+            .root = try common_chat.parsers.indexName(self.a, "tool-", tool_index, "-args"),
         };
         return sp.visitRoot(doc.root) catch |e| {
             self.what = try self.a.dupe(u8, peg.what(e));
@@ -473,23 +458,23 @@ const Build = struct {
         };
     }
 
-    fn toolPeg(self: *Build, tool_index: usize, name: []const u8, args: ParserId) chat_peg.Error!void {
+    fn toolPeg(self: *Build, tool_index: usize, name: []const u8, args: peg.ParserId) peg.Error!void {
         const p = self.cb;
         const b = &p.b;
         const open = try p.toolOpen(try b.plus(try p.toolName(try b.literal(name)), try b.peek(try b.literal("{"))));
         const t = try p.tool(try b.sequence(&.{ open, try p.toolArgs(args) }));
-        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), t, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try common_chat.parsers.indexName(self.a, "tool-", tool_index, ""), t, false));
     }
 };
 
 /// Ports `common_chat_params_init_gemma4` (parsers/gemma4.cpp:283 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, null, null, null);
 
     if (inputs.add_generation_prompt and std.mem.endsWith(u8, try data.prompt.str(a), "<turn|>\n")) {
         // This may happen if the model generates content + tool_call, the
@@ -521,7 +506,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         try data.prompt.append(a, data.generation_prompt, false);
     }
 
-    const has_tools = parsers.hasTools(&inputs.tools);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
     const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
     const extract_reasoning = inputs.reasoning_format != .none;
@@ -533,12 +518,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "<|tool_call>");
     }
 
@@ -557,9 +542,9 @@ test "google-gemma-4-31B-it.jinja applies with a tool and builds a parser and a 
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "llama.cpp/models/templates/google-gemma-4-31B-it.jinja", a, .limited(1 << 20));
-    var t = try template.Template.init(std.testing.allocator, src, "<s>", "</s>");
+    var t = try common_chat.template.Template.init(std.testing.allocator, src, "<s>", "</s>");
     defer t.deinit();
-    var p: GenerationParams = .{ .add_generation_prompt = true };
+    var p: common_chat.template.GenerationParams = .{ .add_generation_prompt = true };
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);

@@ -26,14 +26,7 @@
 //! making one weight wrong to keep the encoding representable.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const blocks = @import("blocks.zig");
-const codebook = @import("codebook.zig");
-const h = @import("helpers.zig");
-const c = impl.c;
-
-const fp16 = impl.fp32ToFp16;
-const QK_K = c.QK_K;
+const ggml = @import("../module.zig");
 
 /// Ports `iq3_find_best_neighbour` (ggml-quants.c:3930 @b1b770d90).
 ///
@@ -48,7 +41,7 @@ fn findBestNeighbour(
     l_out: [*]i8,
 ) i32 {
     const num_neighbors = neighbours[0];
-    impl.assert(num_neighbors > 0, "num_neighbors > 0");
+    ggml.impl.assert(num_neighbors > 0, "num_neighbors > 0");
 
     var best_d2: f32 = std.math.floatMax(f32);
     var grid_index: i32 = -1;
@@ -65,7 +58,7 @@ fn findBestNeighbour(
             grid_index = neighbours[j];
         }
     }
-    impl.assert(grid_index >= 0, "grid_index >= 0");
+    ggml.impl.assert(grid_index >= 0, "grid_index >= 0");
 
     const pg: *const [4]i8 = @ptrCast(&grid[@intCast(grid_index)]);
     for (0..4) |i| l_out[i] = @intCast(@divTrunc(pg[i] - 1, 2));
@@ -78,23 +71,23 @@ fn findBestNeighbour(
 /// takes the block stride rather than a block type: the two write different
 /// structs but run the identical search.
 fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f32) void {
-    const kgrid = codebook.iq3Grid(grid_size);
-    const kmap = codebook.iq3Map(grid_size);
-    const kneighbors = codebook.iq3Neighbours(grid_size);
+    const kgrid = ggml.quants.codebook.iq3Grid(grid_size);
+    const kmap = ggml.quants.codebook.iq3Map(grid_size);
+    const kneighbors = ggml.quants.codebook.iq3Neighbours(grid_size);
 
-    std.debug.assert(@rem(n, QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     const k_max_q = 8;
-    const nbl: usize = @intCast(@divExact(n, QK_K));
+    const nbl: usize = @intCast(@divExact(n, ggml.impl.c.QK_K));
 
     // The two destination layouts share a prefix -- an f16 scale then the
     // quant bytes -- so the walk is expressed as a stride rather than a type.
-    const block_size: usize = if (grid_size == 256) @sizeOf(blocks.IQ3_XXS) else @sizeOf(blocks.IQ3_S);
-    const quant_size = block_size - @sizeOf(blocks.Half);
+    const block_size: usize = if (grid_size == 256) @sizeOf(ggml.quants.blocks.IQ3_XXS) else @sizeOf(ggml.quants.blocks.IQ3_S);
+    const quant_size = block_size - @sizeOf(ggml.quants.blocks.Half);
 
-    var dh: [*]blocks.Half = @ptrCast(@alignCast(vy.?));
-    var qs: [*]u8 = @as([*]u8, @ptrCast(@alignCast(vy.?))) + @sizeOf(blocks.Half);
+    var dh: [*]ggml.quants.blocks.Half = @ptrCast(@alignCast(vy.?));
+    var qs: [*]u8 = @as([*]u8, @ptrCast(@alignCast(vy.?))) + @sizeOf(ggml.quants.blocks.Half);
 
-    var scales: [QK_K / 32]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 32]f32 = undefined;
     var weight: [32]f32 = undefined;
     var xval: [32]f32 = undefined;
     var l_buf: [32]i8 = undefined;
@@ -103,26 +96,26 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
     var is_on_grid: [8]bool = undefined;
     var is_on_grid_aux: [8]bool = undefined;
     var block_signs: [8]u8 = undefined;
-    var q3: [3 * (QK_K / 8) + QK_K / 32]u8 = undefined;
+    var q3: [3 * (ggml.impl.c.QK_K / 8) + ggml.impl.c.QK_K / 32]u8 = undefined;
 
     for (0..nbl) |ibl| {
-        dh[0] = fp16(0.0);
+        dh[0] = ggml.impl.fp32ToFp16(0.0);
         @memset(&q3, 0);
         // Two views into the same buffer: the scale-and-sign words start where
         // the grid indices end, and `qh` overlaps the same tail for grid-512.
-        const scales_and_signs: [*]u32 = @ptrCast(@alignCast(&q3[QK_K / 4]));
-        const qh: [*]u8 = @ptrCast(&q3[3 * (QK_K / 8)]);
+        const scales_and_signs: [*]u32 = @ptrCast(@alignCast(&q3[ggml.impl.c.QK_K / 4]));
+        const qh: [*]u8 = @ptrCast(&q3[3 * (ggml.impl.c.QK_K / 8)]);
 
         var max_scale: f32 = 0;
-        const xbl = x + QK_K * ibl;
+        const xbl = x + ggml.impl.c.QK_K * ibl;
         var sumx2: f32 = 0;
-        for (0..QK_K) |i| sumx2 += xbl[i] * xbl[i];
-        const sigma2 = 2 * sumx2 / QK_K;
+        for (0..ggml.impl.c.QK_K) |i| sumx2 += xbl[i] * xbl[i];
+        const sigma2 = 2 * sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 32) |ib| {
+        for (0..ggml.impl.c.QK_K / 32) |ib| {
             const xb = xbl + 32 * ib;
             if (quant_weights) |qw_all| {
-                const qw = qw_all + QK_K * ibl + 32 * ib;
+                const qw = qw_all + ggml.impl.c.QK_K * ibl + 32 * ib;
                 for (0..32) |i| weight[i] = qw[i] * @sqrt(sigma2 + xb[i] * xb[i]);
             } else {
                 for (0..32) |i| weight[i] = xb[i] * xb[i];
@@ -163,7 +156,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
             var max = xval[0];
             for (1..32) |i| max = @max(max, xval[i]);
             @memset(&l_buf, 0);
-            if (max < h.group_max_eps_iq3_xxs) {
+            if (max < ggml.quants.helpers.group_max_eps_iq3_xxs) {
                 scales[ib] = 0;
                 continue;
             }
@@ -180,7 +173,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
                     for (0..4) |i| {
                         // The 0.5*(id*x - 1) maps onto the odd values the
                         // codebook stores: level l represents 2l+1.
-                        const l = h.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
+                        const l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
                         l_aux[4 * k + i] = @intCast(@max(0, @min(k_max_q - 1, l)));
                     }
                     var u: u16 = 0;
@@ -221,7 +214,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
                     if (is_on_grid[k]) continue;
                     var u: u16 = 0;
                     for (0..4) |i| {
-                        var l = h.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
+                        var l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
                         l = @max(0, @min(k_max_q - 1, l));
                         u |= @as(u16, @intCast(l)) << @intCast(3 * i);
                     }
@@ -256,7 +249,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
                 var u: u16 = 0;
                 for (0..4) |i| u |= @as(u16, @intCast(l_buf[4 * k + i])) << @intCast(3 * i);
                 const grid_index = kmap[u];
-                if (grid_index < 0) impl.abort("fatal error: point not on grid");
+                if (grid_index < 0) ggml.impl.abort("fatal error: point not on grid");
                 if (grid_size == 256) {
                     q3[8 * ib + k] = @intCast(grid_index);
                 } else {
@@ -268,7 +261,7 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
                 (@as(u32, block_signs[1]) << 7) |
                 (@as(u32, block_signs[2]) << 14) |
                 (@as(u32, block_signs[3]) << 21);
-            impl.assert(scale >= 0, "scale >= 0");
+            ggml.impl.assert(scale >= 0, "scale >= 0");
             scales[ib] = scale;
             max_scale = @max(max_scale, scale);
         }
@@ -282,10 +275,10 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
 
         const d = max_scale / 31;
         // The C's comment: "small improvement via this fudge factor".
-        dh[0] = fp16(d * 1.0125);
+        dh[0] = ggml.impl.fp32ToFp16(d * 1.0125);
         const id = 1 / d;
-        for (0..QK_K / 32) |ib| {
-            var l = h.nearestInt(0.5 * (id * scales[ib] - 1));
+        for (0..ggml.impl.c.QK_K / 32) |ib| {
+            var l = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib] - 1));
             l = @max(0, @min(15, l));
             scales_and_signs[ib] |= @as(u32, @intCast(l)) << 28;
         }
@@ -297,21 +290,21 @@ fn iq3XxsImpl(grid_size: c_int, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_
 
 /// Ports `quantize_iq3_xxs` (ggml-quants.c:4168 @b1b770d90).
 pub export fn quantize_iq3_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
     for (0..@intCast(nrow)) |_| {
         iq3XxsImpl(256, s, qrow, n_per_row, if (quant_weights != null) quant_weights else null);
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ3_XXS);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ3_XXS);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ3_XXS);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ3_XXS);
 }
 
 /// Ports `quantize_row_iq3_xxs_ref` (ggml-quants.c:4180 @b1b770d90).
-pub export fn quantize_row_iq3_xxs_ref(x: [*c]const f32, y: [*c]blocks.IQ3_XXS, k: i64) void {
-    std.debug.assert(@rem(k, QK_K) == 0);
+pub export fn quantize_row_iq3_xxs_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.IQ3_XXS, k: i64) void {
+    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
     iq3XxsImpl(256, x, @ptrCast(y), k, null);
 }
 
@@ -338,19 +331,19 @@ const iq3s_block_size = 32;
 ///   flag is commented out, so every group is re-snapped once any group is off
 ///   the grid. Reinstating it would change the output.
 fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f32) void {
-    const kgrid = codebook.iq3Grid(512);
-    const kmap = codebook.iq3Map(512);
-    const kneighbors = codebook.iq3Neighbours(512);
+    const kgrid = ggml.quants.codebook.iq3Grid(512);
+    const kmap = ggml.quants.codebook.iq3Map(512);
+    const kneighbors = ggml.quants.codebook.iq3Neighbours(512);
 
-    std.debug.assert(@rem(n, QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     const k_max_q = 8;
-    const nbl: usize = @intCast(@divExact(n, QK_K));
-    const y: [*]blocks.IQ3_S = @ptrCast(@alignCast(vy.?));
+    const nbl: usize = @intCast(@divExact(n, ggml.impl.c.QK_K));
+    const y: [*]ggml.quants.blocks.IQ3_S = @ptrCast(@alignCast(vy.?));
 
     const bs4 = block_size / 4;
     const bs8 = block_size / 8;
 
-    var scales: [QK_K / iq3s_block_size]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / iq3s_block_size]f32 = undefined;
     var weight: [iq3s_block_size]f32 = undefined;
     var xval: [iq3s_block_size]f32 = undefined;
     var l_buf: [iq3s_block_size]i8 = undefined;
@@ -362,21 +355,21 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
 
     for (0..nbl) |ibl| {
         @memset(std.mem.asBytes(&y[ibl]), 0);
-        y[ibl].d = fp16(0.0);
+        y[ibl].d = ggml.impl.fp32ToFp16(0.0);
         var qs: [*]u8 = &y[ibl].qs;
         const qh: [*]u8 = &y[ibl].qh;
         var signs: [*]u8 = &y[ibl].signs;
 
         var max_scale: f32 = 0;
-        const xbl = x + QK_K * ibl;
+        const xbl = x + ggml.impl.c.QK_K * ibl;
         var sumx2: f32 = 0;
-        for (0..QK_K) |i| sumx2 += xbl[i] * xbl[i];
-        const sigma2 = 2 * sumx2 / QK_K;
+        for (0..ggml.impl.c.QK_K) |i| sumx2 += xbl[i] * xbl[i];
+        const sigma2 = 2 * sumx2 / ggml.impl.c.QK_K;
 
-        for (0..@divExact(@as(usize, QK_K), block_size)) |ib| {
+        for (0..@divExact(@as(usize, ggml.impl.c.QK_K), block_size)) |ib| {
             const xb = xbl + block_size * ib;
             if (quant_weights) |qw_all| {
-                const qw = qw_all + QK_K * ibl + block_size * ib;
+                const qw = qw_all + ggml.impl.c.QK_K * ibl + block_size * ib;
                 for (0..block_size) |i| weight[i] = qw[i] * @sqrt(sigma2 + xb[i] * xb[i]);
             } else {
                 for (0..block_size) |i| weight[i] = xb[i] * xb[i];
@@ -416,7 +409,7 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
                 const this_scale = 1 / id;
                 for (0..bs4) |k| {
                     for (0..4) |i| {
-                        const l = h.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
+                        const l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
                         l_aux[4 * k + i] = @intCast(@max(0, @min(k_max_q - 1, l)));
                     }
                     var u: u16 = 0;
@@ -455,7 +448,7 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
                     // the C, and reinstating it changes the output.
                     var u: u16 = 0;
                     for (0..4) |i| {
-                        var l = h.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
+                        var l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[4 * k + i] - 1));
                         l = @max(0, @min(k_max_q - 1, l));
                         u |= @as(u16, @intCast(l)) << @intCast(3 * i);
                     }
@@ -488,7 +481,7 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
                 var u: u16 = 0;
                 for (0..4) |i| u |= @as(u16, @intCast(l_buf[4 * k + i])) << @intCast(3 * i);
                 const grid_index = kmap[u];
-                if (grid_index < 0) impl.abort("fatal error: point not on grid");
+                if (grid_index < 0) ggml.impl.abort("fatal error: point not on grid");
                 qs[k] = @intCast(grid_index & 255);
                 // The ninth bit, indexed across the whole super-block.
                 const bit = ib * bs4 + k;
@@ -498,7 +491,7 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
             for (0..bs8) |k| signs[k] = block_signs[k];
             signs += bs8;
 
-            impl.assert(scale >= 0, "scale >= 0");
+            ggml.impl.assert(scale >= 0, "scale >= 0");
             scales[ib] = scale;
             max_scale = @max(max_scale, scale);
         }
@@ -507,13 +500,13 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
 
         const d = max_scale / 31;
         // A different fudge factor from iq3_xxs's 1.0125.
-        y[ibl].d = fp16(d * 1.033);
+        y[ibl].d = ggml.impl.fp32ToFp16(d * 1.033);
         const id = 1 / d;
         var ib: usize = 0;
-        while (ib < @divExact(@as(usize, QK_K), block_size)) : (ib += 2) {
-            var l1 = h.nearestInt(0.5 * (id * scales[ib + 0] - 1));
+        while (ib < @divExact(@as(usize, ggml.impl.c.QK_K), block_size)) : (ib += 2) {
+            var l1 = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib + 0] - 1));
             l1 = @max(0, @min(15, l1));
-            var l2 = h.nearestInt(0.5 * (id * scales[ib + 1] - 1));
+            var l2 = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib + 1] - 1));
             l2 = @max(0, @min(15, l2));
             y[ibl].scales[ib / 2] = @as(u8, @intCast(l1)) | (@as(u8, @intCast(l2)) << 4);
         }
@@ -522,20 +515,20 @@ fn iq3SImpl(block_size: usize, x: [*]const f32, vy: ?*anyopaque, n: i64, quant_w
 
 /// Ports `quantize_iq3_s` (ggml-quants.c:4369 @b1b770d90).
 pub export fn quantize_iq3_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
     for (0..@intCast(nrow)) |_| {
         iq3SImpl(iq3s_block_size, s, qrow, n_per_row, if (quant_weights != null) quant_weights else null);
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ3_S);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ3_S);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ3_S);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ3_S);
 }
 
 /// Ports `quantize_row_iq3_s_ref` (ggml-quants.c:4391 @b1b770d90).
-pub export fn quantize_row_iq3_s_ref(x: [*c]const f32, y: [*c]blocks.IQ3_S, k: i64) void {
-    std.debug.assert(@rem(k, QK_K) == 0);
+pub export fn quantize_row_iq3_s_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.IQ3_S, k: i64) void {
+    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
     _ = quantize_iq3_s(x, @ptrCast(y), 1, k, null);
 }

@@ -22,16 +22,7 @@
 //! folds them into `ne[3]` and writes them to op_params slots 9, 10 and 11.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const convert = @import("convert.zig");
-const fattn_common = @import("fattn_common.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-const half = kernels.half;
+const ggml = @import("../module.zig");
 
 /// Ports `conv3d_params` (conv3d.cu:5 @b1b770d90), passed to the kernels by
 /// value: 22 `int64_t`.
@@ -76,25 +67,25 @@ fn conv3dLaunchImplicitGemm(
     output: ?*anyopaque,
     params: Conv3dParams,
     split_k: c_int,
-    grid: kernels.Dim3,
-    block: kernels.Dim3,
-    stream: cu.cudaStream_t,
+    grid: ggml.cuda.kernels.Dim3,
+    block: ggml.cuda.kernels.Dim3,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     // Vector loads require both the base pointer and each weight row to be 16-byte aligned.
     const sizeof_int4 = 16;
     const aligned_weights = @intFromPtr(weight) % sizeof_int4 == 0 and
-        @rem(params.IC * params.KW * params.KH * params.KD, sizeof_int4 / @sizeOf(half)) == 0;
-    const lp: kernels.LaunchParams = .{ .grid = grid, .block = block, .shmem = 0, .stream = stream };
+        @rem(params.IC * params.KW * params.KH * params.KD, sizeof_int4 / @sizeOf(ggml.cuda.kernels.half)) == 0;
+    const lp: ggml.cuda.kernels.LaunchParams = .{ .grid = grid, .block = block, .shmem = 0, .stream = stream };
     const args = .{ input, weight, output, params, split_k, aligned_weights };
-    const mma = comptime kernels.boolean(use_mma);
+    const mma = comptime ggml.cuda.kernels.boolean(use_mma);
     if (params.KW == 3 and params.KH == 3 and params.KD == 3) {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_implicit_gemm_f16", &.{ kernels.int(3), kernels.int(3), kernels.int(3), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(3), ggml.cuda.kernels.int(3), ggml.cuda.kernels.int(3), mma })), lp, args);
     } else if (params.KW == 1 and params.KH == 1 and params.KD == 3) {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_implicit_gemm_f16", &.{ kernels.int(1), kernels.int(1), kernels.int(3), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(1), ggml.cuda.kernels.int(1), ggml.cuda.kernels.int(3), mma })), lp, args);
     } else if (params.KW == 1 and params.KH == 1 and params.KD == 1) {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_implicit_gemm_f16", &.{ kernels.int(1), kernels.int(1), kernels.int(1), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(1), ggml.cuda.kernels.int(1), ggml.cuda.kernels.int(1), mma })), lp, args);
     } else {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_implicit_gemm_f16", &.{ kernels.int(0), kernels.int(0), kernels.int(0), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(0), ggml.cuda.kernels.int(0), ggml.cuda.kernels.int(0), mma })), lp, args);
     }
 }
 
@@ -104,15 +95,15 @@ fn conv3dLaunchImplicitGemm(
 /// - `ctx`: the backend context whose stream, pool and cuBLAS handle are used.
 /// - `dst`: the `CONV_3D` node; `src[0]` the F16 or F32 kernel, `src[1]` the
 ///   F32 input.
-pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
-    const kernel = impl.one(Tensor, dst.src[0]);
-    const input = impl.one(Tensor, dst.src[1]);
-    impl.assert(input.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
-    impl.assert(kernel.type == c.GGML_TYPE_F16 or kernel.type == c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
-    impl.assert(c.ggml_is_contiguous(input) and c.ggml_is_contiguous(kernel) and c.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
+pub fn opConv3d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const input = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    ggml.impl.assert(input.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F16 or kernel.type == ggml.impl.c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(input) and ggml.impl.c.ggml_is_contiguous(kernel) and ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(input) && ggml_is_contiguous(kernel) && ggml_is_contiguous(dst)");
 
     var p: [12]i32 = undefined;
-    for (&p, 0..) |*v, i| v.* = impl.getOpParamsI32(dst, i);
+    for (&p, 0..) |*v, i| v.* = ggml.impl.getOpParamsI32(dst, i);
     const IW: i64 = input.ne[0];
     const IH: i64 = input.ne[1];
     const ID: i64 = input.ne[2];
@@ -125,9 +116,9 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
     const IC: i64 = p[9];
     const B: i64 = p[10];
     const OC: i64 = p[11];
-    impl.assert(IC > 0 and B > 0 and OC > 0 and input.ne[3] == IC * B and kernel.ne[3] == IC * OC, "IC > 0 && B > 0 && OC > 0 && input->ne[3] == IC * B && kernel->ne[3] == IC * OC");
-    impl.assert(dst.ne[3] == OC * B and p[0] > 0 and p[1] > 0 and p[2] > 0 and p[6] > 0 and p[7] > 0 and p[8] > 0, "dst->ne[3] == OC * B && p[0] > 0 && p[1] > 0 && p[2] > 0 && p[6] > 0 && p[7] > 0 && p[8] > 0");
-    const total: i64 = c.ggml_nelements(dst);
+    ggml.impl.assert(IC > 0 and B > 0 and OC > 0 and input.ne[3] == IC * B and kernel.ne[3] == IC * OC, "IC > 0 && B > 0 && OC > 0 && input->ne[3] == IC * B && kernel->ne[3] == IC * OC");
+    ggml.impl.assert(dst.ne[3] == OC * B and p[0] > 0 and p[1] > 0 and p[2] > 0 and p[6] > 0 and p[7] > 0 and p[8] > 0, "dst->ne[3] == OC * B && p[0] > 0 && p[1] > 0 && p[2] > 0 && p[6] > 0 && p[7] > 0 && p[8] > 0");
+    const total: i64 = ggml.impl.c.ggml_nelements(dst);
     const params: Conv3dParams = .{
         .IW = IW,
         .IH = IH,
@@ -156,29 +147,29 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
     const w: ?*const anyopaque = kernel.data;
     const y: ?*anyopaque = dst.data;
     const stream = ctx.stream();
-    const device = &common.info().devices[@intCast(ctx.device)];
-    const use_mma = common.turingMmaAvailable(device.cc) or fattn_common.amdWmmaAvailable(device.cc) or fattn_common.amdMfmaAvailable(device.cc);
+    const device = &ggml.cuda.common.info().devices[@intCast(ctx.device)];
+    const use_mma = ggml.cuda.common.turingMmaAvailable(device.cc) or ggml.cuda.fattn_common.amdWmmaAvailable(device.cc) or ggml.cuda.fattn_common.amdMfmaAvailable(device.cc);
     const pointwise = KW == 1 and KH == 1 and KD == 1 and p[0] == 1 and p[1] == 1 and p[2] == 1 and p[3] == 0 and p[4] == 0 and p[5] == 0;
-    const use_blas = pointwise and common.fastFp16HardwareAvailable(device.cc);
+    const use_blas = pointwise and ggml.cuda.common.fastFp16HardwareAvailable(device.cc);
     const limit: i64 = std.math.maxInt(c_int) - 256;
     const pw: i64 = IW + 2 * @as(i64, p[3]);
     const ph: i64 = IH + 2 * @as(i64, p[4]);
     const pd: i64 = ID + 2 * @as(i64, p[5]);
     const padded_fits = pw > 0 and pw <= limit and ph > 0 and ph <= limit and pd > 0 and pd <= limit and
         pw * ph <= @divTrunc(limit, pd) and IC * B <= @divTrunc(limit, pw * ph * pd);
-    if (kernel.type == c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and c.ggml_nelements(input) <= limit and
-        c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
+    if (kernel.type == ggml.impl.c.GGML_TYPE_F16 and KW > 0 and KH > 0 and KD > 0 and ggml.impl.c.ggml_nelements(input) <= limit and
+        ggml.impl.c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and p[3] >= 0 and p[4] >= 0 and p[5] >= 0 and
         (OW - 1) * p[0] + (KW - 1) * p[6] < pw and (OH - 1) * p[1] + (KH - 1) * p[7] < ph and
         (OD - 1) * p[2] + (KD - 1) * p[8] < pd and @divTrunc(OC + 63, 64) <= 65535 and B <= 65535)
     {
         const padded_total: c_int = @truncate(pw * ph * pd * IC * B);
-        var x_half = common.PoolAlloc(half).initAlloc(ctx.pool(), @intCast(padded_total));
+        var x_half = ggml.cuda.common.PoolAlloc(ggml.cuda.kernels.half).initAlloc(ctx.pool(), @intCast(padded_total));
         defer x_half.deinit();
         // Match im2col's F16 input precision without materializing all patches in global memory.
         if (p[3] == 0 and p[4] == 0 and p[5] == 0) {
-            convert.getToFp16(input.type).?(x, x_half.get(), padded_total, stream);
+            ggml.cuda.convert.getToFp16(input.type).?(x, x_half.get(), padded_total, stream);
         } else {
-            kernels.launch(kernels.get("conv3d", "conv3d_pad_f16"), .{
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", "conv3d_pad_f16"), .{
                 .grid = .{ .x = @intCast(@divTrunc(padded_total + 255, 256)) },
                 .block = .{ .x = 256 },
                 .shmem = 0,
@@ -219,30 +210,30 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
             const alpha: f32 = 1.0;
             const beta: f32 = 0.0;
             const cublas_h = ctx.cublasHandle();
-            const xh: [*]const half = x_half.get().?;
+            const xh: [*]const ggml.cuda.kernels.half = x_half.get().?;
             const yd: [*]f32 = @ptrCast(@alignCast(y.?));
             var n: c_int = 0;
             while (n < B) : (n += 1) {
-                common.cublasCheck(cu.cublasGemmEx(
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmEx(
                     cublas_h,
-                    cu.CUBLAS_OP_N,
-                    cu.CUBLAS_OP_N,
+                    ggml.cuda.common.cu.CUBLAS_OP_N,
+                    ggml.cuda.common.cu.CUBLAS_OP_N,
                     positions,
                     @as(c_int, @truncate(OC)),
                     @as(c_int, @truncate(IC)),
                     &alpha,
                     xh + @as(usize, @intCast(@as(i64, n) * IC * positions)),
-                    cu.CUDA_R_16F,
+                    ggml.cuda.common.cu.CUDA_R_16F,
                     positions,
                     w,
-                    cu.CUDA_R_16F,
+                    ggml.cuda.common.cu.CUDA_R_16F,
                     @as(c_int, @truncate(IC)),
                     &beta,
                     yd + @as(usize, @intCast(@as(i64, n) * OC * positions)),
-                    cu.CUDA_R_32F,
+                    ggml.cuda.common.cu.CUDA_R_32F,
                     positions,
-                    cu.CUBLAS_COMPUTE_32F,
-                    cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
+                    ggml.cuda.common.cu.CUBLAS_COMPUTE_32F,
+                    ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
                 ), "cublasGemmEx(cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, positions, int(OC), int(IC), &alpha, x_half.get() + int64_t(n) * IC * positions, CUDA_R_16F, positions, w, CUDA_R_16F, int(IC), &beta, y + int64_t(n) * OC * positions, CUDA_R_32F, positions, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)", @src());
             }
             return;
@@ -253,11 +244,11 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
             @min(@as(i64, 32), @divTrunc(@as(i64, 65535), B)),
             @min(@divTrunc(IC * KW * KH * KD + 63, 64), @max(@as(i64, 1), @divTrunc(target + blocks - 1, blocks))),
         ));
-        var partial = common.PoolAlloc(f32).init(ctx.pool());
+        var partial = ggml.cuda.common.PoolAlloc(f32).init(ctx.pool());
         defer partial.deinit();
         const result: ?*anyopaque = if (split_k == 1) y else @ptrCast(partial.alloc(@intCast(total * split_k)));
-        const block: kernels.Dim3 = .{ .x = @bitCast(device.warp_size), .y = 4 };
-        const grid: kernels.Dim3 = .{
+        const block: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(device.warp_size), .y = 4 };
+        const grid: ggml.cuda.kernels.Dim3 = .{
             .x = @truncate(@as(u64, @bitCast(@divTrunc(@as(i64, positions) + 63, 64)))),
             .y = @truncate(@as(u64, @bitCast(@divTrunc(OC + 63, 64)))),
             .z = @truncate(@as(u64, @bitCast(B * split_k))),
@@ -268,7 +259,7 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
             conv3dLaunchImplicitGemm(false, x_half.get(), w, result, padded_params, split_k, grid, block, stream);
         }
         if (split_k > 1) {
-            kernels.launch(kernels.get("conv3d", "conv3d_reduce_split_k"), .{
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", "conv3d_reduce_split_k"), .{
                 .grid = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(total + 255, 256)))) },
                 .block = .{ .x = 256 },
                 .shmem = 0,
@@ -278,10 +269,10 @@ pub fn opConv3d(ctx: *common.Context, dst: *Tensor) void {
         return;
     }
     const blocks: c_int = @intCast(@min(@as(i64, 65535), @divTrunc(total + 255, 256)));
-    const lp: kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = 256 }, .shmem = 0, .stream = stream };
-    if (kernel.type == c.GGML_TYPE_F16) {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_kernel", &.{kernels.typeName(half)})), lp, .{ x, w, y, params });
+    const lp: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = @bitCast(blocks) }, .block = .{ .x = 256 }, .shmem = 0, .stream = stream };
+    if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_kernel", &.{ggml.cuda.kernels.typeName(ggml.cuda.kernels.half)})), lp, .{ x, w, y, params });
     } else {
-        kernels.launch(kernels.get("conv3d", kernels.tmpl("conv3d_kernel", &.{kernels.typeName(f32)})), lp, .{ x, w, y, params });
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv3d", ggml.cuda.kernels.tmpl("conv3d_kernel", &.{ggml.cuda.kernels.typeName(f32)})), lp, .{ x, w, y, params });
     }
 }

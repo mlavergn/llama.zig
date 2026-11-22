@@ -18,15 +18,10 @@
 //! trailing separator, short of a root; both are kept.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const file = @import("file.zig");
-const errno = @import("errno.zig");
-const path_mod = @import("path.zig");
-const env = @import("env.zig");
 
 const E = std.c.E;
-
-const errnoFrom = errno.from;
 
 /// The file type bits of `st_mode`: the same on Linux, Darwin and the CRT.
 pub const IFMT: u32 = 0o170000;
@@ -56,8 +51,8 @@ pub fn statErrno(path: []const u8, follow: bool, out: *Info) c_int {
         }
     }
     const follow_symlinks = follow or builtin.os.tag == .windows;
-    const st = std.Io.Dir.cwd().statFile(file.defaultIo(), name, .{ .follow_symlinks = follow_symlinks }) catch |e| {
-        return errnoFrom(e);
+    const st = std.Io.Dir.cwd().statFile(mod.file.defaultIo(), name, .{ .follow_symlinks = follow_symlinks }) catch |e| {
+        return mod.errno.from(e);
     };
     out.* = .{
         .mode = switch (st.kind) {
@@ -86,7 +81,7 @@ pub fn stat(path: []const u8, follow: bool) ?Info {
 ///
 /// Return: 0, or the `errno`.
 pub fn mkdir(path: []const u8) c_int {
-    std.Io.Dir.cwd().createDir(file.defaultIo(), path, .default_dir) catch |e| return errnoFrom(e);
+    std.Io.Dir.cwd().createDir(mod.file.defaultIo(), path, .default_dir) catch |e| return mod.errno.from(e);
     return 0;
 }
 
@@ -94,7 +89,7 @@ pub fn mkdir(path: []const u8) c_int {
 ///
 /// Return: 0, or the `errno`.
 pub fn rmdir(path: []const u8) c_int {
-    std.Io.Dir.cwd().deleteDir(file.defaultIo(), path) catch |e| return errnoFrom(e);
+    std.Io.Dir.cwd().deleteDir(mod.file.defaultIo(), path) catch |e| return mod.errno.from(e);
     return 0;
 }
 
@@ -103,9 +98,9 @@ pub fn rmdir(path: []const u8) c_int {
 ///
 /// Return: 0, or the `errno`.
 pub fn unlink(path: []const u8) c_int {
-    std.Io.Dir.cwd().deleteFile(file.defaultIo(), path) catch |e| {
+    std.Io.Dir.cwd().deleteFile(mod.file.defaultIo(), path) catch |e| {
         if (e == error.IsDir and comptime builtin.os.tag.isDarwin()) return @backingInt(E.PERM);
-        return errnoFrom(e);
+        return mod.errno.from(e);
     };
     return 0;
 }
@@ -114,9 +109,9 @@ pub fn unlink(path: []const u8) c_int {
 ///
 /// Return: 0, or the `errno`.
 pub fn remove(path: []const u8) c_int {
-    std.Io.Dir.cwd().deleteFile(file.defaultIo(), path) catch |e| {
+    std.Io.Dir.cwd().deleteFile(mod.file.defaultIo(), path) catch |e| {
         if (e == error.IsDir) return rmdir(path);
-        return errnoFrom(e);
+        return mod.errno.from(e);
     };
     return 0;
 }
@@ -126,7 +121,7 @@ pub fn remove(path: []const u8) c_int {
 /// Return: 0, or the `errno`.
 pub fn rename(old: []const u8, new: []const u8) c_int {
     const cwd = std.Io.Dir.cwd();
-    cwd.rename(old, cwd, new, file.defaultIo()) catch |e| return errnoFrom(e);
+    cwd.rename(old, cwd, new, mod.file.defaultIo()) catch |e| return mod.errno.from(e);
     return 0;
 }
 
@@ -134,7 +129,7 @@ pub fn rename(old: []const u8, new: []const u8) c_int {
 ///
 /// Return: 0, or the `errno`.
 pub fn symlink(target: []const u8, link: []const u8) c_int {
-    std.Io.Dir.cwd().symLink(file.defaultIo(), target, link, .{}) catch |e| return errnoFrom(e);
+    std.Io.Dir.cwd().symLink(mod.file.defaultIo(), target, link, .{}) catch |e| return mod.errno.from(e);
     return 0;
 }
 
@@ -146,7 +141,7 @@ pub fn symlink(target: []const u8, link: []const u8) c_int {
 /// Return: the target, in `buf`; null when `path` is not a link or cannot
 /// be read.
 pub fn readLink(path: []const u8, buf: []u8) ?[]u8 {
-    const n = std.Io.Dir.cwd().readLink(file.defaultIo(), path, buf) catch return null;
+    const n = std.Io.Dir.cwd().readLink(mod.file.defaultIo(), path, buf) catch return null;
     return buf[0..n];
 }
 
@@ -156,7 +151,7 @@ pub fn readLink(path: []const u8, buf: []u8) ?[]u8 {
 /// exist or memory runs out.
 pub fn realPathAlloc(a: std.mem.Allocator, path: []const u8) ?[]u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const n = std.Io.Dir.cwd().realPathFile(file.defaultIo(), path, &buf) catch return null;
+    const n = std.Io.Dir.cwd().realPathFile(mod.file.defaultIo(), path, &buf) catch return null;
     return a.dupe(u8, buf[0..n]) catch null;
 }
 
@@ -166,7 +161,7 @@ pub fn realPathAlloc(a: std.mem.Allocator, path: []const u8) ?[]u8 {
 /// read or memory runs out.
 pub fn currentPathAlloc(a: std.mem.Allocator) ?[]u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const n = std.process.currentPath(file.defaultIo(), &buf) catch return null;
+    const n = std.process.currentPath(mod.file.defaultIo(), &buf) catch return null;
     return a.dupe(u8, buf[0..n]) catch null;
 }
 
@@ -243,7 +238,7 @@ pub fn createDirectories(p: []const u8) c_int {
         .other => return @backingInt(E.EXIST),
         .not_found => {},
     }
-    const up = path_mod.parent(p);
+    const up = mod.path.parent(p);
     if (up.len != 0) {
         switch (statusOf(up, &e)) {
             .unknown => return e,
@@ -290,7 +285,7 @@ pub fn removeAll(a: std.mem.Allocator, p: []const u8) struct { n: u64, err: c_in
             a.free(names);
         }
         for (names) |name| {
-            const child = path_mod.join(a, p, name) catch return .{ .n = n, .err = @backingInt(E.NOMEM) };
+            const child = mod.path.join(a, p, name) catch return .{ .n = n, .err = @backingInt(E.NOMEM) };
             defer a.free(child);
             const r = removeAll(a, child);
             n += r.n;
@@ -331,10 +326,10 @@ pub fn listNames(a: std.mem.Allocator, p: []const u8) std.mem.Allocator.Error![]
 ///
 /// Return: 0, or the `errno` of the read or write that failed.
 pub fn copyFile(a: std.mem.Allocator, from: []const u8, to: []const u8) c_int {
-    const io = file.defaultIo();
-    const data = std.Io.Dir.cwd().readFileAlloc(io, from, a, .unlimited) catch |e| return errnoFrom(e);
+    const io = mod.file.defaultIo();
+    const data = std.Io.Dir.cwd().readFileAlloc(io, from, a, .unlimited) catch |e| return mod.errno.from(e);
     defer a.free(data);
-    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = to, .data = data }) catch |e| return errnoFrom(e);
+    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = to, .data = data }) catch |e| return mod.errno.from(e);
     return 0;
 }
 
@@ -343,10 +338,10 @@ pub fn copyFile(a: std.mem.Allocator, from: []const u8, to: []const u8) c_int {
 ///
 /// Return: owned by `a`.
 pub fn absolute(a: std.mem.Allocator, p: []const u8) std.mem.Allocator.Error![]u8 {
-    if (path_mod.isAbsolute(p)) return a.dupe(u8, p);
+    if (mod.path.isAbsolute(p)) return a.dupe(u8, p);
     const cwd = currentPathAlloc(a) orelse return a.dupe(u8, p);
     defer a.free(cwd);
-    return path_mod.join(a, cwd, p);
+    return mod.path.join(a, cwd, p);
 }
 
 /// `readlink(path)`, its target copied.
@@ -366,7 +361,7 @@ pub fn readLinkAlloc(a: std.mem.Allocator, p: []const u8) ?[]u8 {
 pub fn tempDirectoryPath() []const u8 {
     var p: []const u8 = "/tmp";
     for ([_][]const u8{ "TMPDIR", "TMP", "TEMP", "TEMPDIR" }) |name| {
-        if (env.get(name)) |v| {
+        if (mod.env.get(name)) |v| {
             p = v;
             break;
         }
@@ -379,14 +374,14 @@ pub fn tempDirectoryPath() []const u8 {
 /// the same device and inode. std's `Stat` carries no device, so this asks
 /// `stat` (`statx` on Linux, where `std.c.Stat` is void) itself.
 pub fn equivalent(a: [:0]const u8, b: [:0]const u8) bool {
-    const std_io = file.defaultIo();
+    const std_io = mod.file.defaultIo();
     if (comptime builtin.os.tag == .windows) {
         // Windows compares by volume serial and file index; resolving both
         // paths is the closest the C library offers.
         var ra: [260:0]u8 = undefined;
         var rb: [260:0]u8 = undefined;
         if (@import("libc.zig")._fullpath(&ra, a.ptr, ra.len) == null or @import("libc.zig")._fullpath(&rb, b.ptr, rb.len) == null) return false;
-        const fb = file.openIn(std_io, b) catch return false;
+        const fb = mod.file.openIn(std_io, b) catch return false;
         fb.close(std_io);
         return std.ascii.eqlIgnoreCase(std.mem.sliceTo(&ra, 0), std.mem.sliceTo(&rb, 0));
     }
@@ -417,7 +412,7 @@ pub const Dir = struct {
     ///
     /// Return: the directory, or the `errno` it could not be opened with.
     pub fn open(path: []const u8) union(enum) { ok: Dir, err: c_int } {
-        const d = std.Io.Dir.cwd().openDir(file.defaultIo(), path, .{ .iterate = true }) catch |e| return .{ .err = errnoFrom(e) };
+        const d = std.Io.Dir.cwd().openDir(mod.file.defaultIo(), path, .{ .iterate = true }) catch |e| return .{ .err = mod.errno.from(e) };
         return .{ .ok = .{ .dir = d, .it = d.iterate() } };
     }
 
@@ -426,13 +421,13 @@ pub const Dir = struct {
     /// Return: the next entry's name, valid until the next call; null at
     /// the end; the `errno` of a failed read.
     pub fn next(self: *Dir) union(enum) { name: []const u8, end, err: c_int } {
-        const ent = self.it.next(file.defaultIo()) catch |e| return .{ .err = errnoFrom(e) };
+        const ent = self.it.next(mod.file.defaultIo()) catch |e| return .{ .err = mod.errno.from(e) };
         return if (ent) |en| .{ .name = en.name } else .end;
     }
 
     /// `closedir`.
     pub fn close(self: *Dir) void {
-        self.dir.close(file.defaultIo());
+        self.dir.close(mod.file.defaultIo());
     }
 };
 
@@ -460,7 +455,7 @@ test "a tree is made, listed, linked, renamed and removed, with the C's errno" {
 
     try std.testing.expectEqual(@as(c_int, 0), mkdir(d));
     try std.testing.expectEqual(@as(c_int, @backingInt(E.EXIST)), mkdir(d));
-    var out = try file.Out.create(std.testing.io, f);
+    var out = try mod.file.Out.create(std.testing.io, f);
     out.close(std.testing.io);
 
     try std.testing.expectEqual(@as(c_int, 0), symlink("f", l));
@@ -526,7 +521,7 @@ test "a file is regular, with its size" {
     defer tmp.cleanup();
     var buf: [64]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, ".zig-cache/tmp/{s}/f", .{&tmp.sub_path});
-    var out = try file.Out.create(io, path);
+    var out = try mod.file.Out.create(io, path);
     try out.write("12345");
     out.close(io);
     const info = stat(path, true) orelse return error.TestUnexpectedResult;

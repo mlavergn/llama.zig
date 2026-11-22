@@ -10,19 +10,10 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_grok`'s `load_arch_hparams` (models/grok.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -58,11 +49,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_grok`'s `load_arch_tensors` (models/grok.cpp:35 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     if (l.n_expert == 0) {
         return exc.throw(.runtime_error, "{s} model cannot have zero experts", .{self.archName()});
@@ -111,19 +102,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_grok`'s `build_arch_graph` (models/grok.cpp:82 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_grok`'s `graph`
 /// (models/grok.cpp:86 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/grok.cpp", 89, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/grok.cpp", 90, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/grok.cpp", 89, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/grok.cpp", 90, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -161,13 +152,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_out_norm, null, .rms, il);
         b.cb(cur, "attn_out_norm", il);
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -195,7 +186,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             // `std::sqrt(2) / 2`, a double, narrowed to the float argument.
             const inv_sqrt2: f32 = @floatCast(@sqrt(@as(f64, 2.0)) / 2.0);
-            cur = c.ggml_scale(ctx, c.ggml_add(ctx, ffn_out, moe_out), inv_sqrt2);
+            cur = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_add(ctx, ffn_out, moe_out), inv_sqrt2);
             b.cb(cur, "ffn_out", il);
         } else {
             cur = moe_out;
@@ -203,7 +194,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -222,13 +213,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // The LM head.
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
-    cur = c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
 
     // Final logit soft-capping.
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = c.ggml_tanh(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_tanh(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

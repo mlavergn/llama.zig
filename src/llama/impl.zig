@@ -31,6 +31,7 @@
 //! `api.impl.llama_log_set`, beside the C++'s.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 
 /// `llama.h`, and through it `ggml.h`, `ggml-backend.h`, `ggml-cpu.h` and
@@ -38,24 +39,6 @@ const stdlib = @import("stdlib");
 /// read metadata through. Translated from `c_import.h` by
 /// `build/llamacpp.zig` (Zig 0.17 has no `@cImport`).
 pub const c = @import("llama_c");
-
-/// `llama_token_data`, the element every sampler works on.
-pub const TokenData = c.llama_token_data;
-/// `llama_token_data_array`, the candidate list every sampler mutates.
-pub const TokenDataArray = c.llama_token_data_array;
-/// `llama_token`.
-pub const Token = c.llama_token;
-/// `struct llama_sampler`.
-pub const Sampler = c.struct_llama_sampler;
-/// `struct llama_sampler_i`, the C vtable.
-pub const SamplerI = c.struct_llama_sampler_i;
-
-/// The allocator for every object the ported code hands across the C ABI.
-///
-/// `malloc`, like the C++'s `operator new`: a sampler's context outlives any
-/// Zig scope, is freed through a C entry point, and must not depend on an
-/// allocator instance that only Zig code could reach.
-pub const allocator = std.heap.c_allocator;
 
 /// C's `stdout`: `__stdoutp` on Darwin, `stdout` on glibc, `__acrt_iob_func(1)`
 /// in MinGW's UCRT. The macro expands to a different variable or call on each,
@@ -65,10 +48,6 @@ pub const allocator = std.heap.c_allocator;
 pub fn cStdout() *c.FILE {
     return @ptrCast(@alignCast(stdlib.stdio.cStream(.stdout)));
 }
-
-/// The port's mutex, under every `std::mutex` it ports: a futex, with no C
-/// library under it (`stdlib/sync/`).
-pub const Mutex = @import("stdlib").sync.Mutex;
 
 /// C's `stderr`; see `cStdout`.
 ///
@@ -99,8 +78,6 @@ pub fn writeStderr(parts: []const []const u8) void {
 // -----------------------------------------------------------------------------
 // Logging
 
-const log = @import("log.zig");
-
 /// Ports `llama_prefetch_rows` (llama-impl.cpp:22 @b1b770d90): prefetch the
 /// host pages a gather of these rows of `tensor` will read. A no-op for a
 /// tensor that is not in host memory, or for no rows.
@@ -123,8 +100,8 @@ pub fn prefetchRows(tensor: ?*const c.ggml_tensor, rows: [*c]const i32, n_rows: 
     const base: [*]const u8 = @ptrCast(t.data.?);
 
     const mmap = @import("mmap.zig");
-    const mr = allocator.alloc(mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 32, "out of memory");
-    defer allocator.free(mr);
+    const mr = std.heap.c_allocator.alloc(mmap.MemoryRange, n_rows) catch abort("llama-impl.cpp", 32, "out of memory");
+    defer std.heap.c_allocator.free(mr);
     for (0..n_rows) |i| {
         assert(rows[i] >= 0 and rows[i] < t.ne[1], "llama-impl.cpp", 35, "rows[i] >= 0 && rows[i] < tensor->ne[1]");
         mr[i] = .{ .addr = base + @as(usize, @intCast(rows[i])) * t.nb[1], .size = row_bytes };
@@ -156,7 +133,7 @@ pub fn clearTensorData(t: *c.ggml_tensor, offset: usize, size: usize) void {
 ///
 /// Return: nothing.
 pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
-    log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
+    mod.log.logInternal(c.GGML_LOG_LEVEL_WARN, format, args);
 }
 
 /// Ports `LLAMA_LOG_ERROR` (llama-impl.h:30 @b1b770d90).
@@ -167,7 +144,7 @@ pub fn logWarn(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logError(comptime format: [:0]const u8, args: anytype) void {
-    log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
+    mod.log.logInternal(c.GGML_LOG_LEVEL_ERROR, format, args);
 }
 
 /// Ports `LLAMA_LOG_INFO` (llama-impl.h:28 @b1b770d90).
@@ -178,7 +155,7 @@ pub fn logError(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
-    log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
+    mod.log.logInternal(c.GGML_LOG_LEVEL_INFO, format, args);
 }
 
 /// Ports `LLAMA_LOG_DEBUG` (llama-impl.h:31 @b1b770d90).
@@ -189,7 +166,7 @@ pub fn logInfo(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
-    log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
+    mod.log.logInternal(c.GGML_LOG_LEVEL_DEBUG, format, args);
 }
 
 /// Ports `LLAMA_LOG_CONT` (llama-impl.h:32 @b1b770d90): continues the
@@ -201,7 +178,7 @@ pub fn logDebug(comptime format: [:0]const u8, args: anytype) void {
 ///
 /// Return: nothing.
 pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
-    log.logInternal(c.GGML_LOG_LEVEL_CONT, format, args);
+    mod.log.logInternal(c.GGML_LOG_LEVEL_CONT, format, args);
 }
 
 // -----------------------------------------------------------------------------
@@ -218,15 +195,15 @@ pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
 pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
     if (search.len == 0) return;
     var builder: std.ArrayList(u8) = .empty;
-    builder.ensureTotalCapacity(allocator, s.items.len) catch abort("llama-impl.cpp", 101, "out of memory");
+    builder.ensureTotalCapacity(std.heap.c_allocator, s.items.len) catch abort("llama-impl.cpp", 101, "out of memory");
     var last_pos: usize = 0;
     while (std.mem.findPos(u8, s.items, last_pos, search)) |pos| {
-        builder.appendSlice(allocator, s.items[last_pos..pos]) catch abort("llama-impl.cpp", 101, "out of memory");
-        builder.appendSlice(allocator, replace) catch abort("llama-impl.cpp", 101, "out of memory");
+        builder.appendSlice(std.heap.c_allocator, s.items[last_pos..pos]) catch abort("llama-impl.cpp", 101, "out of memory");
+        builder.appendSlice(std.heap.c_allocator, replace) catch abort("llama-impl.cpp", 101, "out of memory");
         last_pos = pos + search.len;
     }
-    builder.appendSlice(allocator, s.items[last_pos..]) catch abort("llama-impl.cpp", 101, "out of memory");
-    s.deinit(allocator);
+    builder.appendSlice(std.heap.c_allocator, s.items[last_pos..]) catch abort("llama-impl.cpp", 101, "out of memory");
+    s.deinit(std.heap.c_allocator);
     s.* = builder;
 }
 

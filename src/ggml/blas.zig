@@ -32,10 +32,7 @@
 //! The port calls that symbol, so both sides run the same routine.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
+const mod = @import("module.zig");
 
 /// The C++ `new`s the context and the backend and `delete`s both in
 /// `ggml_backend_blas_free`; libc's allocator is what a C entry point can
@@ -72,14 +69,14 @@ const cblas_sgemm = @extern(*const fn (
 /// multiply, so the port holds the spawned threads for the length of one
 /// call instead.
 const Context = struct {
-    n_threads: c_int = c.GGML_DEFAULT_N_THREADS,
+    n_threads: c_int = mod.impl.c.GGML_DEFAULT_N_THREADS,
     work_data: ?[*]u8 = null,
     work_size: usize = 0,
 };
 
 /// One `std::async` task of `ggml_backend_blas_mul_mat`: rows `start..end`
 /// of one plane converted to `f32`.
-fn convertRows(to_float: c.ggml_to_float_t, x: [*]const u8, nb01: usize, wplane: [*]f32, ne00: i64, start: i64, end: i64) void {
+fn convertRows(to_float: mod.impl.c.ggml_to_float_t, x: [*]const u8, nb01: usize, wplane: [*]f32, ne00: i64, start: i64, end: i64) void {
     var j01 = start;
     while (j01 < end) : (j01 += 1) {
         to_float.?(x + @as(usize, @intCast(j01)) * nb01, wplane + @as(usize, @intCast(j01 * ne00)), ne00);
@@ -87,9 +84,9 @@ fn convertRows(to_float: c.ggml_to_float_t, x: [*]const u8, nb01: usize, wplane:
 }
 
 /// Ports `ggml_backend_blas_mul_mat` (ggml-blas.cpp:31 @b1b770d90).
-fn mulMat(ctx: *Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+fn mulMat(ctx: *Context, dst: *mod.impl.c.ggml_tensor) void {
+    const src0 = mod.impl.one(mod.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = mod.impl.one(mod.impl.c.ggml_tensor, dst.src[1]);
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -117,39 +114,39 @@ fn mulMat(ctx: *Context, dst: *Tensor) void {
 
     const @"type" = src0.type;
 
-    impl.assert(ne0 == ne01, "ne0 == ne01");
-    impl.assert(ne1 == ne11, "ne1 == ne11");
-    impl.assert(ne2 == ne12, "ne2 == ne12");
-    impl.assert(ne3 == ne13, "ne3 == ne13");
+    mod.impl.assert(ne0 == ne01, "ne0 == ne01");
+    mod.impl.assert(ne1 == ne11, "ne1 == ne11");
+    mod.impl.assert(ne2 == ne12, "ne2 == ne12");
+    mod.impl.assert(ne3 == ne13, "ne3 == ne13");
 
     // we don't support permuted src0 or src1
-    impl.assert(nb00 == c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
-    impl.assert(nb10 == c.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
+    mod.impl.assert(nb00 == mod.impl.c.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    mod.impl.assert(nb10 == mod.impl.c.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
 
     // dst cannot be transposed or permuted
-    impl.assert(nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
-    impl.assert(nb0 <= nb1, "nb0 <= nb1");
-    impl.assert(nb1 <= nb2, "nb1 <= nb2");
-    impl.assert(nb2 <= nb3, "nb2 <= nb3");
+    mod.impl.assert(nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
+    mod.impl.assert(nb0 <= nb1, "nb0 <= nb1");
+    mod.impl.assert(nb1 <= nb2, "nb1 <= nb2");
+    mod.impl.assert(nb2 <= nb3, "nb2 <= nb3");
 
     // broadcast factors
     const r2 = @divTrunc(ne12, ne02);
     const r3 = @divTrunc(ne13, ne03);
 
     const ne_plane = ne01 * ne00;
-    const desired_wsize: usize = if (@"type" == c.GGML_TYPE_F32) 0 else @as(usize, @intCast(ne03 * ne02 * ne_plane)) * @sizeOf(f32);
+    const desired_wsize: usize = if (@"type" == mod.impl.c.GGML_TYPE_F32) 0 else @as(usize, @intCast(ne03 * ne02 * ne_plane)) * @sizeOf(f32);
 
     if (ctx.work_size < desired_wsize) {
         if (ctx.work_data) |w| allocator.free(w[0..ctx.work_size]);
-        ctx.work_data = (allocator.alloc(u8, desired_wsize) catch impl.abort("std::bad_alloc")).ptr;
+        ctx.work_data = (allocator.alloc(u8, desired_wsize) catch mod.impl.abort("std::bad_alloc")).ptr;
         ctx.work_size = desired_wsize;
     }
     // Unread unless src0 needs converting, when it has just been sized.
     const wdata: [*]f32 = if (ctx.work_data) |w| @ptrCast(@alignCast(w)) else undefined;
 
     // convert src0 to float
-    if (@"type" != c.GGML_TYPE_F32) {
-        const type_traits = c.ggml_get_type_traits(@"type");
+    if (@"type" != mod.impl.c.GGML_TYPE_F32) {
+        const type_traits = mod.impl.c.ggml_get_type_traits(@"type");
         const to_float = type_traits.*.to_float;
 
         var tasks: std.ArrayList(std.Thread) = .empty;
@@ -172,8 +169,8 @@ fn mulMat(ctx: *Context, dst: *Tensor) void {
                     const end = @divTrunc((i + 1) * ne01, n_threads);
                     if (start < end) {
                         const t = std.Thread.spawn(.{}, convertRows, .{ to_float, x, nb01, wplane, ne00, start, end }) catch
-                            impl.abort("std::system_error");
-                        tasks.append(allocator, t) catch impl.abort("std::bad_alloc");
+                            mod.impl.abort("std::system_error");
+                        tasks.append(allocator, t) catch mod.impl.abort("std::bad_alloc");
                     }
                 }
                 {
@@ -198,7 +195,7 @@ fn mulMat(ctx: *Context, dst: *Tensor) void {
             const y: [*]const f32 = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(src1.data.?)) + @as(usize, @intCast(j12)) * nb12 + @as(usize, @intCast(j13)) * nb13));
             const d: [*]f32 = @ptrCast(@alignCast(@as([*]u8, @ptrCast(dst.data.?)) + @as(usize, @intCast(j12)) * nb2 + @as(usize, @intCast(j13)) * nb3));
 
-            if (@"type" != c.GGML_TYPE_F32) {
+            if (@"type" != mod.impl.c.GGML_TYPE_F32) {
                 x = wdata + @as(usize, @intCast(j02 * ne_plane + j03 * ne02 * ne_plane));
             }
 
@@ -208,23 +205,23 @@ fn mulMat(ctx: *Context, dst: *Tensor) void {
 }
 
 /// Ports `ggml_backend_blas_out_prod` (ggml-blas.cpp:151 @b1b770d90).
-fn outProd(ctx: *Context, dst: *Tensor) void {
+fn outProd(ctx: *Context, dst: *mod.impl.c.ggml_tensor) void {
     _ = ctx;
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+    const src0 = mod.impl.one(mod.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = mod.impl.one(mod.impl.c.ggml_tensor, dst.src[1]);
 
-    impl.assert(dst.ne[0] == src0.ne[0], "ne0  == ne00");
-    impl.assert(dst.ne[1] == src1.ne[0], "ne1  == ne10");
-    impl.assert(dst.ne[2] == src0.ne[2], "ne2  == ne02");
-    impl.assert(src0.ne[2] == src1.ne[2], "ne02 == ne12");
-    impl.assert(dst.ne[3] == src1.ne[3], "ne3  == ne13");
-    impl.assert(src0.ne[3] == src1.ne[3], "ne03 == ne13");
+    mod.impl.assert(dst.ne[0] == src0.ne[0], "ne0  == ne00");
+    mod.impl.assert(dst.ne[1] == src1.ne[0], "ne1  == ne10");
+    mod.impl.assert(dst.ne[2] == src0.ne[2], "ne2  == ne02");
+    mod.impl.assert(src0.ne[2] == src1.ne[2], "ne02 == ne12");
+    mod.impl.assert(dst.ne[3] == src1.ne[3], "ne3  == ne13");
+    mod.impl.assert(src0.ne[3] == src1.ne[3], "ne03 == ne13");
 
     // we don't support permuted src0 or src1
-    impl.assert(src0.nb[0] == @sizeOf(f32), "nb00 == sizeof(float)");
+    mod.impl.assert(src0.nb[0] == @sizeOf(f32), "nb00 == sizeof(float)");
 
     // dst cannot be transposed or permuted
-    impl.assert(dst.nb[0] == @sizeOf(f32), "nb0 == sizeof(float)");
+    mod.impl.assert(dst.nb[0] == @sizeOf(f32), "nb0 == sizeof(float)");
 
     // src0: (k,n), src1: (k,m), dst: (m,n) as (major,minor); sgemm's a is
     // src1 transposed, b is src0 -- unless src1 is already transposed, when
@@ -236,7 +233,7 @@ fn outProd(ctx: *Context, dst: *Tensor) void {
     var transpose_a: c_int = undefined;
     var lda: c_int = undefined;
 
-    if (!c.ggml_is_transposed(src1)) {
+    if (!mod.impl.c.ggml_is_transposed(src1)) {
         transpose_a = cblas_trans;
         lda = m;
     } else {
@@ -255,14 +252,14 @@ fn outProd(ctx: *Context, dst: *Tensor) void {
 // The backend
 
 /// Ports `ggml_backend_blas_get_name` (ggml-blas.cpp:214 @b1b770d90).
-fn getName(backend: c.ggml_backend_t) callconv(.c) [*c]const u8 {
+fn getName(backend: mod.impl.c.ggml_backend_t) callconv(.c) [*c]const u8 {
     _ = backend;
     return "BLAS";
 }
 
 /// Ports `ggml_backend_blas_free` (ggml-blas.cpp:220 @b1b770d90).
-fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
-    const b = impl.one(c.struct_ggml_backend, backend);
+fn backendFree(backend: mod.impl.c.ggml_backend_t) callconv(.c) void {
+    const b = mod.impl.one(mod.impl.c.struct_ggml_backend, backend);
     const ctx: *Context = @ptrCast(@alignCast(b.context.?));
     if (ctx.work_data) |w| allocator.free(w[0..ctx.work_size]);
     allocator.destroy(ctx);
@@ -270,28 +267,28 @@ fn backendFree(backend: c.ggml_backend_t) callconv(.c) void {
 }
 
 /// Ports `ggml_backend_blas_graph_compute` (ggml-blas.cpp:226 @b1b770d90).
-fn graphCompute(backend: c.ggml_backend_t, cgraph: *impl.CGraph) callconv(.c) c.enum_ggml_status {
-    const ctx: *Context = @ptrCast(@alignCast(impl.one(c.struct_ggml_backend, backend).context.?));
+fn graphCompute(backend: mod.impl.c.ggml_backend_t, cgraph: *mod.impl.CGraph) callconv(.c) mod.impl.c.enum_ggml_status {
+    const ctx: *Context = @ptrCast(@alignCast(mod.impl.one(mod.impl.c.struct_ggml_backend, backend).context.?));
 
     var i: usize = 0;
     while (i < @as(usize, @intCast(cgraph.n_nodes))) : (i += 1) {
         const node = cgraph.nodes[i].?;
 
-        if ((node.flags & c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
+        if ((node.flags & mod.impl.c.GGML_TENSOR_FLAG_COMPUTE) == 0) continue;
 
         switch (node.op) {
-            c.GGML_OP_MUL_MAT => mulMat(ctx, node),
-            c.GGML_OP_OUT_PROD => outProd(ctx, node),
-            c.GGML_OP_NONE, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE => {},
-            else => c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported op %s\n", "ggml_backend_blas_graph_compute", c.ggml_op_desc(node)),
+            mod.impl.c.GGML_OP_MUL_MAT => mulMat(ctx, node),
+            mod.impl.c.GGML_OP_OUT_PROD => outProd(ctx, node),
+            mod.impl.c.GGML_OP_NONE, mod.impl.c.GGML_OP_RESHAPE, mod.impl.c.GGML_OP_VIEW, mod.impl.c.GGML_OP_PERMUTE, mod.impl.c.GGML_OP_TRANSPOSE => {},
+            else => mod.impl.c.ggml_abort(@src().file.ptr, @intCast(@src().line), "%s: unsupported op %s\n", "ggml_backend_blas_graph_compute", mod.impl.c.ggml_op_desc(node)),
         }
     }
 
-    return c.GGML_STATUS_SUCCESS;
+    return mod.impl.c.GGML_STATUS_SUCCESS;
 }
 
 /// Ports `blas_backend_i` (ggml-blas.cpp:262 @b1b770d90).
-const backend_i = c.struct_ggml_backend_i{
+const backend_i = mod.impl.c.struct_ggml_backend_i{
     .get_name = getName,
     .free = backendFree,
     .set_tensor_async = null,
@@ -311,9 +308,9 @@ const backend_i = c.struct_ggml_backend_i{
 };
 
 /// Ports `ggml_backend_blas_guid` (ggml-blas.cpp:281 @b1b770d90).
-var blas_guid: c.ggml_guid = .{ 0x12, 0xa8, 0xae, 0xf4, 0xc0, 0x1e, 0x61, 0x97, 0x8f, 0xeb, 0x33, 0x04, 0xa1, 0x33, 0x51, 0x2d };
+var blas_guid: mod.impl.c.ggml_guid = .{ 0x12, 0xa8, 0xae, 0xf4, 0xc0, 0x1e, 0x61, 0x97, 0x8f, 0xeb, 0x33, 0x04, 0xa1, 0x33, 0x51, 0x2d };
 
-fn guid() c.ggml_guid_t {
+fn guid() mod.impl.c.ggml_guid_t {
     return &blas_guid;
 }
 
@@ -322,33 +319,33 @@ fn guid() c.ggml_guid_t {
 /// Return: a new BLAS backend, owned by the caller and freed with
 /// `ggml_backend_free`; null if allocation failed, where the C++'s `new`
 /// would throw.
-pub export fn ggml_backend_blas_init() callconv(.c) c.ggml_backend_t {
+pub export fn ggml_backend_blas_init() callconv(.c) mod.impl.c.ggml_backend_t {
     const ctx = allocator.create(Context) catch return null;
     ctx.* = .{};
 
-    const backend = allocator.create(c.struct_ggml_backend) catch {
+    const backend = allocator.create(mod.impl.c.struct_ggml_backend) catch {
         allocator.destroy(ctx);
         return null;
     };
     backend.* = .{
         .guid = guid(),
         .iface = backend_i,
-        .device = c.ggml_backend_reg_dev_get(ggml_backend_blas_reg(), 0),
+        .device = mod.impl.c.ggml_backend_reg_dev_get(ggml_backend_blas_reg(), 0),
         .context = ctx,
     };
     return backend;
 }
 
 /// Ports `ggml_backend_is_blas` (ggml-blas.cpp:309 @b1b770d90).
-pub export fn ggml_backend_is_blas(backend: c.ggml_backend_t) callconv(.c) bool {
-    return backend != null and c.ggml_guid_matches(impl.one(c.struct_ggml_backend, backend).guid, guid());
+pub export fn ggml_backend_is_blas(backend: mod.impl.c.ggml_backend_t) callconv(.c) bool {
+    return backend != null and mod.impl.c.ggml_guid_matches(mod.impl.one(mod.impl.c.struct_ggml_backend, backend).guid, guid());
 }
 
 /// Ports `ggml_backend_blas_set_n_threads` (ggml-blas.cpp:313 @b1b770d90).
-pub export fn ggml_backend_blas_set_n_threads(backend_blas: c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
-    impl.assert(ggml_backend_is_blas(backend_blas), "ggml_backend_is_blas(backend_blas)");
+pub export fn ggml_backend_blas_set_n_threads(backend_blas: mod.impl.c.ggml_backend_t, n_threads: c_int) callconv(.c) void {
+    mod.impl.assert(ggml_backend_is_blas(backend_blas), "ggml_backend_is_blas(backend_blas)");
 
-    const ctx: *Context = @ptrCast(@alignCast(impl.one(c.struct_ggml_backend, backend_blas).context.?));
+    const ctx: *Context = @ptrCast(@alignCast(mod.impl.one(mod.impl.c.struct_ggml_backend, backend_blas).context.?));
     ctx.n_threads = n_threads;
 }
 
@@ -356,7 +353,7 @@ pub export fn ggml_backend_blas_set_n_threads(backend_blas: c.ggml_backend_t, n_
 // The device
 
 /// Ports `ggml_backend_blas_device_get_name` (ggml-blas.cpp:322 @b1b770d90).
-fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+fn deviceGetName(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "BLAS";
 }
@@ -364,13 +361,13 @@ fn deviceGetName(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
 /// Ports `ggml_backend_blas_device_get_description` (ggml-blas.cpp:328
 /// @b1b770d90): the `GGML_BLAS_USE_ACCELERATE` arm. v0.6.0's new
 /// `GGML_BLAS_USE_AOCL` arm (`AOCL-BLAS`) is a vendor library's and not built.
-fn deviceGetDescription(dev: c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
+fn deviceGetDescription(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) [*c]const u8 {
     _ = dev;
     return "Accelerate";
 }
 
 /// Ports `ggml_backend_blas_device_get_memory` (ggml-blas.cpp:348 @b1b770d90).
-fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
+fn deviceGetMemory(dev: mod.impl.c.ggml_backend_dev_t, free: *usize, total: *usize) callconv(.c) void {
     _ = dev;
     // no memory to report
     free.* = 0;
@@ -378,13 +375,13 @@ fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callc
 }
 
 /// Ports `ggml_backend_blas_device_get_type` (ggml-blas.cpp:356 @b1b770d90).
-fn deviceGetType(dev: c.ggml_backend_dev_t) callconv(.c) c.enum_ggml_backend_dev_type {
+fn deviceGetType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.enum_ggml_backend_dev_type {
     _ = dev;
-    return c.GGML_BACKEND_DEVICE_TYPE_ACCEL;
+    return mod.impl.c.GGML_BACKEND_DEVICE_TYPE_ACCEL;
 }
 
 /// Ports `ggml_backend_blas_device_get_props` (ggml-blas.cpp:362 @b1b770d90).
-fn deviceGetProps(dev: c.ggml_backend_dev_t, props: *c.struct_ggml_backend_dev_props) callconv(.c) void {
+fn deviceGetProps(dev: mod.impl.c.ggml_backend_dev_t, props: *mod.impl.c.struct_ggml_backend_dev_props) callconv(.c) void {
     props.name = deviceGetName(dev);
     props.description = deviceGetDescription(dev);
     props.type = deviceGetType(dev);
@@ -400,7 +397,7 @@ fn deviceGetProps(dev: c.ggml_backend_dev_t, props: *c.struct_ggml_backend_dev_p
 
 /// Ports `ggml_backend_blas_device_init_backend` (ggml-blas.cpp:376
 /// @b1b770d90).
-fn deviceInitBackend(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) c.ggml_backend_t {
+fn deviceInitBackend(dev: mod.impl.c.ggml_backend_dev_t, params: [*c]const u8) callconv(.c) mod.impl.c.ggml_backend_t {
     _ = dev;
     _ = params;
     return ggml_backend_blas_init();
@@ -408,30 +405,30 @@ fn deviceInitBackend(dev: c.ggml_backend_dev_t, params: [*c]const u8) callconv(.
 
 /// Ports `ggml_backend_blas_device_get_buffer_type` (ggml-blas.cpp:383
 /// @b1b770d90).
-fn deviceGetBufferType(dev: c.ggml_backend_dev_t) callconv(.c) c.ggml_backend_buffer_type_t {
+fn deviceGetBufferType(dev: mod.impl.c.ggml_backend_dev_t) callconv(.c) mod.impl.c.ggml_backend_buffer_type_t {
     _ = dev;
-    return c.ggml_backend_cpu_buffer_type();
+    return mod.impl.c.ggml_backend_cpu_buffer_type();
 }
 
 /// Ports `ggml_backend_blas_device_buffer_from_host_ptr` (ggml-blas.cpp:389
 /// @b1b770d90).
-fn deviceBufferFromHostPtr(dev: c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) c.ggml_backend_buffer_t {
+fn deviceBufferFromHostPtr(dev: mod.impl.c.ggml_backend_dev_t, ptr: ?*anyopaque, size: usize, max_tensor_size: usize) callconv(.c) mod.impl.c.ggml_backend_buffer_t {
     _ = dev;
     _ = max_tensor_size;
-    return c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
+    return mod.impl.c.ggml_backend_cpu_buffer_from_ptr(ptr, size);
 }
 
 /// Ports `ggml_backend_blas_device_supports_op` (ggml-blas.cpp:396
 /// @b1b770d90).
-fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) bool {
+fn deviceSupportsOp(dev: mod.impl.c.ggml_backend_dev_t, op: *const mod.impl.c.ggml_tensor) callconv(.c) bool {
     _ = dev;
     switch (op.op) {
-        c.GGML_OP_NONE, c.GGML_OP_RESHAPE, c.GGML_OP_VIEW, c.GGML_OP_PERMUTE, c.GGML_OP_TRANSPOSE => return true,
+        mod.impl.c.GGML_OP_NONE, mod.impl.c.GGML_OP_RESHAPE, mod.impl.c.GGML_OP_VIEW, mod.impl.c.GGML_OP_PERMUTE, mod.impl.c.GGML_OP_TRANSPOSE => return true,
 
-        c.GGML_OP_MUL_MAT => {
+        mod.impl.c.GGML_OP_MUL_MAT => {
             // BLAS usually is only faster for large matrices
-            const src0 = impl.one(Tensor, op.src[0]);
-            const src1 = impl.one(Tensor, op.src[1]);
+            const src0 = mod.impl.one(mod.impl.c.ggml_tensor, op.src[0]);
+            const src1 = mod.impl.one(mod.impl.c.ggml_tensor, op.src[1]);
 
             const ne10 = src1.ne[0];
 
@@ -443,27 +440,27 @@ fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) b
 
             // default back to CPU fast path
             // see: https://github.com/ggml-org/llama.cpp/issues/25565
-            if (opParamI32(op, 1) == c.GGML_HINT_SRC0_IS_HADAMARD) {
+            if (opParamI32(op, 1) == mod.impl.c.GGML_HINT_SRC0_IS_HADAMARD) {
                 return false;
             }
 
-            return c.ggml_is_contiguous(src0) and
-                c.ggml_is_contiguous(src1) and
-                src1.type == c.GGML_TYPE_F32 and
+            return mod.impl.c.ggml_is_contiguous(src0) and
+                mod.impl.c.ggml_is_contiguous(src1) and
+                src1.type == mod.impl.c.GGML_TYPE_F32 and
                 (ne0 >= min_batch and ne1 >= min_batch and ne10 >= min_batch) and
-                (src0.type == c.GGML_TYPE_F32 or c.ggml_get_type_traits(src0.type).*.to_float != null);
+                (src0.type == mod.impl.c.GGML_TYPE_F32 or mod.impl.c.ggml_get_type_traits(src0.type).*.to_float != null);
         },
 
-        c.GGML_OP_OUT_PROD => {
+        mod.impl.c.GGML_OP_OUT_PROD => {
             const src0 = op.src[0];
             const src1 = op.src[1];
-            return impl.one(Tensor, src0).type == c.GGML_TYPE_F32 and
-                impl.one(Tensor, src1).type == c.GGML_TYPE_F32 and
-                c.ggml_is_matrix(src0) and
-                c.ggml_is_matrix(src1) and
-                c.ggml_is_contiguous(src0) and
-                (c.ggml_is_contiguous(src1) or c.ggml_is_transposed(src1)) and
-                (impl.one(Tensor, src0).type == c.GGML_TYPE_F32 or c.ggml_get_type_traits(impl.one(Tensor, src0).type).*.to_float != null);
+            return mod.impl.one(mod.impl.c.ggml_tensor, src0).type == mod.impl.c.GGML_TYPE_F32 and
+                mod.impl.one(mod.impl.c.ggml_tensor, src1).type == mod.impl.c.GGML_TYPE_F32 and
+                mod.impl.c.ggml_is_matrix(src0) and
+                mod.impl.c.ggml_is_matrix(src1) and
+                mod.impl.c.ggml_is_contiguous(src0) and
+                (mod.impl.c.ggml_is_contiguous(src1) or mod.impl.c.ggml_is_transposed(src1)) and
+                (mod.impl.one(mod.impl.c.ggml_tensor, src0).type == mod.impl.c.GGML_TYPE_F32 or mod.impl.c.ggml_get_type_traits(mod.impl.one(mod.impl.c.ggml_tensor, src0).type).*.to_float != null);
         },
 
         else => return false,
@@ -471,19 +468,19 @@ fn deviceSupportsOp(dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) b
 }
 
 /// `ggml_get_op_params_i32` (ggml-impl.h), which `@cImport` cannot reach.
-fn opParamI32(op: *const Tensor, i: usize) i32 {
+fn opParamI32(op: *const mod.impl.c.ggml_tensor, i: usize) i32 {
     return op.op_params[i];
 }
 
 /// Ports `ggml_backend_blas_device_supports_buft` (ggml-blas.cpp:452
 /// @b1b770d90).
-fn deviceSupportsBuft(dev: c.ggml_backend_dev_t, buft: c.ggml_backend_buffer_type_t) callconv(.c) bool {
+fn deviceSupportsBuft(dev: mod.impl.c.ggml_backend_dev_t, buft: mod.impl.c.ggml_backend_buffer_type_t) callconv(.c) bool {
     _ = dev;
-    return c.ggml_backend_buft_is_host(buft);
+    return mod.impl.c.ggml_backend_buft_is_host(buft);
 }
 
 /// Ports `ggml_backend_blas_device_i` (ggml-blas.cpp:458 @b1b770d90).
-const device_i = c.struct_ggml_backend_device_i{
+const device_i = mod.impl.c.struct_ggml_backend_device_i{
     .get_name = deviceGetName,
     .get_description = deviceGetDescription,
     .get_memory = @ptrCast(&deviceGetMemory),
@@ -505,14 +502,14 @@ const device_i = c.struct_ggml_backend_device_i{
 // The registration
 
 /// Ports `ggml_backend_blas_reg_get_name` (ggml-blas.cpp:478 @b1b770d90).
-fn regGetName(reg: c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
+fn regGetName(reg: mod.impl.c.ggml_backend_reg_t) callconv(.c) [*c]const u8 {
     _ = reg;
     return "BLAS";
 }
 
 /// Ports `ggml_backend_blas_reg_get_device_count` (ggml-blas.cpp:484
 /// @b1b770d90).
-fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
+fn regGetDeviceCount(reg: mod.impl.c.ggml_backend_reg_t) callconv(.c) usize {
     _ = reg;
     return 1;
 }
@@ -520,17 +517,17 @@ fn regGetDeviceCount(reg: c.ggml_backend_reg_t) callconv(.c) usize {
 /// The C++'s function-local `static ggml_backend_device`, whose `reg` is the
 /// registration it is first asked through -- always `blas_reg`, the only
 /// one -- so it is initialised statically here.
-var blas_device: c.struct_ggml_backend_device = .{ .iface = device_i, .reg = &blas_reg, .context = null };
+var blas_device: mod.impl.c.struct_ggml_backend_device = .{ .iface = device_i, .reg = &blas_reg, .context = null };
 
 /// Ports `ggml_backend_blas_reg_get_device` (ggml-blas.cpp:490 @b1b770d90).
-fn regGetDevice(reg: c.ggml_backend_reg_t, index: usize) callconv(.c) c.ggml_backend_dev_t {
+fn regGetDevice(reg: mod.impl.c.ggml_backend_reg_t, index: usize) callconv(.c) mod.impl.c.ggml_backend_dev_t {
     _ = reg;
-    impl.assert(index == 0, "index == 0");
+    mod.impl.assert(index == 0, "index == 0");
     return &blas_device;
 }
 
 /// Ports `ggml_backend_blas_get_proc_address` (ggml-blas.cpp:505 @b1b770d90).
-fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
+fn regGetProcAddress(reg: mod.impl.c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c) ?*anyopaque {
     _ = reg;
     if (std.mem.eql(u8, std.mem.span(@as([*:0]const u8, @ptrCast(name))), "ggml_backend_set_n_threads")) {
         return @ptrCast(@constCast(&ggml_backend_blas_set_n_threads));
@@ -539,15 +536,15 @@ fn regGetProcAddress(reg: c.ggml_backend_reg_t, name: [*c]const u8) callconv(.c)
 }
 
 /// Ports `ggml_backend_blas_reg_i` (ggml-blas.cpp:515 @b1b770d90).
-const reg_i = c.struct_ggml_backend_reg_i{
+const reg_i = mod.impl.c.struct_ggml_backend_reg_i{
     .get_name = regGetName,
     .get_device_count = regGetDeviceCount,
     .get_device = regGetDevice,
     .get_proc_address = regGetProcAddress,
 };
 
-var blas_reg = c.struct_ggml_backend_reg{
-    .api_version = c.GGML_BACKEND_API_VERSION,
+var blas_reg = mod.impl.c.struct_ggml_backend_reg{
+    .api_version = mod.impl.c.GGML_BACKEND_API_VERSION,
     .iface = reg_i,
     .context = null,
 };
@@ -555,7 +552,7 @@ var blas_reg = c.struct_ggml_backend_reg{
 /// Ports `ggml_backend_blas_reg` (ggml-blas.cpp:522 @b1b770d90).
 ///
 /// Return: the BLAS registration, a process-lifetime singleton.
-pub export fn ggml_backend_blas_reg() callconv(.c) c.ggml_backend_reg_t {
+pub export fn ggml_backend_blas_reg() callconv(.c) mod.impl.c.ggml_backend_reg_t {
     return &blas_reg;
 }
 

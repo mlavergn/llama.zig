@@ -19,24 +19,18 @@
 //! A `msg_t` owns its strings. The client is `httplib/client.zig`'s.
 
 const std = @import("std");
-const sync = @import("stdlib").sync;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const json = @import("json");
-const http = @import("http.zig");
-const common = @import("common.zig");
-const httplib_client = @import("httplib/client.zig");
-const libcxx = @import("stdlib").libcxx;
 
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const srv = common.srv;
-const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
 
 /// Ports `server_http_proxy`'s `msg_t` (server-models.h:461 @b1b770d90): the
 /// headers (first message only) or a chunk of the body.
 const Msg = struct {
-    headers: http.StringMap = .{}, // a std::map: sorted, unique keys
+    headers: mod.http.StringMap = .{}, // a std::map: sorted, unique keys
     status: c_int = 0,
     data: []u8 = &.{},
     content_type: []u8 = &.{},
@@ -54,12 +48,12 @@ const Msg = struct {
 
 /// What the response and the client thread share.
 const Shared = struct {
-    pipe: common.Pipe(Msg),
+    pipe: mod.common.Pipe(Msg),
     refs: std.atomic.Value(u32) = .init(2),
     /// The client the thread drives, null once it is done with it: what
     /// `cli->stop()` reaches from the response's destructor.
-    cli: ?*httplib_client.ClientImpl = null,
-    cli_mutex: sync.Mutex = .{},
+    cli: ?*mod.httplib.client.ClientImpl = null,
+    cli_mutex: stdlib.sync.Mutex = .{},
     // true once response_handler has already forwarded the headers
     headers_sent: std.atomic.Value(bool) = .init(false),
 
@@ -97,7 +91,7 @@ fn shouldStripProxyHeader(header_name: []const u8) bool {
 /// characters from a `std::mt19937` seeded by `std::random_device`.
 fn generateMultipartBoundary(a: Allocator) ![]u8 {
     const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
-    var gen = libcxx.Mt19937.init(libcxx.randomDevice());
+    var gen = stdlib.libcxx.Mt19937.init(stdlib.libcxx.randomDevice());
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, "----llama-cpp-proxy-");
     // the C++ draws through std::uniform_int_distribution; the seed is the
@@ -119,7 +113,7 @@ fn sanitizeField(a: Allocator, text: []const u8) ![]u8 {
 /// Ports `build_multipart_body` (server-models.cpp:2588 @b1b770d90): the form
 /// fields (from the JSON the HTTP layer made of them) and the files,
 /// re-encoded as `multipart/form-data`.
-fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.SortedMap(http.UploadedFile), boundary: []const u8) ![]u8 {
+fn buildMultipartBody(a: Allocator, form_fields: *json.Value, files: *const mod.http.SortedMap(mod.http.UploadedFile), boundary: []const u8) ![]u8 {
     var body: std.ArrayList(u8) = .empty;
     var it = form_fields.items();
     while (it.next()) |item| {
@@ -128,12 +122,12 @@ fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.Sort
         if (value.isArray()) {
             for (value.array.items) |*v| {
                 try body.print(a, "--{s}\r\nContent-Disposition: form-data; name=\"{s}\"\r\n\r\n", .{ boundary, key });
-                if (!v.isString()) return throw(error.InvalidArgument, "expected string", .{});
+                if (!v.isString()) return mod.common.throw(error.InvalidArgument, "expected string", .{});
                 try body.print(a, "{s}\r\n", .{v.string});
             }
         } else {
             try body.print(a, "--{s}\r\nContent-Disposition: form-data; name=\"{s}\"\r\n\r\n", .{ boundary, key });
-            if (!value.isString()) return throw(error.InvalidArgument, "expected string", .{});
+            if (!value.isString()) return mod.common.throw(error.InvalidArgument, "expected string", .{});
             try body.print(a, "{s}\r\n", .{value.string});
         }
     }
@@ -155,26 +149,24 @@ fn buildMultipartBody(a: Allocator, form_fields: *Value, files: *const http.Sort
 }
 
 /// `common_http_format_host` (common/http.h:27 @b1b770d90).
-const formatHost = http.commonHttpFormatHost;
-
 /// Ports `server_http_proxy` (server-models.h:435 @b1b770d90): the response
 /// whose `next` reads the pipe the client thread fills.
 pub const Proxy = struct {
-    base: http.Res,
+    base: mod.http.Res,
     shared: *Shared,
-    should_stop: http.ShouldStop,
+    should_stop: mod.http.ShouldStop,
     /// `std::function<void()> cleanup`, set by its owner after construction.
     cleanup: ?Cleanup = null,
 
     /// `std::function<void()>`.
     pub const Cleanup = struct { ctx: ?*anyopaque, func: *const fn (?*anyopaque) void };
 
-    const vtable: http.Res.VTable = .{ .on_complete = http.Res.noComplete, .destroy = destroyProxy };
+    const vtable: mod.http.Res.VTable = .{ .on_complete = mod.http.Res.noComplete, .destroy = destroyProxy };
 
     /// Ports `server_http_proxy`'s destructor (server-models.h:450 @b1b770d90): the pipe
     /// closed both ways and the client stopped, which drops the connection to
     /// the child so a client's disconnect reaches it, then `cleanup`.
-    fn destroyProxy(res: *http.Res) void {
+    fn destroyProxy(res: *mod.http.Res) void {
         const self: *Proxy = @fieldParentPtr("base", res);
         // cleanup_pipes
         self.shared.pipe.closeRead();
@@ -191,11 +183,11 @@ pub const Proxy = struct {
     }
 
     fn stopFn(ctx: *anyopaque) bool {
-        const s: *const http.ShouldStop = @ptrCast(@alignCast(ctx));
+        const s: *const mod.http.ShouldStop = @ptrCast(@alignCast(ctx));
         return s.call();
     }
 
-    fn stopper(self: *Proxy) ?common.Pipe(Msg).ShouldStop {
+    fn stopper(self: *Proxy) ?mod.common.Pipe(Msg).ShouldStop {
         return .{ .ctx = &self.should_stop, .f = stopFn };
     }
 
@@ -213,13 +205,13 @@ pub const Proxy = struct {
     /// The thread's request and client, in an arena of their own.
     const Job = struct {
         arena: std.heap.ArenaAllocator,
-        cli: httplib_client.ClientImpl,
-        req: httplib_client.Request,
+        cli: mod.httplib.client.ClientImpl,
+        req: mod.httplib.client.Request,
         shared: *Shared,
 
         /// `make_header_msg`: the status and headers, stripped of the
         /// router's own, `Content-Type` apart.
-        fn makeHeaderMsg(response: *const httplib_client.Response) !Msg {
+        fn makeHeaderMsg(response: *const mod.httplib.client.Response) !Msg {
             var msg: Msg = .{ .status = response.status };
             var tmp = std.heap.ArenaAllocator.init(gpa);
             defer tmp.deinit();
@@ -241,7 +233,7 @@ pub const Proxy = struct {
             return msg;
         }
 
-        fn responseHandler(ctx: ?*anyopaque, response: *const httplib_client.Response) bool {
+        fn responseHandler(ctx: ?*anyopaque, response: *const mod.httplib.client.Response) bool {
             const job: *Job = @ptrCast(@alignCast(ctx.?));
             job.shared.headers_sent.store(true, .seq_cst);
             const msg = makeHeaderMsg(response) catch return false;
@@ -271,12 +263,12 @@ pub const Proxy = struct {
                 job.arena.deinit();
                 gpa.destroy(job);
             }
-            const result = job.cli.send(&job.req) catch httplib_client.Result{ .res = null, .err = .unknown };
+            const result = job.cli.send(&job.req) catch mod.httplib.client.Result{ .res = null, .err = .unknown };
             if (result.err != .success) {
                 const err_str = result.err.toString();
-                const ez = common.dupZ(err_str);
-                defer common.freeZ(ez);
-                srv(.err, "operator()", "http client error: %s\n", .{ez});
+                const ez = mod.common.dupZ(err_str);
+                defer mod.common.freeZ(ez);
+                mod.common.srv(.err, "operator()", "http client error: %s\n", .{ez});
                 _ = job.shared.pipe.write(.{ .status = 500 }) catch false; // header
                 const body: []u8 = std.mem.concat(gpa, u8, &.{ "proxy error: ", err_str }) catch @constCast(&[_]u8{});
                 _ = job.shared.pipe.write(.{ .data = body }) catch false; // body
@@ -287,7 +279,7 @@ pub const Proxy = struct {
                 } else |_| {}
             }
             job.shared.pipe.closeWrite(); // signal EOF to reader
-            srv(.dbg, "operator()", "%s", .{@as([*:0]const u8, "client request thread ended\n")});
+            mod.common.srv(.dbg, "operator()", "%s", .{@as([*:0]const u8, "client request thread ended\n")});
         }
     };
 
@@ -303,22 +295,22 @@ pub const Proxy = struct {
         host: []const u8,
         port: c_int,
         path: []const u8,
-        headers: *const http.StringMap,
+        headers: *const mod.http.StringMap,
         body: []const u8,
-        files: *const http.SortedMap(http.UploadedFile),
-        should_stop: http.ShouldStop,
+        files: *const mod.http.SortedMap(mod.http.UploadedFile),
+        should_stop: mod.http.ShouldStop,
         timeout_read: i32,
         timeout_write: i32,
         resolved_addr: []const u8, // if set: connect to this address only, do not follow redirects
-    ) !*http.Res {
+    ) !*mod.http.Res {
         // shared between reader and writer threads
         const job = try gpa.create(Job);
         job.* = .{ .arena = std.heap.ArenaAllocator.init(gpa), .cli = undefined, .req = undefined, .shared = undefined };
         const ja = job.arena.allocator();
         const shared = try gpa.create(Shared);
-        shared.* = .{ .pipe = common.Pipe(Msg).init(gpa) };
+        shared.* = .{ .pipe = mod.common.Pipe(Msg).init(gpa) };
         job.shared = shared;
-        job.cli = httplib_client.ClientImpl.init(ja, try ja.dupe(u8, host), port);
+        job.cli = mod.httplib.client.ClientImpl.init(ja, try ja.dupe(u8, host), port);
         shared.cli = &job.cli;
         var started = false;
         errdefer if (!started) {
@@ -330,7 +322,7 @@ pub const Proxy = struct {
         };
 
         if (std.mem.eql(u8, scheme, "https")) {
-            return throw(error.RuntimeError, "HTTPS requested but CPPHTTPLIB_OPENSSL_SUPPORT is not defined", .{});
+            return mod.common.throw(error.RuntimeError, "HTTPS requested but CPPHTTPLIB_OPENSSL_SUPPORT is not defined", .{});
         }
 
         // setup Client
@@ -364,12 +356,12 @@ pub const Proxy = struct {
                 effective_body = try buildMultipartBody(ja, &form_fields, files, boundary);
                 override_content_type = try std.mem.concat(ja, u8, &.{ "multipart/form-data; boundary=", boundary });
             } else {
-                return throw(error.RuntimeError, "failed to parse multipart form fields JSON", .{});
+                return mod.common.throw(error.RuntimeError, "failed to parse multipart form fields JSON", .{});
             }
         }
 
         // prepare the request to destination server
-        var req: httplib_client.Request = .{ .a = ja, .method = try ja.dupe(u8, method), .path = try ja.dupe(u8, path) };
+        var req: mod.httplib.client.Request = .{ .a = ja, .method = try ja.dupe(u8, method), .path = try ja.dupe(u8, path) };
         for (headers.entries.items) |h| {
             const lowered = try toLowerCopy(ja, h.key);
             // disable Accept-Encoding to avoid compressed responses
@@ -390,7 +382,7 @@ pub const Proxy = struct {
             }
             if (std.mem.eql(u8, lowered, "host")) {
                 const is_default_port = (std.mem.eql(u8, scheme, "https") and port == 443) or (std.mem.eql(u8, scheme, "http") and port == 80);
-                const url_host = try formatHost(ja, host);
+                const url_host = try mod.http.commonHttpFormatHost(ja, host);
                 try req.setHeader(h.key, if (is_default_port) url_host else try std.fmt.allocPrint(ja, "{s}:{d}", .{ url_host, port }));
             } else {
                 try req.setHeader(h.key, h.value);
@@ -404,11 +396,11 @@ pub const Proxy = struct {
 
         // start the proxy thread
         {
-            const mz = common.dupZ(req.method);
-            defer common.freeZ(mz);
-            const pz = common.dupZ(req.path);
-            defer common.freeZ(pz);
-            srv(.dbg, "server_http_proxy", "start proxy thread %s %s\n", .{ mz, pz });
+            const mz = mod.common.dupZ(req.method);
+            defer mod.common.freeZ(mz);
+            const pz = mod.common.dupZ(req.path);
+            defer mod.common.freeZ(pz);
+            mod.common.srv(.dbg, "server_http_proxy", "start proxy thread %s %s\n", .{ mz, pz });
         }
         const thread = try std.Thread.spawn(.{}, Job.run, .{job});
         started = true;
@@ -419,12 +411,12 @@ pub const Proxy = struct {
             var header: Msg = .{};
             if (shared.pipe.read(&header, self.stopper(), true)) {
                 defer header.deinit();
-                srv(.dbg, "server_http_proxy", "%s", .{@as([*:0]const u8, "received response headers\n")});
+                mod.common.srv(.dbg, "server_http_proxy", "%s", .{@as([*:0]const u8, "received response headers\n")});
                 self.base.status = header.status;
                 for (header.headers.entries.items) |e| try self.base.setHeader(e.key, e.value);
                 if (header.content_type.len != 0) self.base.content_type = try self.base.allocator().dupe(u8, header.content_type);
             } else {
-                srv(.dbg, "server_http_proxy", "%s", .{@as([*:0]const u8, "no response headers received (request cancelled?)\n")});
+                mod.common.srv(.dbg, "server_http_proxy", "%s", .{@as([*:0]const u8, "no response headers received (request cancelled?)\n")});
             }
         }
         return &self.base;

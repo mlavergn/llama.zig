@@ -9,18 +9,10 @@
 //! `build_arch_graph`. Its `graph` is `llama_model_lfm2`'s, in `lfm2.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const lfm2 = @import("lfm2.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_lfm2moe`'s `load_arch_hparams` (models/lfm2moe.cpp:5 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.n_shortconv_l_cache = (try meta.getKey(u32, .shortconv_l_cache, true, exc)).?;
@@ -43,14 +35,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_lfm2moe`'s `load_arch_tensors` (models/lfm2moe.cpp:23
 /// @b1b770d90): LFM2's body.
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
-    try lfm2.loadTensors(self, "models/lfm2moe.cpp", 43, 61, exc);
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    try llama.models.lfm2.loadTensors(self, "models/lfm2moe.cpp", 43, 61, exc);
 }
 
 /// Ports `llama_model_lfm2moe`'s `build_arch_graph` (models/lfm2moe.cpp:78
 /// @b1b770d90): LFM2's graph, with or without the sliding window.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
-    lfm2.buildArchGraph(model, b, params);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
+    llama.models.lfm2.buildArchGraph(model, b, params);
 }
 
 // -----------------------------------------------------------------------------

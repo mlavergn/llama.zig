@@ -22,14 +22,7 @@
 //! is the whole of `vsnprintf` these strings can reach.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const table = @import("arch_table.zig");
-
-pub const Arch = table.Arch;
-pub const Kv = table.Kv;
-pub const Tensor = table.Tensor;
-pub const TensorLayer = table.TensorLayer;
-pub const TensorInfo = table.TensorInfo;
+const mod = @import("module.zig");
 
 /// Longest name either formatter can produce with a `suffix` of
 /// `max_suffix` bytes: every format and architecture name is shorter than
@@ -40,9 +33,9 @@ pub const max_name = 64 + 64 + 2 * 11 + 1 + max_suffix;
 pub const max_suffix = 64;
 
 comptime {
-    for (table.arch_names) |n| if (n.?.len >= 64) @compileError("arch name too long");
-    for (table.kv_names) |n| if (n.?.len >= 64) @compileError("key format too long");
-    for (table.tensor_names) |n| if (n) |s| if (s.len >= 64) @compileError("tensor format too long");
+    for (mod.arch_table.arch_names) |n| if (n.?.len >= 64) @compileError("arch name too long");
+    for (mod.arch_table.kv_names) |n| if (n.?.len >= 64) @compileError("key format too long");
+    for (mod.arch_table.tensor_names) |n| if (n) |s| if (s.len >= 64) @compileError("tensor format too long");
 }
 
 /// A formatted name, held inline so a caller needs no allocator.
@@ -74,10 +67,10 @@ pub const Name = struct {
 /// - `suffix`: appended after a `.`, or null; at most `max_suffix` bytes.
 ///
 /// Return: the key's name.
-pub fn kvName(arch: Arch, kv: Kv, suffix: ?[]const u8) Name {
+pub fn kvName(arch: mod.arch_table.Arch, kv: mod.arch_table.Kv, suffix: ?[]const u8) Name {
     var out: Name = .{};
-    const f = table.kv_names[@intCast(@backingInt(kv))].?;
-    const a = table.arch_names[@intCast(@backingInt(arch))].?;
+    const f = mod.arch_table.kv_names[@intCast(@backingInt(kv))].?;
+    const a = mod.arch_table.arch_names[@intCast(@backingInt(arch))].?;
     if (std.mem.find(u8, f, "%s")) |at| {
         out.append(f[0..at]);
         out.append(a);
@@ -104,9 +97,9 @@ pub fn kvName(arch: Arch, kv: Kv, suffix: ?[]const u8) Name {
 /// - `xid`: the expert index, -1 when there is none.
 ///
 /// Return: the tensor's name.
-pub fn tensorName(tensor: Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name {
-    const f = table.tensor_names[@intCast(@backingInt(tensor))] orelse
-        impl.c.ggml_abort("llama-arch.cpp", 1295, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
+pub fn tensorName(tensor: mod.arch_table.Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name {
+    const f = mod.arch_table.tensor_names[@intCast(@backingInt(tensor))] orelse
+        mod.impl.c.ggml_abort("llama-arch.cpp", 1295, "unknown tensor name for tensor id %d", @as(c_int, @backingInt(tensor)));
     var out: Name = .{};
     const args = [2]i32{ bid, xid };
     var next: usize = 0;
@@ -134,23 +127,23 @@ pub fn tensorName(tensor: Tensor, suffix: ?[]const u8, bid: i32, xid: i32) Name 
 /// architecture, in the map's key order.
 ///
 /// Return: the list, static.
-pub fn archAll() []const Arch {
-    return comptime std.enums.values(Arch);
+pub fn archAll() []const mod.arch_table.Arch {
+    return comptime std.enums.values(mod.arch_table.Arch);
 }
 
 /// Ports `llm_arch_name` (llama-arch.cpp:1316 @b1b770d90).
 ///
 /// Return: the architecture's name, static.
-pub fn archName(arch: Arch) [:0]const u8 {
-    return table.arch_names[@intCast(@backingInt(arch))] orelse "unknown";
+pub fn archName(arch: mod.arch_table.Arch) [:0]const u8 {
+    return mod.arch_table.arch_names[@intCast(@backingInt(arch))] orelse "unknown";
 }
 
 /// Ports `llm_arch_from_string` (llama-arch.cpp:1324 @b1b770d90): the first
 /// architecture in key order whose name is `name`.
 ///
 /// Return: the architecture, or `.unknown`.
-pub fn archFromString(name: []const u8) Arch {
-    for (table.arch_names, 0..) |n, i| {
+pub fn archFromString(name: []const u8) mod.arch_table.Arch {
+    for (mod.arch_table.arch_names, 0..) |n, i| {
         if (n) |s| if (std.mem.eql(u8, s, name)) return @fromBackingInt(@intCast(i));
     }
     return .unknown;
@@ -164,13 +157,13 @@ pub fn archFromString(name: []const u8) Arch {
 ///
 /// Return: the tensor's info, or `error.Thrown` with `std::out_of_range`
 /// for one `LLM_TENSOR_INFOS` lacks, as `map::at` throws.
-pub fn tensorInfoFor(tensor: Tensor, exc: *impl.Exception) impl.Thrown!TensorInfo {
-    return table.tensor_infos[@intCast(@backingInt(tensor))] orelse
+pub fn tensorInfoFor(tensor: mod.arch_table.Tensor, exc: *mod.impl.Exception) mod.impl.Thrown!mod.arch_table.TensorInfo {
+    return mod.arch_table.tensor_infos[@intCast(@backingInt(tensor))] orelse
         exc.throw(.out_of_range, "map::at:  key not found", .{});
 }
 
 /// Ports `llm_arch_is_recurrent` (llama-arch.cpp:1338 @b1b770d90).
-pub fn isRecurrent(arch: Arch) bool {
+pub fn isRecurrent(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .mamba, .mamba2, .rwkv6, .rwkv6qwen2, .rwkv7, .arwkv7 => true,
         else => false,
@@ -178,7 +171,7 @@ pub fn isRecurrent(arch: Arch) bool {
 }
 
 /// Ports `llm_arch_is_hybrid` (llama-arch.cpp:1352 @b1b770d90).
-pub fn isHybrid(arch: Arch) bool {
+pub fn isHybrid(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .jamba,
         .falcon_h1,
@@ -209,7 +202,7 @@ pub fn isHybrid(arch: Arch) bool {
 }
 
 /// Ports `llm_arch_is_diffusion` (llama-arch.cpp:1383 @b1b770d90).
-pub fn isDiffusion(arch: Arch) bool {
+pub fn isDiffusion(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .dream, .llada, .llada_moe, .rnd1 => true,
         else => false,
@@ -217,7 +210,7 @@ pub fn isDiffusion(arch: Arch) bool {
 }
 
 /// Ports `llm_arch_supports_rs_rollback` (llama-arch.cpp:1395 @b1b770d90).
-pub fn supportsRsRollback(arch: Arch) bool {
+pub fn supportsRsRollback(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .kimi_k3, .kimi_k31, .qwen35, .qwen35moe, .clover_moe, .qwen4exp, .deepseek4, .deepseek41, .glm5_next, .nemotron_h, .nemotron_h_moe, .lfm2, .lfm2moe, .lfm3, .bailingmoe3 => true,
         else => false,
@@ -228,7 +221,7 @@ pub fn supportsRsRollback(arch: Arch) bool {
 /// whether a batch may mix token and embedding entries. The architectures
 /// it refuses pick weights, routing or the input's meaning per ubatch from
 /// whether the input is tokens or embeddings.
-pub fn supportsMixedBatch(arch: Arch) bool {
+pub fn supportsMixedBatch(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .cogvlm, .deepseek4, .deepseek41, .granite_switch, .eagle3, .dflash, .gemma4_assistant, .limite => false,
         else => true,
@@ -236,7 +229,7 @@ pub fn supportsMixedBatch(arch: Arch) bool {
 }
 
 /// Ports `llm_arch_supports_sm_tensor` (llama-arch.cpp:1435 @b1b770d90).
-pub fn supportsSmTensor(arch: Arch) bool {
+pub fn supportsSmTensor(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .clover_moe,
         .grok,
@@ -285,7 +278,7 @@ pub fn supportsSmTensor(arch: Arch) bool {
 /// vllm-decision2's head tensors are not saved.
 ///
 /// Return: whether the saver can write a model of `arch`.
-pub fn supportsSave(arch: Arch) bool {
+pub fn supportsSave(arch: mod.arch_table.Arch) bool {
     return switch (arch) {
         .sensenova_u1, .gemma3n, .bitnet, .t5, .apertus, .step35, .clef, .vllm_decision2 => false,
         else => true,
@@ -316,11 +309,11 @@ test "an architecture round-trips through its name" {
         if (a == .unknown) continue;
         try std.testing.expectEqual(a, archFromString(archName(a)));
     }
-    try std.testing.expectEqual(Arch.unknown, archFromString("no-such-arch"));
+    try std.testing.expectEqual(mod.arch_table.Arch.unknown, archFromString("no-such-arch"));
 }
 
 test "a tensor without an info throws out_of_range" {
-    var exc: impl.Exception = .{};
+    var exc: mod.impl.Exception = .{};
     try std.testing.expectError(error.Thrown, tensorInfoFor(.attn_rot_embd, &exc));
     try std.testing.expectEqualStrings("map::at:  key not found", exc.what());
 }

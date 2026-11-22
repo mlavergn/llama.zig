@@ -10,22 +10,11 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const RopeParams = model_mod.RopeParams;
-const Cparams = @import("../cparams.zig").Cparams;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_mistral_large4`'s `load_arch_hparams` (models/mistral-large4.cpp:6 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -81,7 +70,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_mistral_large4`'s `load_arch_tensors` (models/mistral-large4.cpp:58 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     _ = ml;
     const l = self.loadLocals();
     const hp = &self.hparams;
@@ -117,7 +106,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         const n_embd_head_qk_nope = n_embd_head_k_mla - n_rot_l;
 
         // Learned RoPE frequencies (LeRoPE), shared by all layers.
-        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, if (i != 0) loader.tensor_duplicated else 0, exc);
+        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, if (i != 0) llama.loader.tensor_duplicated else 0, exc);
 
         layer.attn_norm = try self.createTensor(.{ .tensor = .attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
 
@@ -190,7 +179,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE.
-pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParamsIndexer(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsIndexerBase(cparams, il);
 
     res.type = model.hparams.rope_type;
@@ -200,7 +189,7 @@ pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u3
 }
 
 /// Ports `llama_model_mistral_large4`'s `build_arch_graph` (models/mistral-large4.cpp:160 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
@@ -208,29 +197,29 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 /// `build_ssmax`, a lambda of the `graph` constructor
 /// (models/mistral-large4.cpp:164 @b1b770d90): the per-head SSMax scale
 /// `s * log(pos + 1) + b`, `{1, n_head, n_tokens}`.
-fn buildSsmax(b: *const graph.Builder, ssmax_pos: *Tensor, s: ?*Tensor, bias: ?*Tensor, n_head_l: i64) *Tensor {
+fn buildSsmax(b: *const llama.graph.Builder, ssmax_pos: *llama.impl.c.ggml_tensor, s: ?*llama.impl.c.ggml_tensor, bias: ?*llama.impl.c.ggml_tensor, n_head_l: i64) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
-    const pos = c.ggml_repeat_4d(ctx, ssmax_pos, 1, n_head_l, b.n_tokens, 1);
-    const res = c.ggml_mul(ctx, pos, c.ggml_reshape_3d(ctx, s, 1, n_head_l, 1));
-    return c.ggml_add(ctx, res, c.ggml_reshape_3d(ctx, bias, 1, n_head_l, 1));
+    const pos = llama.impl.c.ggml_repeat_4d(ctx, ssmax_pos, 1, n_head_l, b.n_tokens, 1);
+    const res = llama.impl.c.ggml_mul(ctx, pos, llama.impl.c.ggml_reshape_3d(ctx, s, 1, n_head_l, 1));
+    return llama.impl.c.ggml_add(ctx, res, llama.impl.c.ggml_reshape_3d(ctx, bias, 1, n_head_l, 1));
 }
 
 /// `pad_rope`, a lambda of the `graph` constructor
 /// (models/mistral-large4.cpp:164 @b1b770d90): NoPE layers keep the cache
 /// layout of the RoPE layers by zero-filling the RoPE part.
-fn padRope(b: *const graph.Builder, x: *Tensor) *Tensor {
+fn padRope(b: *const llama.graph.Builder, x: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
-    var zeros = c.ggml_new_tensor_3d(ctx, x.type, b.n_rot, x.ne[1], x.ne[2]);
-    zeros = c.ggml_fill(ctx, zeros, 0.0);
-    return c.ggml_concat(ctx, x, zeros, 0);
+    var zeros = llama.impl.c.ggml_new_tensor_3d(ctx, x.type, b.n_rot, x.ne[1], x.ne[2]);
+    zeros = llama.impl.c.ggml_fill(ctx, zeros, 0.0);
+    return llama.impl.c.ggml_concat(ctx, x, zeros, 0);
 }
 
 /// Ports the constructor of `llama_model_mistral_large4`'s `graph` (models/mistral-large4.cpp:164 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
-    impl.assert(hp.isMla(), "models/mistral-large4.cpp", 166, "hparams.is_mla()");
+    llama.impl.assert(hp.isMla(), "models/mistral-large4.cpp", 166, "hparams.is_mla()");
 
     const n_embd_head_k: i64 = hp.nEmbdHeadKMla();
 
@@ -239,7 +228,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_indexer_top_k: u32 = hp.indexer_top_k;
 
     // The indexer head layout is [rope | nope].
-    impl.assert(b.n_rot <= n_embd_indexer_head, "models/mistral-large4.cpp", 175, "n_rot <= n_embd_indexer_head");
+    llama.impl.assert(b.n_rot <= n_embd_indexer_head, "models/mistral-large4.cpp", 175, "n_rot <= n_embd_indexer_head");
 
     const kv_lora_rank: i64 = hp.n_lora_kv;
     const n_head = b.n_head;
@@ -248,7 +237,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // YaRN is used without magnitude scaling (apply_scale = false), so
     // there is no mscale in kq_scale.
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head_k);
 
     // {n_embd, n_tokens}
     var inpL = b.buildInpEmbd(model.tok_embd.?);
@@ -256,7 +245,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_pos = b.buildInpPos();
 
     // The SSMax position basis: log(pos + 1), {1, 1, n_tokens}.
-    const ssmax_pos = c.ggml_scale_bias(ctx, b.buildInpAttnScale(), 1.0, -1.0);
+    const ssmax_pos = llama.impl.c.ggml_scale_bias(ctx, b.buildInpAttnScale(), 1.0, -1.0);
     b.cb(ssmax_pos, "ssmax_pos", -1);
 
     const inp_attn_dsa = b.buildAttnInpKDsa();
@@ -264,14 +253,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_out_ids = b.buildInpOutIds();
 
     // The shared indexer layers reuse the top_k of the previous full indexer layer.
-    var prev_top_k: ?*Tensor = null;
+    var prev_top_k: ?*llama.impl.c.ggml_tensor = null;
 
     // DSpark reads the last hidden state of every token: the output rows
     // are selected after the last layer.
     const n_layer_u: usize = @intCast(b.n_layer);
     const extract_last = n_layer_u < cp.embeddings_layer_inp.len and cp.embeddings_layer_inp[n_layer_u];
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -291,29 +280,29 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         // Self-attention.
         {
-            var top_k: *Tensor = undefined;
+            var top_k: *llama.impl.c.ggml_tensor = undefined;
 
             // The lightning indexer.
             if (hp.isIndexerFull(ilu)) {
                 var indexer_q = b.buildNorm(cur, layer.indexer_q_norm, layer.indexer_q_norm_b, .norm, il);
                 b.cb(indexer_q, "indexer_q_norm", il);
 
-                indexer_q = c.ggml_mul_mat(ctx, layer.indexer_attn_q_b, indexer_q);
+                indexer_q = llama.impl.c.ggml_mul_mat(ctx, layer.indexer_attn_q_b, indexer_q);
                 b.cb(indexer_q, "indexer_q", il);
 
                 // {n_embd_indexer_head, n_indexer_head, n_tokens}
-                indexer_q = c.ggml_reshape_3d(ctx, indexer_q, n_embd_indexer_head, n_indexer_head, n_tokens);
-                indexer_q = c.ggml_mul(ctx, indexer_q, buildSsmax(b, ssmax_pos, layer.indexer_ssmax_s, layer.indexer_ssmax_b, n_indexer_head));
+                indexer_q = llama.impl.c.ggml_reshape_3d(ctx, indexer_q, n_embd_indexer_head, n_indexer_head, n_tokens);
+                indexer_q = llama.impl.c.ggml_mul(ctx, indexer_q, buildSsmax(b, ssmax_pos, layer.indexer_ssmax_s, layer.indexer_ssmax_b, n_indexer_head));
                 b.cb(indexer_q, "indexer_q_ssmax", il);
 
-                var indexer_k: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_attn_k, cur);
+                var indexer_k: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.indexer_attn_k, cur);
                 b.cb(indexer_k, "indexer_k", il);
 
                 indexer_k = b.buildNorm(indexer_k, layer.indexer_k_norm, layer.indexer_k_norm_b, .norm, il);
                 b.cb(indexer_k, "indexer_k", il);
 
                 // {n_embd_indexer_head, 1, n_tokens}
-                indexer_k = c.ggml_reshape_3d(ctx, indexer_k, n_embd_indexer_head, 1, n_tokens);
+                indexer_k = llama.impl.c.ggml_reshape_3d(ctx, indexer_k, n_embd_indexer_head, 1, n_tokens);
 
                 if (use_rope) {
                     indexer_q = b.buildRopeIndexer(indexer_q, inp_pos, il);
@@ -324,17 +313,17 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 }
 
                 // The Hadamard transform on the indexer q and k.
-                indexer_q = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[ilu], indexer_q);
+                indexer_q = llama.impl.c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[ilu], indexer_q);
                 b.cb(indexer_q, "indexer_q", il);
-                indexer_k = c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[ilu], indexer_k);
+                indexer_k = llama.impl.c.ggml_mul_mat(ctx, inp_attn_dsa.self_k_rot_lid[ilu], indexer_k);
                 b.cb(indexer_k, "indexer_k", il);
 
                 // Store the indexer keys to the KV cache.
                 const mctx_lid = inp_attn_dsa.mctx.getLid();
                 const k_idxs_lid = inp_attn_dsa.getKIdxsLid();
-                c.ggml_build_forward_expand(b.gf, mctx_lid.cpyK(ctx, indexer_k, k_idxs_lid, il));
+                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_lid.cpyK(ctx, indexer_k, k_idxs_lid, il));
 
-                var indexer_weights: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_proj, cur);
+                var indexer_weights: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.indexer_proj, cur);
                 b.cb(indexer_weights, "indexer_weights", il);
 
                 // The cached indexer keys.
@@ -343,125 +332,125 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 // Split the batch into streams if needed.
                 const n_stream = indexer_k.ne[3];
                 const ns: usize = @intCast(n_stream);
-                indexer_q = c.ggml_view_4d(ctx, indexer_q, indexer_q.ne[0], indexer_q.ne[1], @divTrunc(indexer_q.ne[2], n_stream), n_stream, indexer_q.nb[1], indexer_q.nb[2], indexer_q.nb[3] / ns, 0);
-                indexer_weights = c.ggml_view_4d(ctx, indexer_weights, indexer_weights.ne[0], @divTrunc(indexer_weights.ne[1], n_stream), indexer_weights.ne[2], n_stream, indexer_weights.nb[1], indexer_weights.nb[2] / ns, indexer_weights.nb[3] / ns, 0);
+                indexer_q = llama.impl.c.ggml_view_4d(ctx, indexer_q, indexer_q.ne[0], indexer_q.ne[1], @divTrunc(indexer_q.ne[2], n_stream), n_stream, indexer_q.nb[1], indexer_q.nb[2], indexer_q.nb[3] / ns, 0);
+                indexer_weights = llama.impl.c.ggml_view_4d(ctx, indexer_weights, indexer_weights.ne[0], @divTrunc(indexer_weights.ne[1], n_stream), indexer_weights.ne[2], n_stream, indexer_weights.nb[1], indexer_weights.nb[2] / ns, indexer_weights.nb[3] / ns, 0);
 
                 // The weights pre-scaled, to avoid scaling the huge indexer_score tensor.
-                indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / libm.sqrtfInt(n_embd_indexer_head * n_indexer_head));
+                indexer_weights = llama.impl.c.ggml_scale(ctx, indexer_weights, 1.0 / stdlib.libm.sqrtfInt(n_embd_indexer_head * n_indexer_head));
                 b.cb(indexer_weights, "indexer_weights", il);
 
-                var indexer_score: *Tensor = undefined;
+                var indexer_score: *llama.impl.c.ggml_tensor = undefined;
                 if (cp.fused_lid) {
-                    indexer_score = c.ggml_lightning_indexer(ctx, indexer_q, indexer_k, indexer_weights, inp_attn_dsa.self_attn_mask_lid.raw);
+                    indexer_score = llama.impl.c.ggml_lightning_indexer(ctx, indexer_q, indexer_k, indexer_weights, inp_attn_dsa.self_attn_mask_lid.raw);
                     b.cb(indexer_score, "indexer_score", il);
                     b.res.addFusedNode(.{ .op = .lightning_indexer, .tensor = indexer_score, .il = il });
                 } else {
                     // The indexer kq.
-                    indexer_q = c.ggml_permute(ctx, indexer_q, 0, 2, 1, 3);
+                    indexer_q = llama.impl.c.ggml_permute(ctx, indexer_q, 0, 2, 1, 3);
                     b.cb(indexer_q, "indexer_q", il);
-                    indexer_k = c.ggml_permute(ctx, indexer_k, 0, 2, 1, 3);
+                    indexer_k = llama.impl.c.ggml_permute(ctx, indexer_k, 0, 2, 1, 3);
                     b.cb(indexer_k, "indexer_k", il);
 
-                    var indexer_kq: *Tensor = c.ggml_mul_mat(ctx, indexer_k, indexer_q);
+                    var indexer_kq: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, indexer_k, indexer_q);
                     b.cb(indexer_kq, "indexer_kq", il);
 
                     // ReLU requires contiguous tensors.
-                    indexer_kq = c.ggml_cont(ctx, c.ggml_permute(ctx, indexer_kq, 2, 1, 0, 3));
+                    indexer_kq = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, indexer_kq, 2, 1, 0, 3));
                     b.cb(indexer_kq, "indexer_kq", il);
 
-                    indexer_score = c.ggml_relu(ctx, indexer_kq);
+                    indexer_score = llama.impl.c.ggml_relu(ctx, indexer_kq);
                     b.cb(indexer_score, "indexer_score", il);
 
                     // The scores times the indexer weights.
-                    indexer_score = c.ggml_mul(ctx, indexer_score, indexer_weights);
+                    indexer_score = llama.impl.c.ggml_mul(ctx, indexer_score, indexer_weights);
                     b.cb(indexer_score, "indexer_score", il);
 
                     // Summed over the q's n_indexer_head dimension.
-                    indexer_score = c.ggml_sum_rows(ctx, indexer_score);
+                    indexer_score = llama.impl.c.ggml_sum_rows(ctx, indexer_score);
                     b.cb(indexer_score, "indexer_score", il);
 
                     // Permuted to match the KQ mask.
-                    indexer_score = c.ggml_cont(ctx, c.ggml_permute(ctx, indexer_score, 2, 1, 0, 3));
+                    indexer_score = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, indexer_score, 2, 1, 0, 3));
                     b.cb(indexer_score, "indexer_score", il);
 
                     // The masked indexer scores.
                     const indexer_kq_mask = inp_attn_dsa.self_attn_mask_lid.raw;
-                    indexer_score = c.ggml_add(ctx, indexer_score, indexer_kq_mask);
+                    indexer_score = llama.impl.c.ggml_add(ctx, indexer_score, indexer_kq_mask);
                     b.cb(indexer_score, "indexer_score", il);
                 }
 
                 // The indices of the top k indexer scores.
                 const n_top_k: u32 = if (indexer_score.ne[0] < n_indexer_top_k) @intCast(indexer_score.ne[0]) else n_indexer_top_k;
-                top_k = c.ggml_cont(ctx, c.ggml_top_k(ctx, indexer_score, @intCast(n_top_k)));
+                top_k = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_top_k(ctx, indexer_score, @intCast(n_top_k)));
                 prev_top_k = top_k;
                 b.cb(top_k, "top_k", il);
             } else {
-                impl.assert(prev_top_k != null, "models/mistral-large4.cpp", 340, "prev_top_k != nullptr && \"shared indexer layer must follow a previous full indexer layer\"");
+                llama.impl.assert(prev_top_k != null, "models/mistral-large4.cpp", 340, "prev_top_k != nullptr && \"shared indexer layer must follow a previous full indexer layer\"");
                 top_k = prev_top_k.?;
                 b.cb(top_k, "top_k", il);
             }
 
-            const q: *Tensor = c.ggml_mul_mat(ctx, layer.wq, cur);
+            const q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wq, cur);
             b.cb(q, "q", il);
 
             // {n_embd_head_qk_nope, n_head, n_tokens}
-            var q_nope: *Tensor = c.ggml_view_3d(ctx, q, n_embd_head_qk_nope, n_head, n_tokens, c.ggml_row_size(q.type, n_embd_head_k), c.ggml_row_size(q.type, n_embd_head_k) * @as(usize, @intCast(n_head)), 0);
+            var q_nope: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, q, n_embd_head_qk_nope, n_head, n_tokens, llama.impl.c.ggml_row_size(q.type, n_embd_head_k), llama.impl.c.ggml_row_size(q.type, n_embd_head_k) * @as(usize, @intCast(n_head)), 0);
             b.cb(q_nope, "q_nope", il);
 
             // {n_embd_head_qk_nope, n_tokens, n_head}
-            q_nope = c.ggml_permute(ctx, q_nope, 0, 2, 1, 3);
+            q_nope = llama.impl.c.ggml_permute(ctx, q_nope, 0, 2, 1, 3);
             b.cb(q_nope, "q_nope_perm", il);
 
             // {n_embd_head_qk_nope, kv_lora_rank, n_head} x {n_embd_head_qk_nope, n_tokens, n_head}
-            var q_nope_absorbed: *Tensor = c.ggml_mul_mat(ctx, layer.wk_b, q_nope);
+            var q_nope_absorbed: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wk_b, q_nope);
             b.cb(q_nope_absorbed, "q_nope_absorbed", il);
 
             // {kv_lora_rank, n_head, n_tokens}
-            q_nope_absorbed = c.ggml_permute(ctx, q_nope_absorbed, 0, 2, 1, 3);
+            q_nope_absorbed = llama.impl.c.ggml_permute(ctx, q_nope_absorbed, 0, 2, 1, 3);
             b.cb(q_nope_absorbed, "q_nope_absorbed_perm", il);
 
             // {kv_lora_rank + n_rot, n_head, n_tokens}. RoPE must go first,
             // for in-place context shifting in build_rope_shift().
-            var Qcur: *Tensor = undefined;
+            var Qcur: *llama.impl.c.ggml_tensor = undefined;
             if (use_rope) {
-                var q_pe: *Tensor = c.ggml_view_3d(ctx, q, n_rot, n_head, n_tokens, c.ggml_row_size(q.type, n_embd_head_k), c.ggml_row_size(q.type, n_embd_head_k) * @as(usize, @intCast(n_head)), c.ggml_row_size(q.type, n_embd_head_qk_nope));
+                var q_pe: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, q, n_rot, n_head, n_tokens, llama.impl.c.ggml_row_size(q.type, n_embd_head_k), llama.impl.c.ggml_row_size(q.type, n_embd_head_k) * @as(usize, @intCast(n_head)), llama.impl.c.ggml_row_size(q.type, n_embd_head_qk_nope));
                 q_pe = b.buildRope(q_pe, inp_pos, il);
                 b.cb(q_pe, "q_pe", il);
 
-                Qcur = c.ggml_concat(ctx, q_nope_absorbed, q_pe, 0);
+                Qcur = llama.impl.c.ggml_concat(ctx, q_nope_absorbed, q_pe, 0);
             } else {
                 Qcur = padRope(b, q_nope_absorbed);
             }
             b.cb(Qcur, "Qcur", il);
 
-            Qcur = c.ggml_mul(ctx, Qcur, buildSsmax(b, ssmax_pos, layer.attn_ssmax_s, layer.attn_ssmax_b, n_head));
+            Qcur = llama.impl.c.ggml_mul(ctx, Qcur, buildSsmax(b, ssmax_pos, layer.attn_ssmax_s, layer.attn_ssmax_b, n_head));
             b.cb(Qcur, "Qcur_ssmax", il);
 
             // Layers without their own KV read the cache their source layer wrote.
-            var Kcur: ?*Tensor = null;
-            var Vcur: ?*Tensor = null;
+            var Kcur: ?*llama.impl.c.ggml_tensor = null;
+            var Vcur: ?*llama.impl.c.ggml_tensor = null;
 
             if (hp.hasKv(ilu)) {
-                const kv_cmpr_pe: *Tensor = c.ggml_mul_mat(ctx, layer.wkv_a_mqa, cur);
+                const kv_cmpr_pe: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.wkv_a_mqa, cur);
                 b.cb(kv_cmpr_pe, "kv_cmpr_pe", il);
 
                 // {kv_lora_rank, n_tokens}
-                var kv_cmpr: *Tensor = c.ggml_view_2d(ctx, kv_cmpr_pe, kv_lora_rank, n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot_l), 0);
+                var kv_cmpr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, kv_cmpr_pe, kv_lora_rank, n_tokens, llama.impl.c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot_l), 0);
                 b.cb(kv_cmpr, "kv_cmpr", il);
 
                 kv_cmpr = b.buildNorm(kv_cmpr, layer.attn_kv_a_norm, null, .rms, il);
                 b.cb(kv_cmpr, "kv_cmpr", il);
 
-                kv_cmpr = c.ggml_reshape_3d(ctx, kv_cmpr, kv_lora_rank, 1, n_tokens);
+                kv_cmpr = llama.impl.c.ggml_reshape_3d(ctx, kv_cmpr, kv_lora_rank, 1, n_tokens);
                 b.cb(kv_cmpr, "kv_cmpr_reshape", il);
 
                 if (use_rope) {
                     // {n_rot, 1, n_tokens}
-                    var k_pe: *Tensor = c.ggml_view_3d(ctx, kv_cmpr_pe, n_rot, 1, n_tokens, c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
+                    var k_pe: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, kv_cmpr_pe, n_rot, 1, n_tokens, llama.impl.c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), llama.impl.c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank + n_rot), llama.impl.c.ggml_row_size(kv_cmpr_pe.type, kv_lora_rank));
                     k_pe = b.buildRope(k_pe, inp_pos, il);
                     b.cb(k_pe, "k_pe", il);
 
-                    Kcur = c.ggml_concat(ctx, kv_cmpr, k_pe, 0);
+                    Kcur = llama.impl.c.ggml_concat(ctx, kv_cmpr, k_pe, 0);
                 } else {
                     Kcur = padRope(b, kv_cmpr);
                 }
@@ -476,11 +465,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1 and !extract_last) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -511,11 +500,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .silu, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         }
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -525,7 +514,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     if (extract_last) {
         b.res.t_layer_inp[n_layer_u] = inpL;
-        inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+        inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
     }
 
     cur = b.buildNorm(inpL, model.output_norm, null, .rms, -1);
@@ -533,12 +522,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
 
-    cur = c.ggml_mul_mat(ctx, model.output, cur);
+    cur = llama.impl.c.ggml_mul_mat(ctx, model.output, cur);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = c.ggml_tanh(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_tanh(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

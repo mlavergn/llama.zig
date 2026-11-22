@@ -7,22 +7,18 @@
 //! Ports `llama.cpp/tools/mtmd/models/muse-glimmer.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const kimivl = @import("kimivl.zig");
-const c = impl.c;
+const mtmd = @import("../module.zig");
 
 /// The `inp_i32` lambda (mtmd/models/muse-glimmer.cpp:21 @b1b770d90): a named I32 input.
-fn inpI32(g: *graph.Graph, name: [*:0]const u8, n: i64) graph.T {
-    const t = c.ggml_new_tensor_1d(g.ctx0, c.GGML_TYPE_I32, n);
-    _ = c.ggml_set_name(t, name);
-    c.ggml_set_input(t);
+fn inpI32(g: *mtmd.graph.Graph, name: [*:0]const u8, n: i64) mtmd.graph.T {
+    const t = mtmd.impl.c.ggml_new_tensor_1d(g.ctx0, mtmd.impl.c.GGML_TYPE_I32, n);
+    _ = mtmd.impl.c.ggml_set_name(t, name);
+    mtmd.impl.c.ggml_set_input(t);
     return t;
 }
 
 /// Ports `build` (mtmd/models/muse-glimmer.cpp:14 @b1b770d90), a member of `mtmd_graph_muse_glimmer`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -45,16 +41,16 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     // patchify via build_inp (conv2d over raw pixels) + bilinear-resized learned pos-emb
     var x = g.buildInp(); // [n_embd, n_tok, 1]
-    x = c.ggml_add(ctx0, x, g.resizePositionEmbeddings(c.GGML_SCALE_MODE_BILINEAR));
+    x = mtmd.impl.c.ggml_add(ctx0, x, g.resizePositionEmbeddings(mtmd.impl.c.GGML_SCALE_MODE_BILINEAR));
     g.cb(x, "after_posemb", -1);
 
     // group patches into pgrid x pgrid windows (sparse attention order)
-    x = c.ggml_get_rows(ctx0, x, sp_perm);
+    x = mtmd.impl.c.ggml_get_rows(ctx0, x, sp_perm);
     g.cb(x, "after_sp_perm", -1);
 
     // per-layer mask: sparse layers get sp_mask, global layers (every sf-th and last) get none
-    const attn_mask_layers = try impl.gpa.alloc(graph.T, @intCast(g.n_layer));
-    defer impl.gpa.free(attn_mask_layers);
+    const attn_mask_layers = try std.heap.c_allocator.alloc(mtmd.graph.T, @intCast(g.n_layer));
+    defer std.heap.c_allocator.free(attn_mask_layers);
     for (attn_mask_layers, 0..) |*m, i| {
         const il: c_int = @intCast(i);
         const is_global = (il == g.n_layer - 1) or (@rem(il + 1, sf) == 0);
@@ -62,33 +58,33 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     }
 
     // 2D RoPE: first half of head_dim uses width pos, second half uses height pos
-    var rope: kimivl.Rope2d = .{ .pos_a = pos_w, .pos_b = pos_h, .freq_base = rope_base };
+    var rope: mtmd.models.kimivl.Rope2d = .{ .pos_a = pos_w, .pos_b = pos_h, .freq_base = rope_base };
 
     // pre_ln, per-layer transformer, post_ln (all inside build_vit); reference uses exact (erf) GELU
-    x = g.buildVit(x, n_tok, .normal, .gelu_erf, null, .{ .ctx = &rope, .f = kimivl.Rope2d.addPos }, .{ .attn_mask_layers = attn_mask_layers });
+    x = g.buildVit(x, n_tok, .normal, .gelu_erf, null, .{ .ctx = &rope, .f = mtmd.models.kimivl.Rope2d.addPos }, .{ .attn_mask_layers = attn_mask_layers });
 
     // un-permute back to original grid order
-    x = c.ggml_get_rows(ctx0, x, inv_perm);
+    x = mtmd.impl.c.ggml_get_rows(ctx0, x, inv_perm);
     g.cb(x, "after_inv_perm", -1);
 
     // pixel-shuffle downsample: gather f*f spatial neighbors then concat channel-outer.
     // out[c*(ds*ds)+s, o] = x[ds_perm gathered][o*(ds*ds)+s, c]
-    x = c.ggml_get_rows(ctx0, x, ds_perm); // [n_embd, n_tok], grouped
-    x = c.ggml_reshape_3d(ctx0, x, n_embd, ds * ds, n_out); // [c, s, o]
-    x = c.ggml_permute(ctx0, x, 1, 0, 2, 3); // [s, c, o]
-    x = c.ggml_cont(ctx0, x);
-    x = c.ggml_reshape_2d(ctx0, x, n_embd * ds * ds, n_out); // [6144, n_out]
+    x = mtmd.impl.c.ggml_get_rows(ctx0, x, ds_perm); // [n_embd, n_tok], grouped
+    x = mtmd.impl.c.ggml_reshape_3d(ctx0, x, n_embd, ds * ds, n_out); // [c, s, o]
+    x = mtmd.impl.c.ggml_permute(ctx0, x, 1, 0, 2, 3); // [s, c, o]
+    x = mtmd.impl.c.ggml_cont(ctx0, x);
+    x = mtmd.impl.c.ggml_reshape_2d(ctx0, x, n_embd * ds * ds, n_out); // [6144, n_out]
     g.cb(x, "encoder_out", -1);
 
     // adapter (6144->4096->4096, exact GELU each) + LLM vision_projection (4096->6656)
     x = g.buildMm(model.mm_0_w, x);
-    x = c.ggml_gelu_erf(ctx0, x);
+    x = mtmd.impl.c.ggml_gelu_erf(ctx0, x);
     x = g.buildMm(model.mm_1_w, x);
-    x = c.ggml_gelu_erf(ctx0, x);
+    x = mtmd.impl.c.ggml_gelu_erf(ctx0, x);
     x = g.buildMm(model.mm_2_w, x); // [6656, n_out]
     g.cb(x, "projected", -1);
 
-    c.ggml_build_forward_expand(g.gf, x);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, x);
     return g.gf;
 }
 

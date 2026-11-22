@@ -67,8 +67,10 @@ Exactly four markdown files. Never add another.
 - **`zig translate-c` output is a draft to read, never to commit.**
 - **Metal kernels, CUDA kernels and Vulkan shaders are never ported**; they travel as embedded data.
 - **A newly ported file goes into `module.zig`.**
+- **Ported code calls ported code through `@import`, never an `extern` of its C name**: the definition's type checks the call. Per-architecture definitions resolve by `builtin.cpu.arch`; an `arch-fallback.h` rename is an `@export` plus a `pub const` of the same name in that architecture's `fallback.zig`. `extern` stays only where something else may define the symbol: `impl.zig`'s `ggml_log_internal` and `backend_meta.zig` (compiled alone against upstream's C by `meta-diff`, `opt-diff`, `blas-node-diff`), the Objective-C, CUB shims, Accelerate, and the CUDA/Vulkan registrations (`-D<backend>-port`).
+- **A harness reaches both sides by name at link time**, so zigggml can link its library in place of ours; write it `@extern(*const T, .{ .name = ... })` with one shared `T` (`repack_diff.zig`'s `ours`/`reference`), never a hand-typed signature per symbol.
 - **Locks are `stdlib.sync.Mutex` and `stdlib.sync.Condition`** (`stdlib/sync/`): futexes, no C library, no `std.Io`. Never `pthread_mutex_t`, `pthread_cond_t`, SRW locks, `std.Io.Mutex` or a per-file wrapper. A module that imports `stdlib` and compiles beside libllama takes libllama's instance (`llamacpp.stdlibOf`); a gate script that declares modules by hand passes `--dep stdlib` and `-Mstdlib=stdlib/module.zig`.
-- **Platform helpers live only in `stdlib/`**: file reads and writes, the file system and `std::filesystem` paths, clocks and sleeps, the environment, `errno` text, C's number conversions, every C library declaration (`libc.zig`; a file never declares one itself), libm declarations and clang's rewrites of them (`libm.sinCos`, `math_errno`), libc++'s algorithms, RNG and `random_device`, the CPU count, the C streams, `exit`. Never a local copy, never a function that only forwards. Where upstream does two different things, `stdlib` has one function per idiom (`file.readStream` keeps what came before a read error, `Dir.readFileAlloc` fails whole); a call site uses the one upstream's code there uses. A port of an upstream function that upstream defines twice keeps its citation where upstream put it and delegates. Where std already does the job (`std.ascii`, `std.mem.sliceTo`, `Dir.readFileAlloc`, `Dir.writeFile`), call std.
+- **Platform helpers live only in `stdlib/`**: file reads and writes, the file system and `std::filesystem` paths, clocks and sleeps, the environment, `errno` text, C's number conversions, every C library declaration (`libc.zig`; a file never declares one itself; a function std declares is an alias of `std.c`'s, an `extern` only where std lacks it or types it stricter than C, as `mlock` and `setlocale`), libm declarations and clang's rewrites of them (`libm.sinCos`, `math_errno`), libc++'s algorithms, RNG and `random_device`, the CPU count, the C streams, `exit`. Never a local copy, never a function that only forwards. Where upstream does two different things, `stdlib` has one function per idiom (`file.readStream` keeps what came before a read error, `Dir.readFileAlloc` fails whole); a call site uses the one upstream's code there uses. A port of an upstream function that upstream defines twice keeps its citation where upstream put it and delegates. Where std already does the job (`std.ascii`, `std.mem.sliceTo`, `Dir.readFileAlloc`, `Dir.writeFile`), call std.
 
 ### Citations (`make port-links`)
 
@@ -98,7 +100,7 @@ Exactly four markdown files. Never add another.
 
 ## Gates
 
-**A gate proves nothing until it has failed.** Inject a fault, watch it fail, undo by reverse replacement. Confirm the build succeeded and the artifact changed (a failed build leaves the old library). Confirm the injection changes the computation. A checker that silently skips input looks like one that passes.
+**A gate proves nothing until it has failed.** Inject a fault, watch it fail, undo by reverse replacement. Confirm the build succeeded and the artifact changed (a failed build leaves the old library; a script run directly links whatever `zig-out/lib` holds, so rebuild first -- the `make` targets do). Confirm the injection changes the computation. A checker that silently skips input looks like one that passes.
 
 - Compare on **bits**, never a tolerance. Bit-exact gates build `--release=fast` on both sides; optimization level and compiler move bits.
 - **A gate's input distribution is part of the gate**: amplitudes, tie cases, thread counts, shapes straddling thresholds.
@@ -155,6 +157,7 @@ Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.W
 - **`p.*.arr[i]` through `[*c]T` miscompiles** (indexes by the whole array). Narrow with `impl.one` first.
 - **A small `extern struct` received by value across the C ABI reads zeros** unless its size is a multiple of 4 with no padding. Take an integer of the same size and `@bitCast`; add it to `harness/abi_structs.c`.
 - **`compiler_rt` shadows libm's `expf`/`logf`**: no `@panic` in libraries; native Linux executables link gcc's `libgcc.a` first (`llamacpp.addLibgcc`); `libm_check` guards it.
+- **`std.c.LC` is glibc's numbering on every OS** (Darwin and Windows: `LC_ALL` 0, `LC_CTYPE` 2, `LC_NUMERIC` 4): use `libc.LC`. **`std.c.mlock` demands a page-aligned address**; C's takes any.
 - **`std.c.Stat` is `void` on Linux and Windows** (`stdlib/fs.zig`); `std.c.clock_gettime` on Windows (`stdlib/clock.zig`); `std.c.write` takes a `HANDLE` on Windows (use `_write`).
 - **`char` is `c_char`**, unsigned on aarch64 Linux.
 - **`iN`/`uN` are type names**: the C's `i0`, `i11`... become `j0`, `j11`, digit for digit.
@@ -233,7 +236,9 @@ make zmake                # build the reference through llama.cpp.zmake
 
 ## Code conventions
 
-- Barrel per directory: `module.zig` re-exports; siblings import the barrel. `src/root.zig` is docs-only.
+- **Barrels.** Each directory's `module.zig` re-exports its files (`pub const x = @import("x.zig")`) and forces nothing. A file outside a directory reaches it only through that directory's barrel (`const quants = @import("../../quants/module.zig"); quants.blocks.X`); a parent's file through the parent's barrel (`const mtmd = @import("../module.zig"); mtmd.clip.x()`). Same-directory siblings import each other by name; a file importing its own barrel names it `mod`. `src/root.zig` is docs-only.
+- **No file-scope member aliases** (`const libc = @import("stdlib").libc;`, `const Vocab = mod.Vocab;`, `const c = impl.c;`): write the full path at the use (`stdlib.libc.write(...)`). Values in a function may be named.
+- **The C API is the library's, not the consumers'.** `src/llama/lib.zig` and `src/mtmd/lib.zig` force every exporting file, only when that library is the compilation root or under test. `cli/`, `tools/` and the server call the Zig API (`llama.api.llama_decode(...)`); a comptime `_ = @import("llama").lib` in a consumer is a stopgap until they do. Harnesses call upstream by C name.
 - Allocator first, owner frees; `init(allocator, ...)` stores it.
 - `init` returns an error union even when it cannot fail.
 - Public functions: doc comment with `Parameters:` and `Return:` (what it borrows, how long). Struct `///` says why it exists.

@@ -26,7 +26,7 @@
 //! `calloc` for the same reason.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 
 /// What `stbi_load_from_memory` returns.
 pub const Image = struct {
@@ -486,7 +486,7 @@ const Context = struct {
         for (0..npix) |i| {
             var k: usize = 0;
             while (k < nu) : (k += 1) {
-                var z = @mulAdd(f32, libm.powf(data[i * cu + k] * h2l_scale_i, h2l_gamma_i), 255, 0.5);
+                var z = @mulAdd(f32, stdlib.libm.powf(data[i * cu + k] * h2l_scale_i, h2l_gamma_i), 255, 0.5);
                 if (z < 0) z = 0;
                 if (z > 255) z = 255;
                 output[i * cu + k] = @intCast(@as(c_int, @intFromFloat(z)));
@@ -4201,7 +4201,7 @@ fn hdrGettoken(z: *Context, buffer: *[hdr_buflen]u8) []const u8 {
 fn hdrConvert(output: []f32, input: *const [4]u8, req_comp: c_int) void {
     if (input[3] != 0) {
         // Exponent
-        const f1 = libm.ldexpf(1.0, @as(c_int, input[3]) - (128 + 8));
+        const f1 = stdlib.libm.ldexpf(1.0, @as(c_int, input[3]) - (128 + 8));
         if (req_comp <= 2) {
             output[0] = @as(f32, @floatFromInt(@as(c_int, input[0]) + input[1] + input[2])) * f1 / 3;
         } else {

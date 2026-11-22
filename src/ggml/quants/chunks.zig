@@ -25,17 +25,7 @@
 //! so `eachRow` below carries the loop and the callers supply the body.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const blocks = @import("blocks.zig");
-const h = @import("helpers.zig");
-const legacy = @import("legacy.zig");
-const k_quants = @import("k.zig");
-const ternary = @import("ternary.zig");
-const c = impl.c;
-
-const fp16 = impl.fp32ToFp16;
-const unfp16 = impl.fp16ToFp32;
-const QK_K = c.QK_K;
+const ggml = @import("../module.zig");
 
 /// `ggml_row_size` without depending on the traits table.
 ///
@@ -119,12 +109,12 @@ fn forwardingChunk(
 // argument, ignore it, and still run the row loop, so they keep that shape
 // below.
 comptime {
-    @export(&forwardingChunk(blocks.Q8_0, c.QK8_0, legacy.quantize_row_q8_0_ref), .{ .name = "quantize_q8_0" });
-    @export(&forwardingChunk(blocks.MXFP4, c.QK_MXFP4, legacy.quantize_row_mxfp4_ref), .{ .name = "quantize_mxfp4" });
-    @export(&forwardingChunk(blocks.NVFP4, c.QK_NVFP4, legacy.quantize_row_nvfp4_ref), .{ .name = "quantize_nvfp4" });
-    @export(&forwardingChunk(c.ggml_fp8_e4m3_t, 1, legacy.quantize_row_f8_e4m3_ref), .{ .name = "quantize_f8_e4m3" });
-    @export(&forwardingChunk(blocks.TQ1_0, QK_K, ternary.quantize_row_tq1_0_ref), .{ .name = "quantize_tq1_0" });
-    @export(&forwardingChunk(blocks.TQ2_0, QK_K, ternary.quantize_row_tq2_0_ref), .{ .name = "quantize_tq2_0" });
+    @export(&forwardingChunk(ggml.quants.blocks.Q8_0, ggml.impl.c.QK8_0, ggml.quants.legacy.quantize_row_q8_0_ref), .{ .name = "quantize_q8_0" });
+    @export(&forwardingChunk(ggml.quants.blocks.MXFP4, ggml.impl.c.QK_MXFP4, ggml.quants.legacy.quantize_row_mxfp4_ref), .{ .name = "quantize_mxfp4" });
+    @export(&forwardingChunk(ggml.quants.blocks.NVFP4, ggml.impl.c.QK_NVFP4, ggml.quants.legacy.quantize_row_nvfp4_ref), .{ .name = "quantize_nvfp4" });
+    @export(&forwardingChunk(ggml.impl.c.ggml_fp8_e4m3_t, 1, ggml.quants.legacy.quantize_row_f8_e4m3_ref), .{ .name = "quantize_f8_e4m3" });
+    @export(&forwardingChunk(ggml.quants.blocks.TQ1_0, ggml.impl.c.QK_K, ggml.quants.ternary.quantize_row_tq1_0_ref), .{ .name = "quantize_tq1_0" });
+    @export(&forwardingChunk(ggml.quants.blocks.TQ2_0, ggml.impl.c.QK_K, ggml.quants.ternary.quantize_row_tq2_0_ref), .{ .name = "quantize_tq2_0" });
 }
 
 /// Ports `quantize_q1_0` (ggml-quants.c:2108 @b1b770d90).
@@ -134,12 +124,12 @@ comptime {
 /// is kept so the correspondence with the C is checkable.
 pub export fn quantize_q1_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     if (quant_weights == null) {
-        legacy.quantize_row_q1_0_ref(src, @ptrCast(@alignCast(dst)), nrow * n_per_row);
-        return @as(usize, @intCast(nrow)) * rowSize(blocks.Q1_0, c.QK1_0, n_per_row);
+        ggml.quants.legacy.quantize_row_q1_0_ref(src, @ptrCast(@alignCast(dst)), nrow * n_per_row);
+        return @as(usize, @intCast(nrow)) * rowSize(ggml.quants.blocks.Q1_0, ggml.impl.c.QK1_0, n_per_row);
     }
-    return eachRow(blocks.Q1_0, c.QK1_0, src, dst, nrow, n_per_row, null, struct {
-        fn f(s: [*]const f32, y: [*]blocks.Q1_0, npr: i64, _: ?[*]const f32) void {
-            legacy.quantize_row_q1_0_ref(s, y, npr);
+    return eachRow(ggml.quants.blocks.Q1_0, ggml.impl.c.QK1_0, src, dst, nrow, n_per_row, null, struct {
+        fn f(s: [*]const f32, y: [*]ggml.quants.blocks.Q1_0, npr: i64, _: ?[*]const f32) void {
+            ggml.quants.legacy.quantize_row_q1_0_ref(s, y, npr);
         }
     }.f);
 }
@@ -147,12 +137,12 @@ pub export fn quantize_q1_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_p
 /// Ports `quantize_q2_0` (ggml-quants.c:2123 @b1b770d90).
 pub export fn quantize_q2_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
     if (quant_weights == null) {
-        legacy.quantize_row_q2_0_ref(src, @ptrCast(@alignCast(dst)), nrow * n_per_row);
-        return @as(usize, @intCast(nrow)) * rowSize(blocks.Q2_0, c.QK2_0, n_per_row);
+        ggml.quants.legacy.quantize_row_q2_0_ref(src, @ptrCast(@alignCast(dst)), nrow * n_per_row);
+        return @as(usize, @intCast(nrow)) * rowSize(ggml.quants.blocks.Q2_0, ggml.impl.c.QK2_0, n_per_row);
     }
-    return eachRow(blocks.Q2_0, c.QK2_0, src, dst, nrow, n_per_row, null, struct {
-        fn f(s: [*]const f32, y: [*]blocks.Q2_0, npr: i64, _: ?[*]const f32) void {
-            legacy.quantize_row_q2_0_ref(s, y, npr);
+    return eachRow(ggml.quants.blocks.Q2_0, ggml.impl.c.QK2_0, src, dst, nrow, n_per_row, null, struct {
+        fn f(s: [*]const f32, y: [*]ggml.quants.blocks.Q2_0, npr: i64, _: ?[*]const f32) void {
+            ggml.quants.legacy.quantize_row_q2_0_ref(s, y, npr);
         }
     }.f);
 }
@@ -161,25 +151,25 @@ pub export fn quantize_q2_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_p
 // The legacy formats with an imatrix-aware fit
 
 /// Ports `quantize_row_q4_0_impl` (ggml-quants.c:2080 @b1b770d90).
-fn q4_0Impl(x: [*]const f32, y: [*]blocks.Q4_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
+fn q4_0Impl(x: [*]const f32, y: [*]ggml.quants.blocks.Q4_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
-        legacy.quantize_row_q4_0_ref(x, y, n_per_row);
+        ggml.quants.legacy.quantize_row_q4_0_ref(x, y, n_per_row);
         return;
     };
 
-    var weight: [c.QK4_0]f32 = undefined;
-    var l_buf: [c.QK4_0]i8 = undefined;
+    var weight: [ggml.impl.c.QK4_0]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK4_0]i8 = undefined;
 
     var sum_x2: f32 = 0;
     for (0..@intCast(n_per_row)) |j| sum_x2 += x[j] * x[j];
     const sigma2 = sum_x2 / @as(f32, @floatFromInt(n_per_row));
 
-    const nb: usize = @intCast(@divExact(n_per_row, c.QK4_0));
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK4_0));
     for (0..nb) |ib| {
-        const xb = x + c.QK4_0 * ib;
-        imatrixWeights(&weight, qw_all + c.QK4_0 * ib, xb, c.QK4_0, sigma2);
-        const d = h.makeQxQuants(c.QK4_0, 8, xb, &l_buf, 1, &weight);
-        y[ib].d = fp16(d);
+        const xb = x + ggml.impl.c.QK4_0 * ib;
+        imatrixWeights(&weight, qw_all + ggml.impl.c.QK4_0 * ib, xb, ggml.impl.c.QK4_0, sigma2);
+        const d = ggml.quants.helpers.makeQxQuants(ggml.impl.c.QK4_0, 8, xb, &l_buf, 1, &weight);
+        y[ib].d = ggml.impl.fp32ToFp16(d);
         for (0..16) |j| {
             y[ib].qs[j] = @as(u8, @bitCast(l_buf[j])) | (@as(u8, @bitCast(l_buf[j + 16])) << 4);
         }
@@ -187,52 +177,52 @@ fn q4_0Impl(x: [*]const f32, y: [*]blocks.Q4_0, n_per_row: i64, quant_weights: ?
 }
 
 /// Ports `quantize_row_q4_1_impl` (ggml-quants.c:2153 @b1b770d90).
-fn q4_1Impl(x: [*]const f32, y: [*]blocks.Q4_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
+fn q4_1Impl(x: [*]const f32, y: [*]ggml.quants.blocks.Q4_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
-        legacy.quantize_row_q4_1_ref(x, y, n_per_row);
+        ggml.quants.legacy.quantize_row_q4_1_ref(x, y, n_per_row);
         return;
     };
 
-    var weight: [c.QK4_1]f32 = undefined;
-    var l_buf: [c.QK4_1]u8 = undefined;
-    var l_aux: [c.QK4_1]u8 = undefined;
+    var weight: [ggml.impl.c.QK4_1]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK4_1]u8 = undefined;
+    var l_aux: [ggml.impl.c.QK4_1]u8 = undefined;
 
     var sum_x2: f32 = 0;
     for (0..@intCast(n_per_row)) |j| sum_x2 += x[j] * x[j];
     const sigma2 = sum_x2 / @as(f32, @floatFromInt(n_per_row));
 
-    const nb: usize = @intCast(@divExact(n_per_row, c.QK4_1));
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK4_1));
     for (0..nb) |ib| {
-        const xb = x + c.QK4_1 * ib;
-        imatrixWeights(&weight, qw_all + c.QK4_1 * ib, xb, c.QK4_1, sigma2);
+        const xb = x + ggml.impl.c.QK4_1 * ib;
+        imatrixWeights(&weight, qw_all + ggml.impl.c.QK4_1 * ib, xb, ggml.impl.c.QK4_1, sigma2);
         var min: f32 = undefined;
-        const d = h.makeQkx3Quants(c.QK4_1, 15, xb, &weight, &l_buf, &min, &l_aux, -0.9, 0.05, 36, false);
-        y[ib].d = fp16(d);
-        y[ib].m = fp16(-min);
+        const d = ggml.quants.helpers.makeQkx3Quants(ggml.impl.c.QK4_1, 15, xb, &weight, &l_buf, &min, &l_aux, -0.9, 0.05, 36, false);
+        y[ib].d = ggml.impl.fp32ToFp16(d);
+        y[ib].m = ggml.impl.fp32ToFp16(-min);
         for (0..16) |j| y[ib].qs[j] = l_buf[j] | (l_buf[j + 16] << 4);
     }
 }
 
 /// Ports `quantize_row_q5_0_impl` (ggml-quants.c:2198 @b1b770d90).
-fn q5_0Impl(x: [*]const f32, y: [*]blocks.Q5_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
+fn q5_0Impl(x: [*]const f32, y: [*]ggml.quants.blocks.Q5_0, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
-        legacy.quantize_row_q5_0_ref(x, y, n_per_row);
+        ggml.quants.legacy.quantize_row_q5_0_ref(x, y, n_per_row);
         return;
     };
 
-    var weight: [c.QK5_0]f32 = undefined;
-    var l_buf: [c.QK5_0]i8 = undefined;
+    var weight: [ggml.impl.c.QK5_0]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK5_0]i8 = undefined;
 
     var sum_x2: f32 = 0;
     for (0..@intCast(n_per_row)) |j| sum_x2 += x[j] * x[j];
     const sigma2 = sum_x2 / @as(f32, @floatFromInt(n_per_row));
 
-    const nb: usize = @intCast(@divExact(n_per_row, c.QK5_0));
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK5_0));
     for (0..nb) |ib| {
-        const xb = x + c.QK5_0 * ib;
-        imatrixWeights(&weight, qw_all + c.QK5_0 * ib, xb, c.QK5_0, sigma2);
-        const d = h.makeQxQuants(c.QK5_0, 16, xb, &l_buf, 1, &weight);
-        y[ib].d = fp16(d);
+        const xb = x + ggml.impl.c.QK5_0 * ib;
+        imatrixWeights(&weight, qw_all + ggml.impl.c.QK5_0 * ib, xb, ggml.impl.c.QK5_0, sigma2);
+        const d = ggml.quants.helpers.makeQxQuants(ggml.impl.c.QK5_0, 16, xb, &l_buf, 1, &weight);
+        y[ib].d = ggml.impl.fp32ToFp16(d);
 
         var qh: u32 = 0;
         for (0..16) |j| {
@@ -240,35 +230,35 @@ fn q5_0Impl(x: [*]const f32, y: [*]blocks.Q5_0, n_per_row: i64, quant_weights: ?
             const xi1: u8 = @bitCast(l_buf[j + 16]);
             y[ib].qs[j] = (xi0 & 0x0F) | ((xi1 & 0x0F) << 4);
             qh |= @as(u32, (xi0 & 0x10) >> 4) << @intCast(j + 0);
-            qh |= @as(u32, (xi1 & 0x10) >> 4) << @intCast(j + c.QK5_0 / 2);
+            qh |= @as(u32, (xi1 & 0x10) >> 4) << @intCast(j + ggml.impl.c.QK5_0 / 2);
         }
         @memcpy(&y[ib].qh, std.mem.asBytes(&qh));
     }
 }
 
 /// Ports `quantize_row_q5_1_impl` (ggml-quants.c:2252 @b1b770d90).
-fn q5_1Impl(x: [*]const f32, y: [*]blocks.Q5_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
+fn q5_1Impl(x: [*]const f32, y: [*]ggml.quants.blocks.Q5_1, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights orelse {
-        legacy.quantize_row_q5_1_ref(x, y, n_per_row);
+        ggml.quants.legacy.quantize_row_q5_1_ref(x, y, n_per_row);
         return;
     };
 
-    var weight: [c.QK5_1]f32 = undefined;
-    var l_buf: [c.QK5_1]u8 = undefined;
-    var l_aux: [c.QK5_1]u8 = undefined;
+    var weight: [ggml.impl.c.QK5_1]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK5_1]u8 = undefined;
+    var l_aux: [ggml.impl.c.QK5_1]u8 = undefined;
 
     var sum_x2: f32 = 0;
     for (0..@intCast(n_per_row)) |j| sum_x2 += x[j] * x[j];
     const sigma2 = sum_x2 / @as(f32, @floatFromInt(n_per_row));
 
-    const nb: usize = @intCast(@divExact(n_per_row, c.QK5_1));
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK5_1));
     for (0..nb) |ib| {
-        const xb = x + c.QK5_1 * ib;
-        imatrixWeights(&weight, qw_all + c.QK5_1 * ib, xb, c.QK5_1, sigma2);
+        const xb = x + ggml.impl.c.QK5_1 * ib;
+        imatrixWeights(&weight, qw_all + ggml.impl.c.QK5_1 * ib, xb, ggml.impl.c.QK5_1, sigma2);
         var min: f32 = undefined;
-        const d = h.makeQkx3Quants(c.QK5_1, 31, xb, &weight, &l_buf, &min, &l_aux, -0.9, 0.05, 36, false);
-        y[ib].d = fp16(d);
-        y[ib].m = fp16(-min);
+        const d = ggml.quants.helpers.makeQkx3Quants(ggml.impl.c.QK5_1, 31, xb, &weight, &l_buf, &min, &l_aux, -0.9, 0.05, 36, false);
+        y[ib].d = ggml.impl.fp32ToFp16(d);
+        y[ib].m = ggml.impl.fp32ToFp16(-min);
 
         var qh: u32 = 0;
         for (0..16) |j| {
@@ -276,7 +266,7 @@ fn q5_1Impl(x: [*]const f32, y: [*]blocks.Q5_1, n_per_row: i64, quant_weights: ?
             const xi1 = l_buf[j + 16];
             y[ib].qs[j] = (xi0 & 0x0F) | ((xi1 & 0x0F) << 4);
             qh |= @as(u32, (xi0 & 0x10) >> 4) << @intCast(j + 0);
-            qh |= @as(u32, (xi1 & 0x10) >> 4) << @intCast(j + c.QK5_1 / 2);
+            qh |= @as(u32, (xi1 & 0x10) >> 4) << @intCast(j + ggml.impl.c.QK5_1 / 2);
         }
         @memcpy(&y[ib].qh, std.mem.asBytes(&qh));
     }
@@ -304,10 +294,10 @@ fn implChunk(
 }
 
 comptime {
-    @export(&implChunk(blocks.Q4_0, c.QK4_0, legacy.quantize_row_q4_0_ref, q4_0Impl), .{ .name = "quantize_q4_0" });
-    @export(&implChunk(blocks.Q4_1, c.QK4_1, legacy.quantize_row_q4_1_ref, q4_1Impl), .{ .name = "quantize_q4_1" });
-    @export(&implChunk(blocks.Q5_0, c.QK5_0, legacy.quantize_row_q5_0_ref, q5_0Impl), .{ .name = "quantize_q5_0" });
-    @export(&implChunk(blocks.Q5_1, c.QK5_1, legacy.quantize_row_q5_1_ref, q5_1Impl), .{ .name = "quantize_q5_1" });
+    @export(&implChunk(ggml.quants.blocks.Q4_0, ggml.impl.c.QK4_0, ggml.quants.legacy.quantize_row_q4_0_ref, q4_0Impl), .{ .name = "quantize_q4_0" });
+    @export(&implChunk(ggml.quants.blocks.Q4_1, ggml.impl.c.QK4_1, ggml.quants.legacy.quantize_row_q4_1_ref, q4_1Impl), .{ .name = "quantize_q4_1" });
+    @export(&implChunk(ggml.quants.blocks.Q5_0, ggml.impl.c.QK5_0, ggml.quants.legacy.quantize_row_q5_0_ref, q5_0Impl), .{ .name = "quantize_q5_0" });
+    @export(&implChunk(ggml.quants.blocks.Q5_1, ggml.impl.c.QK5_1, ggml.quants.legacy.quantize_row_q5_1_ref, q5_1Impl), .{ .name = "quantize_q5_1" });
 }
 
 // -----------------------------------------------------------------------------
@@ -319,59 +309,59 @@ comptime {
 // genuinely different code, not the reference with a weight argument.
 
 /// Ports `quantize_row_q2_K_impl` (ggml-quants.c:1159 @b1b770d90).
-fn q2_KImpl(x_in: [*]const f32, y: [*]blocks.Q2_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
+fn q2_KImpl(x_in: [*]const f32, y: [*]ggml.quants.blocks.Q2_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
     const qw_all = quant_weights.?; // the C asserts this
-    const nb: usize = @intCast(@divExact(n_per_row, QK_K));
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var x = x_in;
 
-    var l_buf: [QK_K]u8 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]u8 = undefined;
     var l_aux: [16]u8 = undefined;
-    var mins: [QK_K / 16]f32 = undefined;
-    var scales: [QK_K / 16]f32 = undefined;
-    var sw: [QK_K / 16]f32 = undefined;
+    var mins: [ggml.impl.c.QK_K / 16]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 16]f32 = undefined;
+    var sw: [ggml.impl.c.QK_K / 16]f32 = undefined;
     var weight: [16]f32 = undefined;
-    var ls: [QK_K / 16]u8 = undefined;
-    var lm: [QK_K / 16]u8 = undefined;
+    var ls: [ggml.impl.c.QK_K / 16]u8 = undefined;
+    var lm: [ggml.impl.c.QK_K / 16]u8 = undefined;
 
     for (0..nb) |i| {
         @memset(&sw, 0);
         var sumx2: f32 = 0;
-        for (0..QK_K) |j| sumx2 += x[j] * x[j];
-        const sigma2 = sumx2 / QK_K;
+        for (0..ggml.impl.c.QK_K) |j| sumx2 += x[j] * x[j];
+        const sigma2 = sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 16) |j| {
-            const qw = qw_all + QK_K * i + 16 * j;
+        for (0..ggml.impl.c.QK_K / 16) |j| {
+            const qw = qw_all + ggml.impl.c.QK_K * i + 16 * j;
             imatrixWeights(&weight, qw, x + 16 * j, 16, sigma2);
             // Note the bound: `QK_K/16`, not 16. They are equal at QK_K = 256,
             // so this reads all sixteen weights either way -- but the C wrote
             // it this way and the two would part company at another QK_K.
-            for (0..QK_K / 16) |l| sw[j] += weight[l];
-            scales[j] = h.makeQkx3Quants(16, 3, x + 16 * j, &weight, @ptrCast(&l_buf[16 * j]), &mins[j], &l_aux, -0.9, 0.05, 36, false);
+            for (0..ggml.impl.c.QK_K / 16) |l| sw[j] += weight[l];
+            scales[j] = ggml.quants.helpers.makeQkx3Quants(16, 3, x + 16 * j, &weight, @ptrCast(&l_buf[16 * j]), &mins[j], &l_aux, -0.9, 0.05, 36, false);
         }
 
-        var dm = h.makeQpQuants(QK_K / 16, 15, &scales, &ls, &sw);
-        var mm = h.makeQpQuants(QK_K / 16, 15, &mins, &lm, &sw);
-        y[i].d = fp16(dm);
-        y[i].dmin = fp16(mm);
+        var dm = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 16, 15, &scales, &ls, &sw);
+        var mm = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 16, 15, &mins, &lm, &sw);
+        y[i].d = ggml.impl.fp32ToFp16(dm);
+        y[i].dmin = ggml.impl.fp32ToFp16(mm);
         // Read back through f16 so the requantize below uses the stored value.
-        dm = unfp16(y[i].d);
-        mm = unfp16(y[i].dmin);
+        dm = ggml.impl.fp16ToFp32(y[i].d);
+        mm = ggml.impl.fp16ToFp32(y[i].dmin);
 
-        for (0..QK_K / 16) |j| y[i].scales[j] = ls[j] | (lm[j] << 4);
+        for (0..ggml.impl.c.QK_K / 16) |j| y[i].scales[j] = ls[j] | (lm[j] << 4);
 
-        for (0..QK_K / 16) |j| {
+        for (0..ggml.impl.c.QK_K / 16) |j| {
             const d = dm * @as(f32, @floatFromInt(y[i].scales[j] & 0xF));
             if (d == 0) continue;
             const m = mm * @as(f32, @floatFromInt(y[i].scales[j] >> 4));
             for (0..16) |ii| {
-                var l = h.nearestInt((x[16 * j + ii] + m) / d);
+                var l = ggml.quants.helpers.nearestInt((x[16 * j + ii] + m) / d);
                 l = @max(0, @min(3, l));
                 l_buf[16 * j + ii] = @intCast(l);
             }
         }
 
         var j: usize = 0;
-        while (j < QK_K) : (j += 128) {
+        while (j < ggml.impl.c.QK_K) : (j += 128) {
             for (0..32) |l| {
                 y[i].qs[j / 4 + l] = l_buf[j + l] |
                     (l_buf[j + l + 32] << 2) |
@@ -380,7 +370,7 @@ fn q2_KImpl(x_in: [*]const f32, y: [*]blocks.Q2_K, n_per_row: i64, quant_weights
             }
         }
 
-        x += QK_K;
+        x += ggml.impl.c.QK_K;
     }
 }
 
@@ -388,37 +378,37 @@ fn q2_KImpl(x_in: [*]const f32, y: [*]blocks.Q2_K, n_per_row: i64, quant_weights
 ///
 /// Unlike `q2_K`'s, this one tolerates a null imatrix -- it falls back to
 /// `x*x` weighting rather than forwarding to the reference.
-fn q3_KImpl(x_in: [*]const f32, y: [*]blocks.Q3_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
-    const nb: usize = @intCast(@divExact(n_per_row, QK_K));
+fn q3_KImpl(x_in: [*]const f32, y: [*]ggml.quants.blocks.Q3_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var x = x_in;
 
-    var l_buf: [QK_K]i8 = undefined;
-    var scales: [QK_K / 16]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]i8 = undefined;
+    var scales: [ggml.impl.c.QK_K / 16]f32 = undefined;
     var weight: [16]f32 = undefined;
-    var sw: [QK_K / 16]f32 = undefined;
-    var ls: [QK_K / 16]i8 = undefined;
+    var sw: [ggml.impl.c.QK_K / 16]f32 = undefined;
+    var ls: [ggml.impl.c.QK_K / 16]i8 = undefined;
 
     for (0..nb) |i| {
         var sumx2: f32 = 0;
-        for (0..QK_K) |j| sumx2 += x[j] * x[j];
+        for (0..ggml.impl.c.QK_K) |j| sumx2 += x[j] * x[j];
         // Note the 2x, which q2_K's version does not have.
-        const sigma2 = 2 * sumx2 / QK_K;
+        const sigma2 = 2 * sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 16) |j| {
+        for (0..ggml.impl.c.QK_K / 16) |j| {
             if (quant_weights) |qw_all| {
-                imatrixWeights(&weight, qw_all + QK_K * i + 16 * j, x + 16 * j, 16, sigma2);
+                imatrixWeights(&weight, qw_all + ggml.impl.c.QK_K * i + 16 * j, x + 16 * j, 16, sigma2);
             } else {
                 for (0..16) |l| weight[l] = x[16 * j + l] * x[16 * j + l];
             }
             var sumw: f32 = 0;
             for (0..16) |l| sumw += weight[l];
             sw[j] = sumw;
-            scales[j] = h.makeQxQuants(16, 4, x + 16 * j, @ptrCast(&l_buf[16 * j]), 1, &weight);
+            scales[j] = ggml.quants.helpers.makeQxQuants(16, 4, x + 16 * j, @ptrCast(&l_buf[16 * j]), 1, &weight);
         }
 
         @memset(&y[i].scales, 0);
-        const d_block = h.makeQxQuants(QK_K / 16, 32, &scales, &ls, 1, &sw);
-        for (0..QK_K / 16) |j| {
+        const d_block = ggml.quants.helpers.makeQxQuants(ggml.impl.c.QK_K / 16, 32, &scales, &ls, 1, &sw);
+        for (0..ggml.impl.c.QK_K / 16) |j| {
             var l: i32 = ls[j];
             if (j < 8) {
                 y[i].scales[j] = @as(u8, @intCast(l)) & 0xF;
@@ -428,19 +418,19 @@ fn q3_KImpl(x_in: [*]const f32, y: [*]blocks.Q3_K, n_per_row: i64, quant_weights
             l >>= 4;
             y[i].scales[j % 4 + 8] |= @as(u8, @intCast(l)) << @intCast(2 * (j / 4));
         }
-        y[i].d = fp16(d_block);
+        y[i].d = ggml.impl.fp32ToFp16(d_block);
 
-        for (0..QK_K / 16) |j| {
+        for (0..ggml.impl.c.QK_K / 16) |j| {
             var sc: i8 = if (j < 8)
                 @bitCast(y[i].scales[j] & 0xF)
             else
                 @bitCast(y[i].scales[j - 8] >> 4);
             sc = @bitCast(@as(u8, @bitCast(sc)) | (((y[i].scales[8 + j % 4] >> @intCast(2 * (j / 4))) & 3) << 4));
             sc -%= 32;
-            const d = unfp16(y[i].d) * @as(f32, @floatFromInt(sc));
+            const d = ggml.impl.fp16ToFp32(y[i].d) * @as(f32, @floatFromInt(sc));
             if (d == 0) continue;
             for (0..16) |ii| {
-                var l = h.nearestInt(x[16 * j + ii] / d);
+                var l = ggml.quants.helpers.nearestInt(x[16 * j + ii] / d);
                 l = @max(-4, @min(3, l));
                 l_buf[16 * j + ii] = @intCast(l + 4);
             }
@@ -449,20 +439,20 @@ fn q3_KImpl(x_in: [*]const f32, y: [*]blocks.Q3_K, n_per_row: i64, quant_weights
         @memset(&y[i].hmask, 0);
         var m: usize = 0;
         var hm: u8 = 1;
-        for (0..QK_K) |j| {
+        for (0..ggml.impl.c.QK_K) |j| {
             if (l_buf[j] > 3) {
                 y[i].hmask[m] |= hm;
                 l_buf[j] -= 4;
             }
             m += 1;
-            if (m == QK_K / 8) {
+            if (m == ggml.impl.c.QK_K / 8) {
                 m = 0;
                 hm <<= 1;
             }
         }
 
         var j: usize = 0;
-        while (j < QK_K) : (j += 128) {
+        while (j < ggml.impl.c.QK_K) : (j += 128) {
             for (0..32) |l| {
                 y[i].qs[j / 4 + l] = @as(u8, @bitCast(l_buf[j + l])) |
                     (@as(u8, @bitCast(l_buf[j + l + 32])) << 2) |
@@ -471,7 +461,7 @@ fn q3_KImpl(x_in: [*]const f32, y: [*]blocks.Q3_K, n_per_row: i64, quant_weights
             }
         }
 
-        x += QK_K;
+        x += ggml.impl.c.QK_K;
     }
 }
 
@@ -486,99 +476,99 @@ fn fitScalesKImpl(
     i: usize,
     quant_weights: ?[*]const f32,
     l_buf: [*]u8,
-    scales: *[QK_K / 32]f32,
-    mins: *[QK_K / 32]f32,
-    sw: *[QK_K / 32]f32,
+    scales: *[ggml.impl.c.QK_K / 32]f32,
+    mins: *[ggml.impl.c.QK_K / 32]f32,
+    sw: *[ggml.impl.c.QK_K / 32]f32,
 ) void {
     var weights: [32]f32 = undefined;
     var l_aux: [32]u8 = undefined;
 
     var sum_x2: f32 = 0;
-    for (0..QK_K) |l| sum_x2 += x[l] * x[l];
-    const sigma2 = 2 * sum_x2 / QK_K;
+    for (0..ggml.impl.c.QK_K) |l| sum_x2 += x[l] * x[l];
+    const sigma2 = 2 * sum_x2 / ggml.impl.c.QK_K;
     const av_x = @sqrt(sigma2);
 
-    for (0..QK_K / 32) |j| {
+    for (0..ggml.impl.c.QK_K / 32) |j| {
         if (quant_weights) |qw_all| {
-            imatrixWeights(&weights, qw_all + QK_K * i + 32 * j, x + 32 * j, 32, sigma2);
+            imatrixWeights(&weights, qw_all + ggml.impl.c.QK_K * i + 32 * j, x + 32 * j, 32, sigma2);
         } else {
             for (0..32) |l| weights[l] = av_x + @abs(x[32 * j + l]);
         }
         var sumw: f32 = 0;
         for (0..32) |l| sumw += weights[l];
         sw[j] = sumw;
-        scales[j] = h.makeQkx3Quants(32, nmax, x + 32 * j, &weights, l_buf + 32 * j, &mins[j], &l_aux, -0.9, 0.05, 36, false);
+        scales[j] = ggml.quants.helpers.makeQkx3Quants(32, nmax, x + 32 * j, &weights, l_buf + 32 * j, &mins[j], &l_aux, -0.9, 0.05, 36, false);
     }
 }
 
 /// Ports `quantize_row_q4_K_impl` (ggml-quants.c:1563 @b1b770d90).
-fn q4_KImpl(x_in: [*]const f32, y: [*]blocks.Q4_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
-    const nb: usize = @intCast(@divExact(n_per_row, QK_K));
+fn q4_KImpl(x_in: [*]const f32, y: [*]ggml.quants.blocks.Q4_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var x = x_in;
 
-    var l_buf: [QK_K]u8 = undefined;
-    var ls: [QK_K / 32]u8 = undefined;
-    var lm: [QK_K / 32]u8 = undefined;
-    var sw: [QK_K / 32]f32 = undefined;
-    var mins: [QK_K / 32]f32 = undefined;
-    var scales: [QK_K / 32]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]u8 = undefined;
+    var ls: [ggml.impl.c.QK_K / 32]u8 = undefined;
+    var lm: [ggml.impl.c.QK_K / 32]u8 = undefined;
+    var sw: [ggml.impl.c.QK_K / 32]f32 = undefined;
+    var mins: [ggml.impl.c.QK_K / 32]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 32]f32 = undefined;
 
     for (0..nb) |i| {
         fitScalesKImpl(15, x, i, quant_weights, &l_buf, &scales, &mins, &sw);
 
-        const d_block = h.makeQpQuants(QK_K / 32, 63, &scales, &ls, &sw);
-        const m_block = h.makeQpQuants(QK_K / 32, 63, &mins, &lm, &sw);
+        const d_block = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 32, 63, &scales, &ls, &sw);
+        const m_block = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 32, 63, &mins, &lm, &sw);
 
         @memset(&y[i].scales, 0);
-        for (0..QK_K / 32) |j| {
+        for (0..ggml.impl.c.QK_K / 32) |j| {
             // No MIN(63) here, unlike the reference: makeQpQuants already
             // bounds the level by its nmax.
             packScalePair(&y[i].scales, j, ls[j], lm[j]);
         }
-        y[i].d = fp16(d_block);
-        y[i].dmin = fp16(m_block);
+        y[i].d = ggml.impl.fp32ToFp16(d_block);
+        y[i].dmin = ggml.impl.fp32ToFp16(m_block);
 
-        requantizeK(15, x, &y[i].scales, unfp16(y[i].d), unfp16(y[i].dmin), &l_buf);
+        requantizeK(15, x, &y[i].scales, ggml.impl.fp16ToFp32(y[i].d), ggml.impl.fp16ToFp32(y[i].dmin), &l_buf);
 
         var q: [*]u8 = &y[i].qs;
         var j: usize = 0;
-        while (j < QK_K) : (j += 64) {
+        while (j < ggml.impl.c.QK_K) : (j += 64) {
             for (0..32) |l| q[l] = l_buf[j + l] | (l_buf[j + l + 32] << 4);
             q += 32;
         }
 
-        x += QK_K;
+        x += ggml.impl.c.QK_K;
     }
 }
 
 /// Ports `quantize_row_q5_K_impl` (ggml-quants.c:1768 @b1b770d90).
-fn q5_KImpl(x_in: [*]const f32, y: [*]blocks.Q5_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
-    const nb: usize = @intCast(@divExact(n_per_row, QK_K));
+fn q5_KImpl(x_in: [*]const f32, y: [*]ggml.quants.blocks.Q5_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var x = x_in;
 
-    var l_buf: [QK_K]u8 = undefined;
-    var ls: [QK_K / 32]u8 = undefined;
-    var lm: [QK_K / 32]u8 = undefined;
-    var sw: [QK_K / 32]f32 = undefined;
-    var mins: [QK_K / 32]f32 = undefined;
-    var scales: [QK_K / 32]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]u8 = undefined;
+    var ls: [ggml.impl.c.QK_K / 32]u8 = undefined;
+    var lm: [ggml.impl.c.QK_K / 32]u8 = undefined;
+    var sw: [ggml.impl.c.QK_K / 32]f32 = undefined;
+    var mins: [ggml.impl.c.QK_K / 32]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 32]f32 = undefined;
 
     for (0..nb) |i| {
         fitScalesKImpl(31, x, i, quant_weights, &l_buf, &scales, &mins, &sw);
 
-        const d_block = h.makeQpQuants(QK_K / 32, 63, &scales, &ls, &sw);
-        const m_block = h.makeQpQuants(QK_K / 32, 63, &mins, &lm, &sw);
+        const d_block = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 32, 63, &scales, &ls, &sw);
+        const m_block = ggml.quants.helpers.makeQpQuants(ggml.impl.c.QK_K / 32, 63, &mins, &lm, &sw);
 
         @memset(&y[i].scales, 0);
-        for (0..QK_K / 32) |j| {
+        for (0..ggml.impl.c.QK_K / 32) |j| {
             // This one *does* clamp, where q4_K's impl does not. The C is
             // inconsistent between the two; both are reproduced as written.
             packScalePair(&y[i].scales, j, @min(63, ls[j]), @min(63, lm[j]));
         }
-        y[i].d = fp16(d_block);
-        y[i].dmin = fp16(m_block);
+        y[i].d = ggml.impl.fp32ToFp16(d_block);
+        y[i].dmin = ggml.impl.fp32ToFp16(m_block);
 
-        requantizeK(31, x, &y[i].scales, unfp16(y[i].d), unfp16(y[i].dmin), &l_buf);
+        requantizeK(31, x, &y[i].scales, ggml.impl.fp16ToFp32(y[i].d), ggml.impl.fp16ToFp32(y[i].dmin), &l_buf);
 
         var qh: [*]u8 = &y[i].qh;
         var ql: [*]u8 = &y[i].qs;
@@ -587,7 +577,7 @@ fn q5_KImpl(x_in: [*]const f32, y: [*]blocks.Q5_K, n_per_row: i64, quant_weights
         var m1: u8 = 1;
         var m2: u8 = 2;
         var n: usize = 0;
-        while (n < QK_K) : (n += 64) {
+        while (n < ggml.impl.c.QK_K) : (n += 64) {
             for (0..32) |j| {
                 var l1: i32 = l_buf[n + j];
                 if (l1 > 15) {
@@ -606,7 +596,7 @@ fn q5_KImpl(x_in: [*]const f32, y: [*]blocks.Q5_K, n_per_row: i64, quant_weights
             ql += 32;
         }
 
-        x += QK_K;
+        x += ggml.impl.c.QK_K;
     }
 }
 
@@ -624,15 +614,15 @@ inline fn packScalePair(scales_out: [*]u8, j: usize, ls: u8, lm: u8) void {
 
 /// The requantize-against-the-rounded-scales pass `q4_K` and `q5_K` share.
 inline fn requantizeK(comptime nmax: i32, x: [*]const f32, scales: [*]const u8, d_all: f32, dmin_all: f32, l_buf: [*]u8) void {
-    for (0..QK_K / 32) |j| {
+    for (0..ggml.impl.c.QK_K / 32) |j| {
         var sc: u8 = undefined;
         var m: u8 = undefined;
-        h.getScaleMinK4(j, scales, &sc, &m);
+        ggml.quants.helpers.getScaleMinK4(j, scales, &sc, &m);
         const d = d_all * @as(f32, @floatFromInt(sc));
         if (d == 0) continue;
         const dm = dmin_all * @as(f32, @floatFromInt(m));
         for (0..32) |ii| {
-            var l = h.nearestInt((x[32 * j + ii] + dm) / d);
+            var l = ggml.quants.helpers.nearestInt((x[32 * j + ii] + dm) / d);
             l = @max(0, @min(nmax, l));
             l_buf[32 * j + ii] = @intCast(l);
         }
@@ -644,22 +634,22 @@ inline fn requantizeK(comptime nmax: i32, x: [*]const f32, scales: [*]const u8, 
 /// Note it passes the raw importance matrix straight to `makeQxQuants` as the
 /// weighting, rather than the `qw * sqrt(sigma2 + x*x)` the others build. The
 /// C has the alternative commented out just above.
-fn q6_KImpl(x_in: [*]const f32, y: [*]blocks.Q6_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
-    const nb: usize = @intCast(@divExact(n_per_row, QK_K));
+fn q6_KImpl(x_in: [*]const f32, y: [*]ggml.quants.blocks.Q6_K, n_per_row: i64, quant_weights: ?[*]const f32) void {
+    const nb: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var x = x_in;
 
-    var l_buf: [QK_K]i8 = undefined;
-    var scales: [QK_K / 16]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]i8 = undefined;
+    var scales: [ggml.impl.c.QK_K / 16]f32 = undefined;
 
     for (0..nb) |i| {
         var max_scale: f32 = 0;
         var max_abs_scale: f32 = 0;
 
-        for (0..QK_K / 16) |ib| {
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
             const scale = if (quant_weights) |qw_all|
-                h.makeQxQuants(16, 32, x + 16 * ib, @ptrCast(&l_buf[16 * ib]), 1, qw_all + QK_K * i + 16 * ib)
+                ggml.quants.helpers.makeQxQuants(16, 32, x + 16 * ib, @ptrCast(&l_buf[16 * ib]), 1, qw_all + ggml.impl.c.QK_K * i + 16 * ib)
             else
-                h.makeQxQuants(16, 32, x + 16 * ib, @ptrCast(&l_buf[16 * ib]), 1, null);
+                ggml.quants.helpers.makeQxQuants(16, 32, x + 16 * ib, @ptrCast(&l_buf[16 * ib]), 1, null);
             scales[ib] = scale;
             const abs_scale = @abs(scale);
             if (abs_scale > max_abs_scale) {
@@ -668,24 +658,24 @@ fn q6_KImpl(x_in: [*]const f32, y: [*]blocks.Q6_K, n_per_row: i64, quant_weights
             }
         }
 
-        if (max_abs_scale < h.group_max_eps) {
+        if (max_abs_scale < ggml.quants.helpers.group_max_eps) {
             @memset(std.mem.asBytes(&y[i]), 0);
-            y[i].d = fp16(0.0);
-            x += QK_K;
+            y[i].d = ggml.impl.fp32ToFp16(0.0);
+            x += ggml.impl.c.QK_K;
             continue;
         }
 
         const iscale = -128.0 / max_scale;
-        y[i].d = fp16(1 / iscale);
-        for (0..QK_K / 16) |ib| {
-            y[i].scales[ib] = @intCast(@min(127, h.nearestInt(iscale * scales[ib])));
+        y[i].d = ggml.impl.fp32ToFp16(1 / iscale);
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
+            y[i].scales[ib] = @intCast(@min(127, ggml.quants.helpers.nearestInt(iscale * scales[ib])));
         }
 
-        for (0..QK_K / 16) |j| {
-            const d = unfp16(y[i].d) * @as(f32, @floatFromInt(y[i].scales[j]));
+        for (0..ggml.impl.c.QK_K / 16) |j| {
+            const d = ggml.impl.fp16ToFp32(y[i].d) * @as(f32, @floatFromInt(y[i].scales[j]));
             if (d == 0) continue;
             for (0..16) |ii| {
-                var l = h.nearestInt(x[16 * j + ii] / d);
+                var l = ggml.quants.helpers.nearestInt(x[16 * j + ii] / d);
                 l = @max(-32, @min(31, l));
                 l_buf[16 * j + ii] = @intCast(l + 32);
             }
@@ -694,7 +684,7 @@ fn q6_KImpl(x_in: [*]const f32, y: [*]blocks.Q6_K, n_per_row: i64, quant_weights
         var ql: [*]u8 = &y[i].ql;
         var qh: [*]u8 = &y[i].qh;
         var j: usize = 0;
-        while (j < QK_K) : (j += 128) {
+        while (j < ggml.impl.c.QK_K) : (j += 128) {
             for (0..32) |l| {
                 const q1: u8 = @as(u8, @bitCast(l_buf[j + l + 0])) & 0xF;
                 const q2: u8 = @as(u8, @bitCast(l_buf[j + l + 32])) & 0xF;
@@ -711,22 +701,20 @@ fn q6_KImpl(x_in: [*]const f32, y: [*]blocks.Q6_K, n_per_row: i64, quant_weights
             qh += 32;
         }
 
-        x += QK_K;
+        x += ggml.impl.c.QK_K;
     }
 }
 
 comptime {
-    @export(&implChunk(blocks.Q2_K, QK_K, k_quants.quantize_row_q2_K_ref, q2_KImpl), .{ .name = "quantize_q2_K" });
-    @export(&implChunk(blocks.Q3_K, QK_K, k_quants.quantize_row_q3_K_ref, q3_KImpl), .{ .name = "quantize_q3_K" });
-    @export(&implChunk(blocks.Q4_K, QK_K, k_quants.quantize_row_q4_K_ref, q4_KImpl), .{ .name = "quantize_q4_K" });
-    @export(&implChunk(blocks.Q5_K, QK_K, k_quants.quantize_row_q5_K_ref, q5_KImpl), .{ .name = "quantize_q5_K" });
-    @export(&implChunk(blocks.Q6_K, QK_K, k_quants.quantize_row_q6_K_ref, q6_KImpl), .{ .name = "quantize_q6_K" });
+    @export(&implChunk(ggml.quants.blocks.Q2_K, ggml.impl.c.QK_K, ggml.quants.k.quantize_row_q2_K_ref, q2_KImpl), .{ .name = "quantize_q2_K" });
+    @export(&implChunk(ggml.quants.blocks.Q3_K, ggml.impl.c.QK_K, ggml.quants.k.quantize_row_q3_K_ref, q3_KImpl), .{ .name = "quantize_q3_K" });
+    @export(&implChunk(ggml.quants.blocks.Q4_K, ggml.impl.c.QK_K, ggml.quants.k.quantize_row_q4_K_ref, q4_KImpl), .{ .name = "quantize_q4_K" });
+    @export(&implChunk(ggml.quants.blocks.Q5_K, ggml.impl.c.QK_K, ggml.quants.k.quantize_row_q5_K_ref, q5_KImpl), .{ .name = "quantize_q5_K" });
+    @export(&implChunk(ggml.quants.blocks.Q6_K, ggml.impl.c.QK_K, ggml.quants.k.quantize_row_q6_K_ref, q6_KImpl), .{ .name = "quantize_q6_K" });
 }
 
 // -----------------------------------------------------------------------------
 // Unit Tests
-
-const t = @import("testing.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -737,37 +725,27 @@ test {
 /// test: a mis-wired `@export` name shows up here rather than at the swap.
 const ChunkFn = *const fn ([*c]const f32, ?*anyopaque, i64, i64, [*c]const f32) callconv(.c) usize;
 
-extern fn quantize_q4_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q4_1(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q5_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q5_1(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q8_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_mxfp4(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_nvfp4(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_tq1_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_tq2_0(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q2_K(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q3_K(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q4_K(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q5_K(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
-extern fn quantize_q6_K(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, qw: [*c]const f32) usize;
+/// The chunk entry point exported as `name`, found by that name.
+fn exported(comptime name: []const u8) ChunkFn {
+    return @extern(ChunkFn, .{ .name = name });
+}
 
 /// Checks one format's chunk entry point, with and without an importance
 /// matrix, on every input pattern.
 fn checkChunk(comptime name: []const u8, chunk: ChunkFn) !void {
-    for (t.all_patterns) |pattern| {
-        const g = t.find(name, pattern);
+    for (ggml.quants.testing.all_patterns) |pattern| {
+        const g = ggml.quants.testing.find(name, pattern);
 
-        var src: [t.n_elem]f32 = undefined;
-        var imatrix: [t.n_per_row]f32 = undefined;
-        t.fillSrc(pattern, &src);
-        t.fillImatrix(&imatrix);
+        var src: [ggml.quants.testing.n_elem]f32 = undefined;
+        var imatrix: [ggml.quants.golden.n_per_row]f32 = undefined;
+        ggml.quants.testing.fillSrc(pattern, &src);
+        ggml.quants.testing.fillImatrix(&imatrix);
 
-        var buf: [t.n_elem * 4]u8 align(16) = undefined;
+        var buf: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
 
         if (g.chunk) |want| {
             @memset(&buf, 0);
-            const n = chunk(&src, &buf, t.n_rows, t.n_per_row, null);
+            const n = chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, null);
             std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                 std.debug.print("{s}: quantize_* differs on '{s}'\n", .{ name, pattern.name() });
                 return e;
@@ -776,7 +754,7 @@ fn checkChunk(comptime name: []const u8, chunk: ChunkFn) !void {
 
         if (g.chunk_imatrix) |want| {
             @memset(&buf, 0);
-            const n = chunk(&src, &buf, t.n_rows, t.n_per_row, &imatrix);
+            const n = chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, &imatrix);
             std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                 std.debug.print("{s}: quantize_* with imatrix differs on '{s}'\n", .{ name, pattern.name() });
                 return e;
@@ -786,42 +764,42 @@ fn checkChunk(comptime name: []const u8, chunk: ChunkFn) !void {
 }
 
 test "the legacy chunk entry points match the C" {
-    try checkChunk("Q4_0", quantize_q4_0);
-    try checkChunk("Q4_1", quantize_q4_1);
-    try checkChunk("Q5_0", quantize_q5_0);
-    try checkChunk("Q5_1", quantize_q5_1);
-    try checkChunk("Q8_0", quantize_q8_0);
-    try checkChunk("MXFP4", quantize_mxfp4);
-    try checkChunk("NVFP4", quantize_nvfp4);
+    try checkChunk("Q4_0", exported("quantize_q4_0"));
+    try checkChunk("Q4_1", exported("quantize_q4_1"));
+    try checkChunk("Q5_0", exported("quantize_q5_0"));
+    try checkChunk("Q5_1", exported("quantize_q5_1"));
+    try checkChunk("Q8_0", exported("quantize_q8_0"));
+    try checkChunk("MXFP4", exported("quantize_mxfp4"));
+    try checkChunk("NVFP4", exported("quantize_nvfp4"));
 }
 
 test "the ternary chunk entry points match the C" {
-    try checkChunk("TQ1_0", quantize_tq1_0);
-    try checkChunk("TQ2_0", quantize_tq2_0);
+    try checkChunk("TQ1_0", exported("quantize_tq1_0"));
+    try checkChunk("TQ2_0", exported("quantize_tq2_0"));
 }
 
 test "the K-quant chunk entry points match the C" {
-    try checkChunk("Q2_K", quantize_q2_K);
-    try checkChunk("Q3_K", quantize_q3_K);
-    try checkChunk("Q4_K", quantize_q4_K);
-    try checkChunk("Q5_K", quantize_q5_K);
-    try checkChunk("Q6_K", quantize_q6_K);
+    try checkChunk("Q2_K", exported("quantize_q2_K"));
+    try checkChunk("Q3_K", exported("quantize_q3_K"));
+    try checkChunk("Q4_K", exported("quantize_q4_K"));
+    try checkChunk("Q5_K", exported("quantize_q5_K"));
+    try checkChunk("Q6_K", exported("quantize_q6_K"));
 }
 
 test "a chunk entry point reports the byte count its type implies" {
     // Independent of the checksums: a wrong return value would silently
     // truncate or overrun whatever the caller writes next.
-    var src: [t.n_elem]f32 = undefined;
-    t.fillSrc(.random, &src);
-    var buf: [t.n_elem * 4]u8 align(16) = undefined;
+    var src: [ggml.quants.testing.n_elem]f32 = undefined;
+    ggml.quants.testing.fillSrc(.random, &src);
+    var buf: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
 
     inline for (.{
-        .{ "Q4_0", quantize_q4_0 },
-        .{ "Q6_K", quantize_q6_K },
-        .{ "TQ2_0", quantize_tq2_0 },
+        .{ "Q4_0", exported("quantize_q4_0") },
+        .{ "Q6_K", exported("quantize_q6_K") },
+        .{ "TQ2_0", exported("quantize_tq2_0") },
     }) |case| {
-        const g = t.find(case[0], .random);
-        const n = case[1](&src, &buf, t.n_rows, t.n_per_row, null);
-        try std.testing.expectEqual(g.row_size * t.n_rows, n);
+        const g = ggml.quants.testing.find(case[0], .random);
+        const n = case[1](&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, null);
+        try std.testing.expectEqual(g.row_size * ggml.quants.golden.n_rows, n);
     }
 }

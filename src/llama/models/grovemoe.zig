@@ -9,20 +9,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_grovemoe`'s `load_arch_hparams` (models/grovemoe.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -39,10 +30,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_grovemoe`'s `load_arch_tensors` (models/grovemoe.cpp:16 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -51,12 +42,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
-    impl.assert(l.n_expert > 0, "models/grovemoe.cpp", 29, "n_expert > 0 && \"n_expert must be > 0 for GROVEMOE\"");
-    impl.assert(l.n_expert_used > 0, "models/grovemoe.cpp", 30, "n_expert_used > 0 && \"n_expert_used must be > 0 for GROVEMOE\"");
-    impl.assert(hp.n_group_experts > 0, "models/grovemoe.cpp", 31, "hparams.n_group_experts > 0 && \"n_group_experts must be > 0 for GROVEMOE\"");
+    llama.impl.assert(l.n_expert > 0, "models/grovemoe.cpp", 29, "n_expert > 0 && \"n_expert must be > 0 for GROVEMOE\"");
+    llama.impl.assert(l.n_expert_used > 0, "models/grovemoe.cpp", 30, "n_expert_used > 0 && \"n_expert_used must be > 0 for GROVEMOE\"");
+    llama.impl.assert(hp.n_group_experts > 0, "models/grovemoe.cpp", 31, "hparams.n_group_experts > 0 && \"n_group_experts must be > 0 for GROVEMOE\"");
 
     var i: i32 = 0;
     while (i < l.n_layer) : (i += 1) {
@@ -90,20 +81,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_grovemoe`'s `build_arch_graph` (models/grovemoe.cpp:63 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_grovemoe`'s `graph`
 /// (models/grovemoe.cpp:67 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const n_chunk_expert: i64 = @divTrunc(b.n_expert, @as(i64, hp.n_group_experts));
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/grovemoe.cpp", 72, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/grovemoe.cpp", 73, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/grovemoe.cpp", 72, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/grovemoe.cpp", 73, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -145,15 +136,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The mixture of experts.
@@ -195,10 +186,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }, il);
         b.cb(moe_out, "ffn_adj_moe_out", il);
 
-        cur = c.ggml_add(ctx, cur, c.ggml_scale(ctx, moe_out, hp.expert_group_scale));
+        cur = llama.impl.c.ggml_add(ctx, cur, llama.impl.c.ggml_scale(ctx, moe_out, hp.expert_group_scale));
         b.cb(cur, "ffn_final_moe_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

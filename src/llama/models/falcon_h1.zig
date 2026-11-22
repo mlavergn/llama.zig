@@ -8,23 +8,11 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const mamba_base = @import("mamba_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_falcon_h1`'s `load_arch_hparams` (models/falcon-h1.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -53,10 +41,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_falcon_h1`'s `load_arch_tensors` (models/falcon-h1.cpp:34 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     // Common.
     const hidden_size: i64 = hp.n_embd;
@@ -86,7 +74,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ hidden_size, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ hidden_size, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -117,7 +105,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         // The feed-forward, with optional biases. Its norm has no suffix.
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .bid = i }, &.{hidden_size}, 0, exc);
-        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | (if (i != 0) loader.tensor_duplicated else 0), exc);
+        layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | (if (i != 0) llama.loader.tensor_duplicated else 0), exc);
         layer.ffn_gate = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "weight", .bid = i }, &.{ hidden_size, ffn_intermediate_size }, 0, exc);
         layer.ffn_down = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = i }, &.{ ffn_intermediate_size, hidden_size }, 0, exc);
         layer.ffn_up = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = i }, &.{ hidden_size, ffn_intermediate_size }, 0, exc);
@@ -137,7 +125,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE parameters.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     // No frequency factors.
@@ -147,13 +135,13 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 }
 
 /// Ports `llama_model_falcon_h1`'s `build_arch_graph` (models/falcon-h1.cpp:116 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_falcon_h1`'s `graph`
 /// (models/falcon-h1.cpp:120 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -166,11 +154,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // The inputs of the recurrent memory and the KV cache.
     const inp = b.buildInpMemHybrid();
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     const inp_out_ids = b.buildInpOutIds();
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -200,17 +188,17 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         // The Mamba-2 layer.
         b.cb(cur, "ssm_in", il);
 
-        const ssm_out = mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
+        const ssm_out = llama.models.mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
         b.cb(ssm_out, "ssm_out", il);
 
         // Aggregation.
-        cur = c.ggml_add(ctx, attn_out, ssm_out);
-        inpSA = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, attn_out, ssm_out);
+        inpSA = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "layer_out", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         const ffn_inp = inpSA;
         b.cb(ffn_inp, "ffn_inp", il);
@@ -222,7 +210,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

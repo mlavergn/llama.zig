@@ -20,12 +20,10 @@
 //! `std::runtime_error` text in `exception.what`.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const jinja = @import("zigjinja");
-const exception = @import("exception.zig");
 
 const Allocator = std.mem.Allocator;
-const Error = exception.Error;
-const throw = exception.throw;
 
 // -----------------------------------------------------------------------------
 // character classes
@@ -125,7 +123,7 @@ pub const Decoded = struct {
 
 /// Ports `tts_norm_decode_utf8` (chat-tts-norm.cpp:110 @b1b770d90): invalid
 /// bytes are decoded as U+FFFD, one per byte.
-pub fn decodeUtf8(a: Allocator, s: []const u8) Error!Decoded {
+pub fn decodeUtf8(a: Allocator, s: []const u8) mod.exception.Error!Decoded {
     var cpts: std.ArrayList(u32) = .empty;
     var offs: std.ArrayList(usize) = .empty;
     var i: usize = 0;
@@ -252,8 +250,8 @@ const Parser = struct {
     n_caps: *usize,
 
     /// Ports `fail` (chat-tts-norm.cpp:214 @b1b770d90).
-    fn fail(self: *const Parser, msg: []const u8) Error {
-        return throw(error.RuntimeError, "invalid TTS norm pattern: {s} at position {d}", .{ msg, self.p });
+    fn fail(self: *const Parser, msg: []const u8) mod.exception.Error {
+        return mod.exception.throw(error.RuntimeError, "invalid TTS norm pattern: {s} at position {d}", .{ msg, self.p });
     }
 
     fn eof(self: *const Parser) bool {
@@ -269,7 +267,7 @@ const Parser = struct {
     }
 
     /// Ports `expect` (chat-tts-norm.cpp:222 @b1b770d90).
-    fn expect(self: *Parser, c: u32, what: []const u8) Error!void {
+    fn expect(self: *Parser, c: u32, what: []const u8) mod.exception.Error!void {
         if (!self.peekIs(c)) {
             return self.fail(try std.mem.concat(self.a, u8, &.{ "expected ", what }));
         }
@@ -277,7 +275,7 @@ const Parser = struct {
     }
 
     /// Ports `parse_alts` (chat-tts-norm.cpp:229 @b1b770d90).
-    fn parseAlts(self: *Parser) Error![]Seq {
+    fn parseAlts(self: *Parser) mod.exception.Error![]Seq {
         var alts: std.ArrayList(Seq) = .empty;
         try alts.append(self.a, try self.parseSeq());
         while (self.peekIs('|')) {
@@ -288,7 +286,7 @@ const Parser = struct {
     }
 
     /// Ports `parse_seq` (chat-tts-norm.cpp:239 @b1b770d90).
-    fn parseSeq(self: *Parser) Error!Seq {
+    fn parseSeq(self: *Parser) mod.exception.Error!Seq {
         var seq: std.ArrayList(Item) = .empty;
         while (!self.eof() and self.peek() != '|' and self.peek() != ')') {
             var item: Item = .{ .atom = try self.parseAtom() };
@@ -299,7 +297,7 @@ const Parser = struct {
     }
 
     /// Ports `parse_int` (chat-tts-norm.cpp:250 @b1b770d90).
-    fn parseInt(self: *Parser) Error!c_int {
+    fn parseInt(self: *Parser) mod.exception.Error!c_int {
         if (self.eof() or self.peek() < '0' or self.peek() > '9') {
             return self.fail("expected number in quantifier");
         }
@@ -315,7 +313,7 @@ const Parser = struct {
     }
 
     /// Ports `parse_quantifier` (chat-tts-norm.cpp:265 @b1b770d90).
-    fn parseQuantifier(self: *Parser, item: *Item) Error!void {
+    fn parseQuantifier(self: *Parser, item: *Item) mod.exception.Error!void {
         if (self.eof()) return;
         const c = self.peek();
         if (c != '?' and c != '*' and c != '+' and c != '{') return;
@@ -351,7 +349,7 @@ const Parser = struct {
 
     /// Ports `parse_group` (chat-tts-norm.cpp:300 @b1b770d90); '(' already
     /// consumed.
-    fn parseGroup(self: *Parser) Error!PatternNode {
+    fn parseGroup(self: *Parser) mod.exception.Error!PatternNode {
         var node: PatternNode = .{ .op = .group };
         if (self.peekIs('?')) {
             self.p += 1;
@@ -402,7 +400,7 @@ const Parser = struct {
 
     /// Ports `parse_escape` (chat-tts-norm.cpp:350 @b1b770d90): after '%'
     /// inside or outside of a set.
-    fn parseEscape(self: *Parser, in_set: bool) Error!Escape {
+    fn parseEscape(self: *Parser, in_set: bool) mod.exception.Error!Escape {
         if (self.eof()) return self.fail("dangling '%'");
         const e = self.s[self.p];
         self.p += 1;
@@ -419,7 +417,7 @@ const Parser = struct {
 
     /// Ports `parse_set` (chat-tts-norm.cpp:373 @b1b770d90); '[' already
     /// consumed.
-    fn parseSet(self: *Parser) Error!PatternNode {
+    fn parseSet(self: *Parser) mod.exception.Error!PatternNode {
         var node: PatternNode = .{ .op = .set };
         if (self.peekIs('^')) {
             node.set.neg = true;
@@ -471,7 +469,7 @@ const Parser = struct {
     }
 
     /// Ports `parse_atom` (chat-tts-norm.cpp:428 @b1b770d90).
-    fn parseAtom(self: *Parser) Error!PatternNode {
+    fn parseAtom(self: *Parser) mod.exception.Error!PatternNode {
         const c = self.s[self.p];
         self.p += 1;
         switch (c) {
@@ -524,7 +522,7 @@ const Matcher = struct {
     icase: bool,
     caps: []Cap,
 
-    fn saveCaps(self: *Matcher) Error![]Cap {
+    fn saveCaps(self: *Matcher) mod.exception.Error![]Cap {
         return self.a.dupe(Cap, self.caps);
     }
 
@@ -558,7 +556,7 @@ const Matcher = struct {
     }
 
     /// Ports `match_alts` (chat-tts-norm.cpp:517 @b1b770d90).
-    fn matchAlts(self: *Matcher, alts: []const Seq, i: usize, end: *usize) Error!bool {
+    fn matchAlts(self: *Matcher, alts: []const Seq, i: usize, end: *usize) mod.exception.Error!bool {
         for (alts) |seq| {
             const saved = try self.saveCaps();
             if (try self.matchSeq(seq, i, end)) return true;
@@ -568,7 +566,7 @@ const Matcher = struct {
     }
 
     /// Ports `match_seq` (chat-tts-norm.cpp:528 @b1b770d90).
-    fn matchSeq(self: *Matcher, seq: Seq, i: usize, end: *usize) Error!bool {
+    fn matchSeq(self: *Matcher, seq: Seq, i: usize, end: *usize) mod.exception.Error!bool {
         var pos = i;
         for (seq) |*it| {
             var count: c_int = 0;
@@ -596,7 +594,7 @@ const Matcher = struct {
     }
 
     /// Ports `match_once` (chat-tts-norm.cpp:561 @b1b770d90).
-    fn matchOnce(self: *Matcher, node: *const PatternNode, i: usize, end: *usize) Error!bool {
+    fn matchOnce(self: *Matcher, node: *const PatternNode, i: usize, end: *usize) mod.exception.Error!bool {
         const n = self.t.len;
         switch (node.op) {
             .literal => {
@@ -673,9 +671,9 @@ pub const Pattern = struct {
     /// @b1b770d90).
     ///
     /// Return: the pattern, in `a`; `error.RuntimeError` on an invalid one.
-    pub fn init(a: Allocator, src: []const u8) Error!Pattern {
+    pub fn init(a: Allocator, src: []const u8) mod.exception.Error!Pattern {
         if (src.len > max_pattern_len) {
-            return throw(error.RuntimeError, "invalid TTS norm pattern: pattern is longer than {d} bytes", .{max_pattern_len});
+            return mod.exception.throw(error.RuntimeError, "invalid TTS norm pattern: pattern is longer than {d} bytes", .{max_pattern_len});
         }
         const decoded = try decodeUtf8(a, src);
         var self: Pattern = .{ .root = .{ .op = .group } };
@@ -697,7 +695,7 @@ pub const Pattern = struct {
     /// - `end`: on success, the code point index after the match.
     /// - `groups`: on success, `[start, end)` of each capture, `-1, -1` for one
     ///   that did not participate; owned by `a`.
-    pub fn matchAt(self: *const Pattern, a: Allocator, cpts: []const u32, pos: usize, end: *usize, groups: *[]Cap) Error!bool {
+    pub fn matchAt(self: *const Pattern, a: Allocator, cpts: []const u32, pos: usize, end: *usize, groups: *[]Cap) mod.exception.Error!bool {
         const caps = try a.alloc(Cap, self.n_caps);
         @memset(caps, .{ .start = -1, .end = -1 });
         var m: Matcher = .{ .a = a, .t = cpts, .icase = self.icase, .caps = caps };
@@ -727,7 +725,7 @@ pub const Segment = struct {
 /// split into matched and unmatched segments. At each position the rules
 /// are tried in order and the first non-empty match wins; otherwise one
 /// code point is skipped.
-pub fn scan(a: Allocator, text: []const u8, rules: []const *const Pattern) Error![]Segment {
+pub fn scan(a: Allocator, text: []const u8, rules: []const *const Pattern) mod.exception.Error![]Segment {
     const d = try decodeUtf8(a, text);
     var out: std.ArrayList(Segment) = .empty;
     const n = d.cpts.len;
@@ -768,7 +766,7 @@ const ReplPiece = struct {
 };
 
 /// Ports `tts_norm_parse_repl` (chat-tts-norm.cpp:724 @b1b770d90).
-fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) Error![]ReplPiece {
+fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) mod.exception.Error![]ReplPiece {
     var pieces: std.ArrayList(ReplPiece) = .empty;
     var lit: std.ArrayList(u8) = .empty;
     var i: usize = 0;
@@ -778,7 +776,7 @@ fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) Error![]Re
             continue;
         }
         if (i + 1 >= repl.len) {
-            return throw(error.RuntimeError, "invalid TTS norm replacement: dangling '%'", .{});
+            return mod.exception.throw(error.RuntimeError, "invalid TTS norm replacement: dangling '%'", .{});
         }
         i += 1;
         const c = repl[i];
@@ -787,7 +785,7 @@ fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) Error![]Re
         } else if (c >= '0' and c <= '9') {
             const g: usize = c - '0';
             if (g > pattern.n_caps) {
-                return throw(error.RuntimeError, "invalid TTS norm replacement: group %{c} does not exist", .{c});
+                return mod.exception.throw(error.RuntimeError, "invalid TTS norm replacement: group %{c} does not exist", .{c});
             }
             if (lit.items.len != 0) {
                 try pieces.append(a, .{ .literal = lit.items });
@@ -795,7 +793,7 @@ fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) Error![]Re
             }
             try pieces.append(a, .{ .group = @intCast(g) });
         } else {
-            return throw(error.RuntimeError, "invalid TTS norm replacement: unknown escape '%{c}'", .{c});
+            return mod.exception.throw(error.RuntimeError, "invalid TTS norm replacement: unknown escape '%{c}'", .{c});
         }
     }
     if (lit.items.len != 0) try pieces.append(a, .{ .literal = lit.items });
@@ -805,7 +803,7 @@ fn parseRepl(a: Allocator, repl: []const u8, pattern: *const Pattern) Error![]Re
 /// Ports `common_tts_norm_sub` (chat-tts-norm.cpp:759 @b1b770d90): every
 /// non-overlapping match of `pattern` replaced by `repl`, whose references
 /// are %0 (the whole match), %1..%9 (the groups) and %% (a percent).
-pub fn sub(a: Allocator, text: []const u8, pattern: *const Pattern, repl: []const u8) Error![]u8 {
+pub fn sub(a: Allocator, text: []const u8, pattern: *const Pattern, repl: []const u8) mod.exception.Error![]u8 {
     const pieces = try parseRepl(a, repl, pattern);
     var out: std.ArrayList(u8) = .empty;
     for (try scan(a, text, &.{pattern})) |seg| {
@@ -834,7 +832,7 @@ const Rule = struct { name: []const u8, pattern: []const u8 };
 /// Ports `tts_norm_rules_from_value` (chat-tts-norm.cpp:788 @b1b770d90): a
 /// pattern string (rule name "match"), a dict {name: pattern}, or a list of
 /// [name, pattern] pairs.
-fn rulesFromValue(a: Allocator, v: jinja.Value) Error![]Rule {
+fn rulesFromValue(a: Allocator, v: jinja.Value) mod.exception.Error![]Rule {
     var rules: std.ArrayList(Rule) = .empty;
     switch (v) {
         .string => |s| try rules.append(a, .{ .name = "match", .pattern = s }),
@@ -843,7 +841,7 @@ fn rulesFromValue(a: Allocator, v: jinja.Value) Error![]Rule {
             while (it.next()) |kv| {
                 const pat = switch (kv.value_ptr.*) {
                     .string => |s| s,
-                    else => return throw(error.RuntimeError, "tts_norm_scan: rule pattern must be a string", .{}),
+                    else => return mod.exception.throw(error.RuntimeError, "tts_norm_scan: rule pattern must be a string", .{}),
                 };
                 try rules.append(a, .{ .name = kv.key_ptr.*, .pattern = pat });
             }
@@ -854,11 +852,11 @@ fn rulesFromValue(a: Allocator, v: jinja.Value) Error![]Rule {
                 else => &.{},
             };
             if (pair.len != 2 or pair[0] != .string or pair[1] != .string) {
-                return throw(error.RuntimeError, "tts_norm_scan: each rule must be a [name, pattern] pair of strings", .{});
+                return mod.exception.throw(error.RuntimeError, "tts_norm_scan: each rule must be a [name, pattern] pair of strings", .{});
             }
             try rules.append(a, .{ .name = pair[0].string, .pattern = pair[1].string });
         },
-        else => return throw(error.RuntimeError, "tts_norm_scan: rules must be a string, a dict or a list of [name, pattern] pairs", .{}),
+        else => return mod.exception.throw(error.RuntimeError, "tts_norm_scan: rules must be a string, a dict or a list of [name, pattern] pairs", .{}),
     }
     return rules.items;
 }
@@ -878,7 +876,7 @@ fn allInput(s: []const u8) bool {
 }
 
 /// A builtin's failure, as the engine reports a throw from a function.
-fn callFailure(e: Error) jinja.value.CallError {
+fn callFailure(e: mod.exception.Error) jinja.value.CallError {
     return if (e == error.OutOfMemory) error.OutOfMemory else error.RuntimeError;
 }
 
@@ -945,7 +943,7 @@ fn builtinSub(allocator: Allocator, args: []jinja.Value, ctx: ?*anyopaque, env: 
 /// Parameters:
 /// - `a`: owns the two callables, for as long as the render runs.
 /// - `set`: binds one variable, as `ctx.set_val` does.
-pub fn addBuiltins(a: Allocator, ctx: anytype, comptime set: fn (@TypeOf(ctx), []const u8, jinja.Value) Error!void) Error!void {
+pub fn addBuiltins(a: Allocator, ctx: anytype, comptime set: fn (@TypeOf(ctx), []const u8, jinja.Value) mod.exception.Error!void) mod.exception.Error!void {
     const scan_fn = try a.create(jinja.value.Callable);
     scan_fn.* = jinja.value.Callable.initWithFunc(try a.dupe(u8, "tts_norm_scan"), builtinScan, false);
     try set(ctx, "tts_norm_scan", .{ .callable = scan_fn });
@@ -1003,9 +1001,9 @@ test "invalid patterns throw upstream's text" {
     defer arena_state.deinit();
     const a = arena_state.allocator();
     try std.testing.expectError(error.RuntimeError, Pattern.init(a, "(a"));
-    try std.testing.expectEqualStrings("invalid TTS norm pattern: expected ')' to close group at position 2", exception.what(error.RuntimeError));
+    try std.testing.expectEqualStrings("invalid TTS norm pattern: expected ')' to close group at position 2", mod.exception.what(error.RuntimeError));
     try std.testing.expectError(error.RuntimeError, Pattern.init(a, "a]"));
-    try std.testing.expectEqualStrings("invalid TTS norm pattern: unescaped ']', use '%]' at position 1", exception.what(error.RuntimeError));
+    try std.testing.expectEqualStrings("invalid TTS norm pattern: unescaped ']', use '%]' at position 1", mod.exception.what(error.RuntimeError));
     try std.testing.expectError(error.RuntimeError, Pattern.init(a, "%q"));
-    try std.testing.expectEqualStrings("invalid TTS norm pattern: unknown escape '%q' at position 1", exception.what(error.RuntimeError));
+    try std.testing.expectEqualStrings("invalid TTS norm pattern: unknown escape '%q' at position 1", mod.exception.what(error.RuntimeError));
 }

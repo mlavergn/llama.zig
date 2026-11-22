@@ -19,20 +19,10 @@
 //! digit — the `cpu/mulmat.zig` convention. Do not renumber them.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const vec = @import("vecinline.zig");
-const threading = @import("../threading.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
+const ggml = @import("../../module.zig");
 
 /// Typed pointer at a byte offset; see `common.ptr`.
-const at = common.ptr;
-
 /// Stride as `i64`; see `common.sz`.
-const s = common.sz;
 
 // -----------------------------------------------------------------------------
 // get_rows
@@ -47,26 +37,26 @@ const RowKind = enum { q, f16, bf16, f32 };
 /// The four are the same loop with a different row conversion, so they are
 /// one function over a comptime kind. The `f32` variant also serves `I32`
 /// tables: it copies four-byte elements without interpreting them.
-fn getRows(comptime kind: RowKind, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+fn getRows(comptime kind: RowKind, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
-    const l = common.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const nc = l.ne00;
-    const nr: i64 = c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
 
     std.debug.assert(l.ne0 == nc);
     std.debug.assert(l.ne02 == l.ne11);
     std.debug.assert(l.nb00 == switch (kind) {
-        .q => c.ggml_type_size(src0.type),
-        .f16 => @sizeOf(c.ggml_fp16_t),
-        .bf16 => @sizeOf(c.ggml_bf16_t),
+        .q => ggml.impl.c.ggml_type_size(src0.type),
+        .f16 => @sizeOf(ggml.impl.c.ggml_fp16_t),
+        .bf16 => @sizeOf(ggml.impl.c.ggml_bf16_t),
         .f32 => @sizeOf(f32),
     });
-    std.debug.assert(c.ggml_nrows(dst) == nr);
+    std.debug.assert(ggml.impl.c.ggml_nrows(dst) == nr);
 
-    const dequantize_row_q = if (kind == .q) c.ggml_get_type_traits(src0.type).*.to_float.? else {};
+    const dequantize_row_q = if (kind == .q) ggml.impl.c.ggml_get_type_traits(src0.type).*.to_float.? else {};
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
@@ -83,59 +73,59 @@ fn getRows(comptime kind: RowKind, params: *const ComputeParams, dst: *Tensor) v
         const j12 = @divTrunc(i, l.ne11 * l.ne10);
         const j11 = @divTrunc(i - j12 * l.ne11 * l.ne10, l.ne10);
         const j10 = i - j12 * l.ne11 * l.ne10 - j11 * l.ne10;
-        const j01: i64 = at(i32, src1.data, j10 * s(l.nb10) + j11 * s(l.nb11) + j12 * s(l.nb12))[0];
+        const j01: i64 = ggml.cpu.ops.common.ptr(i32, src1.data, j10 * ggml.cpu.ops.common.sz(l.nb10) + j11 * ggml.cpu.ops.common.sz(l.nb11) + j12 * ggml.cpu.ops.common.sz(l.nb12))[0];
 
-        impl.assert(j01 >= 0 and j01 < l.ne01, "i01 >= 0 && i01 < ne01");
+        ggml.impl.assert(j01 >= 0 and j01 < l.ne01, "i01 >= 0 && i01 < ne01");
 
-        const src_off = j01 * s(l.nb01) + j11 * s(l.nb02) + j12 * s(l.nb03);
-        const dst_row = at(f32, dst.data, j10 * s(l.nb1) + j11 * s(l.nb2) + j12 * s(l.nb3));
+        const src_off = j01 * ggml.cpu.ops.common.sz(l.nb01) + j11 * ggml.cpu.ops.common.sz(l.nb02) + j12 * ggml.cpu.ops.common.sz(l.nb03);
+        const dst_row = ggml.cpu.ops.common.ptr(f32, dst.data, j10 * ggml.cpu.ops.common.sz(l.nb1) + j11 * ggml.cpu.ops.common.sz(l.nb2) + j12 * ggml.cpu.ops.common.sz(l.nb3));
 
         switch (kind) {
-            .q => dequantize_row_q(at(u8, src0.data, src_off), dst_row, nc),
-            .f16 => c.ggml_cpu_fp16_to_fp32(at(c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
-            .bf16 => c.ggml_cpu_bf16_to_fp32(at(c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
-            .f32 => vec.cpy_f32(nc, dst_row, at(f32, src0.data, src_off)),
+            .q => dequantize_row_q(ggml.cpu.ops.common.ptr(u8, src0.data, src_off), dst_row, nc),
+            .f16 => ggml.impl.c.ggml_cpu_fp16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, src_off), dst_row, nc),
+            .bf16 => ggml.impl.c.ggml_cpu_bf16_to_fp32(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_bf16_t, src0.data, src_off), dst_row, nc),
+            .f32 => ggml.cpu.ops.vecinline.cpy_f32(nc, dst_row, ggml.cpu.ops.common.ptr(f32, src0.data, src_off)),
         }
     }
 }
 
 /// Ports `ggml_compute_forward_get_rows` (ops.cpp:5354 @b1b770d90).
-pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_get_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_Q1_0,
-        c.GGML_TYPE_Q2_0,
-        c.GGML_TYPE_Q4_0,
-        c.GGML_TYPE_Q4_1,
-        c.GGML_TYPE_Q5_0,
-        c.GGML_TYPE_Q5_1,
-        c.GGML_TYPE_Q8_0,
-        c.GGML_TYPE_Q8_1,
-        c.GGML_TYPE_MXFP4,
-        c.GGML_TYPE_NVFP4,
-        c.GGML_TYPE_F8_E4M3,
-        c.GGML_TYPE_Q2_K,
-        c.GGML_TYPE_Q3_K,
-        c.GGML_TYPE_Q4_K,
-        c.GGML_TYPE_Q5_K,
-        c.GGML_TYPE_Q6_K,
-        c.GGML_TYPE_TQ1_0,
-        c.GGML_TYPE_TQ2_0,
-        c.GGML_TYPE_IQ2_XXS,
-        c.GGML_TYPE_IQ2_XS,
-        c.GGML_TYPE_IQ3_XXS,
-        c.GGML_TYPE_IQ1_S,
-        c.GGML_TYPE_IQ1_M,
-        c.GGML_TYPE_IQ4_NL,
-        c.GGML_TYPE_IQ4_XS,
-        c.GGML_TYPE_IQ3_S,
-        c.GGML_TYPE_IQ2_S,
+        ggml.impl.c.GGML_TYPE_Q1_0,
+        ggml.impl.c.GGML_TYPE_Q2_0,
+        ggml.impl.c.GGML_TYPE_Q4_0,
+        ggml.impl.c.GGML_TYPE_Q4_1,
+        ggml.impl.c.GGML_TYPE_Q5_0,
+        ggml.impl.c.GGML_TYPE_Q5_1,
+        ggml.impl.c.GGML_TYPE_Q8_0,
+        ggml.impl.c.GGML_TYPE_Q8_1,
+        ggml.impl.c.GGML_TYPE_MXFP4,
+        ggml.impl.c.GGML_TYPE_NVFP4,
+        ggml.impl.c.GGML_TYPE_F8_E4M3,
+        ggml.impl.c.GGML_TYPE_Q2_K,
+        ggml.impl.c.GGML_TYPE_Q3_K,
+        ggml.impl.c.GGML_TYPE_Q4_K,
+        ggml.impl.c.GGML_TYPE_Q5_K,
+        ggml.impl.c.GGML_TYPE_Q6_K,
+        ggml.impl.c.GGML_TYPE_TQ1_0,
+        ggml.impl.c.GGML_TYPE_TQ2_0,
+        ggml.impl.c.GGML_TYPE_IQ2_XXS,
+        ggml.impl.c.GGML_TYPE_IQ2_XS,
+        ggml.impl.c.GGML_TYPE_IQ3_XXS,
+        ggml.impl.c.GGML_TYPE_IQ1_S,
+        ggml.impl.c.GGML_TYPE_IQ1_M,
+        ggml.impl.c.GGML_TYPE_IQ4_NL,
+        ggml.impl.c.GGML_TYPE_IQ4_XS,
+        ggml.impl.c.GGML_TYPE_IQ3_S,
+        ggml.impl.c.GGML_TYPE_IQ2_S,
         => getRows(.q, params, dst),
-        c.GGML_TYPE_F16 => getRows(.f16, params, dst),
-        c.GGML_TYPE_BF16 => getRows(.bf16, params, dst),
-        c.GGML_TYPE_F32, c.GGML_TYPE_I32 => getRows(.f32, params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F16 => getRows(.f16, params, dst),
+        ggml.impl.c.GGML_TYPE_BF16 => getRows(.bf16, params, dst),
+        ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.GGML_TYPE_I32 => getRows(.f32, params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -147,11 +137,11 @@ pub export fn ggml_compute_forward_get_rows(params: *const ComputeParams, dst: *
 /// Parameters:
 /// - `SrcT`: `f32` or `ggml_fp16_t`, the source row type.
 /// - `IdxT`: `i64` or `i32`, the index type in `src1`.
-fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
-    const l = common.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const nc = l.ne00;
     const nr = l.ne01;
@@ -159,7 +149,7 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
     std.debug.assert(l.ne0 == nc);
     std.debug.assert(l.ne2 == l.ne02);
     std.debug.assert(l.ne3 == l.ne03);
-    impl.assert(src0.type == c.GGML_TYPE_F32 or src0.type == c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32 or src0.type == ggml.impl.c.GGML_TYPE_F16, "src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16");
     std.debug.assert(@rem(l.ne02, l.ne11) == 0);
     std.debug.assert(@rem(l.ne03, l.ne12) == 0);
 
@@ -173,9 +163,9 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const rs = c.ggml_row_size(src0.type, nc);
+    const rs = ggml.impl.c.ggml_row_size(src0.type, nc);
 
-    const from_float = c.ggml_get_type_traits_cpu(dst.type).*.from_float;
+    const from_float = ggml.impl.c.ggml_get_type_traits_cpu(dst.type).*.from_float;
 
     var j03: i64 = 0;
     while (j03 < l.ne03) : (j03 += 1) {
@@ -187,22 +177,22 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
                 const j11 = @rem(j02, l.ne11);
                 const j10 = i;
 
-                const j1: i64 = at(IdxT, src1.data, j10 * s(l.nb10) + j11 * s(l.nb11) + j12 * s(l.nb12))[0];
+                const j1: i64 = ggml.cpu.ops.common.ptr(IdxT, src1.data, j10 * ggml.cpu.ops.common.sz(l.nb10) + j11 * ggml.cpu.ops.common.sz(l.nb11) + j12 * ggml.cpu.ops.common.sz(l.nb12))[0];
 
-                impl.assert(j1 >= 0 and j1 < l.ne1, "i1 >= 0 && i1 < ne1");
+                ggml.impl.assert(j1 >= 0 and j1 < l.ne1, "i1 >= 0 && i1 < ne1");
 
-                const src_off = i * s(l.nb01) + j02 * s(l.nb02) + j03 * s(l.nb03);
-                const dst_row = at(u8, dst.data, j1 * s(l.nb1) + j02 * s(l.nb2) + j03 * s(l.nb3));
+                const src_off = i * ggml.cpu.ops.common.sz(l.nb01) + j02 * ggml.cpu.ops.common.sz(l.nb02) + j03 * ggml.cpu.ops.common.sz(l.nb03);
+                const dst_row = ggml.cpu.ops.common.ptr(u8, dst.data, j1 * ggml.cpu.ops.common.sz(l.nb1) + j02 * ggml.cpu.ops.common.sz(l.nb2) + j03 * ggml.cpu.ops.common.sz(l.nb3));
 
                 if (SrcT == f32) {
-                    from_float.?(at(f32, src0.data, src_off), dst_row, nc);
-                } else if (SrcT == c.ggml_fp16_t) {
-                    if (dst.type == c.GGML_TYPE_F16) {
-                        @memcpy(dst_row[0..rs], at(u8, src0.data, src_off)[0..rs]);
+                    from_float.?(ggml.cpu.ops.common.ptr(f32, src0.data, src_off), dst_row, nc);
+                } else if (SrcT == ggml.impl.c.ggml_fp16_t) {
+                    if (dst.type == ggml.impl.c.GGML_TYPE_F16) {
+                        @memcpy(dst_row[0..rs], ggml.cpu.ops.common.ptr(u8, src0.data, src_off)[0..rs]);
                     } else {
                         const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
-                        const wdata = wbase + (@as(usize, @intCast(nc)) + common.cache_line_size_f32) * @as(usize, @intCast(ith));
-                        c.ggml_fp16_to_fp32_row(at(c.ggml_fp16_t, src0.data, src_off), wdata, nc);
+                        const wdata = wbase + (@as(usize, @intCast(nc)) + ggml.cpu.ops.common.cache_line_size_f32) * @as(usize, @intCast(ith));
+                        ggml.impl.c.ggml_fp16_to_fp32_row(ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, src_off), wdata, nc);
                         from_float.?(wdata, dst_row, nc);
                     }
                 } else {
@@ -214,30 +204,30 @@ fn setRowsImpl(comptime SrcT: type, comptime IdxT: type, params: *const ComputeP
 }
 
 /// Ports `ggml_compute_forward_set_rows` (ops.cpp:5500 @b1b770d90).
-pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+pub export fn ggml_compute_forward_set_rows(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => {
-            if (src1.type == c.GGML_TYPE_I64) {
+        ggml.impl.c.GGML_TYPE_F32 => {
+            if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
                 setRowsImpl(f32, i64, params, dst);
-            } else if (src1.type == c.GGML_TYPE_I32) {
+            } else if (src1.type == ggml.impl.c.GGML_TYPE_I32) {
                 setRowsImpl(f32, i32, params, dst);
             } else {
-                impl.abort("src1->type not supported");
+                ggml.impl.abort("src1->type not supported");
             }
         },
-        c.GGML_TYPE_F16 => {
-            if (src1.type == c.GGML_TYPE_I64) {
-                setRowsImpl(c.ggml_fp16_t, i64, params, dst);
-            } else if (src1.type == c.GGML_TYPE_I32) {
-                setRowsImpl(c.ggml_fp16_t, i32, params, dst);
+        ggml.impl.c.GGML_TYPE_F16 => {
+            if (src1.type == ggml.impl.c.GGML_TYPE_I64) {
+                setRowsImpl(ggml.impl.c.ggml_fp16_t, i64, params, dst);
+            } else if (src1.type == ggml.impl.c.GGML_TYPE_I32) {
+                setRowsImpl(ggml.impl.c.ggml_fp16_t, i32, params, dst);
             } else {
-                impl.abort("src1->type not supported");
+                ggml.impl.abort("src1->type not supported");
             }
         },
-        else => impl.abort("src0->type not supported"),
+        else => ggml.impl.abort("src0->type not supported"),
     }
 }
 
@@ -245,82 +235,82 @@ pub export fn ggml_compute_forward_set_rows(params: *const ComputeParams, dst: *
 // get_rows_back
 
 /// Ports `ggml_compute_forward_get_rows_back_f32_f16` (ops.cpp:5537 @b1b770d90).
-fn getRowsBackF32F16(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+fn getRowsBackF32F16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
     if (params.ith != 0) return;
 
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(at(u8, dst.data, 0)[0..c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.c.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
 
-    impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
-    impl.assert(src0.nb[0] == @sizeOf(c.ggml_fp16_t), "src0->nb[0] == sizeof(ggml_fp16_t)");
+    ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(ggml.impl.c.ggml_fp16_t), "src0->nb[0] == sizeof(ggml_fp16_t)");
 
-    const idx = at(i32, src1.data, 0);
+    const idx = ggml.cpu.ops.common.ptr(i32, src1.data, 0);
 
     var i: i64 = 0;
     while (i < nr) : (i += 1) {
         const r: i64 = idx[@intCast(i)];
 
-        impl.assert(r >= 0 and r < dst.ne[1], "r >= 0 && r < dst->ne[1]");
+        ggml.impl.assert(r >= 0 and r < dst.ne[1], "r >= 0 && r < dst->ne[1]");
 
-        const srow = at(c.ggml_fp16_t, src0.data, i * s(src0.nb[1]));
-        const drow = at(f32, dst.data, r * s(dst.nb[1]));
+        const srow = ggml.cpu.ops.common.ptr(ggml.impl.c.ggml_fp16_t, src0.data, i * ggml.cpu.ops.common.sz(src0.nb[1]));
+        const drow = ggml.cpu.ops.common.ptr(f32, dst.data, r * ggml.cpu.ops.common.sz(dst.nb[1]));
 
         var j: usize = 0;
         while (j < @as(usize, @intCast(nc))) : (j += 1) {
-            drow[j] += impl.fp16ToFp32(srow[j]);
+            drow[j] += ggml.impl.fp16ToFp32(srow[j]);
         }
     }
 }
 
 /// Ports `ggml_compute_forward_get_rows_back_f32` (ops.cpp:5572 @b1b770d90).
-fn getRowsBackF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+fn getRowsBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
     if (params.ith != 0) return;
 
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
 
     // ggml_compute_forward_dup_same_cont(params, opt0, dst);
 
-    @memset(at(u8, dst.data, 0)[0..c.ggml_nbytes(dst)], 0);
+    @memset(ggml.cpu.ops.common.ptr(u8, dst.data, 0)[0..ggml.impl.c.ggml_nbytes(dst)], 0);
 
     const nc: i64 = src0.ne[0];
-    const nr: i64 = c.ggml_nelements(src1);
+    const nr: i64 = ggml.impl.c.ggml_nelements(src1);
 
-    impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(dst.ne[0] == nc, "dst->ne[0] == nc");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
-    const idx = at(i32, src1.data, 0);
+    const idx = ggml.cpu.ops.common.ptr(i32, src1.data, 0);
 
     var i: i64 = 0;
     while (i < nr) : (i += 1) {
         const r: i64 = idx[@intCast(i)];
 
-        impl.assert(r >= 0 and r < dst.ne[1], "r >= 0 && r < dst->ne[1]");
+        ggml.impl.assert(r >= 0 and r < dst.ne[1], "r >= 0 && r < dst->ne[1]");
 
-        const drow = at(f32, dst.data, r * s(dst.nb[1]));
-        vec.add_f32(nc, drow, drow, at(f32, src0.data, i * s(src0.nb[1])));
+        const drow = ggml.cpu.ops.common.ptr(f32, dst.data, r * ggml.cpu.ops.common.sz(dst.nb[1]));
+        ggml.cpu.ops.vecinline.add_f32(nc, drow, drow, ggml.cpu.ops.common.ptr(f32, src0.data, i * ggml.cpu.ops.common.sz(src0.nb[1])));
     }
 }
 
 /// Ports `ggml_compute_forward_get_rows_back` (ops.cpp:5607 @b1b770d90).
-pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_get_rows_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F16 => getRowsBackF32F16(params, dst),
-        c.GGML_TYPE_F32 => getRowsBackF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F16 => getRowsBackF32F16(params, dst),
+        ggml.impl.c.GGML_TYPE_F32 => getRowsBackF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -328,23 +318,23 @@ pub export fn ggml_compute_forward_get_rows_back(params: *const ComputeParams, d
 // diag
 
 /// Ports `ggml_compute_forward_diag_f32` (ops.cpp:5649 @b1b770d90).
-fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn diagF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
     // TODO: handle transposed/permuted matrices
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    impl.assert(l.ne00 == l.ne0, "ne00 == ne0");
-    impl.assert(l.ne00 == l.ne1, "ne00 == ne1");
-    impl.assert(l.ne01 == 1, "ne01 == 1");
-    impl.assert(l.ne02 == l.ne2, "ne02 == ne2");
-    impl.assert(l.ne03 == l.ne3, "ne03 == ne3");
+    ggml.impl.assert(l.ne00 == l.ne0, "ne00 == ne0");
+    ggml.impl.assert(l.ne00 == l.ne1, "ne00 == ne1");
+    ggml.impl.assert(l.ne01 == 1, "ne01 == 1");
+    ggml.impl.assert(l.ne02 == l.ne2, "ne02 == ne2");
+    ggml.impl.assert(l.ne03 == l.ne3, "ne03 == ne3");
 
-    impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
-    impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
+    ggml.impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
+    ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
 
     var j3: i64 = 0;
     while (j3 < l.ne3) : (j3 += 1) {
@@ -352,8 +342,8 @@ fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
         while (j2 < l.ne2) : (j2 += 1) {
             var j1: i64 = 0;
             while (j1 < l.ne1) : (j1 += 1) {
-                const d = at(f32, dst.data, j3 * s(l.nb3) + j2 * s(l.nb2) + j1 * s(l.nb1));
-                const sp = at(f32, src0.data, j3 * s(l.nb03) + j2 * s(l.nb02));
+                const d = ggml.cpu.ops.common.ptr(f32, dst.data, j3 * ggml.cpu.ops.common.sz(l.nb3) + j2 * ggml.cpu.ops.common.sz(l.nb2) + j1 * ggml.cpu.ops.common.sz(l.nb1));
+                const sp = ggml.cpu.ops.common.ptr(f32, src0.data, j3 * ggml.cpu.ops.common.sz(l.nb03) + j2 * ggml.cpu.ops.common.sz(l.nb02));
                 const k: usize = @intCast(j1);
                 var j0: usize = 0;
                 while (j0 < k) : (j0 += 1) d[j0] = 0;
@@ -366,12 +356,12 @@ fn diagF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_diag` (ops.cpp:5689 @b1b770d90).
-pub export fn ggml_compute_forward_diag(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_diag(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => diagF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => diagF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 

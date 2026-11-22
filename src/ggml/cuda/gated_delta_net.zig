@@ -12,16 +12,7 @@
 //! prefill goes to the chunked kernel in `gated_delta_net_mma.zig` first
 //! (#29353).
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const gdn_mma = @import("gated_delta_net_mma.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `ggml_cuda_gated_delta_net_fused_cache` (gated_delta_net.cuh:5
 /// @b1b770d90): the fused kernel's recurrent-state output. Strides in
 /// elements; the per-sequence stride is always `D`, set in-kernel.
@@ -72,47 +63,47 @@ fn launchGatedDeltaNet(
     scale: f32,
     state_slot_stride: i64,
     K: c_int,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     //TODO: Add chunked kernel for even faster pre-fill
-    const warp_size: c_int = common.info().devices[@intCast(common.getDevice())].warp_size;
+    const warp_size: c_int = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].warp_size;
     // four columns per warp (see the kernel); shrink the CTA when the wider CTA would leave
     // SMs without a CTA, so small head counts keep the device filled
-    const nsm: c_int = common.info().devices[@intCast(common.getDevice())].nsm;
+    const nsm: c_int = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].nsm;
     const cols_per_warp = gdn_cols_per_warp;
     var num_warps: c_int = 4;
     while (num_warps > 1 and H * n_seqs * @divTrunc(S_v, cols_per_warp * num_warps) < nsm) {
         num_warps = @divTrunc(num_warps, 2);
     }
     // one CTA covers cols_per_warp*num_warps columns (see the kernel)
-    const grid_dims: kernels.Dim3 = .{ .x = dim(H), .y = dim(n_seqs), .z = dim(@divTrunc(S_v + cols_per_warp * num_warps - 1, cols_per_warp * num_warps)) };
-    const block_dims: kernels.Dim3 = .{ .x = if (warp_size <= S_v) @bitCast(warp_size) else dim(S_v), .y = @bitCast(num_warps), .z = 1 };
+    const grid_dims: ggml.cuda.kernels.Dim3 = .{ .x = dim(H), .y = dim(n_seqs), .z = dim(@divTrunc(S_v + cols_per_warp * num_warps - 1, cols_per_warp * num_warps)) };
+    const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = if (warp_size <= S_v) @bitCast(warp_size) else dim(S_v), .y = @bitCast(num_warps), .z = 1 };
 
-    const neqk1_magic = common.initFastdivValues(@bitCast(neqk1));
-    const rq3_magic = common.initFastdivValues(@bitCast(rq3));
+    const neqk1_magic = ggml.cuda.common.initFastdivValues(@bitCast(neqk1));
+    const rq3_magic = ggml.cuda.common.initFastdivValues(@bitCast(rq3));
 
-    const params: kernels.LaunchParams = .{ .grid = grid_dims, .block = block_dims, .shmem = 0, .stream = stream };
+    const params: ggml.cuda.kernels.LaunchParams = .{ .grid = grid_dims, .block = block_dims, .shmem = 0, .stream = stream };
     const args = .{
         q_d,      k_d,    v_d,         g_d,       b_d,   s_d,               dst_d, state_d, H,
         n_tokens, n_seqs, sq1,         sq2,       sq3,   sv1,               sv2,   sv3,     sb1,
         sb2,      sb3,    neqk1_magic, rq3_magic, scale, state_slot_stride, K,
     };
     switch (S_v) {
-        inline 16, 32, 64, 128 => |s| kernels.launchPdl(kernels.get("gated_delta_net", kernels.tmpl("gated_delta_net_cuda", &.{ kernels.int(s), kernels.boolean(kda), kernels.boolean(keep_rs_t), kernels.int(gdn_cols_per_warp) })), params, args),
-        else => impl.abort("fatal error"),
+        inline 16, 32, 64, 128 => |s| ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("gated_delta_net", ggml.cuda.kernels.tmpl("gated_delta_net_cuda", &.{ ggml.cuda.kernels.int(s), ggml.cuda.kernels.boolean(kda), ggml.cuda.kernels.boolean(keep_rs_t), ggml.cuda.kernels.int(gdn_cols_per_warp) })), params, args),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_cuda_gdn_mma_args_from_tensor` (gated_delta_net.cu:242
 /// @b1b770d90): the chunked kernel's arguments; `state_out` is the
 /// caller's.
-fn gdnMmaArgsFromTensor(dst: *const Tensor) gdn_mma.Args {
-    const q = impl.one(Tensor, dst.src[0]);
-    const k = impl.one(Tensor, dst.src[1]);
-    const v = impl.one(Tensor, dst.src[2]);
-    const g = impl.one(Tensor, dst.src[3]);
-    const beta = impl.one(Tensor, dst.src[4]);
-    const state = impl.one(Tensor, dst.src[5]);
+fn gdnMmaArgsFromTensor(dst: *const ggml.impl.c.ggml_tensor) ggml.cuda.gated_delta_net_mma.Args {
+    const q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const g = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]);
+    const beta = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]);
+    const state = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]);
 
     const S_v = v.ne[0];
     const H = v.ne[1];
@@ -141,19 +132,19 @@ fn gdnMmaArgsFromTensor(dst: *const Tensor) gdn_mma.Args {
         .sb2 = @intCast(beta.nb[2] / f),
         .sb3 = @intCast(beta.nb[3] / f),
         .scale = 1.0 / @sqrt(@as(f32, @floatFromInt(S_v))),
-        .eligible = g.ne[0] == 1 and impl.getOpParamsI32(dst, 0) < v.ne[2] and S_v == 128 and q.ne[0] == 128,
+        .eligible = g.ne[0] == 1 and ggml.impl.getOpParamsI32(dst, 0) < v.ne[2] and S_v == 128 and q.ne[0] == 128,
     };
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_impl` (gated_delta_net.cu:280
 /// @b1b770d90).
-fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
-    const src_q = impl.one(Tensor, dst.src[0]);
-    const src_k = impl.one(Tensor, dst.src[1]);
-    const src_v = impl.one(Tensor, dst.src[2]);
-    const src_g = impl.one(Tensor, dst.src[3]);
-    const src_beta = impl.one(Tensor, dst.src[4]);
-    const src_state = impl.one(Tensor, dst.src[5]);
+fn opGatedDeltaNetImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: ?*const FusedCache) void {
+    const src_q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src_k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src_v = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const src_g = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]);
+    const src_beta = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]);
+    const src_state = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]);
 
     const neq1 = src_q.ne[1];
     const neq3 = src_q.ne[3];
@@ -180,11 +171,11 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
 
     const kda = src_g.ne[0] == S_v;
 
-    impl.assert(neq1 == nek1, "neq1 == nek1");
+    ggml.impl.assert(neq1 == nek1, "neq1 == nek1");
     const neqk1 = neq1;
 
-    impl.assert(neq3 > 0 and nev3 >= neq3 and @rem(nev3, neq3) == 0, "neq3 > 0 && nev3 >= neq3 && nev3 % neq3 == 0");
-    impl.assert(nek3 == neq3, "nek3 == neq3");
+    ggml.impl.assert(neq3 > 0 and nev3 >= neq3 and @rem(nev3, neq3) == 0, "neq3 > 0 && nev3 >= neq3 && nev3 % neq3 == 0");
+    ggml.impl.assert(nek3 == neq3, "nek3 == neq3");
     const rq3 = @divTrunc(nev3, neq3);
 
     const q_d: ?*const anyopaque = src_q.data;
@@ -196,14 +187,14 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
     const s_d: ?*const anyopaque = src_state.data;
     const dst_d: [*]f32 = @ptrCast(@alignCast(dst.data));
 
-    impl.assert(c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
-    impl.assert(c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
-    impl.assert(c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
-    impl.assert(c.ggml_are_same_stride(src_q, src_k), "ggml_are_same_stride(src_q, src_k)");
-    impl.assert(src_g.ne[0] == 1 or kda, "src_g->ne[0] == 1 || kda");
-    impl.assert(c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
-    impl.assert(c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
-    impl.assert(c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_q), "ggml_is_contiguous_rows(src_q)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_k), "ggml_is_contiguous_rows(src_k)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous_rows(src_v), "ggml_is_contiguous_rows(src_v)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_stride(src_q, src_k), "ggml_are_same_stride(src_q, src_k)");
+    ggml.impl.assert(src_g.ne[0] == 1 or kda, "src_g->ne[0] == 1 || kda");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_g), "ggml_is_contiguous(src_g)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_beta), "ggml_is_contiguous(src_beta)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(src_state), "ggml_is_contiguous(src_state)");
 
     // strides in floats (beta strides used for both g and beta offset computation)
     const sq1: i64 = @intCast(nbq1 / @sizeOf(f32));
@@ -221,7 +212,7 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
     const stream = ctx.stream();
 
     // K (snapshot slot count) is an op param; state holds s0 only [S_v, S_v, H, n_seqs].
-    const K = impl.getOpParamsI32(dst, 0);
+    const K = ggml.impl.getOpParamsI32(dst, 0);
     const keep_rs = K > 1;
 
     // recurrent state -> gdn_out tail (after attention scores), or the cache when fusing
@@ -235,7 +226,7 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
     {
         var mma_args = gdnMmaArgsFromTensor(dst);
         mma_args.state_out = @ptrCast(@alignCast(state_d));
-        if (gdn_mma.launch(ctx.device, &mma_args, stream)) {
+        if (ggml.cuda.gated_delta_net_mma.launch(ctx.device, &mma_args, stream)) {
             return;
         }
     }
@@ -256,13 +247,13 @@ fn opGatedDeltaNetImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedC
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net` (gated_delta_net.cu:386 @b1b770d90).
-pub fn opGatedDeltaNet(ctx: *common.Context, dst: *Tensor) void {
+pub fn opGatedDeltaNet(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     opGatedDeltaNetImpl(ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_gated_delta_net_fused_cache` (gated_delta_net.cu:390
 /// @b1b770d90): the same op, writing the snapshot(s) into the cache
 /// instead of `dst`.
-pub fn opGatedDeltaNetFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
+pub fn opGatedDeltaNetFusedCache(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: FusedCache) void {
     opGatedDeltaNetImpl(ctx, dst, &cache);
 }

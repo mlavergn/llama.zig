@@ -12,21 +12,11 @@
 //! `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_phi3`'s `load_arch_hparams` (models/phi3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -46,11 +36,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 
     if (found_swa and hp.n_swa > 0) {
-        impl.logWarn("%s: Phi SWA is currently disabled - results might be suboptimal for some models (see %s)\n", .{ "load_arch_hparams", "https://github.com/ggml-org/llama.cpp/pull/13676" });
+        llama.impl.logWarn("%s: Phi SWA is currently disabled - results might be suboptimal for some models (see %s)\n", .{ "load_arch_hparams", "https://github.com/ggml-org/llama.cpp/pull/13676" });
 
         // TODO: fix conversion scripts to correctly populate `n_swa` and
         // `n_swa_pattern`.
-        hp.swa_type = @backingInt(hparams_mod.SwaType.none);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.none);
 
         hp.n_swa = 0;
         hp.setSwaPattern(1, false);
@@ -58,9 +48,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_phi3`'s `load_arch_tensors` (models/phi3.cpp:27 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -70,7 +60,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -87,15 +77,15 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.ffn_down = try self.createTensor(.{ .tensor = .ffn_down, .suffix = "weight", .bid = i }, &.{ l.n_ff, l.n_embd }, 0, exc);
         layer.ffn_up = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "weight", .bid = i }, &.{ l.n_embd, 2 * l.n_ff }, 0, exc);
 
-        const rope_dup: u32 = if (i != 0) loader.tensor_duplicated else 0;
+        const rope_dup: u32 = if (i != 0) llama.loader.tensor_duplicated else 0;
         layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
     }
 }
 
 /// Ports `llama_model_phi3`'s `build_arch_graph` (models/phi3.cpp:59 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    if (b.hparams.swa_type != @backingInt(hparams_mod.SwaType.none)) {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    if (b.hparams.swa_type != @backingInt(llama.hparams.SwaType.none)) {
         buildGraph(true, model, b);
     } else {
         buildGraph(false, model, b);
@@ -104,12 +94,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports the constructor of `llama_model_phi3`'s `graph<iswa>`
 /// (models/phi3.cpp:68 @b1b770d90).
-fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/phi3.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/phi3.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -124,7 +114,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         var residual = inpL;
-        var cur: *Tensor = undefined;
+        var cur: *llama.impl.c.ggml_tensor = undefined;
 
         // Self-attention.
         {
@@ -143,16 +133,16 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / libm.sqrtfInt(n_embd_head));
+            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, 1.0 / stdlib.libm.sqrtfInt(n_embd_head));
             b.cb(Qcur, "Qcur", il);
 
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         residual = cur;
 
         cur = b.buildNorm(cur, layer.ffn_norm, layer.ffn_norm_b, .rms, il);
@@ -178,7 +168,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             }, il);
             b.cb(cur, "ffn_moe_out", il);
         }
-        cur = c.ggml_add(ctx, residual, cur);
+        cur = llama.impl.c.ggml_add(ctx, residual, cur);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -195,7 +185,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
     if (model.output_b) |ob| {
         b.cb(cur, "result_output_no_bias", -1);
-        cur = c.ggml_add(ctx, cur, ob);
+        cur = llama.impl.c.ggml_add(ctx, cur, ob);
     }
     b.cb(cur, "result_output", -1);
     b.res.t_logits = cur;

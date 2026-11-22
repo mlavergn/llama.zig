@@ -9,40 +9,35 @@
 //! as upstream's are, so both decode the same batches.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
 const stdlib = @import("stdlib");
 const tc = @import("tools_common");
-const c = tc.c;
-const io = tc.io;
-const log = tc.log;
-const arg = tc.arg;
 
 comptime {
     // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama");
+    _ = @import("llama").lib;
 }
 
 /// Ports `print_usage` (batched-bench.cpp:12 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
-    log.out("\nexample usage:\n", .{});
-    log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
-    log.out("\n", .{});
+    tc.log.out("\nexample usage:\n", .{});
+    tc.log.out("\n    %s -m model.gguf -c 2048 -b 2048 -ub 512 -npp 128,256,512 -ntg 128,256 -npl 1,2,4,8,16,32 [-pps]\n", .{argv[0].ptr});
+    tc.log.out("\n", .{});
 }
 
 /// The `decode_helper` lambda (batched-bench.cpp:82 @b1b770d90): `batch` in
 /// sub-batches of `n_batch` tokens.
-fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, n_batch: i32, synchronize: bool) bool {
+fn decodeHelper(ctx: ?*tc.c.llama_context, batch: *tc.common.Batch, n_batch: i32, synchronize: bool) bool {
     var i: i32 = 0;
     while (i < batch.size()) : (i += n_batch) {
         const n_tokens = @min(n_batch, batch.size() - i);
 
-        const ret = c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
+        const ret = tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
         if (ret != 0) {
-            log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
+            tc.log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
             return false;
         }
 
-        if (synchronize) c.llama_synchronize(ctx);
+        if (synchronize) tc.c.llama_synchronize(ctx);
     }
     return true;
 }
@@ -54,7 +49,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     tc.common.init();
 
-    if (!try arg.parse(argv, &params, .bench, printUsage)) return 1;
+    if (!try tc.arg.parse(argv, &params, .bench, printUsage)) return 1;
 
     const is_pp_shared: c_int = @intFromBool(params.is_pp_shared);
     const is_tg_separate: c_int = @intFromBool(params.is_tg_separate);
@@ -65,16 +60,16 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
     // init LLM
 
-    c.llama_backend_init();
-    c.llama_numa_init(params.numa);
+    tc.c.llama_backend_init();
+    tc.c.llama_numa_init(params.numa);
 
     // initialize the model
 
     const model_params = tc.common.modelParamsToLlama(&params);
 
     const model_path = try a.dupeSentinel(u8, params.model.path, 0);
-    const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse {
-        io.eprintf("%s: error: unable to load model\n", .{func});
+    const model = tc.c.llama_model_load_from_file(model_path.ptr, model_params) orelse {
+        tc.io.eprintf("%s: error: unable to load model\n", .{func});
         return 1;
     };
 
@@ -83,18 +78,18 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     // ensure enough sequences are available
     ctx_params.n_seq_max = if (n_pl.len == 0) 1 else @intCast(std.mem.max(i32, n_pl));
 
-    const ctx = c.llama_init_from_model(model, ctx_params) orelse {
-        io.eprintf("%s: error: failed to create the llama_context\n", .{func});
-        c.llama_model_free(model);
+    const ctx = tc.c.llama_init_from_model(model, ctx_params) orelse {
+        tc.io.eprintf("%s: error: failed to create the llama_context\n", .{func});
+        tc.c.llama_model_free(model);
         return 1;
     };
 
-    const vocab = c.llama_model_get_vocab(model);
-    const n_vocab = c.llama_vocab_n_tokens(vocab);
+    const vocab = tc.c.llama_model_get_vocab(model);
+    const n_vocab = tc.c.llama_vocab_n_tokens(vocab);
 
-    const mem = c.llama_get_memory(ctx);
+    const mem = tc.c.llama_get_memory(ctx);
 
-    const n_kv_max: i32 = @intCast(c.llama_n_ctx(ctx));
+    const n_kv_max: i32 = @intCast(tc.c.llama_n_ctx(ctx));
 
     var batch = tc.common.Batch.init(a, ctx);
     defer batch.deinit();
@@ -103,24 +98,24 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     // warm up
     {
         var i: c_int = 0;
-        while (i < 16) : (i += 1) _ = batch.add(@rem(libc.rand(), n_vocab), i, 0, false);
+        while (i < 16) : (i += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), i, 0, false);
 
         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-            log.err("%s: llama_decode() failed\n", .{func});
-            c.llama_free(ctx);
-            c.llama_model_free(model);
+            tc.log.err("%s: llama_decode() failed\n", .{func});
+            tc.c.llama_free(ctx);
+            tc.c.llama_model_free(model);
             return 1;
         }
     }
 
     if (!params.batched_bench_output_jsonl) {
-        log.out("\n", .{});
-        log.out("%s: n_kv_max = %d, n_batch = %d, n_ubatch = %d, flash_attn = %d, is_pp_shared = %d, is_tg_separate = %d, n_gpu_layers = %d, n_threads = %u, n_threads_batch = %u\n", .{
+        tc.log.out("\n", .{});
+        tc.log.out("%s: n_kv_max = %d, n_batch = %d, n_ubatch = %d, flash_attn = %d, is_pp_shared = %d, is_tg_separate = %d, n_gpu_layers = %d, n_threads = %u, n_threads_batch = %u\n", .{
             func, n_kv_max, params.n_batch, params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), is_pp_shared, is_tg_separate, params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
         });
-        log.out("\n", .{});
-        log.out("|%6s | %6s | %4s | %6s | %8s | %8s | %8s | %8s | %8s | %8s |\n", .{ "PP", "TG", "B", "N_KV", "T_PP s", "S_PP t/s", "T_TG s", "S_TG t/s", "T s", "S t/s" });
-        log.out("|%6s-|-%6s-|-%4s-|-%6s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|\n", .{ "------", "------", "----", "------", "--------", "--------", "--------", "--------", "--------", "--------" });
+        tc.log.out("\n", .{});
+        tc.log.out("|%6s | %6s | %4s | %6s | %8s | %8s | %8s | %8s | %8s | %8s |\n", .{ "PP", "TG", "B", "N_KV", "T_PP s", "S_PP t/s", "T_TG s", "S_TG t/s", "T s", "S t/s" });
+        tc.log.out("|%6s-|-%6s-|-%4s-|-%6s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|-%8s-|\n", .{ "------", "------", "----", "------", "--------", "--------", "--------", "--------", "--------", "--------" });
     }
 
     for (n_pp) |pp| {
@@ -135,43 +130,43 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                 var j: i32 = 0;
                 while (j < (if (is_pp_shared != 0) 1 else pl)) : (j += 1) {
                     var i: i32 = 0;
-                    while (i < pp) : (i += 1) _ = batch.add(@rem(libc.rand(), n_vocab), i, j, i == pp - 1);
+                    while (i < pp) : (i += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), i, j, i == pp - 1);
                 }
 
-                c.llama_memory_clear(mem, false);
+                tc.c.llama_memory_clear(mem, false);
 
-                const t_pp_start = c.ggml_time_us();
+                const t_pp_start = tc.c.ggml_time_us();
 
                 if (!decodeHelper(ctx, &batch, n_batch, false)) {
-                    log.err("%s: llama_decode() failed\n", .{func});
-                    c.llama_free(ctx);
-                    c.llama_model_free(model);
+                    tc.log.err("%s: llama_decode() failed\n", .{func});
+                    tc.c.llama_free(ctx);
+                    tc.c.llama_model_free(model);
                     return 1;
                 }
 
-                c.llama_synchronize(ctx);
+                tc.c.llama_synchronize(ctx);
 
-                const t_pp_end = c.ggml_time_us();
+                const t_pp_end = tc.c.ggml_time_us();
 
                 if (is_pp_shared != 0) {
                     var i: i32 = 1;
-                    while (i < pl) : (i += 1) c.llama_memory_seq_cp(mem, 0, i, -1, -1);
+                    while (i < pl) : (i += 1) tc.c.llama_memory_seq_cp(mem, 0, i, -1, -1);
 
                     if (!params.kv_unified) {
                         // run one dummy token to apply the memory copy
                         batch.clear();
-                        _ = batch.add(@rem(libc.rand(), n_vocab), pp + 0, 0, true);
+                        _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + 0, 0, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                            log.err("%s: llama_decode() failed\n", .{func});
-                            c.llama_free(ctx);
-                            c.llama_model_free(model);
+                            tc.log.err("%s: llama_decode() failed\n", .{func});
+                            tc.c.llama_free(ctx);
+                            tc.c.llama_model_free(model);
                             return 1;
                         }
-                        _ = c.llama_memory_seq_rm(mem, 0, pp, -1);
+                        _ = tc.c.llama_memory_seq_rm(mem, 0, pp, -1);
                     }
                 }
 
-                const t_tg_start = c.ggml_time_us();
+                const t_tg_start = tc.c.ggml_time_us();
 
                 if (is_tg_separate != 0) {
                     // decode pattern:
@@ -181,11 +176,11 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                         var i: i32 = 0;
                         while (i < tg) : (i += 1) {
                             batch.clear();
-                            _ = batch.add(@rem(libc.rand(), n_vocab), pp + i, jj, true);
+                            _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + i, jj, true);
                             if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                                log.err("%s: llama_decode() failed\n", .{func});
-                                c.llama_free(ctx);
-                                c.llama_model_free(model);
+                                tc.log.err("%s: llama_decode() failed\n", .{func});
+                                tc.c.llama_free(ctx);
+                                tc.c.llama_model_free(model);
                                 return 1;
                             }
                         }
@@ -197,17 +192,17 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     while (i < tg) : (i += 1) {
                         batch.clear();
                         var jj: i32 = 0;
-                        while (jj < pl) : (jj += 1) _ = batch.add(@rem(libc.rand(), n_vocab), pp + i, jj, true);
+                        while (jj < pl) : (jj += 1) _ = batch.add(@rem(stdlib.libc.rand(), n_vocab), pp + i, jj, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
-                            log.err("%s: llama_decode() failed\n", .{func});
-                            c.llama_free(ctx);
-                            c.llama_model_free(model);
+                            tc.log.err("%s: llama_decode() failed\n", .{func});
+                            tc.c.llama_free(ctx);
+                            tc.c.llama_model_free(model);
                             return 1;
                         }
                     }
                 }
 
-                const t_tg_end = c.ggml_time_us();
+                const t_tg_end = tc.c.ggml_time_us();
 
                 const n_kv = n_ctx_req;
 
@@ -220,13 +215,13 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                 const speed: f32 = @as(f32, @floatFromInt((if (is_pp_shared != 0) pp else pl * pp) + pl * tg)) / t;
 
                 if (params.batched_bench_output_jsonl) {
-                    log.out("{\"n_kv_max\": %d, \"n_batch\": %d, \"n_ubatch\": %d, \"flash_attn\": %d, \"is_pp_shared\": %d, \"n_gpu_layers\": %d, \"n_threads\": %u, \"n_threads_batch\": %u, \"pp\": %d, \"tg\": %d, \"pl\": %d, \"n_kv\": %d, \"t_pp\": %f, \"speed_pp\": %f, \"t_tg\": %f, \"speed_tg\": %f, \"t\": %f, \"speed\": %f}\n", .{
+                    tc.log.out("{\"n_kv_max\": %d, \"n_batch\": %d, \"n_ubatch\": %d, \"flash_attn\": %d, \"is_pp_shared\": %d, \"n_gpu_layers\": %d, \"n_threads\": %u, \"n_threads_batch\": %u, \"pp\": %d, \"tg\": %d, \"pl\": %d, \"n_kv\": %d, \"t_pp\": %f, \"speed_pp\": %f, \"t_tg\": %f, \"speed_tg\": %f, \"t\": %f, \"speed\": %f}\n", .{
                         n_kv_max,    params.n_batch,  params.n_ubatch, @as(c_int, @intCast(params.flash_attn_type)), @as(c_int, @intFromBool(params.is_pp_shared)), params.n_gpu_layers, ctx_params.n_threads, ctx_params.n_threads_batch,
                         pp,          tg,              pl,              n_kv,                                         @as(f64, t_pp),                                @as(f64, speed_pp),  @as(f64, t_tg),       @as(f64, speed_tg),
                         @as(f64, t), @as(f64, speed),
                     });
                 } else {
-                    log.out("|%6d | %6d | %4d | %6d | %8.3f | %8.2f | %8.3f | %8.2f | %8.3f | %8.2f |\n", .{
+                    tc.log.out("|%6d | %6d | %4d | %6d | %8.3f | %8.2f | %8.3f | %8.2f | %8.3f | %8.2f |\n", .{
                         pp, tg, pl, n_kv, @as(f64, t_pp), @as(f64, speed_pp), @as(f64, t_tg), @as(f64, speed_tg), @as(f64, t), @as(f64, speed),
                     });
                 }
@@ -234,13 +229,13 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
         }
     }
 
-    log.out("\n", .{});
-    c.llama_perf_context_print(ctx);
+    tc.log.out("\n", .{});
+    tc.c.llama_perf_context_print(ctx);
 
-    c.llama_free(ctx);
-    c.llama_model_free(model);
+    tc.c.llama_free(ctx);
+    tc.c.llama_model_free(model);
 
-    c.llama_backend_free();
+    tc.c.llama_backend_free();
 
     return 0;
 }

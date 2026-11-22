@@ -12,21 +12,11 @@
 //! `build_arch_graph`, `beam_residual_add`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_beam`'s `load_arch_hparams` (models/beam.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -39,15 +29,15 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_final_logit_softcapping = 0.0; // An absent key is no softcap (the default is 30).
     if (try meta.getKey(f32, .final_logit_softcapping, false, exc)) |v| hp.f_final_logit_softcapping = v;
 
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
     }
     if (hp.n_layer_dense_lead > hp.nLayer()) {
         return exc.throw(.runtime_error, "beam: leading_dense_block_count exceeds the layer count", .{});
     }
 
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard); // Masked iff p1 - p0 >= n_swa.
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard); // Masked iff p1 - p0 >= n_swa.
     const n_pattern = (try meta.getArrN(.attention_sliding_window_pattern, true, exc)).?;
     if (hp.n_swa == 0 or n_pattern != hp.n_layer_all) {
         return exc.throw(.runtime_error, "beam: requires a positive sliding window and a sliding window pattern for each layer", .{});
@@ -82,11 +72,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_beam`'s `load_arch_tensors` (models/beam.cpp:59 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -133,28 +123,28 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_beam`'s `build_arch_graph` (models/beam.cpp:105 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `beam_residual_add` (models/beam.cpp:109 @b1b770d90): the running
 /// average of the sublayers' outputs, `i` the sublayer's ordinal.
-fn beamResidualAdd(ctx: *c.ggml_context, h: *Tensor, r: *Tensor, i: c_int) *Tensor {
+fn beamResidualAdd(ctx: *llama.impl.c.ggml_context, h: *llama.impl.c.ggml_tensor, r: *llama.impl.c.ggml_tensor, i: c_int) *llama.impl.c.ggml_tensor {
     const di: f64 = @floatFromInt(i);
     const h_scale: f32 = @floatCast(1.0 / @sqrt(di));
     const r_scale: f32 = @floatCast(@sqrt((di - 1.0) / di));
-    return c.ggml_add(ctx, c.ggml_scale(ctx, h, h_scale), c.ggml_scale(ctx, r, r_scale));
+    return llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_scale(ctx, h, h_scale), llama.impl.c.ggml_scale(ctx, r, r_scale));
 }
 
 /// Ports the constructor of `llama_model_beam`'s `graph`
 /// (models/beam.cpp:115 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/beam.cpp", 117, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/beam.cpp", 117, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
 
@@ -165,13 +155,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             has_nope = has_nope or !hp.isSwa(@intCast(il));
         }
     }
-    const inp_attn_scale: ?*Tensor = if (has_nope) b.buildInpAttnScale() else null;
+    const inp_attn_scale: ?*llama.impl.c.ggml_tensor = if (has_nope) b.buildInpAttnScale() else null;
 
     const inp_attn = b.buildAttnInpKvIswa();
 
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -203,7 +193,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 b.cb(Qcur, "Qcur_rope", il);
                 b.cb(Kcur, "Kcur_rope", il);
             } else {
-                Qcur = c.ggml_mul(ctx, Qcur, inp_attn_scale);
+                Qcur = llama.impl.c.ggml_mul(ctx, Qcur, inp_attn_scale);
                 b.cb(Qcur, "Qcur_scaled", il);
             }
 
@@ -213,13 +203,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             var gate = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
             b.cb(gate, "attn_gate_proj", il);
-            gate = c.ggml_reshape_3d(ctx, gate, n_embd_head, b.n_head, b.n_tokens);
-            gate = c.ggml_add(ctx, gate, c.ggml_reshape_3d(ctx, layer.wqkv_gate_b, 1, b.n_head, 1));
-            gate = c.ggml_sigmoid(ctx, gate);
-            gate = c.ggml_reshape_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
+            gate = llama.impl.c.ggml_reshape_3d(ctx, gate, n_embd_head, b.n_head, b.n_tokens);
+            gate = llama.impl.c.ggml_add(ctx, gate, llama.impl.c.ggml_reshape_3d(ctx, layer.wqkv_gate_b, 1, b.n_head, 1));
+            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.c.ggml_reshape_2d(ctx, gate, n_embd_head * b.n_head, b.n_tokens);
             b.cb(gate, "attn_gate_sig", il);
 
-            cur = c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", il);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -230,8 +220,8 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         const i_attn: c_int = 2 * (il + 1);
@@ -281,9 +271,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = c.ggml_tanh(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_tanh(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

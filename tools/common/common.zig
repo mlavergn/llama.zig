@@ -10,13 +10,10 @@
 //! ports and the line it began at.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const ggml = @import("ggml.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
-const log = @import("log.zig");
-const arg = @import("arg.zig");
 const Params = @import("params.zig").Params;
 const llama = @import("llama");
 
@@ -27,19 +24,19 @@ extern fn SetConsoleCP(cp: c_uint) callconv(.winapi) c_int;
 /// `log.h` exports: the `common_log` verbosity a ggml log level maps to.
 pub fn logGetVerbosity(level: c.ggml_log_level) c_int {
     return switch (level) {
-        c.GGML_LOG_LEVEL_DEBUG => log.level_debug,
-        c.GGML_LOG_LEVEL_INFO => log.level_trace,
-        c.GGML_LOG_LEVEL_WARN => log.level_warn,
-        c.GGML_LOG_LEVEL_ERROR => log.level_error,
-        c.GGML_LOG_LEVEL_CONT => log.level_trace,
-        else => log.level_output,
+        c.GGML_LOG_LEVEL_DEBUG => mod.log.level_debug,
+        c.GGML_LOG_LEVEL_INFO => mod.log.level_trace,
+        c.GGML_LOG_LEVEL_WARN => mod.log.level_warn,
+        c.GGML_LOG_LEVEL_ERROR => mod.log.level_error,
+        c.GGML_LOG_LEVEL_CONT => mod.log.level_trace,
+        else => mod.log.level_output,
     };
 }
 
 /// Ports `common_log_default_callback` (common/log.cpp:561 @b1b770d90): libllama's
 /// messages through `common_log`, at `common_log_get_verbosity`'s level.
 pub fn defaultLogCallback(level: c.ggml_log_level, text: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
-    if (logGetVerbosity(level) <= log.verbosity_thold) log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
+    if (logGetVerbosity(level) <= mod.log.verbosity_thold) mod.log.add(@fromBackingInt(@intCast(level)), "%s", .{text});
 }
 
 /// Ports `common_init` (common/common.cpp:406 @b1b770d90).
@@ -49,8 +46,8 @@ pub fn init() void {
         _ = SetConsoleCP(65001);
     }
 
-    log.setPrefix(true);
-    log.setTimestamps(true);
+    mod.log.setPrefix(true);
+    mod.log.setTimestamps(true);
 
     c.llama_log_set(defaultLogCallback, null);
 }
@@ -64,7 +61,7 @@ pub fn tokenize(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, text: []cons
     var result = try a.alloc(c.llama_token, @intCast(n_tokens));
     n_tokens = c.llama_tokenize(vocab, text.ptr, @intCast(text.len), result.ptr, @intCast(result.len), add_special, parse_special);
     if (n_tokens == std.math.minInt(i32)) {
-        return arg.throwStr("Tokenization failed: input text too large, tokenization result exceeds int32_t limit");
+        return mod.arg.throwStr("Tokenization failed: input text too large, tokenization result exceeds int32_t limit");
     }
     if (n_tokens < 0) {
         result = try a.realloc(result, @intCast(-n_tokens));
@@ -449,14 +446,14 @@ pub fn replayLastToken(a: std.mem.Allocator, ctx: ?*c.llama_context, last_token:
     _ = batch.add(last_token, pos, 0, true);
 
     if (c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
-        log.err("%s: failed to replay last token\n", .{@as([*:0]const u8, "common_replay_last_token")});
+        mod.log.err("%s: failed to replay last token\n", .{@as([*:0]const u8, "common_replay_last_token")});
         return false;
     }
     return true;
 }
 
 fn oom() noreturn {
-    ggml.oom("common.cpp");
+    mod.ggml.oom("common.cpp");
 }
 
 // -----------------------------------------------------------------------------
@@ -589,18 +586,18 @@ pub fn getGgufInfo(fname: []const u8) GgufInfo {
 /// `fit.Log.sink` for the tools: `cli/fit.zig`'s messages through
 /// `common_log`, at the level and verbosity of the `LOG_*` macro the C uses.
 pub fn fitLogSink(verbosity: i32, text: [*:0]const u8) void {
-    const level: log.Level = switch (verbosity) {
-        log.level_error => .err,
-        log.level_warn => .warn,
+    const level: mod.log.Level = switch (verbosity) {
+        mod.log.level_error => .err,
+        mod.log.level_warn => .warn,
         else => .info,
     };
-    if (verbosity <= log.verbosity_thold) log.add(level, "%s", .{text});
+    if (verbosity <= mod.log.verbosity_thold) mod.log.add(level, "%s", .{text});
 }
 
 /// `fit.Log.json` for the tools: `LOG_JSON` (common/log.h:143 @b1b770d90), a
 /// structured record through `common_log`, written only under `--log-jsonl`.
 pub fn fitLogJson(kind: [*:0]const u8, data: []const u8) void {
-    log.addJson(kind, data);
+    mod.log.addJson(kind, data);
 }
 
 // -----------------------------------------------------------------------------
@@ -611,9 +608,9 @@ fn comLog(comptime level: enum { trc, inf, err }, comptime func: [*:0]const u8, 
     const f = "cmn  %12.*s: " ++ fmt;
     const pre = .{ @as(c_int, 12), func };
     switch (level) {
-        .trc => log.trc(f, pre ++ args),
-        .inf => log.inf(f, pre ++ args),
-        .err => log.err(f, pre ++ args),
+        .trc => mod.log.trc(f, pre ++ args),
+        .inf => mod.log.inf(f, pre ++ args),
+        .err => mod.log.err(f, pre ++ args),
     }
 }
 
@@ -640,11 +637,11 @@ pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_device
     const build_type: [*:0]const u8 = if (std.debug.runtime_safety) " (debug)" else "";
     comLog(.trc, func, "%s: build %d (%s) with %s for %s%s\n", .{ func, bi.build_number, bi.commit.ptr, bi.compiler.ptr, bi.build_target.ptr, build_type });
 
-    const verbosity = log.verbosity_thold;
+    const verbosity = mod.log.verbosity_thold;
     comLog(.inf, func, "%s: verbosity = %d (adjust with the `-lv N` CLI arg)\n", .{ func, verbosity });
 
     // device enumeration creates a primary context on CUDA backends, skip it when the caller does not own any device
-    if (print_devices and verbosity >= log.level_trace) {
+    if (print_devices and verbosity >= mod.log.level_trace) {
         comLog(.trc, func, "%s", .{@as([*:0]const u8, "device_info:\n")});
         var i: usize = 0;
         while (i < c.ggml_backend_dev_count()) : (i += 1) {
@@ -655,7 +652,7 @@ pub fn paramsPrintInfo(a: std.mem.Allocator, params: *const Params, print_device
             comLog(.trc, func, "  - %-8s: %s (%zu MiB, %zu MiB free)\n", .{ c.ggml_backend_dev_name(dev), c.ggml_backend_dev_description(dev), total / 1024 / 1024, free / 1024 / 1024 });
         }
     }
-    if (verbosity >= log.level_trace) {
+    if (verbosity >= mod.log.level_trace) {
         comLog(.trc, func, "%s\n", .{(try paramsGetSystemInfo(a, params)).ptr});
     }
 }
@@ -810,9 +807,9 @@ pub fn embdNormalize(inp: [*]const f32, out: [*]f32, n: c_int, embd_norm: c_int)
         },
         else => { // p-norm (euclidean is p-norm p=2)
             for (0..len) |i| {
-                sum += libm.pow(@abs(@as(f64, inp[i])), @floatFromInt(embd_norm));
+                sum += stdlib.libm.pow(@abs(@as(f64, inp[i])), @floatFromInt(embd_norm));
             }
-            sum = libm.pow(sum, 1.0 / @as(f64, @floatFromInt(embd_norm)));
+            sum = stdlib.libm.pow(sum, 1.0 / @as(f64, @floatFromInt(embd_norm)));
         },
     }
 

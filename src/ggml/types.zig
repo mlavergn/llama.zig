@@ -19,9 +19,8 @@
 //! leave them.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("impl.zig");
-const c = impl.c;
 
 const op_name = [_][*:0]const u8{
     "NONE",              "DUP",                "ADD",                "ADD_ID",
@@ -107,82 +106,82 @@ const glu_op_name = [_][*:0]const u8{
 };
 
 const type_traits = blk: {
-    var t: [c.GGML_TYPE_COUNT]c.ggml_type_traits = @splat(std.mem.zeroes(c.ggml_type_traits));
-    t[c.GGML_TYPE_I8] = .{
+    var t: [mod.impl.c.GGML_TYPE_COUNT]mod.impl.c.ggml_type_traits = @splat(std.mem.zeroes(mod.impl.c.ggml_type_traits));
+    t[mod.impl.c.GGML_TYPE_I8] = .{
         .type_name = "i8",
         .blck_size = 1,
         .type_size = @sizeOf(i8),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_I16] = .{
+    t[mod.impl.c.GGML_TYPE_I16] = .{
         .type_name = "i16",
         .blck_size = 1,
         .type_size = @sizeOf(i16),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_I32] = .{
+    t[mod.impl.c.GGML_TYPE_I32] = .{
         .type_name = "i32",
         .blck_size = 1,
         .type_size = @sizeOf(i32),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_I64] = .{
+    t[mod.impl.c.GGML_TYPE_I64] = .{
         .type_name = "i64",
         .blck_size = 1,
         .type_size = @sizeOf(i64),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_F64] = .{
+    t[mod.impl.c.GGML_TYPE_F64] = .{
         .type_name = "f64",
         .blck_size = 1,
         .type_size = @sizeOf(f64),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_F32] = .{
+    t[mod.impl.c.GGML_TYPE_F32] = .{
         .type_name = "f32",
         .blck_size = 1,
         .type_size = @sizeOf(f32),
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_F16] = .{
+    t[mod.impl.c.GGML_TYPE_F16] = .{
         .type_name = "f16",
         .blck_size = 1,
-        .type_size = @sizeOf(c.ggml_fp16_t),
+        .type_size = @sizeOf(mod.impl.c.ggml_fp16_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&c.ggml_fp16_to_fp32_row),
-        .from_float_ref = @ptrCast(&c.ggml_fp32_to_fp16_row),
+        .to_float = @ptrCast(&mod.impl.c.ggml_fp16_to_fp32_row),
+        .from_float_ref = @ptrCast(&mod.impl.c.ggml_fp32_to_fp16_row),
     };
-    t[c.GGML_TYPE_Q1_0] = .{
+    t[mod.impl.c.GGML_TYPE_Q1_0] = .{
         .type_name = "q1_0",
-        .blck_size = c.QK1_0,
-        .type_size = @sizeOf(c.block_q1_0),
+        .blck_size = mod.impl.c.QK1_0,
+        .type_size = @sizeOf(mod.impl.c.block_q1_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q1_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_q1_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q1_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q1_0_ref),
     };
-    t[c.GGML_TYPE_Q2_0] = .{
+    t[mod.impl.c.GGML_TYPE_Q2_0] = .{
         .type_name = "q2_0",
-        .blck_size = c.QK2_0,
-        .type_size = @sizeOf(c.block_q2_0),
+        .blck_size = mod.impl.c.QK2_0,
+        .type_size = @sizeOf(mod.impl.c.block_q2_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q2_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_q2_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q2_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q2_0_ref),
     };
-    t[c.GGML_TYPE_Q4_0] = .{
+    t[mod.impl.c.GGML_TYPE_Q4_0] = .{
         .type_name = "q4_0",
-        .blck_size = c.QK4_0,
-        .type_size = @sizeOf(c.block_q4_0),
+        .blck_size = mod.impl.c.QK4_0,
+        .type_size = @sizeOf(mod.impl.c.block_q4_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q4_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_q4_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q4_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q4_0_ref),
     };
-    t[c.GGML_TYPE_Q4_1] = .{
+    t[mod.impl.c.GGML_TYPE_Q4_1] = .{
         .type_name = "q4_1",
-        .blck_size = c.QK4_1,
-        .type_size = @sizeOf(c.block_q4_1),
+        .blck_size = mod.impl.c.QK4_1,
+        .type_size = @sizeOf(mod.impl.c.block_q4_1),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q4_1),
-        .from_float_ref = @ptrCast(&c.quantize_row_q4_1_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q4_1),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q4_1_ref),
     };
     t[4] = .{
         .type_name = "REMOVED",
@@ -196,182 +195,182 @@ const type_traits = blk: {
         .type_size = 0,
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_Q5_0] = .{
+    t[mod.impl.c.GGML_TYPE_Q5_0] = .{
         .type_name = "q5_0",
-        .blck_size = c.QK5_0,
-        .type_size = @sizeOf(c.block_q5_0),
+        .blck_size = mod.impl.c.QK5_0,
+        .type_size = @sizeOf(mod.impl.c.block_q5_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q5_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_q5_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q5_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q5_0_ref),
     };
-    t[c.GGML_TYPE_Q5_1] = .{
+    t[mod.impl.c.GGML_TYPE_Q5_1] = .{
         .type_name = "q5_1",
-        .blck_size = c.QK5_1,
-        .type_size = @sizeOf(c.block_q5_1),
+        .blck_size = mod.impl.c.QK5_1,
+        .type_size = @sizeOf(mod.impl.c.block_q5_1),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q5_1),
-        .from_float_ref = @ptrCast(&c.quantize_row_q5_1_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q5_1),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q5_1_ref),
     };
-    t[c.GGML_TYPE_Q8_0] = .{
+    t[mod.impl.c.GGML_TYPE_Q8_0] = .{
         .type_name = "q8_0",
-        .blck_size = c.QK8_0,
-        .type_size = @sizeOf(c.block_q8_0),
+        .blck_size = mod.impl.c.QK8_0,
+        .type_size = @sizeOf(mod.impl.c.block_q8_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q8_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_q8_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q8_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q8_0_ref),
     };
-    t[c.GGML_TYPE_Q8_1] = .{
+    t[mod.impl.c.GGML_TYPE_Q8_1] = .{
         .type_name = "q8_1",
-        .blck_size = c.QK8_1,
-        .type_size = @sizeOf(c.block_q8_1),
+        .blck_size = mod.impl.c.QK8_1,
+        .type_size = @sizeOf(mod.impl.c.block_q8_1),
         .is_quantized = true,
-        .from_float_ref = @ptrCast(&c.quantize_row_q8_1_ref),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q8_1_ref),
     };
-    t[c.GGML_TYPE_MXFP4] = .{
+    t[mod.impl.c.GGML_TYPE_MXFP4] = .{
         .type_name = "mxfp4",
-        .blck_size = c.QK_MXFP4,
-        .type_size = @sizeOf(c.block_mxfp4),
+        .blck_size = mod.impl.c.QK_MXFP4,
+        .type_size = @sizeOf(mod.impl.c.block_mxfp4),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_mxfp4),
-        .from_float_ref = @ptrCast(&c.quantize_row_mxfp4_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_mxfp4),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_mxfp4_ref),
     };
-    t[c.GGML_TYPE_NVFP4] = .{
+    t[mod.impl.c.GGML_TYPE_NVFP4] = .{
         .type_name = "nvfp4",
-        .blck_size = c.QK_NVFP4,
-        .type_size = @sizeOf(c.block_nvfp4),
+        .blck_size = mod.impl.c.QK_NVFP4,
+        .type_size = @sizeOf(mod.impl.c.block_nvfp4),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_nvfp4),
-        .from_float_ref = @ptrCast(&c.quantize_row_nvfp4_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_nvfp4),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_nvfp4_ref),
     };
-    t[c.GGML_TYPE_F8_E4M3] = .{
+    t[mod.impl.c.GGML_TYPE_F8_E4M3] = .{
         .type_name = "f8_e4m3",
         .blck_size = 1,
-        .type_size = @sizeOf(c.ggml_fp8_e4m3_t),
+        .type_size = @sizeOf(mod.impl.c.ggml_fp8_e4m3_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&c.dequantize_row_f8_e4m3),
-        .from_float_ref = @ptrCast(&c.quantize_row_f8_e4m3_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_f8_e4m3),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_f8_e4m3_ref),
     };
-    t[c.GGML_TYPE_Q2_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q2_K] = .{
         .type_name = "q2_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q2_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q2_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q2_K),
-        .from_float_ref = @ptrCast(&c.quantize_row_q2_K_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q2_K),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q2_K_ref),
     };
-    t[c.GGML_TYPE_Q3_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q3_K] = .{
         .type_name = "q3_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q3_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q3_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q3_K),
-        .from_float_ref = @ptrCast(&c.quantize_row_q3_K_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q3_K),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q3_K_ref),
     };
-    t[c.GGML_TYPE_Q4_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q4_K] = .{
         .type_name = "q4_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q4_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q4_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q4_K),
-        .from_float_ref = @ptrCast(&c.quantize_row_q4_K_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q4_K),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q4_K_ref),
     };
-    t[c.GGML_TYPE_Q5_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q5_K] = .{
         .type_name = "q5_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q5_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q5_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q5_K),
-        .from_float_ref = @ptrCast(&c.quantize_row_q5_K_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q5_K),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q5_K_ref),
     };
-    t[c.GGML_TYPE_Q6_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q6_K] = .{
         .type_name = "q6_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q6_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q6_K),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_q6_K),
-        .from_float_ref = @ptrCast(&c.quantize_row_q6_K_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_q6_K),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_q6_K_ref),
     };
-    t[c.GGML_TYPE_IQ2_XXS] = .{
+    t[mod.impl.c.GGML_TYPE_IQ2_XXS] = .{
         .type_name = "iq2_xxs",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq2_xxs),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq2_xxs),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq2_xxs),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq2_xxs),
     };
-    t[c.GGML_TYPE_IQ2_XS] = .{
+    t[mod.impl.c.GGML_TYPE_IQ2_XS] = .{
         .type_name = "iq2_xs",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq2_xs),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq2_xs),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq2_xs),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq2_xs),
     };
-    t[c.GGML_TYPE_IQ3_XXS] = .{
+    t[mod.impl.c.GGML_TYPE_IQ3_XXS] = .{
         .type_name = "iq3_xxs",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq3_xxs),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq3_xxs),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq3_xxs),
-        .from_float_ref = @ptrCast(&c.quantize_row_iq3_xxs_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq3_xxs),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_iq3_xxs_ref),
     };
-    t[c.GGML_TYPE_IQ3_S] = .{
+    t[mod.impl.c.GGML_TYPE_IQ3_S] = .{
         .type_name = "iq3_s",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq3_s),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq3_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq3_s),
-        .from_float_ref = @ptrCast(&c.quantize_row_iq3_s_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq3_s),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_iq3_s_ref),
     };
-    t[c.GGML_TYPE_IQ2_S] = .{
+    t[mod.impl.c.GGML_TYPE_IQ2_S] = .{
         .type_name = "iq2_s",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq2_s),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq2_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq2_s),
-        .from_float_ref = @ptrCast(&c.quantize_row_iq2_s_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq2_s),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_iq2_s_ref),
     };
-    t[c.GGML_TYPE_IQ1_S] = .{
+    t[mod.impl.c.GGML_TYPE_IQ1_S] = .{
         .type_name = "iq1_s",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq1_s),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq1_s),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq1_s),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq1_s),
     };
-    t[c.GGML_TYPE_IQ1_M] = .{
+    t[mod.impl.c.GGML_TYPE_IQ1_M] = .{
         .type_name = "iq1_m",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq1_m),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq1_m),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq1_m),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq1_m),
     };
-    t[c.GGML_TYPE_IQ4_NL] = .{
+    t[mod.impl.c.GGML_TYPE_IQ4_NL] = .{
         .type_name = "iq4_nl",
-        .blck_size = c.QK4_NL,
-        .type_size = @sizeOf(c.block_iq4_nl),
+        .blck_size = mod.impl.c.QK4_NL,
+        .type_size = @sizeOf(mod.impl.c.block_iq4_nl),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq4_nl),
-        .from_float_ref = @ptrCast(&c.quantize_row_iq4_nl_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq4_nl),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_iq4_nl_ref),
     };
-    t[c.GGML_TYPE_IQ4_XS] = .{
+    t[mod.impl.c.GGML_TYPE_IQ4_XS] = .{
         .type_name = "iq4_xs",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_iq4_xs),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_iq4_xs),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_iq4_xs),
-        .from_float_ref = @ptrCast(&c.quantize_row_iq4_xs_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_iq4_xs),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_iq4_xs_ref),
     };
-    t[c.GGML_TYPE_Q8_K] = .{
+    t[mod.impl.c.GGML_TYPE_Q8_K] = .{
         .type_name = "q8_K",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_q8_K),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_q8_K),
         .is_quantized = true,
     };
-    t[c.GGML_TYPE_BF16] = .{
+    t[mod.impl.c.GGML_TYPE_BF16] = .{
         .type_name = "bf16",
         .blck_size = 1,
-        .type_size = @sizeOf(c.ggml_bf16_t),
+        .type_size = @sizeOf(mod.impl.c.ggml_bf16_t),
         .is_quantized = false,
-        .to_float = @ptrCast(&c.ggml_bf16_to_fp32_row),
-        .from_float_ref = @ptrCast(&c.ggml_fp32_to_bf16_row_ref),
+        .to_float = @ptrCast(&mod.impl.c.ggml_bf16_to_fp32_row),
+        .from_float_ref = @ptrCast(&mod.impl.c.ggml_fp32_to_bf16_row_ref),
     };
     t[31] = .{
         .type_name = "TYPE_Q4_0_4_4 REMOVED, use Q4_0 with runtime repacking",
@@ -391,21 +390,21 @@ const type_traits = blk: {
         .type_size = 0,
         .is_quantized = false,
     };
-    t[c.GGML_TYPE_TQ1_0] = .{
+    t[mod.impl.c.GGML_TYPE_TQ1_0] = .{
         .type_name = "tq1_0",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_tq1_0),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_tq1_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_tq1_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_tq1_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_tq1_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_tq1_0_ref),
     };
-    t[c.GGML_TYPE_TQ2_0] = .{
+    t[mod.impl.c.GGML_TYPE_TQ2_0] = .{
         .type_name = "tq2_0",
-        .blck_size = c.QK_K,
-        .type_size = @sizeOf(c.block_tq2_0),
+        .blck_size = mod.impl.c.QK_K,
+        .type_size = @sizeOf(mod.impl.c.block_tq2_0),
         .is_quantized = true,
-        .to_float = @ptrCast(&c.dequantize_row_tq2_0),
-        .from_float_ref = @ptrCast(&c.quantize_row_tq2_0_ref),
+        .to_float = @ptrCast(&mod.impl.c.dequantize_row_tq2_0),
+        .from_float_ref = @ptrCast(&mod.impl.c.quantize_row_tq2_0_ref),
     };
     t[36] = .{
         .type_name = "TYPE_IQ4_NL_4_4 REMOVED, use IQ4_NL with runtime repacking",
@@ -432,20 +431,20 @@ const type_traits = blk: {
 // Table accessors
 
 /// Ports `ggml_get_type_traits` (ggml.c:963 @b1b770d90).
-pub export fn ggml_get_type_traits(t: c.enum_ggml_type) *const c.ggml_type_traits {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_get_type_traits(t: mod.impl.c.enum_ggml_type) *const mod.impl.c.ggml_type_traits {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     return &type_traits[@intCast(t)];
 }
 
 /// Ports `ggml_blck_size` (ggml.c:1338 @b1b770d90).
-pub export fn ggml_blck_size(t: c.enum_ggml_type) i64 {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_blck_size(t: mod.impl.c.enum_ggml_type) i64 {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].blck_size;
 }
 
 /// Ports `ggml_type_size` (ggml.c:1344 @b1b770d90).
-pub export fn ggml_type_size(t: c.enum_ggml_type) usize {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_type_size(t: mod.impl.c.enum_ggml_type) usize {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].type_size;
 }
 
@@ -453,41 +452,41 @@ pub export fn ggml_type_size(t: c.enum_ggml_type) usize {
 ///
 /// A row's size is not `ne * type_size`: for a quantized type, `type_size` is
 /// the size of a whole block, so the element count divides by the block size.
-pub export fn ggml_row_size(t: c.enum_ggml_type, ne: i64) usize {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_row_size(t: mod.impl.c.enum_ggml_type, ne: i64) usize {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     std.debug.assert(@rem(ne, ggml_blck_size(t)) == 0);
     return ggml_type_size(t) * @as(usize, @intCast(ne)) / @as(usize, @intCast(ggml_blck_size(t)));
 }
 
 /// Ports `ggml_type_name` (ggml.c:1357 @b1b770d90).
-pub export fn ggml_type_name(t: c.enum_ggml_type) [*:0]const u8 {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_type_name(t: mod.impl.c.enum_ggml_type) [*:0]const u8 {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     return @ptrCast(type_traits[@intCast(t)].type_name);
 }
 
 /// Ports `ggml_is_quantized` (ggml.c:1363 @b1b770d90).
-pub export fn ggml_is_quantized(t: c.enum_ggml_type) bool {
-    std.debug.assert(t >= 0 and t < c.GGML_TYPE_COUNT);
+pub export fn ggml_is_quantized(t: mod.impl.c.enum_ggml_type) bool {
+    std.debug.assert(t >= 0 and t < mod.impl.c.GGML_TYPE_COUNT);
     return type_traits[@intCast(t)].is_quantized;
 }
 
 /// Ports `ggml_op_name` (ggml.c:1369 @b1b770d90).
-pub export fn ggml_op_name(op: c.enum_ggml_op) [*:0]const u8 {
+pub export fn ggml_op_name(op: mod.impl.c.enum_ggml_op) [*:0]const u8 {
     return op_name[@intCast(op)];
 }
 
 /// Ports `ggml_op_symbol` (ggml.c:1373 @b1b770d90).
-pub export fn ggml_op_symbol(op: c.enum_ggml_op) [*:0]const u8 {
+pub export fn ggml_op_symbol(op: mod.impl.c.enum_ggml_op) [*:0]const u8 {
     return op_symbol[@intCast(op)];
 }
 
 /// Ports `ggml_unary_op_name` (ggml.c:1377 @b1b770d90).
-pub export fn ggml_unary_op_name(op: c.enum_ggml_unary_op) [*:0]const u8 {
+pub export fn ggml_unary_op_name(op: mod.impl.c.enum_ggml_unary_op) [*:0]const u8 {
     return unary_op_name[@intCast(op)];
 }
 
 /// Ports `ggml_glu_op_name` (ggml.c:1381 @b1b770d90).
-pub export fn ggml_glu_op_name(op: c.enum_ggml_glu_op) [*:0]const u8 {
+pub export fn ggml_glu_op_name(op: mod.impl.c.enum_ggml_glu_op) [*:0]const u8 {
     return glu_op_name[@intCast(op)];
 }
 
@@ -495,21 +494,21 @@ pub export fn ggml_glu_op_name(op: c.enum_ggml_glu_op) [*:0]const u8 {
 ///
 /// Unary and GLU ops all share one `ggml_op`, so a useful description has to
 /// reach into `op_params` for the real operation.
-pub export fn ggml_op_desc(t: *const c.ggml_tensor) [*:0]const u8 {
-    if (t.op == c.GGML_OP_UNARY) return ggml_unary_op_name(ggml_get_unary_op(t));
-    if (t.op == c.GGML_OP_GLU) return ggml_glu_op_name(ggml_get_glu_op(t));
+pub export fn ggml_op_desc(t: *const mod.impl.c.ggml_tensor) [*:0]const u8 {
+    if (t.op == mod.impl.c.GGML_OP_UNARY) return ggml_unary_op_name(ggml_get_unary_op(t));
+    if (t.op == mod.impl.c.GGML_OP_GLU) return ggml_glu_op_name(ggml_get_glu_op(t));
     return ggml_op_name(t.op);
 }
 
 /// Ports `ggml_get_unary_op` (ggml.c:1957 @b1b770d90).
-pub export fn ggml_get_unary_op(t: *const c.ggml_tensor) c.enum_ggml_unary_op {
-    impl.assert(t.op == c.GGML_OP_UNARY, "tensor->op == GGML_OP_UNARY");
+pub export fn ggml_get_unary_op(t: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_unary_op {
+    mod.impl.assert(t.op == mod.impl.c.GGML_OP_UNARY, "tensor->op == GGML_OP_UNARY");
     return @intCast(t.op_params[0]);
 }
 
 /// Ports `ggml_get_glu_op` (ggml.c:1962 @b1b770d90).
-pub export fn ggml_get_glu_op(t: *const c.ggml_tensor) c.enum_ggml_glu_op {
-    impl.assert(t.op == c.GGML_OP_GLU, "tensor->op == GGML_OP_GLU");
+pub export fn ggml_get_glu_op(t: *const mod.impl.c.ggml_tensor) mod.impl.c.enum_ggml_glu_op {
+    mod.impl.assert(t.op == mod.impl.c.GGML_OP_GLU, "tensor->op == GGML_OP_GLU");
     return @intCast(t.op_params[0]);
 }
 
@@ -518,40 +517,40 @@ pub export fn ggml_get_glu_op(t: *const c.ggml_tensor) c.enum_ggml_glu_op {
 /// A file type names the format most tensors in a model use; this maps it to
 /// the tensor type that implies. Aborts on an unknown or mixed file type,
 /// which the C does too.
-export fn ggml_ftype_to_ggml_type(ftype: c.enum_ggml_ftype) c.enum_ggml_type {
-    const wtype: c.enum_ggml_type = switch (ftype) {
-        c.GGML_FTYPE_ALL_F32 => c.GGML_TYPE_F32,
-        c.GGML_FTYPE_MOSTLY_F16 => c.GGML_TYPE_F16,
-        c.GGML_FTYPE_MOSTLY_BF16 => c.GGML_TYPE_BF16,
-        c.GGML_FTYPE_MOSTLY_Q4_0 => c.GGML_TYPE_Q4_0,
-        c.GGML_FTYPE_MOSTLY_Q4_1 => c.GGML_TYPE_Q4_1,
-        c.GGML_FTYPE_MOSTLY_Q1_0 => c.GGML_TYPE_Q1_0,
-        c.GGML_FTYPE_MOSTLY_Q2_0 => c.GGML_TYPE_Q2_0,
-        c.GGML_FTYPE_MOSTLY_Q5_0 => c.GGML_TYPE_Q5_0,
-        c.GGML_FTYPE_MOSTLY_Q5_1 => c.GGML_TYPE_Q5_1,
-        c.GGML_FTYPE_MOSTLY_Q8_0 => c.GGML_TYPE_Q8_0,
-        c.GGML_FTYPE_MOSTLY_MXFP4 => c.GGML_TYPE_MXFP4,
-        c.GGML_FTYPE_MOSTLY_NVFP4 => c.GGML_TYPE_NVFP4,
-        c.GGML_FTYPE_MOSTLY_F8_E4M3 => c.GGML_TYPE_F8_E4M3,
-        c.GGML_FTYPE_MOSTLY_Q2_K => c.GGML_TYPE_Q2_K,
-        c.GGML_FTYPE_MOSTLY_Q3_K => c.GGML_TYPE_Q3_K,
-        c.GGML_FTYPE_MOSTLY_Q4_K => c.GGML_TYPE_Q4_K,
-        c.GGML_FTYPE_MOSTLY_Q5_K => c.GGML_TYPE_Q5_K,
-        c.GGML_FTYPE_MOSTLY_Q6_K => c.GGML_TYPE_Q6_K,
-        c.GGML_FTYPE_MOSTLY_IQ2_XXS => c.GGML_TYPE_IQ2_XXS,
-        c.GGML_FTYPE_MOSTLY_IQ2_XS => c.GGML_TYPE_IQ2_XS,
-        c.GGML_FTYPE_MOSTLY_IQ3_XXS => c.GGML_TYPE_IQ3_XXS,
-        c.GGML_FTYPE_MOSTLY_IQ1_S => c.GGML_TYPE_IQ1_S,
-        c.GGML_FTYPE_MOSTLY_IQ1_M => c.GGML_TYPE_IQ1_M,
-        c.GGML_FTYPE_MOSTLY_IQ4_NL => c.GGML_TYPE_IQ4_NL,
-        c.GGML_FTYPE_MOSTLY_IQ4_XS => c.GGML_TYPE_IQ4_XS,
-        c.GGML_FTYPE_MOSTLY_IQ3_S => c.GGML_TYPE_IQ3_S,
-        c.GGML_FTYPE_MOSTLY_IQ2_S => c.GGML_TYPE_IQ2_S,
+export fn ggml_ftype_to_ggml_type(ftype: mod.impl.c.enum_ggml_ftype) mod.impl.c.enum_ggml_type {
+    const wtype: mod.impl.c.enum_ggml_type = switch (ftype) {
+        mod.impl.c.GGML_FTYPE_ALL_F32 => mod.impl.c.GGML_TYPE_F32,
+        mod.impl.c.GGML_FTYPE_MOSTLY_F16 => mod.impl.c.GGML_TYPE_F16,
+        mod.impl.c.GGML_FTYPE_MOSTLY_BF16 => mod.impl.c.GGML_TYPE_BF16,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q4_0 => mod.impl.c.GGML_TYPE_Q4_0,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q4_1 => mod.impl.c.GGML_TYPE_Q4_1,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q1_0 => mod.impl.c.GGML_TYPE_Q1_0,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q2_0 => mod.impl.c.GGML_TYPE_Q2_0,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q5_0 => mod.impl.c.GGML_TYPE_Q5_0,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q5_1 => mod.impl.c.GGML_TYPE_Q5_1,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q8_0 => mod.impl.c.GGML_TYPE_Q8_0,
+        mod.impl.c.GGML_FTYPE_MOSTLY_MXFP4 => mod.impl.c.GGML_TYPE_MXFP4,
+        mod.impl.c.GGML_FTYPE_MOSTLY_NVFP4 => mod.impl.c.GGML_TYPE_NVFP4,
+        mod.impl.c.GGML_FTYPE_MOSTLY_F8_E4M3 => mod.impl.c.GGML_TYPE_F8_E4M3,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q2_K => mod.impl.c.GGML_TYPE_Q2_K,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q3_K => mod.impl.c.GGML_TYPE_Q3_K,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q4_K => mod.impl.c.GGML_TYPE_Q4_K,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q5_K => mod.impl.c.GGML_TYPE_Q5_K,
+        mod.impl.c.GGML_FTYPE_MOSTLY_Q6_K => mod.impl.c.GGML_TYPE_Q6_K,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ2_XXS => mod.impl.c.GGML_TYPE_IQ2_XXS,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ2_XS => mod.impl.c.GGML_TYPE_IQ2_XS,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ3_XXS => mod.impl.c.GGML_TYPE_IQ3_XXS,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ1_S => mod.impl.c.GGML_TYPE_IQ1_S,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ1_M => mod.impl.c.GGML_TYPE_IQ1_M,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ4_NL => mod.impl.c.GGML_TYPE_IQ4_NL,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ4_XS => mod.impl.c.GGML_TYPE_IQ4_XS,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ3_S => mod.impl.c.GGML_TYPE_IQ3_S,
+        mod.impl.c.GGML_FTYPE_MOSTLY_IQ2_S => mod.impl.c.GGML_TYPE_IQ2_S,
         // Unknown, and the mixed Q4_1/F16 format, have no single tensor type.
-        else => c.GGML_TYPE_COUNT,
+        else => mod.impl.c.GGML_TYPE_COUNT,
     };
 
-    impl.assert(wtype != c.GGML_TYPE_COUNT, "wtype != GGML_TYPE_COUNT");
+    mod.impl.assert(wtype != mod.impl.c.GGML_TYPE_COUNT, "wtype != GGML_TYPE_COUNT");
     return wtype;
 }
 
@@ -559,14 +558,14 @@ export fn ggml_ftype_to_ggml_type(ftype: c.enum_ggml_ftype) c.enum_ggml_type {
 // Element counts and sizes
 
 /// Ports `ggml_nelements` (ggml.c:1297 @b1b770d90).
-pub export fn ggml_nelements(tensor: *const c.ggml_tensor) i64 {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_nelements(tensor: *const mod.impl.c.ggml_tensor) i64 {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] * tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
 /// Ports `ggml_nrows` (ggml.c:1303 @b1b770d90).
-pub export fn ggml_nrows(tensor: *const c.ggml_tensor) i64 {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_nrows(tensor: *const mod.impl.c.ggml_tensor) i64 {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return tensor.ne[1] * tensor.ne[2] * tensor.ne[3];
 }
 
@@ -574,8 +573,8 @@ pub export fn ggml_nrows(tensor: *const c.ggml_tensor) i64 {
 ///
 /// Computed from strides rather than from the element count, so a view of a
 /// larger tensor reports the span it actually occupies.
-pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
-    for (0..c.GGML_MAX_DIMS) |i| {
+pub export fn ggml_nbytes(tensor: *const mod.impl.c.ggml_tensor) usize {
+    for (0..mod.impl.c.GGML_MAX_DIMS) |i| {
         if (tensor.ne[i] <= 0) return 0;
     }
 
@@ -583,12 +582,12 @@ pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
     var nbytes: usize = undefined;
     if (blck_size == 1) {
         nbytes = ggml_type_size(tensor.type);
-        for (0..c.GGML_MAX_DIMS) |i| {
+        for (0..mod.impl.c.GGML_MAX_DIMS) |i| {
             nbytes += @as(usize, @intCast(tensor.ne[i] - 1)) * tensor.nb[i];
         }
     } else {
         nbytes = @as(usize, @intCast(tensor.ne[0])) * tensor.nb[0] / blck_size;
-        for (1..c.GGML_MAX_DIMS) |i| {
+        for (1..mod.impl.c.GGML_MAX_DIMS) |i| {
             nbytes += @as(usize, @intCast(tensor.ne[i] - 1)) * tensor.nb[i];
         }
     }
@@ -596,12 +595,12 @@ pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
 }
 
 /// Ports `ggml_nbytes_pad` (ggml.c:1334 @b1b770d90).
-pub export fn ggml_nbytes_pad(tensor: *const c.ggml_tensor) usize {
-    return stdlib.num.pad(usize, ggml_nbytes(tensor), c.GGML_MEM_ALIGN);
+pub export fn ggml_nbytes_pad(tensor: *const mod.impl.c.ggml_tensor) usize {
+    return stdlib.num.pad(usize, ggml_nbytes(tensor), mod.impl.c.GGML_MEM_ALIGN);
 }
 
 /// Ports `ggml_element_size` (ggml.c:1397 @b1b770d90).
-pub export fn ggml_element_size(tensor: *const c.ggml_tensor) usize {
+pub export fn ggml_element_size(tensor: *const mod.impl.c.ggml_tensor) usize {
     return ggml_type_size(tensor.type);
 }
 
@@ -610,33 +609,33 @@ pub export fn ggml_element_size(tensor: *const c.ggml_tensor) usize {
 /// What a tensor costs a context beyond its data: the object header plus the
 /// tensor struct.
 pub export fn ggml_tensor_overhead() usize {
-    return object_size + c.GGML_TENSOR_SIZE;
+    return object_size + mod.impl.c.GGML_TENSOR_SIZE;
 }
 
 /// Ports `GGML_OBJECT_SIZE` (ggml.c:984 @b1b770d90).
-pub const object_size: usize = @sizeOf(impl.Object);
+pub const object_size: usize = @sizeOf(mod.impl.Object);
 
 // -----------------------------------------------------------------------------
 // Shape predicates
 
 /// Ports `ggml_is_scalar` (ggml.c:1401 @b1b770d90).
-pub export fn ggml_is_scalar(tensor: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_is_scalar(tensor: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return tensor.ne[0] == 1 and tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
 /// Ports `ggml_is_vector` (ggml.c:1407 @b1b770d90).
-pub export fn ggml_is_vector(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_vector(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.ne[1] == 1 and tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
 /// Ports `ggml_is_matrix` (ggml.c:1413 @b1b770d90).
-pub export fn ggml_is_matrix(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_matrix(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.ne[2] == 1 and tensor.ne[3] == 1;
 }
 
 /// Ports `ggml_is_3d` (ggml.c:1419 @b1b770d90).
-pub export fn ggml_is_3d(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_3d(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.ne[3] == 1;
 }
 
@@ -644,8 +643,8 @@ pub export fn ggml_is_3d(tensor: *const c.ggml_tensor) bool {
 ///
 /// Return: the index of the highest non-unit dimension, plus one. Always at
 /// least 1, so a scalar reports one dimension rather than none.
-pub export fn ggml_n_dims(tensor: *const c.ggml_tensor) c_int {
-    var i: usize = c.GGML_MAX_DIMS - 1;
+pub export fn ggml_n_dims(tensor: *const mod.impl.c.ggml_tensor) c_int {
+    var i: usize = mod.impl.c.GGML_MAX_DIMS - 1;
     while (i >= 1) : (i -= 1) {
         if (tensor.ne[i] > 1) return @intCast(i + 1);
     }
@@ -653,38 +652,38 @@ pub export fn ggml_n_dims(tensor: *const c.ggml_tensor) c_int {
 }
 
 /// Ports `ggml_is_empty` (ggml.c:1560 @b1b770d90).
-pub export fn ggml_is_empty(tensor: *const c.ggml_tensor) bool {
-    for (0..c.GGML_MAX_DIMS) |i| {
+pub export fn ggml_is_empty(tensor: *const mod.impl.c.ggml_tensor) bool {
+    for (0..mod.impl.c.GGML_MAX_DIMS) |i| {
         if (tensor.ne[i] == 0) return true;
     }
     return false;
 }
 
 /// Ports `ggml_are_same_shape` (ggml.c:1570 @b1b770d90).
-pub export fn ggml_are_same_shape(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_are_same_shape(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return t0.ne[0] == t1.ne[0] and t0.ne[1] == t1.ne[1] and
         t0.ne[2] == t1.ne[2] and t0.ne[3] == t1.ne[3];
 }
 
 /// Ports `ggml_are_same_stride` (ggml.c:1580 @b1b770d90).
-pub export fn ggml_are_same_stride(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_are_same_stride(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return t0.nb[0] == t1.nb[0] and t0.nb[1] == t1.nb[1] and
         t0.nb[2] == t1.nb[2] and t0.nb[3] == t1.nb[3];
 }
 
 /// Ports `ggml_is_view` (ggml.c:1590 @b1b770d90).
-pub export fn ggml_is_view(t: *const c.ggml_tensor) bool {
-    return impl.isView(t);
+pub export fn ggml_is_view(t: *const mod.impl.c.ggml_tensor) bool {
+    return mod.impl.isView(t);
 }
 
 /// Ports `ggml_can_repeat` (ggml.c:1595 @b1b770d90).
 ///
 /// Return: whether `t1`'s shape is a whole-number tiling of `t0`'s, which is
 /// what broadcasting requires. Two empty tensors count as compatible.
-pub export fn ggml_can_repeat(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_can_repeat(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     if (ggml_is_empty(t0)) return ggml_is_empty(t1);
     return @rem(t1.ne[0], t0.ne[0]) == 0 and
         @rem(t1.ne[1], t0.ne[1]) == 0 and
@@ -693,7 +692,7 @@ pub export fn ggml_can_repeat(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor
 }
 
 /// Ports `ggml_can_repeat_rows` (ggml.c:1605 @b1b770d90).
-pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
+pub fn canRepeatRows(t0: *const mod.impl.c.ggml_tensor, t1: *const mod.impl.c.ggml_tensor) bool {
     return t0.ne[0] == t1.ne[0] and ggml_can_repeat(t0, t1);
 }
 
@@ -701,7 +700,7 @@ pub fn canRepeatRows(t0: *const c.ggml_tensor, t1: *const c.ggml_tensor) bool {
 // Layout predicates
 
 /// Ports `ggml_is_transposed` (ggml.c:1476 @b1b770d90).
-pub export fn ggml_is_transposed(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_transposed(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[1];
 }
 
@@ -717,7 +716,7 @@ pub export fn ggml_is_transposed(tensor: *const c.ggml_tensor) bool {
 /// - `n`: number of dimensions to check.
 ///
 /// Return: whether the layout is contiguous under those relaxations.
-fn isContiguousMN(tensor: *const c.ggml_tensor, m: usize, n: usize) bool {
+fn isContiguousMN(tensor: *const mod.impl.c.ggml_tensor, m: usize, n: usize) bool {
     const blck: usize = @intCast(ggml_blck_size(tensor.type));
     var next_nb = ggml_type_size(tensor.type);
     if (tensor.ne[0] != ggml_blck_size(tensor.type) and tensor.nb[0] != next_nb) {
@@ -738,37 +737,37 @@ fn isContiguousMN(tensor: *const c.ggml_tensor, m: usize, n: usize) bool {
 }
 
 /// Ports `ggml_is_contiguous` (ggml.c:1500 @b1b770d90).
-pub export fn ggml_is_contiguous(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_contiguous(tensor: *const mod.impl.c.ggml_tensor) bool {
     return ggml_is_contiguous_0(tensor);
 }
 
 /// Ports `ggml_is_contiguous_0` (ggml.c:1504 @b1b770d90).
-export fn ggml_is_contiguous_0(tensor: *const c.ggml_tensor) bool {
-    return isContiguousMN(tensor, 0, c.GGML_MAX_DIMS);
+export fn ggml_is_contiguous_0(tensor: *const mod.impl.c.ggml_tensor) bool {
+    return isContiguousMN(tensor, 0, mod.impl.c.GGML_MAX_DIMS);
 }
 
 /// Ports `ggml_is_contiguous_1` (ggml.c:1508 @b1b770d90).
-pub export fn ggml_is_contiguous_1(tensor: *const c.ggml_tensor) bool {
-    return isContiguousMN(tensor, 1, c.GGML_MAX_DIMS);
+pub export fn ggml_is_contiguous_1(tensor: *const mod.impl.c.ggml_tensor) bool {
+    return isContiguousMN(tensor, 1, mod.impl.c.GGML_MAX_DIMS);
 }
 
 /// Ports `ggml_is_contiguous_2` (ggml.c:1512 @b1b770d90).
-pub export fn ggml_is_contiguous_2(tensor: *const c.ggml_tensor) bool {
-    return isContiguousMN(tensor, 2, c.GGML_MAX_DIMS);
+pub export fn ggml_is_contiguous_2(tensor: *const mod.impl.c.ggml_tensor) bool {
+    return isContiguousMN(tensor, 2, mod.impl.c.GGML_MAX_DIMS);
 }
 
 /// Ports `ggml_is_contiguous_to_1` (ggml.c:1516 @b1b770d90).
-export fn ggml_is_contiguous_to_1(tensor: *const c.ggml_tensor) bool {
+export fn ggml_is_contiguous_to_1(tensor: *const mod.impl.c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 1);
 }
 
 /// Ports `ggml_is_contiguous_to_2` (ggml.c:1520 @b1b770d90).
-export fn ggml_is_contiguous_to_2(tensor: *const c.ggml_tensor) bool {
+export fn ggml_is_contiguous_to_2(tensor: *const mod.impl.c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 2);
 }
 
 /// Ports `ggml_is_contiguous_to_3` (ggml.c:1524 @b1b770d90).
-export fn ggml_is_contiguous_to_3(tensor: *const c.ggml_tensor) bool {
+export fn ggml_is_contiguous_to_3(tensor: *const mod.impl.c.ggml_tensor) bool {
     return isContiguousMN(tensor, 0, 3);
 }
 
@@ -776,33 +775,33 @@ export fn ggml_is_contiguous_to_3(tensor: *const c.ggml_tensor) bool {
 ///
 /// Stronger than `ggml_is_contiguous`: the span the tensor occupies must equal
 /// what its elements need, so there is no trailing slack either.
-pub export fn ggml_is_contiguously_allocated(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_contiguously_allocated(tensor: *const mod.impl.c.ggml_tensor) bool {
     return ggml_nbytes(tensor) == @as(usize, @intCast(ggml_nelements(tensor))) *
         ggml_type_size(tensor.type) / @as(usize, @intCast(ggml_blck_size(tensor.type)));
 }
 
 /// Ports `ggml_is_permuted` (ggml.c:1532 @b1b770d90).
-pub export fn ggml_is_permuted(tensor: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub export fn ggml_is_permuted(tensor: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] > tensor.nb[1] or tensor.nb[1] > tensor.nb[2] or tensor.nb[2] > tensor.nb[3];
 }
 
 /// Ports `ggml_is_contiguous_channels` (ggml.c:1538 @b1b770d90).
-pub export fn ggml_is_contiguous_channels(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_contiguous_channels(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.nb[0] > tensor.nb[2] and
         tensor.nb[1] > tensor.nb[0] and
         tensor.nb[2] == ggml_type_size(tensor.type);
 }
 
 /// Ports `ggml_is_contiguous_rows` (ggml.c:1545 @b1b770d90).
-pub export fn ggml_is_contiguous_rows(tensor: *const c.ggml_tensor) bool {
+pub export fn ggml_is_contiguous_rows(tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensor.ne[0] == ggml_blck_size(tensor.type) or
         tensor.nb[0] == ggml_type_size(tensor.type);
 }
 
 /// Ports `ggml_is_padded_1d` (ggml.c:1551 @b1b770d90).
-pub fn isPadded1d(tensor: *const c.ggml_tensor) bool {
-    comptime std.debug.assert(c.GGML_MAX_DIMS == 4);
+pub fn isPadded1d(tensor: *const mod.impl.c.ggml_tensor) bool {
+    comptime std.debug.assert(mod.impl.c.GGML_MAX_DIMS == 4);
     return tensor.nb[0] == ggml_type_size(tensor.type) and
         tensor.nb[2] == tensor.nb[1] * @as(usize, @intCast(tensor.ne[1])) and
         tensor.nb[3] == tensor.nb[2] * @as(usize, @intCast(tensor.ne[2]));
@@ -830,24 +829,24 @@ const golden_glu_name: u64 = 0xbcc1426328c349eb;
 
 /// Folds a C string into the checksum, distinguishing absent from empty.
 fn mixStr(h_in: u64, s: ?[*:0]const u8) u64 {
-    const str = s orelse return impl.mix(h_in, 0xdeadbeef);
+    const str = s orelse return mod.impl.mix(h_in, 0xdeadbeef);
     var h = h_in;
     var i: usize = 0;
-    while (str[i] != 0) : (i += 1) h = impl.mix(h, str[i]);
-    return impl.mix(h, 0);
+    while (str[i] != 0) : (i += 1) h = mod.impl.mix(h, str[i]);
+    return mod.impl.mix(h, 0);
 }
 
 test "traits table matches the C checksum" {
     var h: u64 = 0;
     var t: usize = 0;
-    while (t < c.GGML_TYPE_COUNT) : (t += 1) {
+    while (t < mod.impl.c.GGML_TYPE_COUNT) : (t += 1) {
         const tr = &type_traits[t];
         h = mixStr(h, @ptrCast(tr.type_name));
-        h = impl.mix(h, @bitCast(tr.blck_size));
-        h = impl.mix(h, tr.type_size);
-        h = impl.mix(h, if (tr.is_quantized) 1 else 0);
-        h = impl.mix(h, if (tr.to_float != null) 1 else 0);
-        h = impl.mix(h, if (tr.from_float_ref != null) 1 else 0);
+        h = mod.impl.mix(h, @bitCast(tr.blck_size));
+        h = mod.impl.mix(h, tr.type_size);
+        h = mod.impl.mix(h, if (tr.is_quantized) 1 else 0);
+        h = mod.impl.mix(h, if (tr.to_float != null) 1 else 0);
+        h = mod.impl.mix(h, if (tr.from_float_ref != null) 1 else 0);
     }
     try std.testing.expectEqual(golden_traits, h);
 }
@@ -871,10 +870,10 @@ test "op name tables match the C checksums" {
     try std.testing.expectEqual(golden_glu_name, hg);
 
     // The tables must also be exactly as long as the enums they index.
-    try std.testing.expectEqual(@as(usize, c.GGML_OP_COUNT), op_name.len);
-    try std.testing.expectEqual(@as(usize, c.GGML_OP_COUNT), op_symbol.len);
-    try std.testing.expectEqual(@as(usize, c.GGML_UNARY_OP_COUNT), unary_op_name.len);
-    try std.testing.expectEqual(@as(usize, c.GGML_GLU_OP_COUNT), glu_op_name.len);
+    try std.testing.expectEqual(@as(usize, mod.impl.c.GGML_OP_COUNT), op_name.len);
+    try std.testing.expectEqual(@as(usize, mod.impl.c.GGML_OP_COUNT), op_symbol.len);
+    try std.testing.expectEqual(@as(usize, mod.impl.c.GGML_UNARY_OP_COUNT), unary_op_name.len);
+    try std.testing.expectEqual(@as(usize, mod.impl.c.GGML_GLU_OP_COUNT), glu_op_name.len);
 }
 
 test "traits conversion pointers name the right routines" {
@@ -882,11 +881,11 @@ test "traits conversion pointers name the right routines" {
     // identity against the real symbols in ggml-quants.c, which this file does
     // not export, so the comparison is genuine.
     const cases = .{
-        .{ c.GGML_TYPE_Q4_K, &c.dequantize_row_q4_K, &c.quantize_row_q4_K_ref },
-        .{ c.GGML_TYPE_Q5_K, &c.dequantize_row_q5_K, &c.quantize_row_q5_K_ref },
-        .{ c.GGML_TYPE_Q6_K, &c.dequantize_row_q6_K, &c.quantize_row_q6_K_ref },
-        .{ c.GGML_TYPE_Q8_0, &c.dequantize_row_q8_0, &c.quantize_row_q8_0_ref },
-        .{ c.GGML_TYPE_IQ4_XS, &c.dequantize_row_iq4_xs, &c.quantize_row_iq4_xs_ref },
+        .{ mod.impl.c.GGML_TYPE_Q4_K, &mod.impl.c.dequantize_row_q4_K, &mod.impl.c.quantize_row_q4_K_ref },
+        .{ mod.impl.c.GGML_TYPE_Q5_K, &mod.impl.c.dequantize_row_q5_K, &mod.impl.c.quantize_row_q5_K_ref },
+        .{ mod.impl.c.GGML_TYPE_Q6_K, &mod.impl.c.dequantize_row_q6_K, &mod.impl.c.quantize_row_q6_K_ref },
+        .{ mod.impl.c.GGML_TYPE_Q8_0, &mod.impl.c.dequantize_row_q8_0, &mod.impl.c.quantize_row_q8_0_ref },
+        .{ mod.impl.c.GGML_TYPE_IQ4_XS, &mod.impl.c.dequantize_row_iq4_xs, &mod.impl.c.quantize_row_iq4_xs_ref },
     };
     inline for (cases) |case| {
         const tr = &type_traits[@intCast(case[0])];
@@ -894,14 +893,14 @@ test "traits conversion pointers name the right routines" {
         try std.testing.expectEqual(@intFromPtr(case[2]), @intFromPtr(tr.from_float_ref));
     }
     // Types that genuinely have no reference quantizer must stay null.
-    try std.testing.expect(type_traits[@intCast(c.GGML_TYPE_IQ2_XXS)].from_float_ref == null);
-    try std.testing.expect(type_traits[@intCast(c.GGML_TYPE_Q8_K)].to_float == null);
+    try std.testing.expect(type_traits[@intCast(mod.impl.c.GGML_TYPE_IQ2_XXS)].from_float_ref == null);
+    try std.testing.expect(type_traits[@intCast(mod.impl.c.GGML_TYPE_Q8_K)].to_float == null);
 }
 
 test "row size accounts for block quantization" {
     // f32 is one element per block, so a row is the plain product.
-    try std.testing.expectEqual(@as(usize, 256 * 4), ggml_row_size(c.GGML_TYPE_F32, 256));
+    try std.testing.expectEqual(@as(usize, 256 * 4), ggml_row_size(mod.impl.c.GGML_TYPE_F32, 256));
     // Q4_K packs 256 elements into one 144-byte block.
-    try std.testing.expectEqual(@as(usize, 144), ggml_row_size(c.GGML_TYPE_Q4_K, 256));
-    try std.testing.expectEqual(@as(usize, 288), ggml_row_size(c.GGML_TYPE_Q4_K, 512));
+    try std.testing.expectEqual(@as(usize, 144), ggml_row_size(mod.impl.c.GGML_TYPE_Q4_K, 256));
+    try std.testing.expectEqual(@as(usize, 288), ggml_row_size(mod.impl.c.GGML_TYPE_Q4_K, 512));
 }

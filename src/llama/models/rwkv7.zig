@@ -10,26 +10,16 @@
 //! `rwkv7_base.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const rwkv7_base = @import("rwkv7_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_rwkv7`'s `load_arch_hparams` (models/rwkv7.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     try loadHparams(self, ml, exc);
 }
 
 /// The body `llama_model_rwkv7`'s and `llama_model_arwkv7`'s
 /// `load_arch_hparams` share, keys and size table alike.
-pub fn loadHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     if (try meta.getKey(f32, .attention_layernorm_eps, false, exc)) |v| hp.f_norm_eps = v;
@@ -70,7 +60,7 @@ pub fn loadHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thro
 }
 
 /// Ports `llama_model_rwkv7`'s `load_arch_tensors` (models/rwkv7.cpp:46 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -127,7 +117,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// (models/rwkv7.cpp:76 @b1b770d90, and `time_mix_w0` in
 /// models/arwkv7.cpp:66 @b1b770d90). The first layer's value-residual
 /// tensors are loaded at the ICLR rank and never used.
-pub fn createTimeMixLora(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i64, n_lora_decay: i64, n_lora_iclr: i64, n_lora_value_res_mix: i64, exc: *Exception) Thrown!void {
+pub fn createTimeMixLora(self: *llama.model.Model, layer: *llama.model.Layer, i: i32, n_embd: i64, n_lora_decay: i64, n_lora_iclr: i64, n_lora_value_res_mix: i64, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     layer.time_mix_w0 = try self.createTensor(.{ .tensor = .time_mix_w0, .suffix = "weight", .bid = i }, &.{n_embd}, 0, exc);
     layer.time_mix_w1 = try self.createTensor(.{ .tensor = .time_mix_w1, .suffix = "weight", .bid = i }, &.{ n_embd, n_lora_decay }, 0, exc);
     layer.time_mix_w2 = try self.createTensor(.{ .tensor = .time_mix_w2, .suffix = "weight", .bid = i }, &.{ n_lora_decay, n_embd }, 0, exc);
@@ -152,7 +142,7 @@ pub fn createTimeMixLora(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: 
 /// projections, from `time_mix_k_k` on, which RWKV-7 and ARWKV-7 load
 /// alike (models/rwkv7.cpp:100 @b1b770d90, and `time_mix_k_k` in
 /// models/arwkv7.cpp:95 @b1b770d90).
-pub fn createTimeMixKr(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i64, attn_hidden_size: i64, exc: *Exception) Thrown!void {
+pub fn createTimeMixKr(self: *llama.model.Model, layer: *llama.model.Layer, i: i32, n_embd: i64, attn_hidden_size: i64, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     layer.time_mix_k_k = try self.createTensor(.{ .tensor = .time_mix_k_k, .suffix = "weight", .bid = i }, &.{attn_hidden_size}, 0, exc);
     layer.time_mix_k_a = try self.createTensor(.{ .tensor = .time_mix_k_a, .suffix = "weight", .bid = i }, &.{attn_hidden_size}, 0, exc);
     layer.time_mix_r_k = try self.createTensor(.{ .tensor = .time_mix_r_k, .suffix = "weight", .bid = i }, &.{attn_hidden_size}, 0, exc);
@@ -163,18 +153,18 @@ pub fn createTimeMixKr(self: *Model, layer: *model_mod.Layer, i: i32, n_embd: i6
 }
 
 /// Ports `llama_model_rwkv7`'s `build_arch_graph` (models/rwkv7.cpp:120 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_rwkv7`'s `graph` (models/rwkv7.cpp:124 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const ubatch = b.ubatch;
-    impl.assert(hp.token_shift_count == 2, "models/rwkv7.cpp", 126, "hparams.token_shift_count == 2");
+    llama.impl.assert(hp.token_shift_count == 2, "models/rwkv7.cpp", 126, "hparams.token_shift_count == 2");
 
-    var v_first: ?*Tensor = null;
+    var v_first: ?*llama.impl.c.ggml_tensor = null;
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     inpL = b.buildNorm(inpL, model.tok_norm, model.tok_norm_b, .norm, 0);
@@ -191,48 +181,48 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        inpL = c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
+        inpL = llama.impl.c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
 
         var token_shift = b.buildRwkvTokenShiftLoad(rs_inp, ubatch, il);
 
-        const att_shift: *Tensor = c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], 0);
-        const ffn_shift: *Tensor = c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], @as(usize, @intCast(n_embd)) * c.ggml_element_size(token_shift));
+        const att_shift: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], 0);
+        const ffn_shift: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, token_shift, n_embd, 1, n_seqs, token_shift.nb[1], token_shift.nb[2], @as(usize, @intCast(n_embd)) * llama.impl.c.ggml_element_size(token_shift));
 
         const att_norm = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .norm, il);
         b.cb(att_norm, "attn_norm", il);
 
-        var x_prev: *Tensor = c.ggml_concat(ctx, att_shift, c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
+        var x_prev: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, att_shift, llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
 
-        const cur_tm = rwkv7_base.buildRwkv7TimeMix(model, b, rs_inp, att_norm, x_prev, &v_first, ubatch, il);
+        const cur_tm = llama.models.rwkv7_base.buildRwkv7TimeMix(model, b, rs_inp, att_norm, x_prev, &v_first, ubatch, il);
 
-        var ffn_inp: *Tensor = c.ggml_add(ctx, cur_tm, inpL);
+        var ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur_tm, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
         var ffn_norm = b.buildNorm(ffn_inp, layer.attn_norm_2, layer.attn_norm_2_b, .norm, il);
         b.cb(ffn_norm, "ffn_norm", il);
 
-        x_prev = c.ggml_concat(ctx, ffn_shift, c.ggml_view_3d(ctx, ffn_norm, n_embd, n_seq_tokens - 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], 0), 1);
+        x_prev = llama.impl.c.ggml_concat(ctx, ffn_shift, llama.impl.c.ggml_view_3d(ctx, ffn_norm, n_embd, n_seq_tokens - 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], 0), 1);
 
         const last: usize = @intCast((n_seq_tokens - 1) * n_embd);
-        token_shift = c.ggml_concat(
+        token_shift = llama.impl.c.ggml_concat(
             ctx,
-            c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * c.ggml_element_size(att_norm)),
-            c.ggml_view_3d(ctx, ffn_norm, n_embd, 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], last * c.ggml_element_size(ffn_norm)),
+            llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.c.ggml_element_size(att_norm)),
+            llama.impl.c.ggml_view_3d(ctx, ffn_norm, n_embd, 1, n_seqs, ffn_norm.nb[1], ffn_norm.nb[2], last * llama.impl.c.ggml_element_size(ffn_norm)),
             1,
         );
-        c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
+        llama.impl.c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
 
-        ffn_inp = c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
-        ffn_norm = c.ggml_reshape_2d(ctx, ffn_norm, n_embd, n_tokens);
-        x_prev = c.ggml_reshape_2d(ctx, x_prev, n_embd, n_tokens);
+        ffn_inp = llama.impl.c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
+        ffn_norm = llama.impl.c.ggml_reshape_2d(ctx, ffn_norm, n_embd, n_tokens);
+        x_prev = llama.impl.c.ggml_reshape_2d(ctx, x_prev, n_embd, n_tokens);
 
         if (il == b.n_layer - 1) {
-            ffn_inp = c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
-            ffn_norm = c.ggml_get_rows(ctx, ffn_norm, inp_out_ids);
-            x_prev = c.ggml_get_rows(ctx, x_prev, inp_out_ids);
+            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            ffn_norm = llama.impl.c.ggml_get_rows(ctx, ffn_norm, inp_out_ids);
+            x_prev = llama.impl.c.ggml_get_rows(ctx, x_prev, inp_out_ids);
         }
-        var cur = rwkv7_base.buildRwkv7ChannelMix(b, layer, ffn_norm, x_prev, .rwkv7);
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        var cur = llama.models.rwkv7_base.buildRwkv7ChannelMix(b, layer, ffn_norm, x_prev, .rwkv7);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

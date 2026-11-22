@@ -6,20 +6,13 @@
 //! Ported from `llama.cpp/ggml/src/ggml-cuda/add-id.cu` at v1.0.0
 //! (`b1b770d90`). The kernel, `add_id_kernel`, stays CUDA.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `ggml_cuda_op_add_id` (add-id.cu:28 @b1b770d90), which launches with
 /// `<<<>>>`.
-pub fn opAddId(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
-    const src2 = impl.one(Tensor, dst.src[2]);
+pub fn opAddId(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
 
     // GGML_TENSOR_TERNARY_OP_LOCALS
     const ne00 = src0.ne[0];
@@ -35,14 +28,14 @@ pub fn opAddId(ctx: *common.Context, dst: *Tensor) void {
     const ne0 = dst.ne[0];
     const ne1 = dst.ne[1];
 
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    impl.assert(src2.type == c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(src2.type == ggml.impl.c.GGML_TYPE_I32, "src2->type == GGML_TYPE_I32");
 
-    impl.assert(nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
-    impl.assert(nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
-    impl.assert(nb20 == @sizeOf(i32), "nb20 == sizeof(int32_t)");
+    ggml.impl.assert(nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
+    ggml.impl.assert(nb10 == @sizeOf(f32), "nb10 == sizeof(float)");
+    ggml.impl.assert(nb20 == @sizeOf(i32), "nb20 == sizeof(int32_t)");
 
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;
@@ -50,11 +43,11 @@ pub fn opAddId(ctx: *common.Context, dst: *Tensor) void {
     const dst_d: ?*anyopaque = dst.data;
 
     const threads: c_int = @min(@as(c_int, @truncate(ne00)), 768); // cols
-    const blocks: kernels.Dim3 = .{ // n_experts_used, n_tokens
+    const blocks: ggml.cuda.kernels.Dim3 = .{ // n_experts_used, n_tokens
         .x = @truncate(@as(u64, @bitCast(ne01))),
         .y = @truncate(@as(u64, @bitCast(ne02))),
     };
-    kernels.launch(kernels.get("add-id", "add_id_kernel"), .{ .grid = blocks, .block = .{ .x = @bitCast(threads) }, .stream = ctx.stream() }, .{
+    ggml.cuda.kernels.launch(ggml.cuda.kernels.get("add-id", "add_id_kernel"), .{ .grid = blocks, .block = .{ .x = @bitCast(threads) }, .stream = ctx.stream() }, .{
         src0_d, src1_d, src2_d, dst_d,
         ne0,    ne1,    nb01,   nb02,
         nb11,   nb21,

@@ -9,33 +9,27 @@
 //! began at.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const model_mod = @import("../model.zig");
-const c = impl.c;
-const T = graph.T;
-const ne = graph.ne;
+const mtmd = @import("../module.zig");
 
 /// The `conv_block` lambda (mtmd/models/dots3note.cpp:12 @b1b770d90) of `build`.
-fn convBlock(ctx0: ?*c.ggml_context, x_in: T, w: T, b: T) T {
-    var x = c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
-    x = c.ggml_add(ctx0, x, c.ggml_reshape_4d(ctx0, b, 1, 1, ne(x, 2), 1));
-    return c.ggml_gelu_erf(ctx0, x);
+fn convBlock(ctx0: ?*mtmd.impl.c.ggml_context, x_in: mtmd.graph.T, w: mtmd.graph.T, b: mtmd.graph.T) mtmd.graph.T {
+    var x = mtmd.impl.c.ggml_conv_2d(ctx0, w, x_in, 2, 2, 1, 1, 1, 1);
+    x = mtmd.impl.c.ggml_add(ctx0, x, mtmd.impl.c.ggml_reshape_4d(ctx0, b, 1, 1, mtmd.graph.ne(x, 2), 1));
+    return mtmd.impl.c.ggml_gelu_erf(ctx0, x);
 }
 
 /// The `add_pos` lambda (mtmd/models/dots3note.cpp:40 @b1b770d90) of `build`: partial
 /// rotary, the first half of each head, NEOX style. `ctx` is the positions
 /// tensor.
-fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: T, layer: *const model_mod.Layer) T {
+fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
     _ = layer;
-    const positions: T = @ptrCast(@alignCast(ctx));
-    return c.ggml_rope_ext(g.ctx0, cur, positions, null, @divTrunc(g.d_head, 2), c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+    const positions: mtmd.graph.T = @ptrCast(@alignCast(ctx));
+    return mtmd.impl.c.ggml_rope_ext(g.ctx0, cur, positions, null, @divTrunc(g.d_head, 2), mtmd.impl.c.GGML_ROPE_TYPE_NEOX, 0, g.hparams.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
 }
 
 /// Ports `build` (mtmd/models/dots3note.cpp:3 @b1b770d90), a member of
 /// `mtmd_graph_dots3note_a`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -45,7 +39,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // the reference impl zero-masks conv inputs beyond the valid length at each stage;
     // running on exactly the valid frames with the convs' zero padding is equivalent
     var inp = g.buildInpRaw(1);
-    impl.ggmlAssert(inp.?.type == c.GGML_TYPE_F32, "dots3note.cpp", 8, "inp->type == GGML_TYPE_F32");
+    mtmd.impl.ggmlAssert(inp.?.type == mtmd.impl.c.GGML_TYPE_F32, "dots3note.cpp", 8, "inp->type == GGML_TYPE_F32");
 
     // 3x conv2d (k=3, s=2, p=1) + gelu
     {
@@ -57,18 +51,18 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     }
 
     // [OW, OH, OC, 1] -> [OH*OC, OW], feature index f + OH*c (matches the reference permute+reshape)
-    inp = c.ggml_cont(ctx0, c.ggml_permute(ctx0, inp, 2, 0, 1, 3));
-    inp = c.ggml_reshape_2d(ctx0, inp, ne(inp, 0) * ne(inp, 1), ne(inp, 2));
+    inp = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, inp, 2, 0, 1, 3));
+    inp = mtmd.impl.c.ggml_reshape_2d(ctx0, inp, mtmd.graph.ne(inp, 0) * mtmd.graph.ne(inp, 1), mtmd.graph.ne(inp, 2));
 
     // project to d_model (no bias)
-    inp = c.ggml_mul_mat(ctx0, model.conv_out_w, inp);
+    inp = mtmd.impl.c.ggml_mul_mat(ctx0, model.conv_out_w, inp);
     g.cb(inp, "after_conv_out", -1);
 
-    const n_pos = ne(inp, 1);
+    const n_pos = mtmd.graph.ne(inp, 1);
 
-    const positions = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, n_pos);
-    _ = c.ggml_set_name(positions, "positions");
-    c.ggml_set_input(positions);
+    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
+    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
+    mtmd.impl.c.ggml_set_input(positions);
 
     var cur = g.buildVit(inp, n_pos, .rms, hparams.ffn_op, null, .{ .ctx = positions, .f = addPos }, .{});
     g.cb(cur, "after_transformer", -1);
@@ -78,7 +72,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu_erf, -1);
     g.cb(cur, "projected", -1);
 
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

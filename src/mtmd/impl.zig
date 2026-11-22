@@ -20,15 +20,9 @@
 //! libllama.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
 const stdlib = @import("stdlib");
-const builtin = @import("builtin");
 
 pub const c = @import("llama").impl.c;
-
-/// Every allocation mtmd makes, as the C++'s `new` and `std::vector` do:
-/// the C heap, so a buffer handed out through the C ABI can be freed there.
-pub const gpa = std.heap.c_allocator;
 
 /// `GGML_ASSERT`, kept in every build mode as upstream keeps it.
 pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime expr: [*:0]const u8) void {
@@ -44,12 +38,12 @@ pub fn abort(comptime file: [*:0]const u8, comptime line: c_int, comptime msg: [
 /// An exception escaping `main`: libc++abi's message, then `abort`.
 pub fn abortUncaught(comptime kind: [*:0]const u8, what_: [*:0]const u8) noreturn {
     const f = stdlib.stdio.cStream(.stderr);
-    _ = libc.fputs("libc++abi: terminating due to uncaught exception of type ", f);
-    _ = libc.fputs(kind, f);
-    _ = libc.fputs(": ", f);
-    _ = libc.fputs(what_, f);
-    _ = libc.fputs("\n", f);
-    _ = libc.fflush(f);
+    _ = stdlib.libc.fputs("libc++abi: terminating due to uncaught exception of type ", f);
+    _ = stdlib.libc.fputs(kind, f);
+    _ = stdlib.libc.fputs(": ", f);
+    _ = stdlib.libc.fputs(what_, f);
+    _ = stdlib.libc.fputs("\n", f);
+    _ = stdlib.libc.fflush(f);
     std.process.abort();
 }
 
@@ -95,9 +89,9 @@ pub const GenRef = struct {
     spk: std.ArrayList(f32) = .empty,
 
     pub fn deinit(self: *GenRef) void {
-        self.tokens.deinit(gpa);
-        self.feat.deinit(gpa);
-        self.spk.deinit(gpa);
+        self.tokens.deinit(std.heap.c_allocator);
+        self.feat.deinit(std.heap.c_allocator);
+        self.spk.deinit(std.heap.c_allocator);
         self.* = .{};
     }
 
@@ -105,11 +99,11 @@ pub const GenRef = struct {
     pub fn assign(self: *GenRef, other: *const GenRef) !void {
         if (self == other) return;
         self.tokens.clearRetainingCapacity();
-        try self.tokens.appendSlice(gpa, other.tokens.items);
+        try self.tokens.appendSlice(std.heap.c_allocator, other.tokens.items);
         self.feat.clearRetainingCapacity();
-        try self.feat.appendSlice(gpa, other.feat.items);
+        try self.feat.appendSlice(std.heap.c_allocator, other.feat.items);
         self.spk.clearRetainingCapacity();
-        try self.spk.appendSlice(gpa, other.spk.items);
+        try self.spk.appendSlice(std.heap.c_allocator, other.spk.items);
     }
 
     pub fn clone(self: *const GenRef) !GenRef {
@@ -127,7 +121,7 @@ pub const GenVoice = struct {
     ref: GenRef = .{},
 
     pub fn deinit(self: *GenVoice) void {
-        self.rows.deinit(gpa);
+        self.rows.deinit(std.heap.c_allocator);
         self.ref.deinit();
     }
 };
@@ -143,10 +137,10 @@ pub const GenVoiceMap = struct {
 
     pub fn deinit(self: *GenVoiceMap) void {
         for (self.entries.items) |*e| {
-            gpa.free(e.name);
+            std.heap.c_allocator.free(e.name);
             e.voice.deinit();
         }
-        self.entries.deinit(gpa);
+        self.entries.deinit(std.heap.c_allocator);
     }
 
     pub fn count(self: *const GenVoiceMap) usize {
@@ -163,9 +157,9 @@ pub const GenVoiceMap = struct {
                 .gt => break,
             }
         }
-        const owned = try gpa.dupeSentinel(u8, name, 0);
-        errdefer gpa.free(owned);
-        try self.entries.insert(gpa, i, .{ .name = owned, .voice = .{} });
+        const owned = try std.heap.c_allocator.dupeSentinel(u8, name, 0);
+        errdefer std.heap.c_allocator.free(owned);
+        try self.entries.insert(std.heap.c_allocator, i, .{ .name = owned, .voice = .{} });
         return &self.entries.items[i].voice;
     }
 };
@@ -179,12 +173,12 @@ pub const ImageU8 = struct {
     ny: c_int = 0,
 
     pub fn deinit(self: *ImageU8) void {
-        self.buf.deinit(gpa);
+        self.buf.deinit(std.heap.c_allocator);
     }
 
     pub fn clone(self: *const ImageU8) !ImageU8 {
         var out: ImageU8 = .{ .nx = self.nx, .ny = self.ny };
-        try out.buf.appendSlice(gpa, self.buf.items);
+        try out.buf.appendSlice(std.heap.c_allocator, self.buf.items);
         return out;
     }
 
@@ -200,14 +194,14 @@ pub const ImageU8 = struct {
         } else {
             const n = @as(usize, @intCast(self.nx)) * @as(usize, @intCast(self.ny)) * 3;
             const old = self.buf.items.len;
-            try self.buf.resize(gpa, n);
+            try self.buf.resize(std.heap.c_allocator, n);
             if (n > old) @memset(self.buf.items[old..], 0);
         }
     }
 
     pub fn cpyBuf(self: *ImageU8, new_buf: []const u8) !void {
         self.buf.clearRetainingCapacity();
-        try self.buf.appendSlice(gpa, new_buf);
+        try self.buf.appendSlice(std.heap.c_allocator, new_buf);
     }
 
     pub fn isPlaceholder(self: *const ImageU8) bool {
@@ -299,13 +293,13 @@ pub const ImageF32 = struct {
     ny_: c_int = 0,
 
     pub fn deinit(self: *ImageF32) void {
-        self.buf.deinit(gpa);
+        self.buf.deinit(std.heap.c_allocator);
     }
 
     pub fn clone(self: *const ImageF32) !ImageF32 {
         var out = self.*;
         out.buf = .empty;
-        try out.buf.appendSlice(gpa, self.buf.items);
+        try out.buf.appendSlice(std.heap.c_allocator, self.buf.items);
         return out;
     }
 
@@ -330,14 +324,14 @@ pub const ImageF32 = struct {
             const px = @as(usize, @intCast(self.nx_)) * @as(usize, @intCast(self.ny_));
             const n = if (is_audio) px else px * 3;
             const old = self.buf.items.len;
-            try self.buf.resize(gpa, n);
+            try self.buf.resize(std.heap.c_allocator, n);
             if (n > old) @memset(self.buf.items[old..], 0);
         }
     }
 
     pub fn cpyBuf(self: *ImageF32, new_buf: []const f32) !void {
         self.buf.clearRetainingCapacity();
-        try self.buf.appendSlice(gpa, new_buf);
+        try self.buf.appendSlice(std.heap.c_allocator, new_buf);
     }
 
     /// Ports `from_u8` (mtmd-impl.h:853 @b1b770d90), a member of `mtmd_image_f32`.
@@ -349,7 +343,7 @@ pub const ImageF32 = struct {
             self.buf.clearRetainingCapacity();
             return; // no-op
         }
-        try self.buf.resize(gpa, img.nElements());
+        try self.buf.resize(std.heap.c_allocator, img.nElements());
         for (img.roBuf(), 0..) |v, i| self.buf.items[i] = @as(f32, @floatFromInt(v)) / 255.0;
     }
 
@@ -432,12 +426,12 @@ pub const ImageF32Batch = struct {
 
     pub fn deinit(self: *ImageF32Batch) void {
         for (self.entries.items) |*e| e.deinit();
-        self.entries.deinit(gpa);
+        self.entries.deinit(std.heap.c_allocator);
     }
 
     pub fn clone(self: *const ImageF32Batch) !ImageF32Batch {
         var out: ImageF32Batch = .{ .is_audio = self.is_audio, .is_video = self.is_video };
-        try out.entries.ensureTotalCapacity(gpa, self.entries.items.len);
+        try out.entries.ensureTotalCapacity(std.heap.c_allocator, self.entries.items.len);
         for (self.entries.items) |*e| out.entries.appendAssumeCapacity(try e.clone());
         return out;
     }
@@ -451,8 +445,8 @@ pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user
     _ = level;
     _ = user_data;
     const stderr_ = stdlib.stdio.cStream(.stderr);
-    _ = libc.fputs(text, stderr_);
-    _ = libc.fflush(stderr_);
+    _ = stdlib.libc.fputs(text, stderr_);
+    _ = stdlib.libc.fflush(stderr_);
 }
 
 /// Ports `mtmd_logger_state` (mtmd-impl.h:960 @b1b770d90) and
@@ -468,15 +462,15 @@ pub var g_logger_state: LoggerState = .{};
 /// 128 bytes, or a heap buffer when that is too short.
 pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
-    const len = @call(.auto, libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
+    const len = @call(.auto, stdlib.libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
     const cb = g_logger_state.log_callback orelse return;
     if (len < 128) {
         cb(level, @ptrCast(&buffer), g_logger_state.log_callback_user_data);
     } else {
         const n: usize = @intCast(len);
-        const buffer2 = gpa.alloc(u8, n + 1) catch return;
-        defer gpa.free(buffer2);
-        _ = @call(.auto, libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
+        const buffer2 = std.heap.c_allocator.alloc(u8, n + 1) catch return;
+        defer std.heap.c_allocator.free(buffer2);
+        _ = @call(.auto, stdlib.libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
         buffer2[n] = 0;
         cb(level, @ptrCast(buffer2.ptr), g_logger_state.log_callback_user_data);
     }
@@ -514,10 +508,10 @@ pub fn logCnt(comptime fmt: [*:0]const u8, args: anytype) void {
 /// `snprintf`: the string is `size` bytes, without the NUL `string_format`
 /// kept until v0.9.0 (7c2653acc). The caller owns the string.
 pub fn stringFormat(a: std.mem.Allocator, comptime fmt: [*:0]const u8, args: anytype) ![:0]u8 {
-    const size = @call(.auto, libc.snprintf, .{ @as(?[*]u8, null), 0, fmt } ++ args);
+    const size = @call(.auto, stdlib.libc.snprintf, .{ @as(?[*]u8, null), 0, fmt } ++ args);
     ggmlAssert(size >= 0, "mtmd.cpp", 41, "size >= 0 && size < INT_MAX");
     const buf = try a.allocSentinel(u8, @intCast(size), 0);
-    _ = @call(.auto, libc.snprintf, .{ buf.ptr, @as(usize, @intCast(size)) + 1, fmt } ++ args);
+    _ = @call(.auto, stdlib.libc.snprintf, .{ buf.ptr, @as(usize, @intCast(size)) + 1, fmt } ++ args);
     return buf;
 }
 

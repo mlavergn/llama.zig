@@ -27,44 +27,13 @@
 //! during sleep wakes the server first.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
 
-const http = @import("http.zig");
-const common = @import("common.zig");
-const tokens_mod = @import("tokens.zig");
-const task_mod = @import("task.zig");
-const result_mod = @import("result.zig");
-const oaicompat = @import("oaicompat.zig");
-const convert = @import("convert.zig");
-const schema = @import("schema.zig");
-const stream = @import("stream.zig");
-const context = @import("context.zig");
-const decision_mod = @import("decision.zig");
-const realtime = @import("realtime.zig");
-
-const c = tc.c;
-const log = tc.log;
-const Params = tc.params.Params;
-
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Token = common.Token;
-const Task = task_mod.Task;
-const TaskType = task_mod.TaskType;
-const ResponseType = task_mod.ResponseType;
-const Result = result_mod.Result;
-const ServerTokens = tokens_mod.ServerTokens;
-const Impl = context.Impl;
-const Reader = context.Reader;
-const Meta = context.Meta;
-
-const gpa = context.gpa;
-const srv = common.srv;
-const throw = common.throw;
 
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
     tc.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
@@ -77,30 +46,30 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void
 /// generator-like response, its reader on the task queues, and the stream
 /// replay tee it derives from (`server_res_spipe`).
 pub const ResGenerator = struct {
-    base: http.Res,
-    spipe: stream.Spipe = .{},
-    rd: Reader,
-    queue_awake: ?*context.TaskQueue = null, // set while this response keeps the server awake
+    base: mod.http.Res,
+    spipe: mod.stream.Spipe = .{},
+    rd: mod.context.Reader,
+    queue_awake: ?*mod.context.TaskQueue = null, // set while this response keeps the server awake
 
     /// What the streaming lambda of `handle_completions_impl` captures.
-    res_type: ResponseType = .none,
+    res_type: mod.task.ResponseType = .none,
     sse_ping_interval: i32 = 0,
 
     /// What the streaming lambda of `handle_tts_impl` captures.
     tts_is_done: bool = false,
     tts_pcm16: bool = false,
 
-    const vtable: http.Res.VTable = .{ .on_complete = onComplete, .destroy = destroyGen };
+    const vtable: mod.http.Res.VTable = .{ .on_complete = onComplete, .destroy = destroyGen };
 
     /// Ports `server_res_generator`'s constructor (server-context.cpp:5307
     /// @b1b770d90): may bypass sleep if the task does not use the context;
     /// otherwise the server stays awake until the response is destroyed.
-    fn create(queue_tasks: *context.TaskQueue, queue_results: *context.ResultQueue, sleep_idle_seconds: c_int, bypass_sleep_in: bool) !*ResGenerator {
-        const self = try gpa.create(ResGenerator);
-        errdefer gpa.destroy(self);
+    fn create(queue_tasks: *mod.context.TaskQueue, queue_results: *mod.context.ResultQueue, sleep_idle_seconds: c_int, bypass_sleep_in: bool) !*ResGenerator {
+        const self = try mod.context.gpa.create(ResGenerator);
+        errdefer mod.context.gpa.destroy(self);
         self.* = .{
-            .base = .{ .arena = std.heap.ArenaAllocator.init(gpa), .vtable = &vtable },
-            .rd = try Reader.init(gpa, queue_tasks, queue_results, context.http_polling_seconds),
+            .base = .{ .arena = std.heap.ArenaAllocator.init(mod.context.gpa), .vtable = &vtable },
+            .rd = try mod.context.Reader.init(mod.context.gpa, queue_tasks, queue_results, mod.context.http_polling_seconds),
         };
         // fast path in case sleeping is disabled
         const bypass_sleep = bypass_sleep_in or sleep_idle_seconds < 0;
@@ -111,14 +80,14 @@ pub const ResGenerator = struct {
         return self;
     }
 
-    fn onComplete(res: *http.Res) void {
+    fn onComplete(res: *mod.http.Res) void {
         const self: *ResGenerator = @fieldParentPtr("base", res);
         self.spipe.onComplete();
     }
 
     /// Ports the destructor of `server_res_generator` (server-context.cpp:5316
     /// @b1b770d90), then its members' destructors.
-    fn destroyGen(res: *http.Res) void {
+    fn destroyGen(res: *mod.http.Res) void {
         const self: *ResGenerator = @fieldParentPtr("base", res);
         if (self.queue_awake) |q| {
             q.releaseInflight();
@@ -126,7 +95,7 @@ pub const ResGenerator = struct {
         self.rd.deinit();
         self.spipe.deinit();
         self.base.arena.deinit();
-        gpa.destroy(self);
+        mod.context.gpa.destroy(self);
     }
 
     pub fn destroy(self: *ResGenerator) void {
@@ -138,23 +107,23 @@ pub const ResGenerator = struct {
     }
 
     /// Ports `server_res_generator`'s `ok` (server-context.cpp:5321 @b1b770d90).
-    fn ok(self: *ResGenerator, response_data: *const Value) !void {
+    fn ok(self: *ResGenerator, response_data: *const json.Value) !void {
         self.base.status = 200;
-        try self.base.setData(try common.safeJsonToStr(self.alloc(), response_data));
+        try self.base.setData(try mod.common.safeJsonToStr(self.alloc(), response_data));
     }
 
     /// Ports `server_res_generator`'s `error` (server-context.cpp:5325 @b1b770d90).
-    fn err(self: *ResGenerator, error_data: *const Value) !void {
+    fn err(self: *ResGenerator, error_data: *const json.Value) !void {
         const a = self.alloc();
-        self.base.status = common.jsonValue(error_data, "code", c_int, 500);
-        var outer = Value.emptyObject();
+        self.base.status = mod.common.jsonValue(error_data, "code", c_int, 500);
+        var outer = json.Value.emptyObject();
         try outer.set(a, "error", try error_data.clone(a));
-        try self.base.setData(try common.safeJsonToStr(a, &outer));
+        try self.base.setData(try mod.common.safeJsonToStr(a, &outer));
     }
 
     /// `res->error(format_error_response(msg, type))`.
-    fn errMsg(self: *ResGenerator, msg: []const u8, ty: common.ErrorType) !void {
-        var e = try common.formatErrorResponse(self.alloc(), msg, ty);
+    fn errMsg(self: *ResGenerator, msg: []const u8, ty: mod.common.ErrorType) !void {
+        var e = try mod.common.formatErrorResponse(self.alloc(), msg, ty);
         try self.err(&e);
     }
 
@@ -166,7 +135,7 @@ pub const ResGenerator = struct {
 
 /// `req.should_stop`, as `ResponseReader.next` asks it.
 const ReqStop = struct {
-    req: *const http.Req,
+    req: *const mod.http.Req,
     pub fn shouldStop(self: ReqStop) bool {
         return self.req.should_stop.call();
     }
@@ -180,52 +149,52 @@ const ReqStop = struct {
 pub const Routes = struct {
     // handlers using lambda function, so that they can capture `this` without `std::bind`
     // they won't be called until ctx_http.is_ready is set to true
-    get_health: http.Handler = undefined,
-    get_metrics: http.Handler = undefined,
-    get_slots: http.Handler = undefined,
-    post_slots: http.Handler = undefined,
-    get_props: http.Handler = undefined,
-    post_props: http.Handler = undefined,
-    post_infill: http.Handler = undefined,
-    post_completions: http.Handler = undefined,
-    post_completions_oai: http.Handler = undefined,
-    post_chat_completions: http.Handler = undefined,
-    post_chat_completions_tok: http.Handler = undefined,
-    post_control: http.Handler = undefined,
-    post_responses_oai: http.Handler = undefined,
-    post_responses_tok_oai: http.Handler = undefined,
-    post_transcriptions_oai: http.Handler = undefined,
-    ws_realtime: http.WsHandler = undefined,
-    post_anthropic_messages: http.Handler = undefined,
-    post_anthropic_count_tokens: http.Handler = undefined,
-    post_apply_template: http.Handler = undefined,
-    get_models: http.Handler = undefined,
-    post_tokenize: http.Handler = undefined,
-    post_detokenize: http.Handler = undefined,
-    post_embeddings: http.Handler = undefined,
-    post_embeddings_oai: http.Handler = undefined,
-    post_rerank: http.Handler = undefined,
-    post_tts: http.Handler = undefined,
-    post_speech_oai: http.Handler = undefined,
-    post_systemone: http.Handler = undefined,
-    get_lora_adapters: http.Handler = undefined,
-    post_lora_adapters: http.Handler = undefined,
+    get_health: mod.http.Handler = undefined,
+    get_metrics: mod.http.Handler = undefined,
+    get_slots: mod.http.Handler = undefined,
+    post_slots: mod.http.Handler = undefined,
+    get_props: mod.http.Handler = undefined,
+    post_props: mod.http.Handler = undefined,
+    post_infill: mod.http.Handler = undefined,
+    post_completions: mod.http.Handler = undefined,
+    post_completions_oai: mod.http.Handler = undefined,
+    post_chat_completions: mod.http.Handler = undefined,
+    post_chat_completions_tok: mod.http.Handler = undefined,
+    post_control: mod.http.Handler = undefined,
+    post_responses_oai: mod.http.Handler = undefined,
+    post_responses_tok_oai: mod.http.Handler = undefined,
+    post_transcriptions_oai: mod.http.Handler = undefined,
+    ws_realtime: mod.http.WsHandler = undefined,
+    post_anthropic_messages: mod.http.Handler = undefined,
+    post_anthropic_count_tokens: mod.http.Handler = undefined,
+    post_apply_template: mod.http.Handler = undefined,
+    get_models: mod.http.Handler = undefined,
+    post_tokenize: mod.http.Handler = undefined,
+    post_detokenize: mod.http.Handler = undefined,
+    post_embeddings: mod.http.Handler = undefined,
+    post_embeddings_oai: mod.http.Handler = undefined,
+    post_rerank: mod.http.Handler = undefined,
+    post_tts: mod.http.Handler = undefined,
+    post_speech_oai: mod.http.Handler = undefined,
+    post_systemone: mod.http.Handler = undefined,
+    get_lora_adapters: mod.http.Handler = undefined,
+    post_lora_adapters: mod.http.Handler = undefined,
 
     // using unique_ptr to allow late initialization of const
-    meta: ?Meta = null,
+    meta: ?mod.context.Meta = null,
     meta_arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
 
-    params: *const Params,
-    ctx_server: *Impl,
+    params: *const tc.params.Params,
+    ctx_server: *mod.context.Impl,
 
-    queue_tasks: *context.TaskQueue,
-    queue_results: *context.ResultQueue,
+    queue_tasks: *mod.context.TaskQueue,
+    queue_results: *mod.context.ResultQueue,
 
     // cached responses, to be used during sleep
-    mutex_cache: sync.Mutex = .{},
-    cached_models: Value = .null,
-    cached_props: Value = .null,
-    cached_metrics: common.Metrics = .{},
+    mutex_cache: stdlib.sync.Mutex = .{},
+    cached_models: json.Value = .null,
+    cached_props: json.Value = .null,
+    cached_metrics: mod.common.Metrics = .{},
     cache_arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.c_allocator),
     // set when a scrape during sleep already reported the throughput buckets
     should_reset_buckets: bool = false,
@@ -233,7 +202,7 @@ pub const Routes = struct {
     /// Ports the constructor of `server_routes` (server-context.cpp:5622
     /// @b1b770d90). `self` must not move afterwards: the handlers and the
     /// sleeping callback point at it.
-    pub fn init(self: *Routes, params: *const Params, ctx_server: *context.ServerContext) !void {
+    pub fn init(self: *Routes, params: *const tc.params.Params, ctx_server: *mod.context.ServerContext) !void {
         self.* = .{
             .params = params,
             .ctx_server = ctx_server.impl,
@@ -261,12 +230,12 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `update_meta` (server-context.h:105
     /// @b1b770d90): not thread-safe, only while `is_ready` is false.
-    pub fn updateMeta(self: *Routes, ctx_server: *const context.ServerContext) !void {
+    pub fn updateMeta(self: *Routes, ctx_server: *const mod.context.ServerContext) !void {
         _ = self.meta_arena.reset(.free_all);
         self.meta = try ctx_server.getMeta(self.meta_arena.allocator());
     }
 
-    fn metaRef(self: *const Routes) *const Meta {
+    fn metaRef(self: *const Routes) *const mod.context.Meta {
         return &self.meta.?;
     }
 
@@ -275,9 +244,9 @@ pub const Routes = struct {
         return ResGenerator.create(self.queue_tasks, self.queue_results, self.params.sleep_idle_seconds, bypass_sleep);
     }
 
-    fn handler(self: *Routes, comptime f: fn (*Routes, *const http.Req) anyerror!*http.Res) http.Handler {
+    fn handler(self: *Routes, comptime f: fn (*Routes, *const mod.http.Req) anyerror!*mod.http.Res) mod.http.Handler {
         return .{ .ctx = self, .func = struct {
-            fn call(ctx: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
+            fn call(ctx: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
                 return f(@ptrCast(@alignCast(ctx.?)), req);
             }
         }.call };
@@ -325,11 +294,11 @@ pub const Routes = struct {
     /// The `get_health` lambda (server-context.cpp:5778 @b1b770d90): error
     /// and loading states are handled by the middleware; reachable during
     /// sleep.
-    fn getHealth(self: *Routes, _: *const http.Req) anyerror!*http.Res {
+    fn getHealth(self: *Routes, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
         const a = res.alloc();
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("status", "ok");
         const v = o.done();
         try res.ok(&v);
@@ -342,8 +311,8 @@ pub const Routes = struct {
         defer self.mutex_cache.unlock();
         const a = res.alloc();
         try res.base.setHeader("Process-Start-Time-Unix", try std.fmt.allocPrint(a, "{d}", .{self.cached_metrics.t_start}));
-        const tmp = try Result.create(gpa, .metrics);
-        defer tmp.destroy(gpa);
+        const tmp = try mod.result.Result.create(mod.context.gpa, .metrics);
+        defer tmp.destroy(mod.context.gpa);
         tmp.kind.metrics.metrics = try self.cached_metrics.clone(tmp.alloc());
         res.base.content_type = "text/plain; version=0.0.4";
         res.base.status = 200;
@@ -354,7 +323,7 @@ pub const Routes = struct {
     }
 
     /// The `get_metrics` lambda (server-context.cpp:5791 @b1b770d90).
-    fn getMetrics(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn getMetrics(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
         if (!self.params.endpoint_metrics) {
@@ -367,7 +336,7 @@ pub const Routes = struct {
         } else {
             // request slots data using task queue
             {
-                var task = Task.initType(.metrics);
+                var task = mod.task.Task.initType(.metrics);
                 task.id = res.rd.getNewId();
                 // the gauges are averaged over the window between two scrapes
                 task.metrics_reset_bucket = true;
@@ -376,8 +345,8 @@ pub const Routes = struct {
 
             // a task posted right before sleeping is never processed, do not wait for it
             const Stop = struct {
-                req: *const http.Req,
-                q: *context.TaskQueue,
+                req: *const mod.http.Req,
+                q: *mod.context.TaskQueue,
                 pub fn shouldStop(s: @This()) bool {
                     return s.req.should_stop.call() or s.q.isSleeping();
                 }
@@ -388,7 +357,7 @@ pub const Routes = struct {
                 }
                 return &res.base;
             };
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
 
             if (result.isError()) {
                 var j = try result.toJson(res.alloc());
@@ -409,7 +378,7 @@ pub const Routes = struct {
     }
 
     /// The `get_slots` lambda (server-context.cpp:5853 @b1b770d90).
-    fn getSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn getSlots(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         if (!self.params.endpoint_slots) {
@@ -419,7 +388,7 @@ pub const Routes = struct {
 
         // request slots data using task queue
         {
-            var task = Task.initType(.slot_get);
+            var task = mod.task.Task.initType(.slot_get);
             task.id = res.rd.getNewId();
             try res.rd.postTask(task, true); // high-priority task
         }
@@ -430,7 +399,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 5871, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
 
         if (result.isError()) {
             var j = try result.toJson(res.alloc());
@@ -454,7 +423,7 @@ pub const Routes = struct {
     }
 
     /// The `post_slots` lambda (server-context.cpp:5895 @b1b770d90).
-    fn postSlots(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postSlots(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         var res_alive = true;
         errdefer if (res_alive) res.destroy();
@@ -494,7 +463,7 @@ pub const Routes = struct {
 
     /// The `get_props` lambda (server-context.cpp:5928 @b1b770d90): must be
     /// reachable during sleep, so it never touches the context.
-    fn getProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
+    fn getProps(self: *Routes, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
         if (self.queue_tasks.isSleeping()) {
@@ -509,7 +478,7 @@ pub const Routes = struct {
     }
 
     /// The `post_props` lambda (server-context.cpp:5940 @b1b770d90).
-    fn postProps(self: *Routes, _: *const http.Req) anyerror!*http.Res {
+    fn postProps(self: *Routes, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         if (!self.params.endpoint_props) {
@@ -518,7 +487,7 @@ pub const Routes = struct {
         }
         // update any props here
 
-        var o = common.Obj.init(res.alloc());
+        var o = mod.common.Obj.init(res.alloc());
         try o.put("success", true);
         const v = o.done();
         try res.ok(&v);
@@ -528,7 +497,7 @@ pub const Routes = struct {
     /// The `post_infill` lambda (server-context.cpp:5952 @b1b770d90). Its
     /// three "required" checks set an error on a response that is then
     /// dropped, as upstream's do; a missing field throws at `at` instead.
-    fn postInfill(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postInfill(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         var keep = false;
         defer if (!keep) res.destroy();
@@ -536,13 +505,13 @@ pub const Routes = struct {
         const vocab = self.ctx_server.vocab;
         // check model compatibility
         var err: std.ArrayList(u8) = .empty;
-        if (c.llama_vocab_fim_pre(vocab) == common.token_null) {
+        if (tc.c.llama_vocab_fim_pre(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "prefix token is missing. ");
         }
-        if (c.llama_vocab_fim_suf(vocab) == common.token_null) {
+        if (tc.c.llama_vocab_fim_suf(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "suffix token is missing. ");
         }
-        if (c.llama_vocab_fim_mid(vocab) == common.token_null) {
+        if (tc.c.llama_vocab_fim_mid(vocab) == mod.common.token_null) {
             try err.appendSlice(a, "middle token is missing. ");
         }
         if (err.items.len != 0) {
@@ -552,8 +521,8 @@ pub const Routes = struct {
         }
 
         // validate input
-        var data = try json.parse(gpa, req.body);
-        defer data.deinit(gpa);
+        var data = try json.parse(mod.context.gpa, req.body);
+        defer data.deinit(mod.context.gpa);
         if (data.contains("prompt") and !(try data.at("prompt")).isString()) {
             // prompt is optional
             try res.errMsg("\"prompt\" must be a string", .invalid_request);
@@ -574,34 +543,34 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        var input_extra = try common.jsonValueJson(gpa, &data, "input_extra", Value.emptyArray());
+        var input_extra = try mod.common.jsonValueJson(mod.context.gpa, &data, "input_extra", json.Value.emptyArray());
         for (input_extra.array.items) |*chunk| {
             // { "text": string, "filename": string }
             if (!chunk.contains("text") or !(try chunk.at("text")).isString()) {
-                input_extra.deinit(gpa);
+                input_extra.deinit(mod.context.gpa);
                 try res.errMsg("extra_context chunk must contain a \"text\" field with a string value", .invalid_request);
                 keep = true;
                 return &res.base;
             }
             // filename is optional
             if (chunk.contains("filename") and !(try chunk.at("filename")).isString()) {
-                input_extra.deinit(gpa);
+                input_extra.deinit(mod.context.gpa);
                 try res.errMsg("extra_context chunk's \"filename\" field must be a string", .invalid_request);
                 keep = true;
                 return &res.base;
             }
         }
-        try data.set(gpa, "input_extra", input_extra); // default to empty array if it's not exist
+        try data.set(mod.context.gpa, "input_extra", input_extra); // default to empty array if it's not exist
 
-        const prompt = common.jsonValue(&data, "prompt", []const u8, "");
-        var pv = try Value.initString(a, prompt);
-        var tokenized_prompts = try tokens_mod.tokenizeInputPrompts(gpa, vocab, self.ctx_server.mctx, &pv, false, true, self.ctx_server.init_opt);
+        const prompt = mod.common.jsonValue(&data, "prompt", []const u8, "");
+        var pv = try json.Value.initString(a, prompt);
+        var tokenized_prompts = try mod.tokens.tokenizeInputPrompts(mod.context.gpa, vocab, self.ctx_server.mctx, &pv, false, true, self.ctx_server.init_opt);
         defer {
             for (tokenized_prompts.items) |*t| t.deinit();
-            tokenized_prompts.deinit(gpa);
+            tokenized_prompts.deinit(mod.context.gpa);
         }
-        srv(.dbg, "operator()", "creating infill tasks, n_prompts = %d\n", .{@as(c_int, @intCast(tokenized_prompts.items.len))});
-        const infill = try tokens_mod.formatPromptInfill(
+        mod.common.srv(.dbg, "operator()", "creating infill tasks, n_prompts = %d\n", .{@as(c_int, @intCast(tokenized_prompts.items.len))});
+        const infill = try mod.tokens.formatPromptInfill(
             a,
             vocab,
             try data.at("input_prefix"),
@@ -613,26 +582,26 @@ pub const Routes = struct {
             self.params.spm_infill,
             tokenized_prompts.items[0].getTokens(), // TODO: this could maybe be multimodal.
         );
-        try data.set(gpa, "prompt", try common.from(gpa, infill));
+        try data.set(mod.context.gpa, "prompt", try mod.common.from(mod.context.gpa, infill));
 
         return self.handleCompletionsImpl(req, .infill, &data, &.{}, .none, null); // infill is not OAI compatible
     }
 
     /// The `post_completions` lambda (server-context.cpp:6030 @b1b770d90).
-    fn postCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postCompletions(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
-        var body = try json.parse(gpa, req.body);
-        defer body.deinit(gpa);
+        var body = try json.parse(mod.context.gpa, req.body);
+        defer body.deinit(mod.context.gpa);
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .none, null);
     }
 
     /// The `post_completions_oai` lambda (server-context.cpp:6042 @b1b770d90).
-    fn postCompletionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postCompletionsOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
-        var body = try json.parse(gpa, req.body);
-        defer body.deinit(gpa);
+        var body = try json.parse(mod.context.gpa, req.body);
+        defer body.deinit(mod.context.gpa);
         return self.handleCompletionsImpl(req, .completion, &body, &.{}, .oai_cmpl, null);
     }
 
@@ -640,7 +609,7 @@ pub const Routes = struct {
     /// media files.
     const Parsed = struct {
         arena: std.heap.ArenaAllocator,
-        body: Value,
+        body: json.Value,
         files: std.ArrayList([]u8),
         session: chat.session.Session,
     };
@@ -655,10 +624,10 @@ pub const Routes = struct {
     /// `chatParse` after one of `server-chat.cpp`'s conversions, with the
     /// two `SRV_DBG` lines each route logs after it (the second dumps the
     /// body, which throws on invalid UTF-8 -- only when it prints).
-    fn chatParseConverted(self: *Routes, body_text: []const u8, conv: Conversion, req: ?*const http.Req) !*Parsed {
-        const p = try gpa.create(Parsed);
-        errdefer gpa.destroy(p);
-        p.* = .{ .arena = std.heap.ArenaAllocator.init(gpa), .body = .null, .files = .empty, .session = try chat.session.Session.initEmpty(gpa) };
+    fn chatParseConverted(self: *Routes, body_text: []const u8, conv: Conversion, req: ?*const mod.http.Req) !*Parsed {
+        const p = try mod.context.gpa.create(Parsed);
+        errdefer mod.context.gpa.destroy(p);
+        p.* = .{ .arena = std.heap.ArenaAllocator.init(mod.context.gpa), .body = .null, .files = .empty, .session = try chat.session.Session.initEmpty(mod.context.gpa) };
         errdefer p.arena.deinit();
         errdefer p.session.deinit();
         const a = p.arena.allocator();
@@ -666,42 +635,42 @@ pub const Routes = struct {
         switch (conv) {
             .none => {},
             .responses => {
-                body = try convert.responsesToChatcmpl(a, &body);
+                body = try mod.convert.responsesToChatcmpl(a, &body);
                 try logConverted(a, "Request converted: OpenAI Responses -> OpenAI Chat Completions", &body);
             },
             .anthropic => {
-                body = try convert.anthropicToOai(a, &body);
+                body = try mod.convert.anthropicToOai(a, &body);
                 try logConverted(a, "Request converted: Anthropic -> OpenAI Chat Completions", &body);
             },
             .transcriptions => {
                 const file: ?[]const u8 = if (req.?.files.get("file")) |f| f.data else null;
-                body = try convert.transcriptionsToChatcmpl(a, &body, self.metaRef().chat_params.tmpls, file, &p.files);
+                body = try mod.convert.transcriptionsToChatcmpl(a, &body, self.metaRef().chat_params.tmpls, file, &p.files);
                 try logConverted(a, "Request converted: OpenAI Transcriptions -> OpenAI Chat Completions", &body);
             },
         }
-        p.body = try oaicompat.oaicompatChatParamsParse(a, self.ctx_server.vocab, &body, self.metaRef().chat_params, &p.files, &p.session);
+        p.body = try mod.oaicompat.oaicompatChatParamsParse(a, self.ctx_server.vocab, &body, self.metaRef().chat_params, &p.files, &p.session);
         return p;
     }
 
     /// `SRV_DBG("%s\n", what); SRV_DBG("converted request: %s\n", body.dump().c_str());`
-    fn logConverted(a: Allocator, comptime what: []const u8, body: *const Value) !void {
-        srv(.dbg, "operator()", "%s\n", .{@as([*:0]const u8, what ++ "")});
-        if (log.level_debug <= log.verbosity_thold) {
+    fn logConverted(a: Allocator, comptime what: []const u8, body: *const json.Value) !void {
+        mod.common.srv(.dbg, "operator()", "%s\n", .{@as([*:0]const u8, what ++ "")});
+        if (tc.log.level_debug <= tc.log.verbosity_thold) {
             const d = try json.dump(a, body, -1);
-            const z = common.dupZ(d);
-            defer common.freeZ(z);
-            srv(.dbg, "operator()", "converted request: %s\n", .{z});
+            const z = mod.common.dupZ(d);
+            defer mod.common.freeZ(z);
+            mod.common.srv(.dbg, "operator()", "converted request: %s\n", .{z});
         }
     }
 
     fn freeParsed(p: *Parsed) void {
         p.session.deinit();
         p.arena.deinit();
-        gpa.destroy(p);
+        mod.context.gpa.destroy(p);
     }
 
     /// The `post_chat_completions` lambda (server-context.cpp:6054 @b1b770d90).
-    fn postChatCompletions(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postChatCompletions(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
         const p = try self.chatParse(req.body);
@@ -710,19 +679,19 @@ pub const Routes = struct {
     }
 
     /// The `post_chat_completions_tok` lambda (server-context.cpp:6074 @b1b770d90).
-    fn postChatCompletionsTok(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postChatCompletionsTok(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleCountTokens(req, .oai_chat);
     }
 
     /// The `post_control` lambda (server-context.cpp:6078 @b1b770d90).
-    fn postControl(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postControl(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
         var body = try json.parse(a, req.body);
 
-        const cmpl_id = common.jsonValue(&body, "id", []const u8, "");
-        const action = common.jsonValue(&body, "action", []const u8, "");
+        const cmpl_id = mod.common.jsonValue(&body, "id", []const u8, "");
+        const action = mod.common.jsonValue(&body, "action", []const u8, "");
         if (cmpl_id.len == 0) {
             try res.errMsg("missing completion id", .invalid_request);
             return &res.base;
@@ -733,9 +702,9 @@ pub const Routes = struct {
         }
 
         {
-            var task = Task.initType(.control);
+            var task = mod.task.Task.initType(.control);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(gpa);
+            const ta = try task.arenaAlloc(mod.context.gpa);
             task.params.control_cmpl_id = try ta.dupe(u8, cmpl_id);
             task.params.control_action = .reasoning_end;
             try res.rd.postTask(task, false);
@@ -745,7 +714,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 6104, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
         var j = try result.toJson(a);
         if (result.isError()) {
             try res.err(&j);
@@ -757,7 +726,7 @@ pub const Routes = struct {
 
     /// The `post_responses_oai` lambda (server-context.cpp:6115 @b1b770d90):
     /// the request converted from the Responses API, then run as chat.
-    fn postResponsesOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postResponsesOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
         const p = try self.chatParseConverted(req.body, .responses, null);
@@ -766,14 +735,14 @@ pub const Routes = struct {
     }
 
     /// The `post_responses_tok_oai` lambda (server-context.cpp:6137 @b1b770d90).
-    fn postResponsesTokOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postResponsesTokOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleCountTokens(req, .oai_resp);
     }
 
     /// The `post_transcriptions_oai` lambda (server-context.cpp:6141
     /// @b1b770d90): refused without audio input; otherwise the upload and
     /// its form converted into chat over the template's ASR preset.
-    fn postTranscriptionsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postTranscriptionsOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
 
         if (!self.metaRef().has_mtmd or !self.metaRef().chat_params.allow_audio) {
@@ -791,7 +760,7 @@ pub const Routes = struct {
     /// The `post_anthropic_messages` lambda (server-context.cpp:6412
     /// @b1b770d90): the request converted from the Anthropic Messages API,
     /// then run as chat.
-    fn postAnthropicMessages(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postAnthropicMessages(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         defer res.destroy();
         const p = try self.chatParseConverted(req.body, .anthropic, null);
@@ -800,19 +769,19 @@ pub const Routes = struct {
     }
 
     /// The `post_anthropic_count_tokens` lambda (server-context.cpp:6434 @b1b770d90).
-    fn postAnthropicCountTokens(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postAnthropicCountTokens(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleCountTokens(req, .anthropic);
     }
 
     /// The `post_apply_template` lambda (server-context.cpp:6439
     /// @b1b770d90): `handle_chat_completions` without the inference.
-    fn postApplyTemplate(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postApplyTemplate(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const p = try self.chatParse(req.body);
         defer freeParsed(p);
         const a = res.alloc();
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("prompt", try (try p.body.at("prompt")).clone(a));
         const v = o.done();
         try res.ok(&v);
@@ -820,7 +789,7 @@ pub const Routes = struct {
     }
 
     /// The `get_models` lambda (server-context.cpp:6454 @b1b770d90).
-    fn getModels(self: *Routes, _: *const http.Req) anyerror!*http.Res {
+    fn getModels(self: *Routes, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(true);
         errdefer res.destroy();
         // note: do NOT use ctx_server here, this endpoint must be accessible during sleep
@@ -836,46 +805,46 @@ pub const Routes = struct {
     }
 
     /// The `post_tokenize` lambda (server-context.cpp:6466 @b1b770d90).
-    fn postTokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postTokenize(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
         var body = try json.parse(a, req.body);
-        var tokens_response = Value.emptyArray();
+        var tokens_response = json.Value.emptyArray();
         if (body.count("content") != 0) {
-            const add_special = common.jsonValue(&body, "add_special", bool, false);
-            const parse_special = common.jsonValue(&body, "parse_special", bool, true);
-            const with_pieces = common.jsonValue(&body, "with_pieces", bool, false);
+            const add_special = mod.common.jsonValue(&body, "add_special", bool, false);
+            const parse_special = mod.common.jsonValue(&body, "parse_special", bool, true);
+            const with_pieces = mod.common.jsonValue(&body, "with_pieces", bool, false);
 
-            const toks = try tokens_mod.tokenizeMixed(a, self.ctx_server.vocab, try body.at("content"), add_special, parse_special);
+            const toks = try mod.tokens.tokenizeMixed(a, self.ctx_server.vocab, try body.at("content"), add_special, parse_special);
 
             if (with_pieces) {
                 for (toks) |token| {
                     const piece = try tc.common.tokenToPiece(a, self.ctx_server.vocab, token, true);
-                    var piece_json: Value = undefined;
+                    var piece_json: json.Value = undefined;
 
                     // Check if the piece is valid UTF-8
-                    if (common.isValidUtf8(piece)) {
-                        piece_json = try Value.initString(a, piece);
+                    if (mod.common.isValidUtf8(piece)) {
+                        piece_json = try json.Value.initString(a, piece);
                     } else {
                         // If not valid UTF-8, store as array of byte values
-                        piece_json = Value.emptyArray();
+                        piece_json = json.Value.emptyArray();
                         for (piece) |ch| {
                             try piece_json.pushBack(a, .{ .number_integer = ch });
                         }
                     }
 
-                    var o = common.Obj.init(a);
+                    var o = mod.common.Obj.init(a);
                     try o.put("id", token);
                     try o.put("piece", piece_json);
                     try tokens_response.pushBack(a, o.done());
                 }
             } else {
-                tokens_response = try common.from(a, toks);
+                tokens_response = try mod.common.from(a, toks);
             }
         }
 
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("tokens", tokens_response);
         const v = o.done();
         try res.ok(&v);
@@ -883,7 +852,7 @@ pub const Routes = struct {
     }
 
     /// The `post_detokenize` lambda (server-context.cpp:6507 @b1b770d90).
-    fn postDetokenize(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postDetokenize(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
@@ -891,11 +860,11 @@ pub const Routes = struct {
 
         var content: []const u8 = "";
         if (body.count("tokens") != 0) {
-            const toks = try (try body.at("tokens")).getSlice(a, Token);
-            content = try common.tokensToStr(a, self.ctx_server.vocab, toks);
+            const toks = try (try body.at("tokens")).getSlice(a, mod.common.Token);
+            content = try mod.common.tokensToStr(a, self.ctx_server.vocab, toks);
         }
 
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("content", content);
         const v = o.done();
         try res.ok(&v);
@@ -903,19 +872,19 @@ pub const Routes = struct {
     }
 
     /// The `post_embeddings` lambda (server-context.cpp:6521 @b1b770d90).
-    fn postEmbeddings(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postEmbeddings(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleEmbeddingsImpl(req, .none);
     }
 
     /// The `post_embeddings_oai` lambda (server-context.cpp:6525 @b1b770d90).
-    fn postEmbeddingsOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postEmbeddingsOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleEmbeddingsImpl(req, .oai_embd);
     }
 
     /// The `post_systemone` lambda (server-context.cpp:6544 @b1b770d90): the
     /// typed decision API. One task per variant of each question, or one
     /// task for all the questions of a joint model.
-    fn postSystemone(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postSystemone(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
@@ -939,43 +908,43 @@ pub const Routes = struct {
 
         // one task per variant of each question, or one task for all the questions
         {
-            var tasks: std.ArrayList(Task) = .empty;
+            var tasks: std.ArrayList(mod.task.Task) = .empty;
             defer {
-                for (tasks.items) |*t| t.deinit(gpa);
-                tasks.deinit(gpa);
+                for (tasks.items) |*t| t.deinit(mod.context.gpa);
+                tasks.deinit(mod.context.gpa);
             }
             if (decision.isJoint()) {
-                var task = Task.initType(.decision);
-                errdefer task.deinit(gpa);
-                task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                var task = mod.task.Task.initType(.decision);
+                errdefer task.deinit(mod.context.gpa);
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
                 task.id = res.rd.getNewId();
-                try decision.fillTaskJoint(a, gpa, &state, questions, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
-                try tasks.append(gpa, task);
+                try decision.fillTaskJoint(a, mod.context.gpa, &state, questions, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                try tasks.append(mod.context.gpa, task);
             } else {
                 for (questions) |*question| {
                     for (0..decision.nVariants(question)) |variant| {
-                        var task = Task.initType(.decision);
-                        errdefer task.deinit(gpa);
-                        task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                        var task = mod.task.Task.initType(.decision);
+                        errdefer task.deinit(mod.context.gpa);
+                        task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
                         task.id = res.rd.getNewId();
-                        try decision.fillTask(a, gpa, &state, questions, question, variant, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
-                        try tasks.append(gpa, task);
+                        try decision.fillTask(a, mod.context.gpa, &state, questions, question, variant, fs, self.ctx_server.mctx, self.ctx_server.init_opt, &task);
+                        try tasks.append(mod.context.gpa, task);
                     }
                 }
             }
             if (decision.canSharePrompt()) {
-                var groups = try decision_mod.groupTasks(gpa, tasks.items, @intCast(self.params.n_parallel));
-                defer groups.deinit(gpa);
-                for (tasks.items) |*t| t.deinit(gpa);
+                var groups = try mod.decision.groupTasks(mod.context.gpa, tasks.items, @intCast(self.params.n_parallel));
+                defer groups.deinit(mod.context.gpa);
+                for (tasks.items) |*t| t.deinit(mod.context.gpa);
                 tasks.clearRetainingCapacity();
-                try tasks.appendSlice(gpa, groups.items);
+                try tasks.appendSlice(mod.context.gpa, groups.items);
             }
             try res.rd.postTasks(tasks.items, null, false);
             tasks.clearRetainingCapacity();
         }
 
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(gpa);
+        defer all_results.deinit(mod.context.gpa);
 
         if (all_results.is_terminated) {
             return &res.base; // connection is closed
@@ -985,7 +954,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        var answers = Value.emptyObject();
+        var answers = json.Value.emptyObject();
         var n_tokens: i32 = 0;
         var i_result: usize = 0;
         var i_score: usize = 0;
@@ -1011,10 +980,10 @@ pub const Routes = struct {
             try answers.set(a, question.id, try decision.formatAnswerMedia(a, question, scores.items, files.items.len != 0));
         }
 
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("model", self.metaRef().model_name);
         try o.put("answers", answers);
-        var usage = common.Obj.init(a);
+        var usage = mod.common.Obj.init(a);
         try usage.put("input_tokens", n_tokens);
         try usage.put("output_tokens", @as(i32, 0));
         try o.put("usage", usage.done());
@@ -1024,59 +993,59 @@ pub const Routes = struct {
     }
 
     /// The `post_rerank` lambda (server-context.cpp:6529 @b1b770d90).
-    fn postRerank(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postRerank(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         return self.handleRerankImpl(req);
     }
 
     /// `parse_item` of `handle_rerank_impl`: one rerank input item, a plain
     /// string or `{"text": str|[str], "image": url|data-uri|raw-base64|[urls]}`.
-    fn parseRerankItem(self: *Routes, a: Allocator, item: *const Value, out_text: *std.ArrayList(u8), out_files: *std.ArrayList([]u8)) !void {
+    fn parseRerankItem(self: *Routes, a: Allocator, item: *const json.Value, out_text: *std.ArrayList(u8), out_files: *std.ArrayList([]u8)) !void {
         if (item.isString()) {
             out_text.clearRetainingCapacity();
             try out_text.appendSlice(a, item.string);
             return;
         }
         if (!item.isObject()) {
-            return common.throw(error.InvalidArgument, "rerank input must be a string or an object of the form {{\"text\": ..., \"image\": ...}}", .{});
+            return mod.common.throw(error.InvalidArgument, "rerank input must be a string or an object of the form {{\"text\": ..., \"image\": ...}}", .{});
         }
         if (item.contains("video") or item.contains("fps") or item.contains("max_frames")) {
-            return common.throw(error.InvalidArgument, "video/fps/max_frames are not supported for rerank input", .{});
+            return mod.common.throw(error.InvalidArgument, "video/fps/max_frames are not supported for rerank input", .{});
         }
-        const text: Value = if (item.contains("text")) (try item.at("text")).* else .null;
+        const text: json.Value = if (item.contains("text")) (try item.at("text")).* else .null;
         if (text.isString()) {
             try out_text.appendSlice(a, text.string);
         } else if (text.isArray()) {
             for (text.array.items) |*t| {
                 if (!t.isString()) {
-                    return common.throw(error.InvalidArgument, "\"text\" array elements must be strings", .{});
+                    return mod.common.throw(error.InvalidArgument, "\"text\" array elements must be strings", .{});
                 }
                 try out_text.appendSlice(a, t.string);
             }
         } else if (!text.isNull()) {
-            return common.throw(error.InvalidArgument, "\"text\" must be a string or an array of strings", .{});
+            return mod.common.throw(error.InvalidArgument, "\"text\" must be a string or an array of strings", .{});
         }
-        const image: Value = if (item.contains("image")) (try item.at("image")).* else .null;
+        const image: json.Value = if (item.contains("image")) (try item.at("image")).* else .null;
         if (image.isString()) {
             // marker is appended by format_prompt_rerank, one per decoded file
-            try oaicompat.handleMedia(a, out_files, image.string, self.params.media_path, self.params.media_allow_private_urls);
+            try mod.oaicompat.handleMedia(a, out_files, image.string, self.params.media_path, self.params.media_allow_private_urls);
         } else if (image.isArray()) {
             for (image.array.items) |*u| {
                 if (!u.isString()) {
-                    return common.throw(error.InvalidArgument, "\"image\" array elements must be strings", .{});
+                    return mod.common.throw(error.InvalidArgument, "\"image\" array elements must be strings", .{});
                 }
-                try oaicompat.handleMedia(a, out_files, u.string, self.params.media_path, self.params.media_allow_private_urls);
+                try mod.oaicompat.handleMedia(a, out_files, u.string, self.params.media_path, self.params.media_allow_private_urls);
             }
         } else if (!image.isNull()) {
-            return common.throw(error.InvalidArgument, "\"image\" must be a string or an array of strings", .{});
+            return mod.common.throw(error.InvalidArgument, "\"image\" must be a string or an array of strings", .{});
         }
     }
 
     /// Ports `server_routes`'s `handle_rerank_impl` (server-context.cpp:6912 @b1b770d90).
-    fn handleRerankImpl(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn handleRerankImpl(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
-        if (!self.params.embedding or self.params.pooling_type != c.LLAMA_POOLING_TYPE_RANK) {
+        if (!self.params.embedding or self.params.pooling_type != tc.c.LLAMA_POOLING_TYPE_RANK) {
             try res.errMsg("This server does not support reranking. Start it with `--reranking`", .not_supported);
             return &res.base;
         }
@@ -1095,7 +1064,7 @@ pub const Routes = struct {
             self.parseRerankItem(a, try body.at("query"), &query_str, &query_files) catch |e| switch (e) {
                 // handle_media's std::runtime_error is rethrown as an invalid_argument
                 error.InvalidArgument, error.RuntimeError => {
-                    try res.errMsg(context.whatOf(e), .invalid_request);
+                    try res.errMsg(mod.context.whatOf(e), .invalid_request);
                     return &res.base;
                 },
                 else => return e,
@@ -1106,7 +1075,7 @@ pub const Routes = struct {
         }
 
         // Resolve Jina/TEI format ambiguity
-        const documents_json = try common.jsonValueJson(a, &body, "documents", try common.jsonValueJson(a, &body, "texts", Value.emptyArray()));
+        const documents_json = try mod.common.jsonValueJson(a, &body, "documents", try mod.common.jsonValueJson(a, &body, "texts", json.Value.emptyArray()));
         if (!documents_json.isArray() or documents_json.empty()) {
             try res.errMsg("\"documents\" must be a non-empty array of strings or objects", .invalid_request);
             return &res.base;
@@ -1121,7 +1090,7 @@ pub const Routes = struct {
             var files: std.ArrayList([]u8) = .empty;
             self.parseRerankItem(a, item, &text, &files) catch |e| switch (e) {
                 error.InvalidArgument, error.RuntimeError => {
-                    try res.errMsg(context.whatOf(e), .invalid_request);
+                    try res.errMsg(mod.context.whatOf(e), .invalid_request);
                     return &res.base;
                 },
                 else => return e,
@@ -1130,24 +1099,24 @@ pub const Routes = struct {
             document_files[i] = files.items;
         }
 
-        const top_n = common.jsonValue(&body, "top_n", c_int, @intCast(documents.len));
+        const top_n = mod.common.jsonValue(&body, "top_n", c_int, @intCast(documents.len));
         if (top_n < 0) {
             try res.errMsg("\"top_n\" must be >= 0", .invalid_request);
             return &res.base;
         }
 
         // create and queue the task
-        var responses = Value.emptyArray();
+        var responses = json.Value.emptyArray();
         {
-            var tasks: std.ArrayList(Task) = .empty;
-            defer tasks.deinit(gpa);
-            errdefer for (tasks.items) |*t| t.deinit(gpa);
-            try tasks.ensureTotalCapacity(gpa, documents.len);
+            var tasks: std.ArrayList(mod.task.Task) = .empty;
+            defer tasks.deinit(mod.context.gpa);
+            errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
+            try tasks.ensureTotalCapacity(mod.context.gpa, documents.len);
             for (documents, document_files) |doc, doc_files| {
-                var tmp = try tokens_mod.formatPromptRerank(gpa, self.ctx_server.model_tgt, self.ctx_server.vocab, self.ctx_server.mctx, query_str.items, doc, query_files.items, doc_files, self.ctx_server.init_opt);
+                var tmp = try mod.tokens.formatPromptRerank(mod.context.gpa, self.ctx_server.model_tgt, self.ctx_server.vocab, self.ctx_server.mctx, query_str.items, doc, query_files.items, doc_files, self.ctx_server.init_opt);
                 errdefer tmp.deinit();
-                var task = Task.initType(.rerank);
-                task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                var task = mod.task.Task.initType(.rerank);
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
                 task.id = res.rd.getNewId();
                 task.tokens = tmp;
                 tasks.appendAssumeCapacity(task);
@@ -1158,7 +1127,7 @@ pub const Routes = struct {
 
         // wait for the results
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(gpa);
+        defer all_results.deinit(mod.context.gpa);
 
         // collect results
         if (all_results.is_terminated) {
@@ -1175,7 +1144,7 @@ pub const Routes = struct {
         }
 
         // write JSON response
-        var root = try oaicompat.formatResponseRerank(a, &body, self.metaRef().model_name, &responses, is_tei_format, documents, top_n);
+        var root = try mod.oaicompat.formatResponseRerank(a, &body, self.metaRef().model_name, &responses, is_tei_format, documents, top_n);
 
         try res.ok(&root);
         return &res.base;
@@ -1186,16 +1155,16 @@ pub const Routes = struct {
     /// strings, the numeric and boolean params get their types back.
     ///
     /// Return: owned by `a`.
-    fn parseTtsBody(a: Allocator, req: *const http.Req) !Value {
+    fn parseTtsBody(a: Allocator, req: *const mod.http.Req) !json.Value {
         var body = try json.parse(a, req.body);
         for ([_][]const u8{ "top_k", "n_predict", "max_tokens", "seed" }) |k| {
             if (body.contains(k) and (try body.at(k)).isString()) {
-                try body.set(a, k, .{ .number_integer = try convert.stoll((try body.at(k)).string) });
+                try body.set(a, k, .{ .number_integer = try mod.convert.stoll((try body.at(k)).string) });
             }
         }
         for ([_][]const u8{ "top_p", "temperature", "repeat_penalty", "speed" }) |k| {
             if (body.contains(k) and (try body.at(k)).isString()) {
-                try body.set(a, k, try Value.from(a, try convert.stof((try body.at(k)).string)));
+                try body.set(a, k, try json.Value.from(a, try mod.convert.stof((try body.at(k)).string)));
             }
         }
         if (body.contains("stream") and (try body.at("stream")).isString()) {
@@ -1205,8 +1174,8 @@ pub const Routes = struct {
     }
 
     /// The `post_tts` lambda (server-context.cpp:6533 @b1b770d90).
-    fn postTts(self: *Routes, req: *const http.Req) anyerror!*http.Res {
-        var arena = std.heap.ArenaAllocator.init(gpa);
+    fn postTts(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
+        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer arena.deinit();
         const body = try parseTtsBody(arena.allocator(), req);
         return self.handleTtsImpl(req, &body);
@@ -1214,12 +1183,12 @@ pub const Routes = struct {
 
     /// The `post_speech_oai` lambda (server-context.cpp:6537 @b1b770d90): an
     /// OpenAI speech request, converted to `/tts`'s.
-    fn postSpeechOai(self: *Routes, req: *const http.Req) anyerror!*http.Res {
-        var arena = std.heap.ArenaAllocator.init(gpa);
+    fn postSpeechOai(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
+        var arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer arena.deinit();
         const aa = arena.allocator();
         const parsed = try parseTtsBody(aa, req);
-        const body = try convert.speechToTts(aa, &parsed);
+        const body = try mod.convert.speechToTts(aa, &parsed);
         try logConverted(aa, "Request converted: OpenAI Speech -> TTS", &body);
         return self.handleTtsImpl(req, &body);
     }
@@ -1228,7 +1197,7 @@ pub const Routes = struct {
     /// of `server_routes`: `/tts` and `/v1/audio/speech`. A model with predefined
     /// voices speaks only with one of them: the one asked for, `--tts-voice`,
     /// or the first. `pcm16` is the float32 output converted to 16-bit.
-    fn handleTtsImpl(self: *Routes, req: *const http.Req, body: *const Value) anyerror!*http.Res {
+    fn handleTtsImpl(self: *Routes, req: *const mod.http.Req, body: *const json.Value) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
@@ -1239,37 +1208,37 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        const info = c.mtmd_gen_audio_get_info(self.ctx_server.mctx);
+        const info = tc.c.mtmd_gen_audio_get_info(self.ctx_server.mctx);
 
-        const prompt = common.jsonValue(body, "input", []const u8, common.jsonValue(body, "prompt", []const u8, ""));
+        const prompt = mod.common.jsonValue(body, "input", []const u8, mod.common.jsonValue(body, "prompt", []const u8, ""));
         if (prompt.len == 0) {
             try res.errMsg("\"input\" must be a non-empty string", .invalid_request);
             return &res.base;
         }
 
-        const response_format = common.jsonValue(body, "response_format", []const u8, "wav");
+        const response_format = mod.common.jsonValue(body, "response_format", []const u8, "wav");
         const pcm16 = std.mem.eql(u8, response_format, "pcm16");
         const is_pcm = std.mem.eql(u8, response_format, "pcm");
 
-        var task = Task.initType(.tts);
+        var task = mod.task.Task.initType(.tts);
         var task_moved = false;
-        defer if (!task_moved) task.deinit(gpa);
-        const ta = try task.arenaAlloc(gpa);
-        task.params = try task_mod.TaskParams.init(ta);
-        task.tts_inp = task_mod.TtsInp.init();
-        try schema.evalTtsSchema(ta, self.params, &task, body);
+        defer if (!task_moved) task.deinit(mod.context.gpa);
+        const ta = try task.arenaAlloc(mod.context.gpa);
+        task.params = try mod.task.TaskParams.init(ta);
+        task.tts_inp = mod.task.TtsInp.init();
+        try mod.schema.evalTtsSchema(ta, self.params, &task, body);
         const do_stream = task.params.stream;
         // a model with a "tts" chat template (e.g. LFM3-Audio) speaks the prompt rendered from it
-        const lang = common.jsonValue(body, "lang", []const u8, self.params.tts_lang);
+        const lang = mod.common.jsonValue(body, "lang", []const u8, self.params.tts_lang);
         // speaker_ref in the request overrides the default voice
-        const has_speaker_ref = req.files.get("speaker_ref") != null or common.jsonValue(body, "speaker_ref_b64", []const u8, "").len != 0;
-        const voice = common.jsonValue(body, "voice", []const u8, if (has_speaker_ref) "" else self.params.tts_voice);
+        const has_speaker_ref = req.files.get("speaker_ref") != null or mod.common.jsonValue(body, "speaker_ref_b64", []const u8, "").len != 0;
+        const voice = mod.common.jsonValue(body, "voice", []const u8, if (has_speaker_ref) "" else self.params.tts_voice);
         const tts_prompt = try chat.templates.getTtsPrompt(a, self.metaRef().chat_params.tmpls, prompt, lang, voice);
         // a model with predefined voices only speaks with one of them
-        var voice_ref: ?*c.mtmd_bitmap = null;
-        defer if (voice_ref) |bmp| c.mtmd_bitmap_free(bmp);
+        var voice_ref: ?*tc.c.mtmd_bitmap = null;
+        defer if (voice_ref) |bmp| tc.c.mtmd_bitmap_free(bmp);
         if (voice.len != 0 and info.n_voices > 0) {
-            voice_ref = c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, (try a.dupeSentinel(u8, voice, 0)).ptr);
+            voice_ref = tc.c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, (try a.dupeSentinel(u8, voice, 0)).ptr);
             if (voice_ref == null) {
                 try res.errMsg(try std.mem.concat(a, u8, &.{ "unknown voice \"", voice, "\", see \"voices\" in GET /props" }), .invalid_request);
                 return &res.base;
@@ -1278,7 +1247,7 @@ pub const Routes = struct {
         task.tts_inp.prompt_str = try ta.dupeSentinel(u8, if (tts_prompt.len == 0) prompt else tts_prompt, 0);
         task.tts_inp.lang_str = try ta.dupeSentinel(u8, lang, 0);
         task.tts_inp.data.stream = do_stream;
-        task.tts_inp.data.out_type = if (is_pcm or pcm16) c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM else c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
+        task.tts_inp.data.out_type = if (is_pcm or pcm16) tc.c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM else tc.c.MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
         // note: -1 is clamped to 0 by the sampler, it will disable the penalty
         task.params.sampling.penalty_last_n = if (task.params.n_predict > 0) task.params.n_predict else 512;
         task.params.sampling.seed = task.tts_inp.data.seed; // same seed for the codec/vocoder RNG
@@ -1297,9 +1266,9 @@ pub const Routes = struct {
         if (req.files.get("speaker_ref")) |file| {
             speaker_ref = file.data;
         } else {
-            const speaker_ref_b64 = common.jsonValue(body, "speaker_ref_b64", []const u8, "");
+            const speaker_ref_b64 = mod.common.jsonValue(body, "speaker_ref_b64", []const u8, "");
             if (speaker_ref_b64.len != 0) {
-                speaker_ref = tokens_mod.base64HppDecode(a, speaker_ref_b64) catch |e| switch (e) {
+                speaker_ref = mod.tokens.base64HppDecode(a, speaker_ref_b64) catch |e| switch (e) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => {
                         try res.errMsg("\"speaker_ref_b64\" is not valid base64", .invalid_request);
@@ -1314,11 +1283,11 @@ pub const Routes = struct {
                 try res.errMsg("\"voice\" and \"speaker_ref\" cannot be used together", .invalid_request);
                 return &res.base;
             }
-            if (!c.mtmd_support_audio(self.ctx_server.mctx)) {
+            if (!tc.c.mtmd_support_audio(self.ctx_server.mctx)) {
                 try res.errMsg("this model has no voice encoder, \"speaker_ref\" cannot be used", .invalid_request);
                 return &res.base;
             }
-            const wrapper = c.mtmd_helper_bitmap_init_from_buf(self.ctx_server.mctx, speaker_ref.ptr, speaker_ref.len, false, self.ctx_server.init_opt);
+            const wrapper = tc.c.mtmd_helper_bitmap_init_from_buf(self.ctx_server.mctx, speaker_ref.ptr, speaker_ref.len, false, self.ctx_server.init_opt);
             if (wrapper.bitmap == null) {
                 try res.errMsg("failed to decode \"speaker_ref\"", .invalid_request);
                 return &res.base;
@@ -1329,11 +1298,11 @@ pub const Routes = struct {
             voice_ref = null;
         } else if (info.n_voices > 0) {
             // without a voice prompt the model produces near silence: the first voice is the default
-            const first = c.mtmd_gen_audio_voice_name(self.ctx_server.mctx, 0);
-            srv(.wrn, "handle_tts_impl", "no voice given, speaking with \"%s\"\n", .{first});
-            task.tts_inp.setSpeakerRef(c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, first));
+            const first = tc.c.mtmd_gen_audio_voice_name(self.ctx_server.mctx, 0);
+            mod.common.srv(.wrn, "handle_tts_impl", "no voice given, speaking with \"%s\"\n", .{first});
+            task.tts_inp.setSpeakerRef(tc.c.mtmd_gen_audio_get_voice(self.ctx_server.mctx, first));
         } else {
-            srv(.wrn, "handle_tts_impl", "%s", .{@as([*:0]const u8, "no speaker reference provided, the model may behave randomly\n")});
+            mod.common.srv(.wrn, "handle_tts_impl", "%s", .{@as([*:0]const u8, "no speaker reference provided, the model may behave randomly\n")});
         }
 
         task.id = res.rd.getNewId();
@@ -1355,7 +1324,7 @@ pub const Routes = struct {
                 ggmlAssert(req.should_stop.call(), 7185, "req.should_stop()");
                 return &res.base; // connection is closed
             };
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
             if (result.isError()) {
                 var j = try result.toJson(a);
                 try res.err(&j);
@@ -1372,7 +1341,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 7201, "req.should_stop()");
             return &res.base; // connection is closed
         };
-        defer first_result.destroy(gpa);
+        defer first_result.destroy(mod.context.gpa);
         if (first_result.isError()) {
             var j = try first_result.toJson(a);
             try res.err(&j);
@@ -1400,7 +1369,7 @@ pub const Routes = struct {
         const samples = try a.alloc(f32, n);
         defer a.free(samples);
         @memcpy(std.mem.sliceAsBytes(samples), audio[0 .. n * @sizeOf(f32)]);
-        return common.pcmF32ToS16(a, samples);
+        return mod.common.pcmF32ToS16(a, samples);
     }
 
     /// The `set_next` lambda (server-context.cpp:7216 @b1b770d90) of `handle_tts_impl`.
@@ -1430,13 +1399,13 @@ pub const Routes = struct {
             }
         };
         const result = (try rd.next(Stop{ .res_this = res_this })) orelse return false;
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
         if (result.isError()) {
             return false;
         }
         ggmlAssert(result.kind == .tts, 7239, "tts_res != nullptr");
-        const audio = try takeAudio(gpa, res_this.tts_pcm16, result.kind.tts.audio);
-        defer if (res_this.tts_pcm16) gpa.free(audio);
+        const audio = try takeAudio(mod.context.gpa, res_this.tts_pcm16, result.kind.tts.audio);
+        defer if (res_this.tts_pcm16) mod.context.gpa.free(audio);
         try output.appendSlice(oa, audio);
         res_this.tts_is_done = result.kind.tts.final;
         return true;
@@ -1444,12 +1413,12 @@ pub const Routes = struct {
 
     /// The `ws_realtime` handler: runs on its own HTTP thread for the whole
     /// lifetime of the connection.
-    fn wsRealtimeHandler(ctx: ?*anyopaque, req: *const http.Req, conn: *http.WsConn) void {
+    fn wsRealtimeHandler(ctx: ?*anyopaque, req: *const mod.http.Req, conn: *mod.http.WsConn) void {
         const self: *Routes = @ptrCast(@alignCast(ctx.?));
         self.wsRealtime(req, conn) catch |e| {
-            const z = common.dupZ(context.whatOf(e));
-            defer common.freeZ(z);
-            srv(.err, "operator()", "realtime session failed: %s\n", .{z});
+            const z = mod.common.dupZ(mod.context.whatOf(e));
+            defer mod.common.freeZ(z);
+            mod.common.srv(.err, "operator()", "realtime session failed: %s\n", .{z});
             conn.close();
         };
     }
@@ -1461,13 +1430,13 @@ pub const Routes = struct {
     /// base64 in input_audio_buffer.append events;
     /// input_audio_buffer.commit with "final": true ends the input, closing
     /// the socket also ends it.
-    fn wsRealtime(self: *Routes, req: *const http.Req, conn: *http.WsConn) !void {
+    fn wsRealtime(self: *Routes, req: *const mod.http.Req, conn: *mod.http.WsConn) !void {
         // models that answer after the audio hold a conversation, see server-realtime.h
         // live transcription: Voxtral Realtime (no chat), or an "asr" model in a session opened with ?intent=transcription
         const server = self.ctx_server;
         const live_asr = server.asr_prompt.len != 0 and std.mem.eql(u8, req.getParam("intent", ""), "transcription");
         if (server.mtmd_cap.audio_stream and server.mtmd_cap.chat and !live_asr) {
-            realtime.conversation(.{
+            mod.realtime.conversation(.{
                 .queue_tasks = self.queue_tasks,
                 .queue_results = self.queue_results,
                 .meta = self.metaRef(),
@@ -1479,18 +1448,18 @@ pub const Routes = struct {
             return;
         }
 
-        var session: LiveAsr = .{ .routes = self, .conn = conn, .arena = std.heap.ArenaAllocator.init(gpa) };
+        var session: LiveAsr = .{ .routes = self, .conn = conn, .arena = std.heap.ArenaAllocator.init(mod.context.gpa) };
         defer session.arena.deinit();
         try session.run();
     }
 
     /// The `get_lora_adapters` lambda (server-context.cpp:6630 @b1b770d90).
-    fn getLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn getLoraAdapters(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
 
         {
-            var task = Task.initType(.get_lora);
+            var task = mod.task.Task.initType(.get_lora);
             task.id = res.rd.getNewId();
             try res.rd.postTask(task, false);
         }
@@ -1500,7 +1469,7 @@ pub const Routes = struct {
     }
 
     /// The `post_lora_adapters` lambda (server-context.cpp:6658 @b1b770d90).
-    fn postLoraAdapters(self: *Routes, req: *const http.Req) anyerror!*http.Res {
+    fn postLoraAdapters(self: *Routes, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
@@ -1511,9 +1480,9 @@ pub const Routes = struct {
         }
 
         {
-            var task = Task.initType(.set_lora);
+            var task = mod.task.Task.initType(.set_lora);
             task.id = res.rd.getNewId();
-            task.set_lora = try common.parseLoraRequest(try task.arenaAlloc(gpa), &body);
+            task.set_lora = try mod.common.parseLoraRequest(try task.arenaAlloc(mod.context.gpa), &body);
             try res.rd.postTask(task, false);
         }
 
@@ -1523,14 +1492,14 @@ pub const Routes = struct {
 
     /// The common tail of the single-task handlers: wait for the one
     /// result, answer its error or its JSON.
-    fn finishSimple(self: *Routes, res: *ResGenerator, req: *const http.Req, comptime kind: std.meta.Tag(Result.Kind), comptime line: c_int) !*http.Res {
+    fn finishSimple(self: *Routes, res: *ResGenerator, req: *const mod.http.Req, comptime kind: std.meta.Tag(mod.result.Result.Kind), comptime line: c_int) !*mod.http.Res {
         _ = self;
         const result = (try res.rd.next(ReqStop{ .req = req })) orelse {
             // connection was closed
             ggmlAssert(req.should_stop.call(), line - 9, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
 
         if (result.isError()) {
             var j = try result.toJson(res.alloc());
@@ -1546,11 +1515,11 @@ pub const Routes = struct {
 
     /// A slot action's file name, validated, and its path under
     /// `--slot-save-path`; null after answering "Invalid filename".
-    fn slotFile(self: *Routes, res: *ResGenerator, req: *const http.Req) !?[2][]const u8 {
+    fn slotFile(self: *Routes, res: *ResGenerator, req: *const mod.http.Req) !?[2][]const u8 {
         const a = res.alloc();
         var request_data = try json.parse(a, req.body);
         const filename = try (try request_data.at("filename")).get([]const u8);
-        if (!oaicompat.fsValidateFilename(filename, false)) {
+        if (!mod.oaicompat.fsValidateFilename(filename, false)) {
             try res.errMsg("Invalid filename", .invalid_request);
             return null;
         }
@@ -1558,7 +1527,7 @@ pub const Routes = struct {
         return .{ filename, filepath };
     }
 
-    fn postSlotAction(self: *Routes, req: *const http.Req, ty: TaskType, id_slot: c_int, comptime kind: std.meta.Tag(Result.Kind), comptime line: c_int) !*http.Res {
+    fn postSlotAction(self: *Routes, req: *const mod.http.Req, ty: mod.task.TaskType, id_slot: c_int, comptime kind: std.meta.Tag(mod.result.Result.Kind), comptime line: c_int) !*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         var filename: []const u8 = "";
@@ -1570,9 +1539,9 @@ pub const Routes = struct {
         }
 
         {
-            var task = Task.initType(ty);
+            var task = mod.task.Task.initType(ty);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(gpa);
+            const ta = try task.arenaAlloc(mod.context.gpa);
             task.slot_action.id_slot = id_slot;
             task.slot_action.filename = try ta.dupe(u8, filename);
             task.slot_action.filepath = try ta.dupe(u8, filepath);
@@ -1584,15 +1553,15 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `handle_slots_save` (server-context.cpp:6693
     /// @b1b770d90). Its result is not type-checked, as upstream's is not.
-    fn handleSlotsSave(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
+    fn handleSlotsSave(self: *Routes, req: *const mod.http.Req, id_slot: c_int) !*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const f = (try self.slotFile(res, req)) orelse return &res.base;
 
         {
-            var task = Task.initType(.slot_save);
+            var task = mod.task.Task.initType(.slot_save);
             task.id = res.rd.getNewId();
-            const ta = try task.arenaAlloc(gpa);
+            const ta = try task.arenaAlloc(mod.context.gpa);
             task.slot_action.id_slot = id_slot;
             task.slot_action.filename = try ta.dupe(u8, f[0]);
             task.slot_action.filepath = try ta.dupe(u8, f[1]);
@@ -1604,7 +1573,7 @@ pub const Routes = struct {
             ggmlAssert(req.should_stop.call(), 6716, "req.should_stop()");
             return &res.base;
         };
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
 
         var j = try result.toJson(res.alloc());
         if (result.isError()) {
@@ -1617,17 +1586,17 @@ pub const Routes = struct {
     }
 
     /// Ports `server_routes`'s `handle_slots_restore` (server-context.cpp:6729 @b1b770d90).
-    fn handleSlotsRestore(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
+    fn handleSlotsRestore(self: *Routes, req: *const mod.http.Req, id_slot: c_int) !*mod.http.Res {
         return self.postSlotAction(req, .slot_restore, id_slot, .slot_save_load, 6761);
     }
 
     /// Ports `server_routes`'s `handle_slots_erase` (server-context.cpp:6766 @b1b770d90).
-    fn handleSlotsErase(self: *Routes, req: *const http.Req, id_slot: c_int) !*http.Res {
+    fn handleSlotsErase(self: *Routes, req: *const mod.http.Req, id_slot: c_int) !*mod.http.Res {
         return self.postSlotAction(req, .slot_erase, id_slot, .slot_erase, 6788);
     }
 
     /// Ports `server_routes`'s `handle_embeddings_impl` (server-context.cpp:6793 @b1b770d90).
-    fn handleEmbeddingsImpl(self: *Routes, req: *const http.Req, res_type_in: ResponseType) !*http.Res {
+    fn handleEmbeddingsImpl(self: *Routes, req: *const mod.http.Req, res_type_in: mod.task.ResponseType) !*mod.http.Res {
         var res_type = res_type_in;
         const res = try self.createResponse(false);
         errdefer res.destroy();
@@ -1637,7 +1606,7 @@ pub const Routes = struct {
             return &res.base;
         }
 
-        if (res_type != .none and self.metaRef().pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
+        if (res_type != .none and self.metaRef().pooling_type == tc.c.LLAMA_POOLING_TYPE_NONE) {
             try res.errMsg("Pooling type 'none' is not OAI compatible. Please use a different pooling type", .invalid_request);
             return &res.base;
         }
@@ -1645,7 +1614,7 @@ pub const Routes = struct {
         var body = try json.parse(a, req.body);
 
         // for the shape of input/content, see tokenize_input_prompts()
-        var prompt: *const Value = undefined;
+        var prompt: *const json.Value = undefined;
         if (body.count("input") != 0) {
             prompt = try body.at("input");
         } else if (body.contains("content")) {
@@ -1669,30 +1638,30 @@ pub const Routes = struct {
 
         // same shapes as tokenize_input_prompts(), plus OAI content: { "content": [ { "type": "text"|"image_url"|"input_audio"|"input_video", ... } ] }
         const TokenizeEntry = struct {
-            fn run(r: *Routes, p: *const Value) !ServerTokens {
+            fn run(r: *Routes, p: *const json.Value) !mod.tokens.ServerTokens {
                 if (p.isObject() and p.contains("content")) {
-                    return oaicompat.tokenizeOaiContentArray(gpa, r.ctx_server.vocab, r.ctx_server.mctx, r.metaRef().chat_params, try p.at("content"), true, true, r.ctx_server.init_opt);
+                    return mod.oaicompat.tokenizeOaiContentArray(mod.context.gpa, r.ctx_server.vocab, r.ctx_server.mctx, r.metaRef().chat_params, try p.at("content"), true, true, r.ctx_server.init_opt);
                 }
-                return tokens_mod.tokenizeInputSubprompt(gpa, r.ctx_server.vocab, r.ctx_server.mctx, p, true, true, r.ctx_server.init_opt);
+                return mod.tokens.tokenizeInputSubprompt(mod.context.gpa, r.ctx_server.vocab, r.ctx_server.mctx, p, true, true, r.ctx_server.init_opt);
             }
         };
 
-        var tokenized_prompts: std.ArrayList(ServerTokens) = .empty;
+        var tokenized_prompts: std.ArrayList(mod.tokens.ServerTokens) = .empty;
         defer {
             for (tokenized_prompts.items) |*t| t.deinit();
-            tokenized_prompts.deinit(gpa);
+            tokenized_prompts.deinit(mod.context.gpa);
         }
-        if (prompt.isArray() and !common.jsonIsArrayAndContainsNumbers(prompt)) {
+        if (prompt.isArray() and !mod.common.jsonIsArrayAndContainsNumbers(prompt)) {
             for (prompt.array.items) |*p| {
                 var t = try TokenizeEntry.run(self, p);
-                tokenized_prompts.append(gpa, t) catch |e| {
+                tokenized_prompts.append(mod.context.gpa, t) catch |e| {
                     t.deinit();
                     return e;
                 };
             }
         } else {
             var t = try TokenizeEntry.run(self, prompt);
-            tokenized_prompts.append(gpa, t) catch |e| {
+            tokenized_prompts.append(mod.context.gpa, t) catch |e| {
                 t.deinit();
                 return e;
             };
@@ -1713,30 +1682,30 @@ pub const Routes = struct {
         var embd_normalize = self.params.embd_normalize;
         if (body.count("embd_normalize") != 0) {
             embd_normalize = try (try body.at("embd_normalize")).get(c_int);
-            if (self.metaRef().pooling_type == c.LLAMA_POOLING_TYPE_NONE) {
-                srv(.dbg, "handle_embeddings_impl", "embd_normalize is not supported by pooling type %d, ignoring it\n", .{@as(c_int, self.metaRef().pooling_type)});
+            if (self.metaRef().pooling_type == tc.c.LLAMA_POOLING_TYPE_NONE) {
+                mod.common.srv(.dbg, "handle_embeddings_impl", "embd_normalize is not supported by pooling type %d, ignoring it\n", .{@as(c_int, self.metaRef().pooling_type)});
             }
         }
 
         // create and queue the task
-        var responses = Value.emptyArray();
+        var responses = json.Value.emptyArray();
         {
-            var tasks: std.ArrayList(Task) = .empty;
-            defer tasks.deinit(gpa);
-            errdefer for (tasks.items) |*t| t.deinit(gpa);
+            var tasks: std.ArrayList(mod.task.Task) = .empty;
+            defer tasks.deinit(mod.context.gpa);
+            errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
             for (tokenized_prompts.items) |*t| {
-                var task = Task.initType(.embedding);
-                task.params = try task_mod.TaskParams.init(try task.arenaAlloc(gpa));
+                var task = mod.task.Task.initType(.embedding);
+                task.params = try mod.task.TaskParams.init(try task.arenaAlloc(mod.context.gpa));
 
                 task.id = res.rd.getNewId();
                 task.tokens = t.*;
-                t.* = ServerTokens.init(gpa); // std::move
+                t.* = mod.tokens.ServerTokens.init(mod.context.gpa); // std::move
 
                 // OAI-compat
                 task.params.res_type = res_type;
                 task.params.embd_normalize = embd_normalize;
 
-                try tasks.append(gpa, task);
+                try tasks.append(mod.context.gpa, task);
             }
             try res.rd.postTasks(tasks.items, null, false);
             tasks.clearRetainingCapacity();
@@ -1744,7 +1713,7 @@ pub const Routes = struct {
 
         // wait for the results
         var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-        defer all_results.deinit(gpa);
+        defer all_results.deinit(mod.context.gpa);
 
         // collect results
         if (all_results.is_terminated) {
@@ -1762,7 +1731,7 @@ pub const Routes = struct {
 
         // write JSON response
         var root = if (res_type == .oai_embd)
-            try oaicompat.formatEmbeddingsResponseOaicompat(a, &body, self.metaRef().model_name, &responses, use_base64)
+            try mod.oaicompat.formatEmbeddingsResponseOaicompat(a, &body, self.metaRef().model_name, &responses, use_base64)
         else
             responses;
         try res.ok(&root);
@@ -1772,7 +1741,7 @@ pub const Routes = struct {
     /// Ports `server_routes`'s `handle_count_tokens` (server-context.cpp:7249
     /// @b1b770d90): the prompt a chat, Responses or Anthropic request would
     /// render, counted in tokens.
-    fn handleCountTokens(self: *Routes, req: *const http.Req, res_type: ResponseType) !*http.Res {
+    fn handleCountTokens(self: *Routes, req: *const mod.http.Req, res_type: mod.task.ResponseType) !*mod.http.Res {
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
@@ -1785,10 +1754,10 @@ pub const Routes = struct {
             },
             .oai_resp => {
                 is_oai = true;
-                body = try convert.responsesToChatcmpl(a, &body);
+                body = try mod.convert.responsesToChatcmpl(a, &body);
             },
             .anthropic => {
-                body = try convert.anthropicToOai(a, &body);
+                body = try mod.convert.anthropicToOai(a, &body);
             },
             else => {
                 try res.errMsg("invalid res_type", .invalid_request);
@@ -1797,25 +1766,25 @@ pub const Routes = struct {
         }
 
         var files: std.ArrayList([]u8) = .empty;
-        var session = try chat.session.Session.initEmpty(gpa); // dummy, unused
+        var session = try chat.session.Session.initEmpty(mod.context.gpa); // dummy, unused
         defer session.deinit();
-        var body_parsed = try oaicompat.oaicompatChatParamsParse(a, self.ctx_server.vocab, &body, self.metaRef().chat_params, &files, &session);
+        var body_parsed = try mod.oaicompat.oaicompatChatParamsParse(a, self.ctx_server.vocab, &body, self.metaRef().chat_params, &files, &session);
         const prompt = try body_parsed.at("prompt");
 
         // TODO @ngxson : refactor this code block, move this to server-common and reuse it in other places
         var n_tokens: usize = undefined;
         if (self.ctx_server.mctx != null) {
             if (!prompt.isString()) {
-                return throw(error.RuntimeError, "for mtmd, input prompt must be a string.", .{});
+                return mod.common.throw(error.RuntimeError, "for mtmd, input prompt must be a string.", .{});
             }
-            var t = try tokens_mod.processMtmdPrompt(gpa, self.ctx_server.mctx, prompt.string, files.items, self.ctx_server.init_opt, true);
+            var t = try mod.tokens.processMtmdPrompt(mod.context.gpa, self.ctx_server.mctx, prompt.string, files.items, self.ctx_server.init_opt, true);
             defer t.deinit();
             n_tokens = t.size();
         } else {
-            n_tokens = (try tokens_mod.tokenizeMixed(a, self.ctx_server.vocab, prompt, true, true)).len;
+            n_tokens = (try mod.tokens.tokenizeMixed(a, self.ctx_server.vocab, prompt, true, true)).len;
         }
 
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("input_tokens", @as(i64, @intCast(n_tokens)));
         if (is_oai) {
             try o.put("object", "response.input_tokens");
@@ -1827,13 +1796,13 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `handle_completions_impl` (server-context.cpp:5339 @b1b770d90).
     /// `chat_session`: the request's, or null for the default one.
-    fn handleCompletionsImpl(self: *Routes, req: *const http.Req, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, chat_session: ?*const chat.session.Session) !*http.Res {
+    fn handleCompletionsImpl(self: *Routes, req: *const mod.http.Req, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, chat_session: ?*const chat.session.Session) !*mod.http.Res {
         ggmlAssert(ty == .completion or ty == .infill, 5346, "type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL");
 
         const res = try self.createResponse(false);
         errdefer res.destroy();
         const a = res.alloc();
-        const completion_id = try common.genChatcmplid(a);
+        const completion_id = try mod.common.genChatcmplid(a);
         const params = self.params;
 
         try res.spipe.setReq(req); // will also set spipe if needed
@@ -1847,16 +1816,16 @@ pub const Routes = struct {
 
         self.postCompletionTasks(res, ty, data, files, res_type, completion_id, &sse_ping_interval, chat_session) catch |e| {
             if (e == error.OutOfMemory) return e;
-            try res.errMsg(context.whatOf(e), .invalid_request);
+            try res.errMsg(mod.context.whatOf(e), .invalid_request);
             return &res.base;
         };
 
-        const do_stream = common.jsonValue(data, "stream", bool, false);
+        const do_stream = mod.common.jsonValue(data, "stream", bool, false);
 
         if (!do_stream) {
             // non-stream, wait for the results
             var all_results = try res.rd.waitForAll(ReqStop{ .req = req });
-            defer all_results.deinit(gpa);
+            defer all_results.deinit(mod.context.gpa);
             if (all_results.is_terminated) {
                 return &res.base; // connection is closed
             } else if (all_results.err) |e| {
@@ -1864,7 +1833,7 @@ pub const Routes = struct {
                 try res.err(&j);
                 return &res.base;
             } else {
-                var arr = Value.emptyArray();
+                var arr = json.Value.emptyArray();
                 for (all_results.results) |r| {
                     ggmlAssert(r.?.kind == .cmpl_final, 5444, "dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr");
                     try arr.pushBack(a, try r.?.toJson(a));
@@ -1905,7 +1874,7 @@ pub const Routes = struct {
                 ggmlAssert(req.should_stop.call(), 5479, "req.should_stop()");
                 return &res.base; // connection is closed
             };
-            defer first_result.destroy(gpa);
+            defer first_result.destroy(mod.context.gpa);
 
             if (first_result.isError()) {
                 var j = try first_result.toJson(a);
@@ -1921,11 +1890,11 @@ pub const Routes = struct {
             if (first_result_json == .null) {
                 try res.base.setData(""); // simply send HTTP headers and status code
             } else if (res_type == .anthropic) {
-                try res.base.setData(try common.formatAnthropicSse(a, &first_result_json));
+                try res.base.setData(try mod.common.formatAnthropicSse(a, &first_result_json));
             } else if (res_type == .oai_resp) {
-                try res.base.setData(try common.formatOaiRespSse(a, &first_result_json));
+                try res.base.setData(try mod.common.formatOaiRespSse(a, &first_result_json));
             } else {
-                try res.base.setData(try common.formatOaiSse(a, &first_result_json));
+                try res.base.setData(try mod.common.formatOaiSse(a, &first_result_json));
             }
             res.base.status = 200;
             res.base.content_type = "text/event-stream";
@@ -1940,12 +1909,12 @@ pub const Routes = struct {
     /// The `try` block of `handle_completions_impl` (server-context.cpp:5339
     /// @b1b770d90): tokenize, build one task per prompt (and its children),
     /// post them.
-    fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: TaskType, data: *Value, files: []const []u8, res_type: ResponseType, completion_id: []const u8, sse_ping_interval: *i32, chat_session: ?*const chat.session.Session) !void {
+    fn postCompletionTasks(self: *Routes, res: *ResGenerator, ty: mod.task.TaskType, data: *json.Value, files: []const []u8, res_type: mod.task.ResponseType, completion_id: []const u8, sse_ping_interval: *i32, chat_session: ?*const chat.session.Session) !void {
         const params = self.params;
         const ctx_server = self.ctx_server;
-        var tasks: std.ArrayList(Task) = .empty;
-        defer tasks.deinit(gpa);
-        errdefer for (tasks.items) |*t| t.deinit(gpa);
+        var tasks: std.ArrayList(mod.task.Task) = .empty;
+        defer tasks.deinit(mod.context.gpa);
+        errdefer for (tasks.items) |*t| t.deinit(mod.context.gpa);
 
         const prompt = try data.at("prompt");
         // TODO: this log can become very long, put it behind a flag or think about a more compact format
@@ -1955,34 +1924,34 @@ pub const Routes = struct {
         }
 
         // process prompt
-        var inputs: std.ArrayList(ServerTokens) = .empty;
+        var inputs: std.ArrayList(mod.tokens.ServerTokens) = .empty;
         defer {
             for (inputs.items) |*t| t.deinit();
-            inputs.deinit(gpa);
+            inputs.deinit(mod.context.gpa);
         }
 
         if (res_type != .none and ctx_server.mctx != null) {
             // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
-            try inputs.append(gpa, try tokens_mod.processMtmdPrompt(gpa, ctx_server.mctx, try prompt.get([]const u8), files, ctx_server.init_opt, false));
+            try inputs.append(mod.context.gpa, try mod.tokens.processMtmdPrompt(mod.context.gpa, ctx_server.mctx, try prompt.get([]const u8), files, ctx_server.init_opt, false));
         } else {
             // Everything else, including multimodal completions.
-            inputs = try tokens_mod.tokenizeInputPrompts(gpa, ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
+            inputs = try mod.tokens.tokenizeInputPrompts(mod.context.gpa, ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
         }
 
         for (inputs.items) |*input| {
-            var task = Task.initType(ty);
-            errdefer task.deinit(gpa);
+            var task = mod.task.Task.initType(ty);
+            errdefer task.deinit(mod.context.gpa);
 
             task.id = res.rd.getNewId();
 
             task.tokens = input.*;
-            input.* = ServerTokens.init(gpa); // std::move
-            const ta = try task.arenaAlloc(gpa);
-            task.params = try schema.evalLlamaCmplSchema(ta, ctx_server.vocab, params, self.metaRef().logit_bias_eog, data);
+            input.* = mod.tokens.ServerTokens.init(mod.context.gpa); // std::move
+            const ta = try task.arenaAlloc(mod.context.gpa);
+            task.params = try mod.schema.evalLlamaCmplSchema(ta, ctx_server.vocab, params, self.metaRef().logit_bias_eog, data);
 
-            if (chat_session) |cs| try task.applyChatSession(gpa, cs);
+            if (chat_session) |cs| try task.applyChatSession(mod.context.gpa, cs);
 
-            task.id_slot = common.jsonValue(data, "id_slot", c_int, -1);
+            task.id_slot = mod.common.jsonValue(data, "id_slot", c_int, -1);
             sse_ping_interval.* = task.params.sse_ping_interval;
 
             // OAI-compat
@@ -1995,11 +1964,11 @@ pub const Routes = struct {
                 const n_children = task.params.n_cmpl - 1;
                 var j: i32 = 0;
                 while (j < n_children) : (j += 1) {
-                    try task.addChild(gpa, task.id, res.rd.getNewId());
+                    try task.addChild(mod.context.gpa, task.id, res.rd.getNewId());
                 }
             }
 
-            try tasks.append(gpa, task);
+            try tasks.append(mod.context.gpa, task);
         }
 
         try res.rd.postTasks(tasks.items, chat_session, false);
@@ -2009,8 +1978,8 @@ pub const Routes = struct {
     /// The `path_prompts_log_dir` block of `handle_completions_impl`
     /// (server-context.cpp:5339 @b1b770d90): the prompt, written to a file
     /// named for the time.
-    fn logPrompt(a: Allocator, dir: []const u8, prompt: *const Value) !void {
-        const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{c.ggml_time_ms()});
+    fn logPrompt(a: Allocator, dir: []const u8, prompt: *const json.Value) !void {
+        const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{tc.c.ggml_time_ms()});
         const file_path = try std.fs.path.joinZ(a, &.{ dir, name });
         const text = if (prompt.isString()) prompt.string else try json.dump(a, prompt, 2);
         const io = stdlib.file.defaultIo();
@@ -2022,7 +1991,7 @@ pub const Routes = struct {
                 else => {}, // the stream's failure unchecked
             };
         } else |_| {
-            srv(.err, "handle_completions_impl", "failed to create %s\n", .{file_path.ptr});
+            mod.common.srv(.err, "handle_completions_impl", "failed to create %s\n", .{file_path.ptr});
         }
     }
 
@@ -2037,9 +2006,9 @@ pub const Routes = struct {
 
         return streamNextImpl(res_this, output, oa, res_type, sse_ping_interval) catch |e| {
             if (e == error.OutOfMemory) return e;
-            var tmp = std.heap.ArenaAllocator.init(gpa);
+            var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
             defer tmp.deinit();
-            var error_json = try common.formatErrorResponse(tmp.allocator(), context.whatOf(e), .server);
+            var error_json = try mod.common.formatErrorResponse(tmp.allocator(), mod.context.whatOf(e), .server);
             try output.appendSlice(oa, try formatError(tmp.allocator(), res_type, &error_json));
 
             // terminate on exception
@@ -2048,25 +2017,25 @@ pub const Routes = struct {
     }
 
     /// The `format_error` lambda of the streaming lambda (server-context.cpp:5508 @b1b770d90).
-    fn formatError(a: Allocator, res_type: ResponseType, res_json: *const Value) ![]u8 {
+    fn formatError(a: Allocator, res_type: mod.task.ResponseType, res_json: *const json.Value) ![]u8 {
         if (res_type == .anthropic) {
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("event", "error");
             try o.put("data", try res_json.clone(a));
             var v = o.done();
-            return common.formatAnthropicSse(a, &v);
+            return mod.common.formatAnthropicSse(a, &v);
         } else {
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("error", try res_json.clone(a));
             var v = o.done();
-            return common.formatOaiSse(a, &v);
+            return mod.common.formatOaiSse(a, &v);
         }
     }
 
-    fn streamNextImpl(res_this: *ResGenerator, output: *std.ArrayList(u8), oa: Allocator, res_type: ResponseType, sse_ping_interval: i32) !bool {
+    fn streamNextImpl(res_this: *ResGenerator, output: *std.ArrayList(u8), oa: Allocator, res_type: mod.task.ResponseType, sse_ping_interval: i32) !bool {
         const func = "operator()";
         if (res_this.shouldStop()) {
-            srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
+            mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
             return false; // should_stop condition met
         }
 
@@ -2085,7 +2054,7 @@ pub const Routes = struct {
                 .none, .oai_resp, .anthropic => {},
                 else => try output.appendSlice(oa, "data: [DONE]\n\n"),
             }
-            srv(.dbg, func, "%s", .{@as([*:0]const u8, "all results received, terminating stream\n")});
+            mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "all results received, terminating stream\n")});
             return false; // no more data, terminate
         }
 
@@ -2098,7 +2067,7 @@ pub const Routes = struct {
             pub fn shouldStop(s: @This()) bool {
                 if (s.res_this.shouldStop()) {
                     return true; // should_stop condition met
-                } else if (s.sse_ping_interval > 0 and c.ggml_time_ms() - s.start_time > @as(i64, s.sse_ping_interval) * 1000) {
+                } else if (s.sse_ping_interval > 0 and tc.c.ggml_time_ms() - s.start_time > @as(i64, s.sse_ping_interval) * 1000) {
                     s.timeout.* = true;
                     return true; // timeout
                 }
@@ -2106,24 +2075,24 @@ pub const Routes = struct {
             }
         };
         var timeout = false;
-        const result_opt = try rd.next(Stop{ .res_this = res_this, .timeout = &timeout, .start_time = c.ggml_time_ms(), .sse_ping_interval = sse_ping_interval });
+        const result_opt = try rd.next(Stop{ .res_this = res_this, .timeout = &timeout, .start_time = tc.c.ggml_time_ms(), .sse_ping_interval = sse_ping_interval });
 
         if (timeout) {
-            if (result_opt) |r| r.destroy(gpa);
+            if (result_opt) |r| r.destroy(mod.context.gpa);
             // some clients may time out (e.g. undici) will time out if no data is received for a while, so we need to send a ping to keep the connection alive
-            srv(.dbg, func, "%s", .{@as([*:0]const u8, "sending SSE ping\n")});
+            mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "sending SSE ping\n")});
             try output.appendSlice(oa, ":\n\n");
             return true;
         }
 
         const result = result_opt orelse {
-            srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
+            mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "stopping streaming due to should_stop condition\n")});
             ggmlAssert(res_this.shouldStop(), 5577, "effective_should_stop()");
             return false; // should_stop condition met
         };
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
 
-        var tmp = std.heap.ArenaAllocator.init(gpa);
+        var tmp = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer tmp.deinit();
         const a = tmp.allocator();
 
@@ -2131,17 +2100,17 @@ pub const Routes = struct {
         if (result.isError()) {
             var res_json = try result.toJson(a);
             try output.appendSlice(oa, try formatError(a, res_type, &res_json));
-            srv(.dbg, func, "%s", .{@as([*:0]const u8, "error received during streaming, terminating stream\n")});
+            mod.common.srv(.dbg, func, "%s", .{@as([*:0]const u8, "error received during streaming, terminating stream\n")});
             return false; // terminate on error
         } else {
             ggmlAssert(result.kind == .cmpl_partial or result.kind == .cmpl_final, 5588, "dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr");
             var res_json = try result.toJson(a);
             if (res_type == .anthropic) {
-                try output.appendSlice(oa, try common.formatAnthropicSse(a, &res_json));
+                try output.appendSlice(oa, try mod.common.formatAnthropicSse(a, &res_json));
             } else if (res_type == .oai_resp) {
-                try output.appendSlice(oa, try common.formatOaiRespSse(a, &res_json));
+                try output.appendSlice(oa, try mod.common.formatOaiRespSse(a, &res_json));
             } else {
-                try output.appendSlice(oa, try common.formatOaiSse(a, &res_json));
+                try output.appendSlice(oa, try mod.common.formatOaiSse(a, &res_json));
             }
         }
 
@@ -2151,7 +2120,7 @@ pub const Routes = struct {
 
     /// Ports `server_routes`'s `get_model_info` (server-context.cpp:5751
     /// @b1b770d90): for router mode.
-    pub fn getModelInfo(self: *const Routes, a: Allocator) !Value {
+    pub fn getModelInfo(self: *const Routes, a: Allocator) !json.Value {
         return getResModelInfo(a, self.metaRef());
     }
 
@@ -2171,7 +2140,7 @@ pub const Routes = struct {
 
             self.should_reset_buckets = false;
 
-            srv(.dbg, "update_cached_responses", "%s\n", .{@as([*:0]const u8, "cached responses updated")});
+            mod.common.srv(.dbg, "update_cached_responses", "%s\n", .{@as([*:0]const u8, "cached responses updated")});
         } else if (self.should_reset_buckets) {
             // a scrape during sleep already reported these buckets
             self.ctx_server.resetMetricsBucket();
@@ -2186,14 +2155,14 @@ pub const Routes = struct {
 /// warning -- when it does not convert.
 ///
 /// Return: owned by `a`.
-fn jsonValueStringsOr(a: Allocator, body: *const Value, key: []const u8, default_value: []const []const u8) ![][]const u8 {
+fn jsonValueStringsOr(a: Allocator, body: *const json.Value, key: []const u8, default_value: []const []const u8) ![][]const u8 {
     if (body.contains(key) and !(try body.at(key)).isNull()) {
         const v = try body.at(key);
         return v.getSlice(a, []const u8) catch |e| switch (e) {
             error.JsonError => {
                 const k = try a.dupeSentinel(u8, key, 0);
                 const w = try a.dupeSentinel(u8, json.what(), 0);
-                log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k.ptr, w.ptr });
+                tc.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k.ptr, w.ptr });
                 return a.dupe([]const u8, default_value);
             },
             else => |x| x,
@@ -2204,13 +2173,13 @@ fn jsonValueStringsOr(a: Allocator, body: *const Value, key: []const u8, default
 
 /// Ports `get_res_model_info` (server-context.cpp:5636 @b1b770d90): do NOT
 /// use the context here, so it works during sleep.
-fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
-    var o = common.Obj.init(a);
+fn getResModelInfo(a: Allocator, meta: *const mod.context.Meta) !json.Value {
+    var o = mod.common.Obj.init(a);
     try o.put("id", meta.model_name);
     try o.put("aliases", meta.model_aliases);
     try o.put("tags", meta.model_tags);
     try o.put("object", "model");
-    try o.put("architecture", try common.serverModelArchitectureJson(
+    try o.put("architecture", try mod.common.serverModelArchitectureJson(
         a,
         meta.has_inp_image,
         meta.has_inp_audio,
@@ -2219,7 +2188,7 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
     ));
     try o.put("created", stdlib.clock.timeSeconds());
     try o.put("owned_by", "llamacpp");
-    var m = common.Obj.init(a);
+    var m = mod.common.Obj.init(a);
     // an enum is its underlying type in a `common_json_value`
     // (json.h:86 @b1b770d90)
     try m.put("vocab_type", @as(c_uint, @intCast(meta.model_vocab_type)));
@@ -2235,8 +2204,8 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
 }
 
 /// Ports `get_res_models` (server-context.cpp:5664 @b1b770d90).
-fn getResModels(a: Allocator, meta: *const Meta) !Value {
-    var model = common.Obj.init(a);
+fn getResModels(a: Allocator, meta: *const mod.context.Meta) !json.Value {
+    var model = mod.common.Obj.init(a);
     try model.put("name", meta.model_name);
     try model.put("model", meta.model_name);
     try model.put("modified_at", "");
@@ -2251,7 +2220,7 @@ fn getResModels(a: Allocator, meta: *const Meta) !Value {
         try model.put("capabilities", &[_][]const u8{"completion"});
     }
     try model.put("parameters", "");
-    var details = common.Obj.init(a);
+    var details = mod.common.Obj.init(a);
     try details.put("parent_model", "");
     try details.put("format", "gguf");
     try details.put("family", "");
@@ -2260,12 +2229,12 @@ fn getResModels(a: Allocator, meta: *const Meta) !Value {
     try details.put("quantization_level", "");
     try model.put("details", details.done());
 
-    var models = Value.emptyArray();
+    var models = json.Value.emptyArray();
     try models.pushBack(a, model.done());
-    var data = Value.emptyArray();
+    var data = json.Value.emptyArray();
     try data.pushBack(a, try getResModelInfo(a, meta));
 
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("models", models);
     try o.put("object", "list");
     try o.put("data", data);
@@ -2274,28 +2243,28 @@ fn getResModels(a: Allocator, meta: *const Meta) !Value {
 
 /// Ports `get_res_props` (server-context.cpp:5697 @b1b770d90): do NOT use
 /// the context here, so it works during sleep.
-fn getResProps(a: Allocator, meta: *const Meta, params: *const Params, is_sleeping: bool) !Value {
-    var tparams = try task_mod.TaskParams.init(a);
+fn getResProps(a: Allocator, meta: *const mod.context.Meta, params: *const tc.params.Params, is_sleeping: bool) !json.Value {
+    var tparams = try mod.task.TaskParams.init(a);
     tparams.sampling = params.sampling;
-    var dgs = common.Obj.init(a);
+    var dgs = mod.common.Obj.init(a);
     try dgs.put("params", try tparams.toJson(a, true));
     try dgs.put("n_ctx", meta.slot_n_ctx);
 
     const tmpl_default = meta.chat_template;
     const tmpl_tools = meta.chat_template_tool_use;
 
-    var props = common.Obj.init(a);
+    var props = mod.common.Obj.init(a);
     try props.put("default_generation_settings", dgs.done());
     try props.put("total_slots", params.n_parallel);
     try props.put("model_alias", meta.model_name);
     try props.put("model_ftype", meta.model_ftype);
     try props.put("model_path", meta.model_path);
-    var modalities = common.Obj.init(a);
+    var modalities = mod.common.Obj.init(a);
     try modalities.put("vision", meta.has_inp_image);
     try modalities.put("video", meta.has_inp_video);
     try modalities.put("audio", meta.has_inp_audio);
     try props.put("modalities", modalities.done());
-    try props.put("media_marker", common.getMediaMarker());
+    try props.put("media_marker", mod.common.getMediaMarker());
     try props.put("endpoint_slots", params.endpoint_slots);
     try props.put("endpoint_props", params.endpoint_props);
     try props.put("endpoint_metrics", params.endpoint_metrics);
@@ -2329,7 +2298,7 @@ fn getResProps(a: Allocator, meta: *const Meta, params: *const Params, is_sleepi
 
 /// `conn.is_open()`'s negation, as `next` asks it.
 const ConnStop = struct {
-    conn: *http.WsConn,
+    conn: *mod.http.WsConn,
     pub fn shouldStop(self: ConnStop) bool {
         return !self.conn.isOpen();
     }
@@ -2339,22 +2308,22 @@ const ConnStop = struct {
 /// on its stack for a live transcription session.
 /// `j.value(key, json::object())` on an object: a copy of the member, of
 /// whatever type, or an empty object.
-fn valueOr(a: Allocator, j: *const Value, key: []const u8) !Value {
+fn valueOr(a: Allocator, j: *const json.Value, key: []const u8) !json.Value {
     if (j.contains(key)) return (try j.at(key)).clone(a);
-    return Value.emptyObject();
+    return json.Value.emptyObject();
 }
 
 const LiveAsr = struct {
     routes: *Routes,
-    conn: *http.WsConn,
+    conn: *mod.http.WsConn,
     arena: std.heap.ArenaAllocator,
 
     session_id: []const u8 = "",
-    session_config: Value = .null,
+    session_config: json.Value = .null,
     model_rate: c_int = 0,
 
     // one item per committed audio buffer, deltas are attributed to the current item
-    mutex_item: sync.Mutex = .{},
+    mutex_item: stdlib.sync.Mutex = .{},
     item_id: []const u8 = "",
     item_prev: []const u8 = "", // the committed item before item_id, empty for the first one
     item_text: std.ArrayList(u8) = .empty,
@@ -2371,38 +2340,38 @@ const LiveAsr = struct {
 
     fn randomItem(self: *LiveAsr) ![]const u8 {
         const a = self.arena.allocator();
-        return std.mem.concat(a, u8, &.{ "item_", try common.randomString(a) });
+        return std.mem.concat(a, u8, &.{ "item_", try mod.common.randomString(a) });
     }
 
     /// The `send_event` lambda: `ev` is `ea`'s.
-    fn sendEvent(self: *LiveAsr, ea: Allocator, ev: Value) !void {
+    fn sendEvent(self: *LiveAsr, ea: Allocator, ev: json.Value) !void {
         var e = ev;
-        const id = try std.mem.concat(ea, u8, &.{ "event_", try common.randomString(ea) });
-        try e.set(ea, "event_id", try Value.initString(ea, id));
-        _ = self.conn.send(try common.safeJsonToStr(ea, &e));
+        const id = try std.mem.concat(ea, u8, &.{ "event_", try mod.common.randomString(ea) });
+        try e.set(ea, "event_id", try json.Value.initString(ea, id));
+        _ = self.conn.send(try mod.common.safeJsonToStr(ea, &e));
     }
 
     /// The `send_error_event` lambda.
     fn sendErrorEvent(self: *LiveAsr, ea: Allocator, message: []const u8, ty: []const u8) !void {
-        var err = common.Obj.init(ea);
+        var err = mod.common.Obj.init(ea);
         try err.put("type", ty);
-        try err.put("code", @as(Value, .null));
+        try err.put("code", @as(json.Value, .null));
         try err.put("message", message);
-        try err.put("param", @as(Value, .null));
-        var o = common.Obj.init(ea);
+        try err.put("param", @as(json.Value, .null));
+        var o = mod.common.Obj.init(ea);
         try o.put("type", "error");
         try o.put("error", err.done());
         try self.sendEvent(ea, o.done());
     }
 
     fn typed(self: *LiveAsr, ea: Allocator, ty: []const u8) !void {
-        var o = common.Obj.init(ea);
+        var o = mod.common.Obj.init(ea);
         try o.put("type", ty);
         try self.sendEvent(ea, o.done());
     }
 
     fn sessionEvent(self: *LiveAsr, ea: Allocator, ty: []const u8) !void {
-        var o = common.Obj.init(ea);
+        var o = mod.common.Obj.init(ea);
         try o.put("type", ty);
         try o.put("session", try self.session_config.clone(ea));
         try self.sendEvent(ea, o.done());
@@ -2410,7 +2379,7 @@ const LiveAsr = struct {
 
     /// The `send_completed` lambda, called with `mutex_item` held.
     fn sendCompleted(self: *LiveAsr, ea: Allocator) !void {
-        var o = common.Obj.init(ea);
+        var o = mod.common.Obj.init(ea);
         try o.put("type", "conversation.item.input_audio_transcription.completed");
         try o.put("item_id", self.item_id);
         try o.put("content_index", @as(i32, 0));
@@ -2420,18 +2389,18 @@ const LiveAsr = struct {
     }
 
     /// The `post_control` lambda.
-    fn postControl(self: *LiveAsr, action: task_mod.ControlAction, audio: []const f32) !bool {
-        var ctl = try Reader.init(gpa, self.routes.queue_tasks, self.routes.queue_results, context.http_polling_seconds);
+    fn postControl(self: *LiveAsr, action: mod.task.ControlAction, audio: []const f32) !bool {
+        var ctl = try mod.context.Reader.init(mod.context.gpa, self.routes.queue_tasks, self.routes.queue_results, mod.context.http_polling_seconds);
         defer ctl.deinit();
-        var task = Task.initType(.control);
+        var task = mod.task.Task.initType(.control);
         task.id = ctl.getNewId();
-        const ta = try task.arenaAlloc(gpa);
+        const ta = try task.arenaAlloc(mod.context.gpa);
         task.params.control_action = action;
         task.params.control_cmpl_id = try ta.dupe(u8, self.session_id);
         task.params.control_audio = try ta.dupe(f32, audio);
         try ctl.postTask(task, false);
         const result = (try ctl.next(ConnStop{ .conn = self.conn })) orelse return false;
-        defer result.destroy(gpa);
+        defer result.destroy(mod.context.gpa);
         return switch (result.kind) {
             .control => |r| r.success,
             else => false,
@@ -2441,9 +2410,9 @@ const LiveAsr = struct {
     /// The `reader` thread of the lambda: client events.
     fn readerLoop(self: *LiveAsr) void {
         self.readEvents() catch |e| {
-            const z = common.dupZ(context.whatOf(e));
-            defer common.freeZ(z);
-            srv(.err, "operator()", "realtime session failed: %s\n", .{z});
+            const z = mod.common.dupZ(mod.context.whatOf(e));
+            defer mod.common.freeZ(z);
+            mod.common.srv(.err, "operator()", "realtime session failed: %s\n", .{z});
         };
         // the result loop waits on the socket, nobody reads it from here on
         self.conn.close();
@@ -2451,13 +2420,13 @@ const LiveAsr = struct {
 
     fn readEvents(self: *LiveAsr) !void {
         var input_rate: c_int = self.model_rate;
-        var resampler: ?*c.mtmd_helper_resampler = null; // input_rate -> model_rate
-        defer if (resampler) |r| c.mtmd_helper_resampler_free(r);
+        var resampler: ?*tc.c.mtmd_helper_resampler = null; // input_rate -> model_rate
+        defer if (resampler) |r| tc.c.mtmd_helper_resampler_free(r);
         var msg: std.ArrayList(u8) = .empty;
-        defer msg.deinit(gpa);
-        var ev_arena = std.heap.ArenaAllocator.init(gpa);
+        defer msg.deinit(mod.context.gpa);
+        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer ev_arena.deinit();
-        while (try self.conn.read(gpa, &msg) != 0) {
+        while (try self.conn.read(mod.context.gpa, &msg) != 0) {
             _ = ev_arena.reset(.retain_capacity);
             const ea = ev_arena.allocator();
             var ev = json.parse(ea, msg.items) catch |e| switch (e) {
@@ -2467,20 +2436,20 @@ const LiveAsr = struct {
                     continue;
                 },
             };
-            const ty = common.jsonValue(&ev, "type", []const u8, "");
+            const ty = mod.common.jsonValue(&ev, "type", []const u8, "");
             if (std.mem.eql(u8, ty, "session.update") or std.mem.eql(u8, ty, "transcription_session.update")) {
-                const session = try common.jsonValueJson(ea, &ev, "session", Value.emptyObject());
-                const audio = if (session.isObject()) try valueOr(ea, &session, "audio") else Value.emptyObject();
-                const in = if (audio.isObject()) try valueOr(ea, &audio, "input") else Value.emptyObject();
+                const session = try mod.common.jsonValueJson(ea, &ev, "session", json.Value.emptyObject());
+                const audio = if (session.isObject()) try valueOr(ea, &session, "audio") else json.Value.emptyObject();
+                const in = if (audio.isObject()) try valueOr(ea, &audio, "input") else json.Value.emptyObject();
                 if (in.isObject() and in.contains("format") and (try in.at("format")).isObject()) {
-                    const rate = common.jsonValue(try in.at("format"), "rate", c_int, input_rate);
+                    const rate = mod.common.jsonValue(try in.at("format"), "rate", c_int, input_rate);
                     if (rate < 8000 or rate > 192000) {
                         try self.sendErrorEvent(ea, "session.update: the input audio rate must be between 8000 and 192000 Hz", "invalid_request_error");
                         continue;
                     }
                     if (rate != input_rate) {
                         input_rate = rate;
-                        if (resampler) |r| c.mtmd_helper_resampler_free(r);
+                        if (resampler) |r| tc.c.mtmd_helper_resampler_free(r);
                         resampler = null;
                         self.lock();
                         defer self.unlock();
@@ -2490,23 +2459,23 @@ const LiveAsr = struct {
                 }
                 try self.sessionEvent(ea, "session.updated");
             } else if (std.mem.eql(u8, ty, "input_audio_buffer.append")) {
-                const pcm = tokens_mod.base64HppDecode(ea, common.jsonValue(&ev, "audio", []const u8, "")) catch |e| switch (e) {
+                const pcm = mod.tokens.base64HppDecode(ea, mod.common.jsonValue(&ev, "audio", []const u8, "")) catch |e| switch (e) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => {
                         try self.sendErrorEvent(ea, "invalid base64 audio", "invalid_request_error");
                         continue;
                     },
                 };
-                var samples = try realtime.pcm16ToF32(ea, pcm);
+                var samples = try mod.realtime.pcm16ToF32(ea, pcm);
                 if (resampler == null) {
-                    resampler = c.mtmd_helper_resampler_init(input_rate, self.model_rate);
+                    resampler = tc.c.mtmd_helper_resampler_init(input_rate, self.model_rate);
                     if (resampler == null) {
                         try self.sendErrorEvent(ea, "failed to initialize the audio resampler", "server_error");
                         break;
                     }
                 }
                 var out: [*c]const f32 = null;
-                const n = c.mtmd_helper_resampler_process(resampler, samples.ptr, samples.len, &out);
+                const n = tc.c.mtmd_helper_resampler_process(resampler, samples.ptr, samples.len, &out);
                 if (n < 0) {
                     try self.sendErrorEvent(ea, "failed to resample the audio", "server_error");
                     break;
@@ -2522,7 +2491,7 @@ const LiveAsr = struct {
                 }
             } else if (std.mem.eql(u8, ty, "input_audio_buffer.commit")) {
                 // "final": true ends the input, the last item is completed when the stream drains
-                if (common.jsonValue(&ev, "final", bool, false)) {
+                if (mod.common.jsonValue(&ev, "final", bool, false)) {
                     self.input_ended.store(true, .seq_cst);
                     _ = try self.postControl(.audio_end, &.{});
                     continue;
@@ -2533,9 +2502,9 @@ const LiveAsr = struct {
                 // completed is sent once the rows of the committed audio are decoded (audio_commit_drained below)
                 self.lock();
                 defer self.unlock();
-                var o = common.Obj.init(ea);
+                var o = mod.common.Obj.init(ea);
                 try o.put("type", "input_audio_buffer.committed");
-                try o.put("previous_item_id", if (self.item_prev.len == 0) @as(Value, .null) else try Value.initString(ea, self.item_prev));
+                try o.put("previous_item_id", if (self.item_prev.len == 0) @as(json.Value, .null) else try json.Value.initString(ea, self.item_prev));
                 try o.put("item_id", self.item_id);
                 try self.sendEvent(ea, o.done());
             } else if (std.mem.eql(u8, ty, "input_audio_buffer.clear")) {
@@ -2555,7 +2524,7 @@ const LiveAsr = struct {
         const meta = routes.metaRef();
         const a = self.arena.allocator();
 
-        var ev_arena = std.heap.ArenaAllocator.init(gpa);
+        var ev_arena = std.heap.ArenaAllocator.init(mod.context.gpa);
         defer ev_arena.deinit();
         const ea = ev_arena.allocator();
 
@@ -2565,22 +2534,22 @@ const LiveAsr = struct {
             return;
         }
 
-        self.session_id = try std.mem.concat(a, u8, &.{ "sess_", try common.randomString(a) });
-        self.model_rate = c.mtmd_get_audio_sample_rate(server.mctx);
+        self.session_id = try std.mem.concat(a, u8, &.{ "sess_", try mod.common.randomString(a) });
+        self.model_rate = tc.c.mtmd_get_audio_sample_rate(server.mctx);
         {
-            var format = common.Obj.init(a);
+            var format = mod.common.Obj.init(a);
             try format.put("type", "audio/pcm");
             try format.put("rate", self.model_rate);
-            var transcription = common.Obj.init(a);
+            var transcription = mod.common.Obj.init(a);
             try transcription.put("model", meta.model_name);
-            var input = common.Obj.init(a);
+            var input = mod.common.Obj.init(a);
             try input.put("format", format.done());
             try input.put("transcription", transcription.done());
-            try input.put("turn_detection", @as(Value, .null));
-            try input.put("noise_reduction", @as(Value, .null));
-            var audio = common.Obj.init(a);
+            try input.put("turn_detection", @as(json.Value, .null));
+            try input.put("noise_reduction", @as(json.Value, .null));
+            var audio = mod.common.Obj.init(a);
             try audio.put("input", input.done());
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("id", self.session_id);
             try o.put("object", "realtime.transcription_session");
             try o.put("type", "transcription");
@@ -2592,11 +2561,11 @@ const LiveAsr = struct {
         defer res.destroy();
         const rd = &res.rd;
         {
-            var task = Task.initType(.transcribe_rt);
+            var task = mod.task.Task.initType(.transcribe_rt);
             task.id = rd.getNewId();
-            const ta = try task.arenaAlloc(gpa);
-            task.params = try task_mod.TaskParams.init(ta);
-            task.params.sampling = try task_mod.deepClone(ta, routes.params.sampling);
+            const ta = try task.arenaAlloc(mod.context.gpa);
+            task.params = try mod.task.TaskParams.init(ta);
+            task.params.sampling = try mod.task.deepClone(ta, routes.params.sampling);
             task.params.stream = true;
             task.params.oaicompat_cmpl_id = try ta.dupe(u8, self.session_id);
             task.params.oaicompat_model = try ta.dupe(u8, meta.model_name);
@@ -2609,10 +2578,10 @@ const LiveAsr = struct {
                 self.conn.close();
                 return;
             };
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
             if (result.isError()) {
                 var j = try result.toJson(ea);
-                try self.sendErrorEvent(ea, common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
+                try self.sendErrorEvent(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
                 self.conn.close();
                 return;
             }
@@ -2627,10 +2596,10 @@ const LiveAsr = struct {
         while (true) {
             _ = ev_arena.reset(.retain_capacity);
             const result = (try rd.next(ConnStop{ .conn = self.conn })) orelse break; // connection closed
-            defer result.destroy(gpa);
+            defer result.destroy(mod.context.gpa);
             if (result.isError()) {
                 var j = try result.toJson(ea);
-                try self.sendErrorEvent(ea, common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
+                try self.sendErrorEvent(ea, mod.common.jsonValue(&j, "message", []const u8, "server error"), "server_error");
                 break;
             }
             switch (result.kind) {
@@ -2646,7 +2615,7 @@ const LiveAsr = struct {
                         self.lock();
                         defer self.unlock();
                         try self.item_text.appendSlice(a, partial.content.text.items);
-                        var o = common.Obj.init(ea);
+                        var o = mod.common.Obj.init(ea);
                         try o.put("type", "conversation.item.input_audio_transcription.delta");
                         try o.put("item_id", self.item_id);
                         try o.put("content_index", @as(i32, 0));

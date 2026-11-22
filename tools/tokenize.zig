@@ -10,23 +10,19 @@ const std = @import("std");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
-const c = tc.c;
-const io = tc.io;
-const log = tc.log;
-const arg = tc.arg;
 
 comptime {
     // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama");
+    _ = @import("llama").lib;
 }
 
 /// Ports `print_usage` (tokenize.cpp:20 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
-    log.out("\nexample usage:\n", .{});
-    log.out("\n  %s -m your_model.gguf -p \"Hello world\"\n", .{argv[0].ptr});
-    log.out("\n  %s -m your_model.gguf -f prompt.txt --ids\n", .{argv[0].ptr});
-    log.out("\n  cat prompt.txt | %s -m your_model.gguf --stdin --show-count\n", .{argv[0].ptr});
-    log.out("\n", .{});
+    tc.log.out("\nexample usage:\n", .{});
+    tc.log.out("\n  %s -m your_model.gguf -p \"Hello world\"\n", .{argv[0].ptr});
+    tc.log.out("\n  %s -m your_model.gguf -f prompt.txt --ids\n", .{argv[0].ptr});
+    tc.log.out("\n  cat prompt.txt | %s -m your_model.gguf --stdin --show-count\n", .{argv[0].ptr});
+    tc.log.out("\n", .{});
 }
 
 const win = struct {
@@ -48,7 +44,7 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
         const h = win.GetStdHandle(STD_OUTPUT_HANDLE);
         var mode: u32 = 0;
         if (h == null or @intFromPtr(h) == std.math.maxInt(usize) or win.GetConsoleMode(h, &mode) == 0) {
-            io.printf("%s", .{str.ptr});
+            tc.io.printf("%s", .{str.ptr});
             return;
         }
         // MultiByteToWideChar reports an error if str is empty, don't report
@@ -61,15 +57,15 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
             const ERROR_NO_UNICODE_TRANSLATION = 1113;
             if (win.GetLastError() == ERROR_NO_UNICODE_TRANSLATION) {
                 invalid_utf8.* = true;
-                io.printf("<", .{});
+                tc.io.printf("<", .{});
                 for (str, 0..) |b, i| {
-                    if (i > 0) io.printf(" ", .{});
-                    io.printf("%02x", .{@as(c_uint, b)});
+                    if (i > 0) tc.io.printf(" ", .{});
+                    tc.io.printf("%02x", .{@as(c_uint, b)});
                 }
-                io.printf(">", .{});
+                tc.io.printf(">", .{});
                 return;
             }
-            _ = c.ggml_abort("tokenize.cpp", 78, "MultiByteToWideChar() failed in an unexpected way.");
+            _ = tc.c.ggml_abort("tokenize.cpp", 78, "MultiByteToWideChar() failed in an unexpected way.");
         }
         const wstr = try a.alloc(u16, @intCast(n + 1));
         _ = win.MultiByteToWideChar(CP_UTF8, 0, str.ptr, @intCast(str.len), wstr.ptr, n);
@@ -79,7 +75,7 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
     }
     // TODO: reporting invalid_utf8 would be useful on non-Windows too.
     // printf will silently just write bad unicode.
-    io.printf("%s", .{str.ptr});
+    tc.io.printf("%s", .{str.ptr});
 }
 
 /// Reads all of standard input, as `ss << std::cin.rdbuf()` does: its
@@ -98,7 +94,7 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 
     tc.common.init();
 
-    if (!try arg.parse(argv, &params, .tokenize, printUsage)) return 1;
+    if (!try tc.arg.parse(argv, &params, .tokenize, printUsage)) return 1;
 
     // -f and -p both land in params.prompt; -f also sets prompt_file. -f and -p
     // resolve like the other tools (no mutual exclusion), --stdin takes precedence.
@@ -107,7 +103,7 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 
     // must have some prompt
     if (!use_stdin and !use_file and params.prompt.len == 0) {
-        log.err("error: must specify one of: --stdin, --file or --prompt\n", .{});
+        tc.log.err("error: must specify one of: --stdin, --file or --prompt\n", .{});
         return 1;
     }
 
@@ -119,10 +115,10 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
         // to match the behavior of -p/--prompt and --stdin.
         const pf = try a.dupeSentinel(u8, params.prompt_file, 0);
         prompt = std.Io.Dir.cwd().readFileAlloc(std_io, pf, a, .unlimited) catch {
-            log.err("error: could not open file '%s' for reading\n", .{pf.ptr});
+            tc.log.err("error: could not open file '%s' for reading\n", .{pf.ptr});
             return 1;
         };
-        if (params.escape) prompt = try arg.processEscapes(a, prompt);
+        if (params.escape) prompt = try tc.arg.processEscapes(a, prompt);
     } else if (!use_stdin) {
         // -p/--prompt is already escape-processed by common_params_parse()
         // (controlled by --escape/--no-escape), so use it verbatim here.
@@ -131,74 +127,74 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
     // else: we read stdin *after* loading the model (early exit if the
     // model cannot be loaded, which is a nicer user experience)
 
-    c.llama_backend_init();
+    tc.c.llama_backend_init();
 
     // load only the vocabulary (no weights), since tokenizing does not need them
-    var model_params = c.llama_model_default_params();
+    var model_params = tc.c.llama_model_default_params();
     model_params.vocab_only = true;
     const model_path = try a.dupeSentinel(u8, params.model.path, 0);
-    const model = c.llama_model_load_from_file(model_path.ptr, model_params) orelse {
-        log.err("error: could not load model from file '%s'.\n", .{model_path.ptr});
+    const model = tc.c.llama_model_load_from_file(model_path.ptr, model_params) orelse {
+        tc.log.err("error: could not load model from file '%s'.\n", .{model_path.ptr});
         return 1;
     };
 
-    const vocab = c.llama_model_get_vocab(model);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
-    const ctx_params = c.llama_context_default_params();
-    const ctx = c.llama_init_from_model(model, ctx_params) orelse {
-        log.err("error: could not create context.\n", .{});
+    const ctx_params = tc.c.llama_context_default_params();
+    const ctx = tc.c.llama_init_from_model(model, ctx_params) orelse {
+        tc.log.err("error: could not create context.\n", .{});
         return 1;
     };
 
     // read entire prompt from stdin?
     if (params.tokenize_stdin) {
         prompt = readStdin(a, std_io) catch {
-            log.err("error: could not read the entire standard input.\n", .{});
+            tc.log.err("error: could not read the entire standard input.\n", .{});
             return 1;
         };
 
         // stdin is not seen by common_params_parse(), so apply escape handling
         // here to match the behavior of -p/--prompt and -f/--file.
-        if (params.escape) prompt = try arg.processEscapes(a, prompt);
+        if (params.escape) prompt = try tc.arg.processEscapes(a, prompt);
     }
 
-    const model_wants_add_bos = c.llama_vocab_get_add_bos(vocab);
+    const model_wants_add_bos = tc.c.llama_vocab_get_add_bos(vocab);
     const add_bos = model_wants_add_bos and !params.tokenize_no_bos;
     const parse_special = params.parse_special;
 
     const tokens = tc.common.tokenize(a, vocab, prompt, add_bos, parse_special) catch |e| {
         if (e == error.Throw) {
-            io.eprintf("terminate called after throwing an instance of 'std::runtime_error'\n  what():  %.*s\n", .{ @as(c_int, @intCast(arg.what().len)), arg.what().ptr });
+            tc.io.eprintf("terminate called after throwing an instance of 'std::runtime_error'\n  what():  %.*s\n", .{ @as(c_int, @intCast(tc.arg.what().len)), tc.arg.what().ptr });
             std.process.abort();
         }
         return e;
     };
 
-    if (params.tokenize_ids) io.printf("[", .{});
+    if (params.tokenize_ids) tc.io.printf("[", .{});
 
     for (tokens, 0..) |t, i| {
         if (params.tokenize_ids) {
-            if (i > 0) io.printf(", ", .{});
-            io.printf("%d", .{t});
+            if (i > 0) tc.io.printf(", ", .{});
+            tc.io.printf("%d", .{t});
         } else {
             var invalid_utf8 = false;
-            io.printf("%6d -> '", .{t});
+            tc.io.printf("%6d -> '", .{t});
             try writeUtf8ToStdout(a, try tc.common.tokenToPiece(a, vocab, t, true), &invalid_utf8);
             if (invalid_utf8) {
-                io.printf("' (utf-8 decode failure)\n", .{});
+                tc.io.printf("' (utf-8 decode failure)\n", .{});
             } else {
-                io.printf("'\n", .{});
+                tc.io.printf("'\n", .{});
             }
         }
     }
 
-    if (params.tokenize_ids) io.printf("]\n", .{});
+    if (params.tokenize_ids) tc.io.printf("]\n", .{});
 
-    if (params.tokenize_show_count) io.printf("Total number of tokens: %zu\n", .{tokens.len});
+    if (params.tokenize_show_count) tc.io.printf("Total number of tokens: %zu\n", .{tokens.len});
 
     // silence valgrind
-    c.llama_free(ctx);
-    c.llama_model_free(model);
+    tc.c.llama_free(ctx);
+    tc.c.llama_model_free(model);
 
     return 0;
 }

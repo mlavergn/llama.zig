@@ -21,15 +21,7 @@
 //! `static` kernels) is the one its calls reach. `library` encodes that.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const fattn_common = @import("fattn_common.zig");
-const table = @import("fattn_config_table.zig");
-const fattn = @import("fattn.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
+const ggml = @import("../module.zig");
 
 /// `sizeof(half2)`.
 const sizeof_half2 = 4;
@@ -56,7 +48,7 @@ pub const Config = struct {
 
 /// A family's table: the first case matching `(DKQ, DV, ncols)`, else its
 /// default or the table it falls through to.
-fn lookup(t: *const table.MmaTable, DKQ: c_int, DV: c_int, ncols: c_int) Config {
+fn lookup(t: *const ggml.cuda.fattn_config_table.MmaTable, DKQ: c_int, DV: c_int, ncols: c_int) Config {
     for (t.cases) |e| {
         if (DKQ == e.DKQ and DV == e.DV and ncols == e.ncols) return e.config;
     }
@@ -69,19 +61,19 @@ fn lookup(t: *const table.MmaTable, DKQ: c_int, DV: c_int, ncols: c_int) Config 
 /// CDNA and RDNA tables, are false for every CUDA compute capability; those
 /// tables are not generated.
 fn getConfig(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) Config {
-    if (common.ampereMmaAvailable(cc)) {
-        return lookup(&table.mma_ampere, DKQ, DV, ncols);
+    if (ggml.cuda.common.ampereMmaAvailable(cc)) {
+        return lookup(&ggml.cuda.fattn_config_table.mma_ampere, DKQ, DV, ncols);
     }
-    if (common.turingMmaAvailable(cc)) {
-        return lookup(&table.mma_turing, DKQ, DV, ncols);
+    if (ggml.cuda.common.turingMmaAvailable(cc)) {
+        return lookup(&ggml.cuda.fattn_config_table.mma_turing, DKQ, DV, ncols);
     }
-    impl.assert(common.voltaMmaAvailable(cc), "volta_mma_available(cc)");
-    return lookup(&table.mma_volta, DKQ, DV, ncols);
+    ggml.impl.assert(ggml.cuda.common.voltaMmaAvailable(cc), "volta_mma_available(cc)");
+    return lookup(&ggml.cuda.fattn_config_table.mma_volta, DKQ, DV, ncols);
 }
 
 /// Ports `get_cols_per_warp` (fattn-mma-f16.cuh:373 @b1b770d90).
 fn getColsPerWarp(cc: c_int) c_int {
-    if (common.turingMmaAvailable(cc) or fattn_common.amdWmmaAvailable(cc) or fattn_common.amdMfmaAvailable(cc)) {
+    if (ggml.cuda.common.turingMmaAvailable(cc) or ggml.cuda.fattn_common.amdWmmaAvailable(cc) or ggml.cuda.fattn_common.amdMfmaAvailable(cc)) {
         return 16;
     } else {
         // Volta
@@ -93,7 +85,7 @@ fn getColsPerWarp(cc: c_int) c_int {
 /// with `ggml_cuda_fattn_mma_get_nstages_target` (fattn-mma-f16.cuh:349 @b1b770d90)
 /// inlined.
 fn getNstages(DKQ: c_int, DV: c_int, ncols1: c_int, ncols2: c_int, cc: c_int) c_int {
-    return if (common.cpAsyncAvailable(cc) and ncols2 >= 2) getConfig(DKQ, DV, ncols1 * ncols2, cc).nstages_target else 0;
+    return if (ggml.cuda.common.cpAsyncAvailable(cc) and ncols2 >= 2) getConfig(DKQ, DV, ncols1 * ncols2, cc).nstages_target else 0;
 }
 
 /// The translation unit that holds `ggml_cuda_flash_attn_ext_mma_f16_case
@@ -145,7 +137,7 @@ fn library(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols
 /// inline as the C does.
 fn getSwizzled(DKQ: c_int, DV: c_int, ncols: c_int, cc: c_int) bool {
     const cfg = getConfig(DKQ, DV, ncols, cc);
-    return common.turingMmaAvailable(cc) and
+    return ggml.cuda.common.turingMmaAvailable(cc) and
         @rem(cfg.nbatch_K2, 32) == 0 and @rem(cfg.nbatch_V2, 32) == 0;
 }
 
@@ -161,15 +153,15 @@ pub fn mayUseSparse(DKQ: c_int, DV: c_int, ncols1: c_int, ncols2: c_int) bool {
 }
 
 /// `flash_attn_ext_f16<DKQ, DV, ncols1, ncols2, use_logit_softcap, V_is_K_view, use_sparse>`.
-fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, comptime V_is_K_view: bool, comptime use_sparse: bool) kernels.Kernel {
-    return kernels.get(library(DKQ, DV, ncols1, ncols2), kernels.tmpl("flash_attn_ext_f16", &.{
-        kernels.int(DKQ),
-        kernels.int(DV),
-        kernels.int(ncols1),
-        kernels.int(ncols2),
-        kernels.boolean(use_logit_softcap),
-        kernels.boolean(V_is_K_view),
-        kernels.boolean(use_sparse),
+fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, comptime use_logit_softcap: bool, comptime V_is_K_view: bool, comptime use_sparse: bool) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get(library(DKQ, DV, ncols1, ncols2), ggml.cuda.kernels.tmpl("flash_attn_ext_f16", &.{
+        ggml.cuda.kernels.int(DKQ),
+        ggml.cuda.kernels.int(DV),
+        ggml.cuda.kernels.int(ncols1),
+        ggml.cuda.kernels.int(ncols2),
+        ggml.cuda.kernels.boolean(use_logit_softcap),
+        ggml.cuda.kernels.boolean(V_is_K_view),
+        ggml.cuda.kernels.boolean(use_sparse),
     }));
 }
 
@@ -184,10 +176,10 @@ fn kernel(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1
 /// raises the limit under `!GGML_USE_MUSA` implicitly, being inside the
 /// `!GGML_USE_MUSA` block (HIP compiles it too); MUSA is not
 /// defined here.
-pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
+pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols1: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const KQV = dst;
-    const id = common.getDevice();
-    const cc = common.info().devices[@intCast(id)].cc;
+    const id = ggml.cuda.common.getDevice();
+    const cc = ggml.cuda.common.info().devices[@intCast(id)].cc;
 
     const ncols = ncols1 * ncols2;
 
@@ -201,7 +193,7 @@ pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptim
     const nstages = getNstages(DKQ, DV, ncols1, ncols2, cc);
 
     const cols_per_warp = @min(ncols, getColsPerWarp(cc));
-    const warp_size_host = common.info().devices[@intCast(ctx.device)].warp_size;
+    const warp_size_host = ggml.cuda.common.info().devices[@intCast(ctx.device)].warp_size;
     const nwarps = @divTrunc(nthreads, warp_size_host);
 
     const V_is_K_view = DKQ == 576; // Guaranteed by the kernel selection logic in fattn.cu
@@ -224,37 +216,37 @@ pub fn mmaF16Case(comptime DKQ: comptime_int, comptime DV: comptime_int, comptim
     else
         nbytes_shared_Q + nbytes_shared_KV + nbytes_shared_mask);
 
-    const logit_softcap = impl.getOpParamsF32(KQV, 2);
+    const logit_softcap = ggml.impl.getOpParamsF32(KQV, 2);
 
-    var fattn_kernel: kernels.Kernel = undefined;
+    var fattn_kernel: ggml.cuda.kernels.Kernel = undefined;
     var use_sparse = false;
     if (logit_softcap == 0.0) {
         const use_logit_softcap = false;
         if (comptime mayUseSparse(DKQ, DV, ncols1, ncols2)) {
-            if (fattn.mmaF16ShallUseSparse(cc, dst, ncols1, ncols2)) {
+            if (ggml.cuda.fattn.mmaF16ShallUseSparse(cc, dst, ncols1, ncols2)) {
                 const use_sparse_kernel = true;
                 fattn_kernel = comptime kernel(DKQ, DV, ncols1, ncols2, use_logit_softcap, V_is_K_view, use_sparse_kernel);
                 use_sparse = true;
-                kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
+                ggml.cuda.kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
             } else {
                 const use_sparse_kernel = false;
                 fattn_kernel = comptime kernel(DKQ, DV, ncols1, ncols2, use_logit_softcap, V_is_K_view, use_sparse_kernel);
-                kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
+                ggml.cuda.kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
             }
         } else {
             const use_sparse_kernel = false;
             fattn_kernel = comptime kernel(DKQ, DV, ncols1, ncols2, use_logit_softcap, V_is_K_view, use_sparse_kernel);
-            kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
+            ggml.cuda.kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
         }
     } else {
         const use_logit_softcap = true;
         const use_sparse_kernel = false;
         fattn_kernel = comptime kernel(DKQ, DV, ncols1, ncols2, use_logit_softcap, V_is_K_view, use_sparse_kernel);
-        kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
+        ggml.cuda.kernels.setSharedMemoryLimit(fattn_kernel, nbytes_shared_total);
     }
 
     const async_kv_preload = nstages == 2 and !use_sparse;
-    fattn_common.launchFattn(comptime library(DKQ, DV, ncols1, ncols2), DV, ncols1, ncols2, ctx, dst, .{
+    ggml.cuda.fattn_common.launchFattn(comptime library(DKQ, DV, ncols1, ncols2), DV, ncols1, ncols2, ctx, dst, .{
         .kernel = fattn_kernel,
         .nwarps = nwarps,
         .nbytes_shared = nbytes_shared_total,

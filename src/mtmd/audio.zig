@@ -33,22 +33,14 @@
 //! computed it on the CPU are gone.
 
 const std = @import("std");
-const libcxx = @import("stdlib").libcxx;
-const builtin = @import("builtin");
-const impl = @import("impl.zig");
-const model = @import("model.zig");
-const gpa = impl.gpa;
-const c = impl.c;
-
-const Hparams = model.Hparams;
-
-const libm = @import("stdlib").libm;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 
 /// `M_PI`.
 const m_pi: f64 = 3.14159265358979323846;
 
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    impl.ggmlAssert(ok, "mtmd-audio.cpp", line, expr);
+    mod.impl.ggmlAssert(ok, "mtmd-audio.cpp", line, expr);
 }
 
 /// Ports `mtmd_audio_mel` (mtmd-audio.h:13 @b1b770d90): `n_mel` rows of
@@ -60,7 +52,7 @@ pub const Mel = struct {
     data: std.ArrayList(f32) = .empty,
 
     pub fn deinit(self: *Mel) void {
-        self.data.deinit(gpa);
+        self.data.deinit(std.heap.c_allocator);
     }
 };
 
@@ -80,20 +72,20 @@ pub const Cache = struct {
     filters: MelFilters = .{},
 
     pub fn deinit(self: *Cache) void {
-        self.sin_vals.deinit(gpa);
-        self.cos_vals.deinit(gpa);
-        self.hann_window.deinit(gpa);
-        self.filters.data.deinit(gpa);
+        self.sin_vals.deinit(std.heap.c_allocator);
+        self.cos_vals.deinit(std.heap.c_allocator);
+        self.hann_window.deinit(std.heap.c_allocator);
+        self.filters.data.deinit(std.heap.c_allocator);
     }
 
     /// Ports `fill_sin_cos_table` (mtmd-audio.cpp:17 @b1b770d90), a member of `mtmd_audio_cache`.
     pub fn fillSinCosTable(self: *Cache, n: u32) !void {
-        try self.sin_vals.resize(gpa, n);
-        try self.cos_vals.resize(gpa, n);
+        try self.sin_vals.resize(std.heap.c_allocator, n);
+        try self.cos_vals.resize(std.heap.c_allocator, n);
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             const theta: f64 = (2 * m_pi * @as(f64, @floatFromInt(i))) / @as(f64, @floatFromInt(n));
-            const sc = libm.sinCos(@floatCast(theta));
+            const sc = stdlib.libm.sinCos(@floatCast(theta));
             self.sin_vals.items[i] = sc.sin;
             self.cos_vals.items[i] = sc.cos;
         }
@@ -102,13 +94,13 @@ pub const Cache = struct {
     /// Ports `fill_hann_window` (mtmd-audio.cpp:27 @b1b770d90), a member of `mtmd_audio_cache`.
     /// `length + offset` is unsigned arithmetic in the C++.
     pub fn fillHannWindow(self: *Cache, length: u32, periodic: bool) !void {
-        try self.hann_window.resize(gpa, length);
+        try self.hann_window.resize(std.heap.c_allocator, length);
         const offset: c_int = if (periodic) 0 else -1;
         const denom: u32 = length +% @as(u32, @bitCast(offset));
         var i: u32 = 0;
         while (i < length) : (i += 1) {
             const arg: f64 = (2.0 * m_pi * @as(f64, @floatFromInt(i))) / @as(f64, @floatFromInt(denom));
-            self.hann_window.items[i] = @floatCast(0.5 * (1.0 - @as(f64, libm.cosf(@floatCast(arg)))));
+            self.hann_window.items[i] = @floatCast(0.5 * (1.0 - @as(f64, stdlib.libm.cosf(@floatCast(arg)))));
         }
     }
 
@@ -133,17 +125,17 @@ pub const Cache = struct {
         const min_log_hz: f64 = 1000.0;
         const lin_slope: f64 = 3.0 / 200.0;
         const min_log_mel: f64 = min_log_hz * lin_slope;
-        const log_step: f64 = libm.log(6.4) / 27.0;
+        const log_step: f64 = stdlib.libm.log(6.4) / 27.0;
         const Scale = struct {
             htk: bool,
             log_step: f64,
             fn hzToMel(s: @This(), f_hz: f64) f64 {
-                if (s.htk) return 2595.0 * libm.log10(1.0 + f_hz / 700.0);
-                return if (f_hz < min_log_hz) f_hz * lin_slope else min_log_mel + libm.log(f_hz / min_log_hz) / s.log_step;
+                if (s.htk) return 2595.0 * stdlib.libm.log10(1.0 + f_hz / 700.0);
+                return if (f_hz < min_log_hz) f_hz * lin_slope else min_log_mel + stdlib.libm.log(f_hz / min_log_hz) / s.log_step;
             }
             fn melToHz(s: @This(), m: f64) f64 {
-                if (s.htk) return 700.0 * (libm.pow10(m / 2595.0) - 1.0);
-                return if (m < min_log_mel) m / lin_slope else min_log_hz * libm.exp((m - min_log_mel) * s.log_step);
+                if (s.htk) return 700.0 * (stdlib.libm.pow10(m / 2595.0) - 1.0);
+                return if (m < min_log_mel) m / lin_slope else min_log_hz * stdlib.libm.exp((m - min_log_mel) * s.log_step);
             }
         };
         const sc: Scale = .{ .htk = use_htk, .log_step = log_step };
@@ -155,31 +147,31 @@ pub const Cache = struct {
         const m_lo = sc.hzToMel(fmin);
         const m_hi = sc.hzToMel(fmax);
         const n_pts: usize = @intCast(n_mel + 2);
-        const mel_pts = try gpa.alloc(f64, n_pts);
-        defer gpa.free(mel_pts);
+        const mel_pts = try std.heap.c_allocator.alloc(f64, n_pts);
+        defer std.heap.c_allocator.free(mel_pts);
         for (mel_pts, 0..) |*p, i| {
             p.* = @mulAdd(f64, m_hi - m_lo, @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n_mel + 1)), m_lo);
         }
 
         // convert to Hz
-        const hz_pts = try gpa.alloc(f64, n_pts);
-        defer gpa.free(hz_pts);
+        const hz_pts = try std.heap.c_allocator.alloc(f64, n_pts);
+        defer std.heap.c_allocator.free(hz_pts);
         for (hz_pts, mel_pts) |*h, m| h.* = sc.melToHz(m);
 
         const n_fft_bins: i64 = @divTrunc(n_fft, 2) + 1;
 
         // filterbank
         var out: std.ArrayList(f32) = .empty;
-        try out.appendNTimes(gpa, 0, @intCast(n_mel * n_fft_bins));
+        try out.appendNTimes(std.heap.c_allocator, 0, @intCast(n_mel * n_fft_bins));
         var m: usize = 0;
         while (m < n_mel) : (m += 1) {
             const f_left = hz_pts[m];
             const f_center = hz_pts[m + 1];
             const f_right = hz_pts[m + 2];
 
-            const denom_l = libcxx.max(f64, 1e-30, f_center - f_left);
-            const denom_r = libcxx.max(f64, 1e-30, f_right - f_center);
-            const enorm: f64 = if (slaney_area_norm) (2.0 / libcxx.max(f64, 1e-30, f_right - f_left)) else 1.0;
+            const denom_l = stdlib.libcxx.max(f64, 1e-30, f_center - f_left);
+            const denom_r = stdlib.libcxx.max(f64, 1e-30, f_right - f_center);
+            const enorm: f64 = if (slaney_area_norm) (2.0 / stdlib.libcxx.max(f64, 1e-30, f_right - f_left)) else 1.0;
 
             var k: c_int = 0;
             while (k < n_fft_bins) : (k += 1) {
@@ -196,7 +188,7 @@ pub const Cache = struct {
 
         self.filters.n_mel = n_mel;
         self.filters.n_fft = n_fft;
-        self.filters.data.deinit(gpa);
+        self.filters.data.deinit(std.heap.c_allocator);
         self.filters.data = out;
     }
 };
@@ -359,24 +351,24 @@ pub const MelConfig = struct {
     /// log-mel's, and `preprocess` defers the graph to `compute`.
     has_cache: bool = false,
     /// must be set before the first `compute`, see `mtmd_context::init_audio()`
-    sched: c.ggml_backend_sched_t = null,
+    sched: mod.impl.c.ggml_backend_sched_t = null,
 };
 
 /// Ports `mtmd_backend_cpu_set_n_threads` (mtmd-subcontext.cpp:24 @b1b770d90).
-pub fn backendCpuSetNThreads(backend_cpu: c.ggml_backend_t, n_threads: c_int) void {
-    const dev = c.ggml_backend_get_device(backend_cpu);
-    const reg: c.ggml_backend_reg_t = if (dev != null) c.ggml_backend_dev_backend_reg(dev) else null;
+pub fn backendCpuSetNThreads(backend_cpu: mod.impl.c.ggml_backend_t, n_threads: c_int) void {
+    const dev = mod.impl.c.ggml_backend_get_device(backend_cpu);
+    const reg: mod.impl.c.ggml_backend_reg_t = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg != null) {
-        const p = c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
+        const p = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
         if (p != null) {
-            const set_n_threads: c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(p));
+            const set_n_threads: mod.impl.c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(p));
             set_n_threads.?(backend_cpu, n_threads);
         }
     }
 }
 
 /// `t->nb[1]` of a tensor known not to be null.
-fn tensorNb1(t: ?*c.ggml_tensor) usize {
+fn tensorNb1(t: ?*mod.impl.c.ggml_tensor) usize {
     return t.?.nb[1];
 }
 
@@ -389,21 +381,21 @@ fn tensorNb1(t: ?*c.ggml_tensor) usize {
 /// Return: false, logged, when the graph cannot be allocated or computed.
 pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f32, window: [*]const f32, n_frames: i64, out: [*]f32) !bool {
     const sched = config.sched;
-    const backend_cpu = c.ggml_backend_sched_get_backend(sched, c.ggml_backend_sched_get_n_backends(sched) - 1);
+    const backend_cpu = mod.impl.c.ggml_backend_sched_get_backend(sched, mod.impl.c.ggml_backend_sched_get_n_backends(sched) - 1);
     backendCpuSetNThreads(backend_cpu, @max(1, config.n_threads));
 
     const filters = cache.filters.data.items;
     const n_fft_bins = config.n_fft_bins;
     const frame_size = (n_fft_bins - 1) * 2;
     const n_mel = config.n_mel;
-    impl.ggmlAssert(filters.len == @as(usize, @intCast(n_mel * n_fft_bins)), "mtmd-subcontext.cpp", 284, "filters.size() == (size_t) (n_mel * n_fft_bins)");
-    impl.ggmlAssert(cache.cos_vals.items.len == @as(usize, @intCast(frame_size)) and cache.sin_vals.items.len == @as(usize, @intCast(frame_size)), "mtmd-subcontext.cpp", 285, "cache.cos_vals.size() == (size_t) frame_size && cache.sin_vals.size() == (size_t) frame_size");
+    mod.impl.ggmlAssert(filters.len == @as(usize, @intCast(n_mel * n_fft_bins)), "mtmd-subcontext.cpp", 284, "filters.size() == (size_t) (n_mel * n_fft_bins)");
+    mod.impl.ggmlAssert(cache.cos_vals.items.len == @as(usize, @intCast(frame_size)) and cache.sin_vals.items.len == @as(usize, @intCast(frame_size)), "mtmd-subcontext.cpp", 285, "cache.cos_vals.size() == (size_t) frame_size && cache.sin_vals.size() == (size_t) frame_size");
 
     // DFT matrix with the window folded in, the first n_fft_bins rows give the real part
     const fs: usize = @intCast(frame_size);
     const nb: usize = @intCast(n_fft_bins);
-    const dft = try gpa.alloc(f32, 2 * nb * fs);
-    defer gpa.free(dft);
+    const dft = try std.heap.c_allocator.alloc(f32, 2 * nb * fs);
+    defer std.heap.c_allocator.free(dft);
     for (0..nb) |k| {
         for (0..fs) |j| {
             const q = (j * k) % fs;
@@ -419,69 +411,69 @@ pub fn logMel(config: *const MelConfig, cache: *const Cache, samples: [*]const f
     while (off < n_frames) : (off += n_frames_max) {
         const n_cur = @min(n_frames_max, n_frames - off);
 
-        const params: c.ggml_init_params = .{
-            .mem_size = c.ggml_tensor_overhead() * 32 + c.ggml_graph_overhead(),
+        const params: mod.impl.c.ggml_init_params = .{
+            .mem_size = mod.impl.c.ggml_tensor_overhead() * 32 + mod.impl.c.ggml_graph_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         };
-        const ctx0 = c.ggml_init(params);
-        defer c.ggml_free(ctx0);
+        const ctx0 = mod.impl.c.ggml_init(params);
+        defer mod.impl.c.ggml_free(ctx0);
 
-        const inp_samples = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_F32, (n_cur - 1) * config.hop_length + frame_size);
-        const inp_dft = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, frame_size, 2 * n_fft_bins);
-        const inp_filters = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, n_fft_bins, n_mel);
-        c.ggml_set_input(inp_samples);
-        c.ggml_set_input(inp_dft);
-        c.ggml_set_input(inp_filters);
+        const inp_samples = mod.impl.c.ggml_new_tensor_1d(ctx0, mod.impl.c.GGML_TYPE_F32, (n_cur - 1) * config.hop_length + frame_size);
+        const inp_dft = mod.impl.c.ggml_new_tensor_2d(ctx0, mod.impl.c.GGML_TYPE_F32, frame_size, 2 * n_fft_bins);
+        const inp_filters = mod.impl.c.ggml_new_tensor_2d(ctx0, mod.impl.c.GGML_TYPE_F32, n_fft_bins, n_mel);
+        mod.impl.c.ggml_set_input(inp_samples);
+        mod.impl.c.ggml_set_input(inp_dft);
+        mod.impl.c.ggml_set_input(inp_filters);
 
-        var cur = c.ggml_cont(ctx0, c.ggml_view_2d(ctx0, inp_samples, frame_size, n_cur, @as(usize, @intCast(config.hop_length)) * c.ggml_element_size(inp_samples), 0));
-        cur = c.ggml_mul_mat(ctx0, inp_dft, cur); // [2 * n_fft_bins, n_cur]
-        _ = c.ggml_prec_set_src(cur, c.GGML_PREC_F32, 1);
+        var cur = mod.impl.c.ggml_cont(ctx0, mod.impl.c.ggml_view_2d(ctx0, inp_samples, frame_size, n_cur, @as(usize, @intCast(config.hop_length)) * mod.impl.c.ggml_element_size(inp_samples), 0));
+        cur = mod.impl.c.ggml_mul_mat(ctx0, inp_dft, cur); // [2 * n_fft_bins, n_cur]
+        _ = mod.impl.c.ggml_prec_set_src(cur, mod.impl.c.GGML_PREC_F32, 1);
 
-        cur = c.ggml_sqr(ctx0, cur);
+        cur = mod.impl.c.ggml_sqr(ctx0, cur);
         const nb1 = tensorNb1(cur);
-        cur = c.ggml_add(ctx0, c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, 0), c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, nb * c.ggml_element_size(cur)));
+        cur = mod.impl.c.ggml_add(ctx0, mod.impl.c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, 0), mod.impl.c.ggml_view_2d(ctx0, cur, n_fft_bins, n_cur, nb1, nb * mod.impl.c.ggml_element_size(cur)));
         if (config.use_magnitude) {
-            cur = c.ggml_sqrt(ctx0, cur);
+            cur = mod.impl.c.ggml_sqrt(ctx0, cur);
         }
 
-        cur = c.ggml_mul_mat(ctx0, cur, inp_filters); // [n_cur, n_mel]
-        _ = c.ggml_prec_set_src(cur, c.GGML_PREC_F32, 1);
+        cur = mod.impl.c.ggml_mul_mat(ctx0, cur, inp_filters); // [n_cur, n_mel]
+        _ = mod.impl.c.ggml_prec_set_src(cur, mod.impl.c.GGML_PREC_F32, 1);
         cur = if (config.mel_floor_add)
-            c.ggml_scale_bias(ctx0, cur, 1.0, config.mel_floor)
+            mod.impl.c.ggml_scale_bias(ctx0, cur, 1.0, config.mel_floor)
         else
-            c.ggml_clamp(ctx0, cur, config.mel_floor, std.math.floatMax(f32));
-        cur = c.ggml_log(ctx0, cur);
+            mod.impl.c.ggml_clamp(ctx0, cur, config.mel_floor, std.math.floatMax(f32));
+        cur = mod.impl.c.ggml_log(ctx0, cur);
         if (!config.use_natural_log) {
             // clang folds `1.0f / logf(10.0f)` at compile time, and LLVM
             // folds `logf` of a constant through the host's `double` `log`
-            cur = c.ggml_scale(ctx0, cur, 1.0 / @as(f32, @floatCast(libm.log(10.0))));
+            cur = mod.impl.c.ggml_scale(ctx0, cur, 1.0 / @as(f32, @floatCast(stdlib.libm.log(10.0))));
         }
-        c.ggml_set_output(cur);
+        mod.impl.c.ggml_set_output(cur);
 
-        const gf = c.ggml_new_graph(ctx0);
-        c.ggml_build_forward_expand(gf, cur);
+        const gf = mod.impl.c.ggml_new_graph(ctx0);
+        mod.impl.c.ggml_build_forward_expand(gf, cur);
 
-        c.ggml_backend_sched_reset(sched);
-        if (!c.ggml_backend_sched_alloc_graph(sched, gf)) {
-            impl.logErr("%s: failed to allocate compute graph\n", .{"mtmd_audio_log_mel"});
+        mod.impl.c.ggml_backend_sched_reset(sched);
+        if (!mod.impl.c.ggml_backend_sched_alloc_graph(sched, gf)) {
+            mod.impl.logErr("%s: failed to allocate compute graph\n", .{"mtmd_audio_log_mel"});
             return false;
         }
 
-        c.ggml_backend_tensor_set(inp_samples, samples + @as(usize, @intCast(off * config.hop_length)), 0, c.ggml_nbytes(inp_samples));
-        c.ggml_backend_tensor_set(inp_dft, dft.ptr, 0, c.ggml_nbytes(inp_dft));
-        c.ggml_backend_tensor_set(inp_filters, filters.ptr, 0, c.ggml_nbytes(inp_filters));
+        mod.impl.c.ggml_backend_tensor_set(inp_samples, samples + @as(usize, @intCast(off * config.hop_length)), 0, mod.impl.c.ggml_nbytes(inp_samples));
+        mod.impl.c.ggml_backend_tensor_set(inp_dft, dft.ptr, 0, mod.impl.c.ggml_nbytes(inp_dft));
+        mod.impl.c.ggml_backend_tensor_set(inp_filters, filters.ptr, 0, mod.impl.c.ggml_nbytes(inp_filters));
 
-        const status = c.ggml_backend_sched_graph_compute(sched, gf);
-        if (status != c.GGML_STATUS_SUCCESS) {
-            impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ "mtmd_audio_log_mel", @as(c_int, status) });
+        const status = mod.impl.c.ggml_backend_sched_graph_compute(sched, gf);
+        if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+            mod.impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ "mtmd_audio_log_mel", @as(c_int, status) });
             return false;
         }
 
         const cur_nb1 = tensorNb1(cur);
         var j: i64 = 0;
         while (j < n_mel) : (j += 1) {
-            c.ggml_backend_tensor_get(cur, out + @as(usize, @intCast(j * n_frames + off)), @as(usize, @intCast(j)) * cur_nb1, @as(usize, @intCast(n_cur)) * c.ggml_element_size(cur));
+            mod.impl.c.ggml_backend_tensor_get(cur, out + @as(usize, @intCast(j * n_frames + off)), @as(usize, @intCast(j)) * cur_nb1, @as(usize, @intCast(n_cur)) * mod.impl.c.ggml_element_size(cur));
         }
     }
 
@@ -521,11 +513,11 @@ pub fn logMelFrame(cache: *const Cache, samples: [*]const f32, n_fft: c_int, n_m
     ggmlAssert(cache.filters.n_mel == n_mel and cache.filters.n_fft == n_fft, 316, "cache.filters.n_mel == n_mel && cache.filters.n_fft == n_fft");
 
     const nf: usize = @intCast(n_fft);
-    const fft_in = try gpa.alloc(f32, nf * 2);
-    defer gpa.free(fft_in);
+    const fft_in = try std.heap.c_allocator.alloc(f32, nf * 2);
+    defer std.heap.c_allocator.free(fft_in);
     @memset(fft_in, 0.0);
-    const fft_out = try gpa.alloc(f32, nf * 2 * 2 * 2);
-    defer gpa.free(fft_out);
+    const fft_out = try std.heap.c_allocator.alloc(f32, nf * 2 * 2 * 2);
+    defer std.heap.c_allocator.free(fft_out);
     @memset(fft_out, 0.0);
     for (0..nf) |j| fft_in[j] = cache.hann_window.items[j] * samples[j];
     fft(cache, fft_in.ptr, n_fft, fft_out.ptr);
@@ -541,7 +533,7 @@ pub fn logMelFrame(cache: *const Cache, samples: [*]const f32, n_fft: c_int, n_m
         for (0..n_fft_bins) |k| {
             sum += fft_out[k] * cache.filters.data.items[j * n_fft_bins + k];
         }
-        out[j] = @floatCast(libm.log10(libcxx.max(f64, sum, 1e-10)));
+        out[j] = @floatCast(stdlib.libm.log10(stdlib.libcxx.max(f64, sum, 1e-10)));
     }
 }
 
@@ -559,14 +551,14 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const MelConfig, cache: *
 
     // Padding
     var samples_padded: std.ArrayList(f32) = .empty;
-    defer samples_padded.deinit(gpa);
+    defer samples_padded.deinit(std.heap.c_allocator);
     if (params.no_padding) {
         // no padding, use samples as-is
-        try samples_padded.appendSlice(gpa, samples_in);
+        try samples_padded.appendSlice(std.heap.c_allocator, samples_in);
         n_samples = @intCast(samples_padded.items.len);
     } else if (params.center_padding) {
         const pad_amount: usize = @intCast(@divTrunc(frame_size, 2));
-        try samples_padded.appendNTimes(gpa, 0, samples_in.len + 2 * pad_amount);
+        try samples_padded.appendNTimes(std.heap.c_allocator, 0, samples_in.len + 2 * pad_amount);
         @memcpy(samples_padded.items[pad_amount..][0..samples_in.len], samples_in);
         n_samples = @intCast(samples_padded.items.len);
     } else {
@@ -574,7 +566,7 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const MelConfig, cache: *
         const stage_1_pad: usize = @intCast(@as(i64, params.sample_rate) * 30);
         const stage_2_pad: usize = @intCast(@divTrunc(frame_size, 2));
         const ns: usize = @intCast(n_samples);
-        try samples_padded.appendNTimes(gpa, 0, ns + stage_1_pad + stage_2_pad * 2);
+        try samples_padded.appendNTimes(std.heap.c_allocator, 0, ns + stage_1_pad + stage_2_pad * 2);
         @memcpy(samples_padded.items[stage_2_pad..][0..ns], samples_in[0..ns]);
         // 30 seconds of zeros at the end (already zero), then the reflection
         // at the beginning
@@ -600,9 +592,9 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const MelConfig, cache: *
 
     // pad hann window if it's smaller than frame_size
     var hann_window_padded: std.ArrayList(f32) = .empty;
-    defer hann_window_padded.deinit(gpa);
+    defer hann_window_padded.deinit(std.heap.c_allocator);
     if (params.hann_window_size < frame_size) {
-        try hann_window_padded.appendNTimes(gpa, 0, @intCast(frame_size));
+        try hann_window_padded.appendNTimes(std.heap.c_allocator, 0, @intCast(frame_size));
         const padding: usize = @intCast(@divTrunc(frame_size - params.hann_window_size, 2));
         const hw: usize = @intCast(params.hann_window_size);
         @memcpy(hann_window_padded.items[padding..][0..hw], hann[0..hw]);
@@ -615,20 +607,20 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const MelConfig, cache: *
     out.n_len = @divTrunc(n_samples - frame_size, frame_step) + 1;
     // Validate dimensions before allocation to prevent integer overflow
     if (out.n_mel <= 0 or out.n_len <= 0) {
-        impl.logErr("%s: invalid mel dimensions n_mel=%lld n_len=%lld\n", .{ "log_mel_spectrogram", @as(c_longlong, out.n_mel), @as(c_longlong, out.n_len) });
+        mod.impl.logErr("%s: invalid mel dimensions n_mel=%lld n_len=%lld\n", .{ "log_mel_spectrogram", @as(c_longlong, out.n_mel), @as(c_longlong, out.n_len) });
         return false;
     }
     const total_size: usize = @as(usize, @intCast(out.n_mel)) *% @as(usize, @intCast(out.n_len));
     if (total_size > std.math.maxInt(usize) / @sizeOf(f32)) {
-        impl.logErr("%s: size overflow: n_mel=%lld n_len=%lld\n", .{ "log_mel_spectrogram", @as(c_longlong, out.n_mel), @as(c_longlong, out.n_len) });
+        mod.impl.logErr("%s: size overflow: n_mel=%lld n_len=%lld\n", .{ "log_mel_spectrogram", @as(c_longlong, out.n_mel), @as(c_longlong, out.n_len) });
         return false;
     }
     if (n_samples < frame_size) {
-        impl.logErr("%s: not enough samples after padding\n", .{"log_mel_spectrogram"});
+        mod.impl.logErr("%s: not enough samples after padding\n", .{"log_mel_spectrogram"});
         return false;
     }
     const old_len = out.data.items.len;
-    try out.data.resize(gpa, total_size);
+    try out.data.resize(std.heap.c_allocator, total_size);
     if (total_size > old_len) @memset(out.data.items[old_len..], 0.0);
 
     if (!shape_only and !try logMel(params, cache, samples_padded.items.ptr, hann, out.n_len, out.data.items.ptr)) {
@@ -685,17 +677,17 @@ const CbxFftBufs = struct {
     out: []f32,
 
     fn init(n_fft: usize) !CbxFftBufs {
-        const in = try gpa.alloc(f32, n_fft * 2);
-        errdefer gpa.free(in);
-        const out = try gpa.alloc(f32, n_fft * 8);
+        const in = try std.heap.c_allocator.alloc(f32, n_fft * 2);
+        errdefer std.heap.c_allocator.free(in);
+        const out = try std.heap.c_allocator.alloc(f32, n_fft * 8);
         @memset(in, 0.0);
         @memset(out, 0.0);
         return .{ .in = in, .out = out };
     }
 
     fn deinit(self: *CbxFftBufs) void {
-        gpa.free(self.in);
-        gpa.free(self.out);
+        std.heap.c_allocator.free(self.in);
+        std.heap.c_allocator.free(self.out);
     }
 };
 
@@ -731,7 +723,7 @@ fn cbxMelEnergies(cache: *const Cache, fft_in: []f32, fft_out: []f32, magnitude:
     }
     const n_mel: usize = @intCast(cache.filters.n_mel);
     mel.clearRetainingCapacity();
-    try mel.appendNTimes(gpa, 0.0, n_mel);
+    try mel.appendNTimes(std.heap.c_allocator, 0.0, n_mel);
     for (0..n_mel) |m| {
         const w = cache.filters.data.items[m * n_bins ..][0..n_bins];
         var acc = mel.items[m];
@@ -759,16 +751,16 @@ fn cbxS3tokLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList
     var bufs = try CbxFftBufs.init(n_fft);
     defer bufs.deinit();
     var e: std.ArrayList(f64) = .empty;
-    defer e.deinit(gpa);
-    const mel = try gpa.alloc(f64, n_mel * nf);
-    defer gpa.free(mel);
+    defer e.deinit(std.heap.c_allocator);
+    const mel = try std.heap.c_allocator.alloc(f64, n_mel * nf);
+    defer std.heap.c_allocator.free(mel);
     @memset(mel, 0.0);
     for (0..nf) |fru| {
         const fr: c_int = @intCast(fru);
         cbxReflectFrame(samples.ptr, n, fr * hop - @divTrunc(n_fft, 2), cache.hann_window.items, bufs.in);
         try cbxMelEnergies(cache, bufs.in, bufs.out, false, &e);
         for (0..n_mel) |m| {
-            mel[m * nf + fru] = libm.log10(libcxx.max(f64, e.items[m], 1e-10));
+            mel[m * nf + fru] = stdlib.libm.log10(stdlib.libcxx.max(f64, e.items[m], 1e-10));
         }
     }
 
@@ -778,9 +770,9 @@ fn cbxS3tokLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList
         if (mx < v) mx = v;
     }
     out.clearRetainingCapacity();
-    try out.resize(gpa, mel.len);
+    try out.resize(std.heap.c_allocator, mel.len);
     for (out.items, mel) |*o, v| {
-        o.* = @floatCast((libcxx.max(f64, v, mx - 8.0) + 4.0) / 4.0);
+        o.* = @floatCast((stdlib.libcxx.max(f64, v, mx - 8.0) + 4.0) / 4.0);
     }
     return true;
 }
@@ -794,7 +786,7 @@ fn cbxUpsample32(samples: []const f32, out: *std.ArrayList(f32)) !void {
     const n_out = samples.len * 3 / 2;
     const n_in: c_int = @intCast(samples.len);
     out.clearRetainingCapacity();
-    try out.appendNTimes(gpa, 0.0, n_out);
+    try out.appendNTimes(std.heap.c_allocator, 0.0, n_out);
     for (0..n_out) |n| {
         const t: f64 = @as(f64, @floatFromInt(2 * n)) / 3.0;
         const k0: c_int = @as(c_int, @intFromFloat(@floor(t))) - W + 1;
@@ -805,8 +797,8 @@ fn cbxUpsample32(samples: []const f32, out: *std.ArrayList(f32)) !void {
                 continue;
             }
             const x = t - @as(f64, @floatFromInt(k));
-            const s: f64 = if (x == 0.0) 1.0 else libm.sin(2.0 * m_pi * fc * x) / (m_pi * x);
-            acc = @mulAdd(f64, @as(f64, samples[@intCast(k)]) * s * 0.5, 1.0 + libm.cos(m_pi * x / @as(f64, W + 1)), acc);
+            const s: f64 = if (x == 0.0) 1.0 else stdlib.libm.sin(2.0 * m_pi * fc * x) / (m_pi * x);
+            acc = @mulAdd(f64, @as(f64, samples[@intCast(k)]) * s * 0.5, 1.0 + stdlib.libm.cos(m_pi * x / @as(f64, W + 1)), acc);
         }
         out.items[n] = @floatCast(acc);
     }
@@ -831,15 +823,15 @@ fn cbxMatchaLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayLis
     var bufs = try CbxFftBufs.init(n_fft);
     defer bufs.deinit();
     var e: std.ArrayList(f64) = .empty;
-    defer e.deinit(gpa);
+    defer e.deinit(std.heap.c_allocator);
     out.clearRetainingCapacity();
-    try out.resize(gpa, n_mel * nf);
+    try out.resize(std.heap.c_allocator, n_mel * nf);
     for (0..nf) |fru| {
         const fr: c_int = @intCast(fru);
         cbxReflectFrame(samples.ptr, n, fr * hop - pad, cache.hann_window.items, bufs.in);
         try cbxMelEnergies(cache, bufs.in, bufs.out, true, &e);
         for (0..n_mel) |m| {
-            out.items[fru * n_mel + m] = libm.logf(libcxx.max(f32, @floatCast(e.items[m]), 1e-5));
+            out.items[fru * n_mel + m] = stdlib.libm.logf(stdlib.libcxx.max(f32, @floatCast(e.items[m]), 1e-5));
         }
     }
     return true;
@@ -854,8 +846,8 @@ fn cbxTrimSilence(samples: []const f32, top_db: f32, start: *usize, end: *usize)
     const n: c_int = @intCast(samples.len);
 
     const n_fr: c_int = 1 + @divTrunc(n, hop);
-    const rms = try gpa.alloc(f64, @intCast(n_fr));
-    defer gpa.free(rms);
+    const rms = try std.heap.c_allocator.alloc(f64, @intCast(n_fr));
+    defer std.heap.c_allocator.free(rms);
     var mx: f64 = 0.0;
     for (rms, 0..) |*r, fru| {
         const fr: c_int = @intCast(fru);
@@ -869,12 +861,12 @@ fn cbxTrimSilence(samples: []const f32, top_db: f32, start: *usize, end: *usize)
             }
         }
         r.* = @sqrt(acc / @as(f64, win));
-        mx = libcxx.max(f64, mx, r.*);
+        mx = stdlib.libcxx.max(f64, mx, r.*);
     }
 
     // the call is inlined with a constant `top_db`, so clang folds the pow
     // through the host's `pow`, not `__exp10`
-    const thr = mx * libm.pow(10.0, -@as(f64, top_db) / 20.0);
+    const thr = mx * stdlib.libm.pow(10.0, -@as(f64, top_db) / 20.0);
     var first: c_int = -1;
     var last: c_int = -1;
     for (rms, 0..) |r, fru| {
@@ -911,9 +903,9 @@ fn cbxVeMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList(f32),
     var bufs = try CbxFftBufs.init(n_fft);
     defer bufs.deinit();
     var e: std.ArrayList(f64) = .empty;
-    defer e.deinit(gpa);
+    defer e.deinit(std.heap.c_allocator);
     out.clearRetainingCapacity();
-    try out.resize(gpa, n_mel * nf);
+    try out.resize(std.heap.c_allocator, n_mel * nf);
     for (0..nf) |fru| {
         const fr: c_int = @intCast(fru);
         cbxReflectFrame(samples.ptr, n, fr * hop - @divTrunc(n_fft, 2), cache.hann_window.items, bufs.in);
@@ -949,7 +941,7 @@ fn cbxGatedMean(z: []const f64, thr_lufs: f64) f64 {
     var acc: f64 = 0.0;
     var n: c_int = 0;
     for (z) |v| {
-        if (@mulAdd(f64, 10.0, libm.log10(libcxx.max(f64, v, 1e-30)), -0.691) > thr_lufs) {
+        if (@mulAdd(f64, 10.0, stdlib.libm.log10(stdlib.libcxx.max(f64, v, 1e-30)), -0.691) > thr_lufs) {
             acc += v;
             n += 1;
         }
@@ -960,17 +952,17 @@ fn cbxGatedMean(z: []const f64, thr_lufs: f64) f64 {
 /// Ports `mtmd_audio_lufs` (mtmd-audio.cpp:1092 @b1b770d90): the ITU-R
 /// BS.1770 integrated loudness of a mono signal, matching pyloudnorm.
 fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
-    const y = try gpa.alloc(f64, samples.len);
-    defer gpa.free(y);
+    const y = try std.heap.c_allocator.alloc(f64, samples.len);
+    defer std.heap.c_allocator.free(y);
     for (y, samples) |*d, v| d.* = v;
     const sr: f64 = @floatFromInt(sample_rate);
 
     // stage 1: high shelf, f0 1681.9744509555319 Hz, +3.99984385397 dB, Q 0.7071752369554196
     {
         // a constant argument: clang folds the pow through the host's `pow`
-        const A = libm.pow(10.0, @as(f64, 3.99984385397) / 40.0);
+        const A = stdlib.libm.pow(10.0, @as(f64, 3.99984385397) / 40.0);
         const w0 = 2.0 * m_pi * 1681.9744509555319 / sr;
-        const sc = libm.sinCos64(w0);
+        const sc = stdlib.libm.sinCos64(w0);
         const alpha = sc.sin / (2.0 * 0.7071752369554196);
         const cw = sc.cos;
         const sq = 2.0 * @sqrt(A) * alpha;
@@ -985,7 +977,7 @@ fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
     // stage 2: high pass, f0 38.13547087602444 Hz, Q 0.5003270373238773
     {
         const w0 = 2.0 * m_pi * 38.13547087602444 / sr;
-        const sc = libm.sinCos64(w0);
+        const sc = stdlib.libm.sinCos64(w0);
         const alpha = sc.sin / (2.0 * 0.5003270373238773);
         const cw = sc.cos;
         const b0 = (1.0 + cw) / 2.0;
@@ -1004,8 +996,8 @@ fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
         return -std.math.inf(f32);
     }
     const n_blocks: c_int = 1 + @divTrunc(n - win, hop);
-    const z = try gpa.alloc(f64, @intCast(n_blocks));
-    defer gpa.free(z);
+    const z = try std.heap.c_allocator.alloc(f64, @intCast(n_blocks));
+    defer std.heap.c_allocator.free(z);
     const wu: usize = @intCast(win);
     for (z, 0..) |*zb, b| {
         const blk = y[b * @as(usize, @intCast(hop)) ..][0..wu];
@@ -1025,18 +1017,18 @@ fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
     if (z_abs <= 0.0) {
         return -std.math.inf(f32);
     }
-    const thr_rel = @mulAdd(f64, 10.0, libm.log10(z_abs), -0.691) - 10.0;
+    const thr_rel = @mulAdd(f64, 10.0, stdlib.libm.log10(z_abs), -0.691) - 10.0;
     const z_rel = cbxGatedMean(z, thr_rel);
     if (z_rel <= 0.0) {
         return -std.math.inf(f32);
     }
-    return @floatCast(@mulAdd(f64, 10.0, libm.log10(z_rel), -0.691));
+    return @floatCast(@mulAdd(f64, 10.0, stdlib.libm.log10(z_rel), -0.691));
 }
 
 /// A lambda of `mtmd_audio_preprocessor_chatterbox_ref`'s `initialize`,
 /// its `mel` (mtmd-audio.cpp:1192 @b1b770d90): kaldi's mel scale.
 fn cbxKaldiMel(f: f64) f64 {
-    return 1127.0 * libm.log(1.0 + f / 700.0);
+    return 1127.0 * stdlib.libm.log(1.0 + f / 700.0);
 }
 
 /// Ports `initialize` (mtmd-audio.cpp:1177 @b1b770d90), a member of
@@ -1054,10 +1046,10 @@ fn cbxRefInitialize(self: *Preprocessor) !void {
         const fc = &self.cache;
 
         try fc.fillSinCosTable(n_fft);
-        try fc.hann_window.resize(gpa, frame_len);
+        try fc.hann_window.resize(std.heap.c_allocator, frame_len);
         for (fc.hann_window.items, 0..) |*w, i| {
             const arg = 2.0 * m_pi * @as(f64, @floatFromInt(i)) / @as(f64, frame_len - 1);
-            w.* = @floatCast(libm.pow(@mulAdd(f64, -0.5, libm.cos(arg), 0.5), 0.85));
+            w.* = @floatCast(stdlib.libm.pow(@mulAdd(f64, -0.5, stdlib.libm.cos(arg), 0.5), 0.85));
         }
 
         const mel_lo = cbxKaldiMel(20.0);
@@ -1069,7 +1061,7 @@ fn cbxRefInitialize(self: *Preprocessor) !void {
         filters.n_mel = n_mel;
         filters.n_fft = n_fft;
         filters.data.clearRetainingCapacity();
-        try filters.data.appendNTimes(gpa, 0.0, @as(usize, @intCast(n_mel)) * n_bins);
+        try filters.data.appendNTimes(std.heap.c_allocator, 0.0, @as(usize, @intCast(n_mel)) * n_bins);
         for (0..@intCast(n_mel)) |m| {
             const left = @mulAdd(f64, @floatFromInt(m), delta, mel_lo);
             const center = left + delta;
@@ -1105,9 +1097,9 @@ fn cbxRefInitialize(self: *Preprocessor) !void {
 /// owns the list.
 fn cbxCapClip(pcm: []const f32, cap: usize) !std.ArrayList(f32) {
     var clip: std.ArrayList(f32) = .empty;
-    errdefer clip.deinit(gpa);
-    try clip.appendSlice(gpa, pcm[0..@min(pcm.len, cap)]);
-    try clip.appendNTimes(gpa, 0.0, (clip.items.len + 639) / 640 * 640 - clip.items.len);
+    errdefer clip.deinit(std.heap.c_allocator);
+    try clip.appendSlice(std.heap.c_allocator, pcm[0..@min(pcm.len, cap)]);
+    try clip.appendNTimes(std.heap.c_allocator, 0.0, (clip.items.len + 639) / 640 * 640 - clip.items.len);
     return clip;
 }
 
@@ -1115,15 +1107,15 @@ fn cbxCapClip(pcm: []const f32, cap: usize) !std.ArrayList(f32) {
 /// its `s3tok_entry` (mtmd-audio.cpp:1311 @b1b770d90).
 fn cbxS3tokEntry(self: *const Preprocessor, pcm: []const f32, cap: usize, output: *std.ArrayList(Mel)) !bool {
     var clip = try cbxCapClip(pcm, cap);
-    defer clip.deinit(gpa);
+    defer clip.deinit(std.heap.c_allocator);
     var mel: std.ArrayList(f32) = .empty;
-    errdefer mel.deinit(gpa);
+    errdefer mel.deinit(std.heap.c_allocator);
     var n_frames: c_int = 0;
     if (!try cbxS3tokLogMel(&self.s3tok_cache, clip.items, &mel, &n_frames)) {
-        mel.deinit(gpa);
+        mel.deinit(std.heap.c_allocator);
         return false;
     }
-    try output.append(gpa, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = self.s3tok_cache.filters.n_mel, .data = mel });
+    try output.append(std.heap.c_allocator, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = self.s3tok_cache.filters.n_mel, .data = mel });
     return true;
 }
 
@@ -1138,12 +1130,12 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
     const sr: c_int = hp.audio_sample_rate;
 
     // the turbo variant loudness-normalizes the whole clip before any feature
-    const pcm = try gpa.dupe(f32, samples);
-    defer gpa.free(pcm);
+    const pcm = try std.heap.c_allocator.dupe(f32, samples);
+    defer std.heap.c_allocator.free(pcm);
     if (!self.is_mtl) {
         const lufs = try cbxLufs(pcm, sr);
         if (lufs != -std.math.inf(f32)) {
-            const gain = libm.pow10f((-27.0 - lufs) / 20.0);
+            const gain = stdlib.libm.pow10f((-27.0 - lufs) / 20.0);
             if (std.math.isFinite(gain) and gain > 0.0) {
                 for (pcm) |*v| v.* *= gain;
             }
@@ -1166,13 +1158,13 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
 
         var out: Mel = .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = n_mel };
         errdefer out.deinit();
-        try out.data.appendNTimes(gpa, 0.0, nm * nf);
+        try out.data.appendNTimes(std.heap.c_allocator, 0.0, nm * nf);
 
         const win = self.cache.hann_window.items;
         var bufs = try CbxFftBufs.init(n_fft);
         defer bufs.deinit();
         var e: std.ArrayList(f64) = .empty;
-        defer e.deinit(gpa);
+        defer e.deinit(std.heap.c_allocator);
         const fl: usize = @intCast(frame_len);
         for (0..nf) |fr| {
             const x = pcm[fr * @as(usize, @intCast(hop)) ..][0..fl];
@@ -1188,7 +1180,7 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
             }
             try cbxMelEnergies(&self.cache, bufs.in, bufs.out, false, &e);
             for (0..nm) |m| {
-                out.data.items[m * nf + fr] = @floatCast(libm.log(libcxx.max(f64, e.items[m], @as(f64, std.math.floatEps(f32)))));
+                out.data.items[m * nf + fr] = @floatCast(stdlib.libm.log(stdlib.libcxx.max(f64, e.items[m], @as(f64, std.math.floatEps(f32)))));
             }
         }
 
@@ -1200,7 +1192,7 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
             for (row) |*v| v.* -= @as(f32, @floatCast(mean));
         }
 
-        try output.append(gpa, out);
+        try output.append(std.heap.c_allocator, out);
     }
 
     // entries 1 and 2: s3 tokenizer log-mels at the flow and t3 caps, padded to whole 40 ms tokens
@@ -1214,18 +1206,18 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
     // entry 3: s3gen prompt features of the flow-capped clip at 24 kHz
     {
         var clip = try cbxCapClip(pcm, gen_cap);
-        defer clip.deinit(gpa);
+        defer clip.deinit(std.heap.c_allocator);
         var pcm24: std.ArrayList(f32) = .empty;
-        defer pcm24.deinit(gpa);
+        defer pcm24.deinit(std.heap.c_allocator);
         try cbxUpsample32(clip.items, &pcm24);
         var feat: std.ArrayList(f32) = .empty;
-        errdefer feat.deinit(gpa);
+        errdefer feat.deinit(std.heap.c_allocator);
         var n_frames: c_int = 0;
         if (!try cbxMatchaLogMel(&self.matcha_cache, pcm24.items, &feat, &n_frames)) {
-            feat.deinit(gpa);
+            feat.deinit(std.heap.c_allocator);
             return false;
         }
-        try output.append(gpa, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = 80, .data = feat });
+        try output.append(std.heap.c_allocator, .{ .n_len = n_frames, .n_len_org = n_frames, .n_mel = 80, .data = feat });
     }
 
     // entry 4: voice encoder mel of the silence-trimmed clip, padded to the 160-frame partial grid (rate 1.3)
@@ -1237,10 +1229,10 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
             return false;
         }
         var mel: std.ArrayList(f32) = .empty;
-        errdefer mel.deinit(gpa);
+        errdefer mel.deinit(std.heap.c_allocator);
         var n_frames: c_int = 0;
         if (!try cbxVeMel(&self.ve_cache, pcm[t0..t1], &mel, &n_frames)) {
-            mel.deinit(gpa);
+            mel.deinit(std.heap.c_allocator);
             return false;
         }
         const n_mel: c_int = 40;
@@ -1255,11 +1247,11 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
         const target: c_int = n_partial + step * (n_wins - 1);
         const new_len: usize = @as(usize, @intCast(target)) * @as(usize, @intCast(n_mel));
         if (new_len > mel.items.len) {
-            try mel.appendNTimes(gpa, 0.0, new_len - mel.items.len);
+            try mel.appendNTimes(std.heap.c_allocator, 0.0, new_len - mel.items.len);
         } else {
             mel.shrinkRetainingCapacity(new_len);
         }
-        try output.append(gpa, .{ .n_len = target, .n_len_org = target, .n_mel = n_mel, .data = mel });
+        try output.append(std.heap.c_allocator, .{ .n_len = target, .n_len_org = target, .n_mel = n_mel, .data = mel });
     }
     return true;
 }
@@ -1268,13 +1260,13 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
 /// per chunk (empty on failure), and the input of `compute` when the entries
 /// do not hold the data yet.
 pub const PreprocOut = struct {
-    entries: std.ArrayList(impl.ImageF32) = .empty,
+    entries: std.ArrayList(mod.impl.ImageF32) = .empty,
     samples: std.ArrayList(f32) = .empty,
 
     pub fn deinit(self: *PreprocOut) void {
         for (self.entries.items) |*e| e.deinit();
-        self.entries.deinit(gpa);
-        self.samples.deinit(gpa);
+        self.entries.deinit(std.heap.c_allocator);
+        self.samples.deinit(std.heap.c_allocator);
     }
 
     /// Ports `needs_compute` (mtmd-audio.h:82 @b1b770d90), a member of `mtmd_audio_preproc_out`.
@@ -1285,25 +1277,25 @@ pub const PreprocOut = struct {
 
 fn freeMels(mels: *std.ArrayList(Mel)) void {
     for (mels.items) |*m| m.deinit();
-    mels.deinit(gpa);
+    mels.deinit(std.heap.c_allocator);
 }
 
 /// Ports `mtmd_audio_fill_entries` (mtmd-audio.cpp:273 @b1b770d90): one
 /// audio entry per mel, a placeholder when `shape_only` or the mel has no
 /// data. Replaces what `entries` held.
-fn fillEntries(mels: []const Mel, shape_only: bool, entries: *std.ArrayList(impl.ImageF32)) !void {
+fn fillEntries(mels: []const Mel, shape_only: bool, entries: *std.ArrayList(mod.impl.ImageF32)) !void {
     for (entries.items) |*e| e.deinit();
     entries.clearRetainingCapacity();
     for (mels) |*mel| {
-        impl.ggmlAssert(mel.n_len <= std.math.maxInt(i32) and mel.n_len >= 0, "mtmd-audio.cpp", 276, "mel.n_len <= INT32_MAX && mel.n_len >= 0");
-        impl.ggmlAssert(mel.n_mel <= std.math.maxInt(i32) and mel.n_mel >= 0, "mtmd-audio.cpp", 277, "mel.n_mel <= INT32_MAX && mel.n_mel >= 0");
-        var entry: impl.ImageF32 = .{};
+        mod.impl.ggmlAssert(mel.n_len <= std.math.maxInt(i32) and mel.n_len >= 0, "mtmd-audio.cpp", 276, "mel.n_len <= INT32_MAX && mel.n_len >= 0");
+        mod.impl.ggmlAssert(mel.n_mel <= std.math.maxInt(i32) and mel.n_mel >= 0, "mtmd-audio.cpp", 277, "mel.n_mel <= INT32_MAX && mel.n_mel >= 0");
+        var entry: mod.impl.ImageF32 = .{};
         errdefer entry.deinit();
         try entry.setSize(.{ .width = @intCast(mel.n_len), .height = @intCast(mel.n_mel) }, shape_only or mel.data.items.len == 0, true);
         if (!entry.isPlaceholder()) {
             try entry.cpyBuf(mel.data.items);
         }
-        try entries.append(gpa, entry);
+        try entries.append(std.heap.c_allocator, entry);
     }
 }
 
@@ -1345,7 +1337,7 @@ pub const Kind = enum {
 /// `initialize` fills, and the cache the subclass owns.
 pub const Preprocessor = struct {
     kind: Kind,
-    hparams: *const Hparams,
+    hparams: *const mod.model.Hparams,
     /// filled by `initialize` of the preprocessors that use the log-mel
     /// graph; the owner sets `n_threads` and `sched` before `initialize`
     mel_config: MelConfig = .{},
@@ -1365,7 +1357,7 @@ pub const Preprocessor = struct {
     /// Return: a preprocessor reading `hparams`, which must outlive it.
     /// `initialize` must run before `preprocess`, and `mel_config.sched`
     /// must be set before the first `compute`.
-    pub fn init(kind: Kind, hparams: *const Hparams) Preprocessor {
+    pub fn init(kind: Kind, hparams: *const mod.model.Hparams) Preprocessor {
         return .{ .kind = kind, .hparams = hparams };
     }
 
@@ -1420,11 +1412,11 @@ pub const Preprocessor = struct {
 
                 // Standard periodic Hann window, zero-padded to FFT size
                 self.cache.hann_window.clearRetainingCapacity();
-                try self.cache.hann_window.appendNTimes(gpa, 0, @intCast(hp.audio_n_fft));
+                try self.cache.hann_window.appendNTimes(std.heap.c_allocator, 0, @intCast(hp.audio_n_fft));
                 var i: u32 = 0;
                 while (i < @as(u32, @bitCast(hp.audio_window_len))) : (i += 1) {
                     const x = (2.0 * @as(f32, @floatCast(m_pi)) * @as(f32, @floatFromInt(i))) / @as(f32, @floatFromInt(hp.audio_window_len));
-                    self.cache.hann_window.items[i] = @mulAdd(f32, -0.5, libm.cosf(x), 0.5);
+                    self.cache.hann_window.items[i] = @mulAdd(f32, -0.5, stdlib.libm.cosf(x), 0.5);
                 }
 
                 // HTK mel scale, no Slaney area normalization
@@ -1438,12 +1430,12 @@ pub const Preprocessor = struct {
                 self.cache.filters.n_mel = hp.n_mel_bins;
                 self.cache.filters.n_fft = @intCast(n_fft_bins);
                 self.cache.filters.data.clearRetainingCapacity();
-                try self.cache.filters.data.appendSlice(gpa, hp.mel_filters.items);
+                try self.cache.filters.data.appendSlice(std.heap.c_allocator, hp.mel_filters.items);
 
                 ggmlAssert(hp.window.items.len == @as(usize, @intCast(hp.audio_window_len)), 1724, "hparams.window.size() == (size_t)hparams.audio_window_len");
                 ggmlAssert(hp.window.items.len <= @as(usize, @intCast(hp.audio_n_fft)), 1725, "hparams.window.size() <= (size_t) hparams.audio_n_fft");
                 self.cache.hann_window.clearRetainingCapacity();
-                try self.cache.hann_window.appendSlice(gpa, hp.window.items);
+                try self.cache.hann_window.appendSlice(std.heap.c_allocator, hp.window.items);
             },
             .gemma4ua, .pockettts, .muse_spark_audio => {},
             .chatterbox_ref => try cbxRefInitialize(self),
@@ -1543,7 +1535,7 @@ pub const Preprocessor = struct {
         if (try self.process(samples, &mels, deferred)) {
             try fillEntries(mels.items, deferred, &out.entries);
             if (deferred) {
-                try out.samples.appendSlice(gpa, samples);
+                try out.samples.appendSlice(std.heap.c_allocator, samples);
             }
         }
         return out;
@@ -1564,7 +1556,7 @@ pub const Preprocessor = struct {
             return false;
         }
         try fillEntries(mels.items, false, &out.entries);
-        out.samples.clearAndFree(gpa);
+        out.samples.clearAndFree(std.heap.c_allocator);
         return true;
     }
 
@@ -1606,7 +1598,7 @@ pub const Preprocessor = struct {
         const n: c_int = @intCast(samples.len);
         const pu: usize = @intCast(pad);
         var padded: std.ArrayList(f32) = .empty;
-        try padded.appendNTimes(gpa, 0, samples.len + 2 * pu);
+        try padded.appendNTimes(std.heap.c_allocator, 0, samples.len + 2 * pu);
         var i: c_int = 0;
         while (i < pad) : (i += 1) {
             const src = pad - i;
@@ -1630,11 +1622,11 @@ pub const Preprocessor = struct {
 
         var samples = samples_in;
         var smpl: std.ArrayList(f32) = .empty;
-        defer smpl.deinit(gpa);
+        defer smpl.deinit(std.heap.c_allocator);
         // reflection padding needs one sample plus half an FFT window
         const min_samples: usize = @as(usize, @intCast(hp.audio_n_fft)) / 2 + 1;
         if (samples.len < min_samples) {
-            try smpl.appendNTimes(gpa, 0, min_samples);
+            try smpl.appendNTimes(std.heap.c_allocator, 0, min_samples);
             @memcpy(smpl.items[0..samples.len], samples);
             samples = smpl.items;
         }
@@ -1657,13 +1649,13 @@ pub const Preprocessor = struct {
             if (n_len < frames_per_chunk) break; // last incomplete chunk will always be a padded chunk, safe to ignore
 
             var out_chunk: Mel = .{ .n_len = n_len, .n_mel = out_full.n_mel, .n_len_org = out_full.n_mel }; // n_len_org unused
-            try out_chunk.data.ensureTotalCapacity(gpa, @as(usize, @intCast(out_chunk.n_mel)) * @as(usize, @intCast(out_chunk.n_len)));
+            try out_chunk.data.ensureTotalCapacity(std.heap.c_allocator, @as(usize, @intCast(out_chunk.n_mel)) * @as(usize, @intCast(out_chunk.n_len)));
             var i: usize = 0;
             while (i < out_full.n_mel) : (i += 1) {
                 const src = out_full.data.items[i * full_len + off ..][0..frames_per_chunk];
                 out_chunk.data.appendSliceAssumeCapacity(src);
             }
-            try output.append(gpa, out_chunk);
+            try output.append(std.heap.c_allocator, out_chunk);
         }
         return true;
     }
@@ -1678,7 +1670,7 @@ pub const Preprocessor = struct {
         // Reflection-pad n_fft/2 samples at each end, matching WhisperFeatureExtractor center=True
         const pad = @divTrunc(hp.audio_n_fft, 2);
         var padded = try reflectPad(samples, pad, true);
-        defer padded.deinit(gpa);
+        defer padded.deinit(std.heap.c_allocator);
 
         var mel_full: Mel = .{};
         defer mel_full.deinit();
@@ -1691,7 +1683,7 @@ pub const Preprocessor = struct {
                 if (v > mmax) mmax = v;
             }
             mmax -= 8.0;
-            for (mel_full.data.items) |*v| v.* = @floatCast((libcxx.max(f64, v.*, mmax) + 4.0) / 4.0);
+            for (mel_full.data.items) |*v| v.* = @floatCast((stdlib.libcxx.max(f64, v.*, mmax) + 4.0) / 4.0);
         }
 
         // the center-padded STFT gives ~n_samples/hop_length frames
@@ -1709,7 +1701,7 @@ pub const Preprocessor = struct {
             const n_padded = n_chunks * chunk_size;
 
             var out: Mel = .{ .n_mel = mel_full.n_mel, .n_len = n_padded, .n_len_org = win_eff };
-            try out.data.appendNTimes(gpa, 0, @as(usize, @intCast(out.n_mel)) * @as(usize, @intCast(out.n_len)));
+            try out.data.appendNTimes(std.heap.c_allocator, 0, @as(usize, @intCast(out.n_mel)) * @as(usize, @intCast(out.n_len)));
             var m: i64 = 0;
             while (m < out.n_mel) : (m += 1) {
                 const copy_len = @min(win_eff, mel_full.n_len - off);
@@ -1718,7 +1710,7 @@ pub const Preprocessor = struct {
                     @memcpy(out.data.items[@intCast(m * out.n_len)..][0..@intCast(copy_len)], src);
                 }
             }
-            try output.append(gpa, out);
+            try output.append(std.heap.c_allocator, out);
         }
         return true;
     }
@@ -1745,7 +1737,7 @@ pub const Preprocessor = struct {
             // reflect-pad the start; a partial chunk sees zeros past its end,
             // a full chunk reflects its own tail
             var padded = try reflectPad(chunk, pad, n_chunk == chunk_samples);
-            defer padded.deinit(gpa);
+            defer padded.deinit(std.heap.c_allocator);
 
             var mel_full: Mel = .{};
             defer mel_full.deinit();
@@ -1754,25 +1746,25 @@ pub const Preprocessor = struct {
 
             // per-chunk whisper-style normalization, then keep only the valid frames
             var out: Mel = .{ .n_mel = mel_full.n_mel, .n_len = n_valid, .n_len_org = n_valid };
-            try out.data.resize(gpa, @as(usize, @intCast(out.n_mel)) * @as(usize, @intCast(out.n_len)));
+            try out.data.resize(std.heap.c_allocator, @as(usize, @intCast(out.n_mel)) * @as(usize, @intCast(out.n_len)));
 
             var mmax: f64 = -1e20;
             var m: i64 = 0;
             while (m < out.n_mel) : (m += 1) {
                 var t: i64 = 0;
-                while (t < n_valid) : (t += 1) mmax = libcxx.max(f64, mmax, mel_full.data.items[@intCast(m * mel_full.n_len + t)]);
+                while (t < n_valid) : (t += 1) mmax = stdlib.libcxx.max(f64, mmax, mel_full.data.items[@intCast(m * mel_full.n_len + t)]);
             }
             mmax -= 8.0;
             m = 0;
             while (m < out.n_mel) : (m += 1) {
                 var t: i64 = 0;
                 while (t < n_valid) : (t += 1) {
-                    const v = libcxx.max(f64, mel_full.data.items[@intCast(m * mel_full.n_len + t)], mmax);
+                    const v = stdlib.libcxx.max(f64, mel_full.data.items[@intCast(m * mel_full.n_len + t)], mmax);
                     out.data.items[@intCast(m * n_valid + t)] = @floatCast((v + 4.0) / 4.0);
                 }
             }
 
-            try output.append(gpa, out);
+            try output.append(std.heap.c_allocator, out);
         }
         return output.items.len != 0;
     }
@@ -1786,14 +1778,14 @@ pub const Preprocessor = struct {
 
         const pad = @divTrunc(hp.audio_n_fft, 2);
         var padded = try reflectPad(samples, pad, true);
-        defer padded.deinit(gpa);
+        defer padded.deinit(std.heap.c_allocator);
 
         var out: Mel = .{};
         if (!try logMelSpectrogram(padded.items, &self.mel_config, &self.cache, shape_only, &out)) {
             out.deinit();
             return false;
         }
-        try output.append(gpa, out);
+        try output.append(std.heap.c_allocator, out);
         return true;
     }
 
@@ -1811,8 +1803,8 @@ pub const Preprocessor = struct {
         const pu: usize = @intCast(pad);
         const n = samples.len;
         var padded: std.ArrayList(f32) = .empty;
-        defer padded.deinit(gpa);
-        try padded.appendNTimes(gpa, 0, n + 2 * pu);
+        defer padded.deinit(std.heap.c_allocator);
+        try padded.appendNTimes(std.heap.c_allocator, 0, n + 2 * pu);
         for (0..pu) |i| padded.items[i] = samples[pu - i];
         @memcpy(padded.items[pu..][0..n], samples);
         for (0..pu) |i| padded.items[n + pu + i] = samples[n - 2 - i];
@@ -1822,7 +1814,7 @@ pub const Preprocessor = struct {
             out.deinit();
             return false;
         }
-        try output.append(gpa, out);
+        try output.append(std.heap.c_allocator, out);
         return true;
     }
 
@@ -1839,7 +1831,7 @@ pub const Preprocessor = struct {
             out_full.deinit();
             return false;
         }
-        try output.append(gpa, out_full);
+        try output.append(std.heap.c_allocator, out_full);
         return true;
     }
 
@@ -1854,9 +1846,9 @@ pub const Preprocessor = struct {
         const n_min: usize = @intCast(@divTrunc(hp.audio_sample_rate, 2));
 
         var buf: std.ArrayList(f32) = .empty;
-        defer buf.deinit(gpa);
-        try buf.appendSlice(gpa, samples[0..@min(samples.len, n_max)]);
-        if (buf.items.len < n_min) try buf.appendNTimes(gpa, 0.0, n_min - buf.items.len);
+        defer buf.deinit(std.heap.c_allocator);
+        try buf.appendSlice(std.heap.c_allocator, samples[0..@min(samples.len, n_max)]);
+        if (buf.items.len < n_min) try buf.appendNTimes(std.heap.c_allocator, 0.0, n_min - buf.items.len);
 
         if (!try self.conformer(buf.items, output, shape_only)) return false;
 
@@ -1866,13 +1858,13 @@ pub const Preprocessor = struct {
             if (mel.n_len <= n_frames) continue;
             const nf: usize = @intCast(n_frames);
             const n_len: usize = @intCast(mel.n_len);
-            const data = try gpa.alloc(f32, @as(usize, @intCast(mel.n_mel)) * nf);
+            const data = try std.heap.c_allocator.alloc(f32, @as(usize, @intCast(mel.n_mel)) * nf);
             var j: usize = 0;
             while (j < @as(usize, @intCast(mel.n_mel))) : (j += 1) {
                 @memcpy(data[j * nf ..][0..nf], mel.data.items[j * n_len ..][0..nf]);
             }
             mel.n_len = n_frames;
-            mel.data.deinit(gpa);
+            mel.data.deinit(std.heap.c_allocator);
             mel.data = .fromOwnedSlice(data);
         }
         return true;
@@ -1891,9 +1883,9 @@ pub const Preprocessor = struct {
         var n_padded = win;
         if (samples.len > win) n_padded = samples.len + (hop - (samples.len - win) % hop) % hop;
         var padded: std.ArrayList(f32) = .empty;
-        defer padded.deinit(gpa);
-        try padded.appendSlice(gpa, samples);
-        try padded.appendNTimes(gpa, 0.0, n_padded - samples.len);
+        defer padded.deinit(std.heap.c_allocator);
+        try padded.appendSlice(std.heap.c_allocator, samples);
+        try padded.appendNTimes(std.heap.c_allocator, 0.0, n_padded - samples.len);
 
         self.assertCache(1507);
 
@@ -1905,7 +1897,7 @@ pub const Preprocessor = struct {
 
         for (out.data.items) |*v| v.* = (v.* + 4.0) / 4.0;
 
-        try output.append(gpa, out);
+        try output.append(std.heap.c_allocator, out);
         return true;
     }
 
@@ -1922,12 +1914,12 @@ pub const Preprocessor = struct {
         mel.n_len = n_padded;
         mel.n_len_org = n_samples;
         mel.n_mel = 1;
-        try mel.data.appendNTimes(gpa, 0.0, @intCast(n_padded));
+        try mel.data.appendNTimes(std.heap.c_allocator, 0.0, @intCast(n_padded));
         @memcpy(mel.data.items[0..samples.len], samples);
 
         for (output.items) |*m| m.deinit();
         output.clearRetainingCapacity();
-        try output.append(gpa, mel);
+        try output.append(std.heap.c_allocator, mel);
         return true;
     }
 
@@ -1945,8 +1937,8 @@ pub const Preprocessor = struct {
         // reflect padding
         const n_padded: usize = samples.len + 2 * @as(usize, @intCast(pad));
         var padded: std.ArrayList(f32) = .empty;
-        defer padded.deinit(gpa);
-        try padded.appendNTimes(gpa, 0, n_padded);
+        defer padded.deinit(std.heap.c_allocator);
+        try padded.appendNTimes(std.heap.c_allocator, 0, n_padded);
         const pu: usize = @intCast(pad);
         @memcpy(padded.items[pu..][0..samples.len], samples);
         var i: c_int = 0;
@@ -1983,7 +1975,7 @@ pub const Preprocessor = struct {
         const n_stacked = @divTrunc(n_frames, 2);
 
         var stacked: Mel = .{ .n_mel = 2 * n_mel, .n_len = n_stacked, .n_len_org = @intCast(samples.len) };
-        try stacked.data.resize(gpa, 2 * @as(usize, @intCast(n_mel)) * @as(usize, @intCast(n_stacked)));
+        try stacked.data.resize(std.heap.c_allocator, 2 * @as(usize, @intCast(n_mel)) * @as(usize, @intCast(n_stacked)));
 
         var t: i64 = 0;
         while (t < n_stacked) : (t += 1) {
@@ -1994,7 +1986,7 @@ pub const Preprocessor = struct {
             }
         }
 
-        try output.append(gpa, stacked);
+        try output.append(std.heap.c_allocator, stacked);
         return true;
     }
 
@@ -2024,8 +2016,8 @@ pub const Preprocessor = struct {
             const n_padded_needed: i64 = (pt_frames - 1) * hop + fft_size;
             const total_pad: c_int = @max(@as(c_int, @intCast(n_padded_needed - @as(c_int, @intCast(chunk_len)))), pad_left);
             var padded_samples: std.ArrayList(f32) = .empty;
-            defer padded_samples.deinit(gpa);
-            try padded_samples.appendNTimes(gpa, 0, @as(usize, @intCast(total_pad)) + chunk_len);
+            defer padded_samples.deinit(std.heap.c_allocator);
+            try padded_samples.appendNTimes(std.heap.c_allocator, 0, @as(usize, @intCast(total_pad)) + chunk_len);
             @memcpy(padded_samples.items[@intCast(pad_left)..][0..chunk_len], chunk_ptr);
 
             var out_chunk: Mel = .{};
@@ -2037,7 +2029,7 @@ pub const Preprocessor = struct {
             // Trim to PyTorch frame count
             out_chunk.n_len = @min(out_chunk.n_len, pt_frames);
 
-            try output.append(gpa, out_chunk);
+            try output.append(std.heap.c_allocator, out_chunk);
         }
 
         return true;
@@ -2053,8 +2045,8 @@ pub const Preprocessor = struct {
 
         // Apply preemphasis filter (high-pass): x[i] = x[i] - 0.97 * x[i-1]
         var pre: std.ArrayList(f32) = .empty;
-        defer pre.deinit(gpa);
-        try pre.appendSlice(gpa, samples_in);
+        defer pre.deinit(std.heap.c_allocator);
+        try pre.appendSlice(std.heap.c_allocator, samples_in);
         {
             const preemph: f32 = 0.97;
             var i: c_int = @as(c_int, @intCast(samples_in.len)) - 1;
@@ -2067,8 +2059,8 @@ pub const Preprocessor = struct {
         // Parakeet uses centered constant padding
         const pad: usize = @intCast(@divTrunc(frame_size, 2));
         var padded: std.ArrayList(f32) = .empty;
-        defer padded.deinit(gpa);
-        try padded.appendNTimes(gpa, 0, samples_in.len + 2 * pad);
+        defer padded.deinit(std.heap.c_allocator);
+        try padded.appendNTimes(std.heap.c_allocator, 0, samples_in.len + 2 * pad);
         @memcpy(padded.items[pad..][0..samples_in.len], pre.items);
 
         if (!try logMelSpectrogram(padded.items, &self.mel_config, &self.cache, shape_only, out_full)) {
@@ -2121,7 +2113,7 @@ pub const Preprocessor = struct {
             }
         }
 
-        try output.append(gpa, out_full);
+        try output.append(std.heap.c_allocator, out_full);
         return true;
     }
 
@@ -2153,7 +2145,7 @@ pub const Preprocessor = struct {
         mel.n_len = n_frames;
         mel.n_len_org = n_frames;
         mel.data.shrinkRetainingCapacity(@as(usize, @intCast(mel.n_mel)) * nf);
-        output.append(gpa, mel) catch |e| {
+        output.append(std.heap.c_allocator, mel) catch |e| {
             mel.deinit();
             return e;
         };
@@ -2172,7 +2164,7 @@ pub const Preprocessor = struct {
         var mel: Mel = .{ .n_len = n_tokens, .n_len_org = n_tokens, .n_mel = frame_size };
         const fs: usize = @intCast(frame_size);
         const nt: usize = @intCast(n_tokens);
-        try mel.data.appendNTimes(gpa, 0, fs * nt);
+        try mel.data.appendNTimes(std.heap.c_allocator, 0, fs * nt);
 
         // stored mel-major (data[f * n_tokens + t]): the graph builder
         // transposes before RMSNorm so normalization is over frame_size
@@ -2183,7 +2175,7 @@ pub const Preprocessor = struct {
             }
         }
 
-        try output.append(gpa, mel);
+        try output.append(std.heap.c_allocator, mel);
         return true;
     }
 
@@ -2198,12 +2190,12 @@ pub const Preprocessor = struct {
 
         var n_samples = samples_in.len;
         // the mimi transformer mask is dense, so cost is quadratic in the reference length
-        const max_samples: i64 = @as(i64, Hparams.pockettts_max_spk_seconds) * hp.audio_sample_rate;
+        const max_samples: i64 = @as(i64, mod.model.Hparams.pockettts_max_spk_seconds) * hp.audio_sample_rate;
         if (@as(i64, @intCast(n_samples)) > max_samples) {
-            impl.logWrn("%s: speaker reference is %.1f s, truncating to the first %d s\n", .{
+            mod.impl.logWrn("%s: speaker reference is %.1f s, truncating to the first %d s\n", .{
                 "process",
                 @as(f64, @floatFromInt(n_samples)) / @as(f64, @floatFromInt(hp.audio_sample_rate)),
-                @as(c_int, Hparams.pockettts_max_spk_seconds),
+                @as(c_int, mod.model.Hparams.pockettts_max_spk_seconds),
             });
             n_samples = @intCast(max_samples);
         }
@@ -2212,10 +2204,10 @@ pub const Preprocessor = struct {
         const n_padded = n_frames * frame_size;
 
         var out: Mel = .{ .n_mel = 1, .n_len = n_padded, .n_len_org = @intCast(n_samples) };
-        try out.data.appendNTimes(gpa, 0, @intCast(n_padded));
+        try out.data.appendNTimes(std.heap.c_allocator, 0, @intCast(n_padded));
         @memcpy(out.data.items[0..n_samples], samples_in[0..n_samples]);
 
-        try output.append(gpa, out);
+        try output.append(std.heap.c_allocator, out);
         return true;
     }
 };
@@ -2246,11 +2238,11 @@ pub const StreamingIstft = struct {
             .n_fft = n_fft,
             .hop_length = hop_length,
             .n_fft_bins = @divTrunc(n_fft, 2) + 1,
-            .overlap_buffer = try gpa.alloc(f32, nu),
-            .window_sum_buffer = try gpa.alloc(f32, nu),
+            .overlap_buffer = try std.heap.c_allocator.alloc(f32, nu),
+            .window_sum_buffer = try std.heap.c_allocator.alloc(f32, nu),
             .padding_to_remove = @divTrunc(n_fft - hop_length, 2),
-            .ifft_in = try gpa.alloc(f32, nu * 2 * 4), // extra space for recursive IFFT
-            .ifft_out = try gpa.alloc(f32, nu * 2 * 4),
+            .ifft_in = try std.heap.c_allocator.alloc(f32, nu * 2 * 4), // extra space for recursive IFFT
+            .ifft_out = try std.heap.c_allocator.alloc(f32, nu * 2 * 4),
         };
         @memset(self.overlap_buffer, 0.0);
         @memset(self.window_sum_buffer, 0.0);
@@ -2264,10 +2256,10 @@ pub const StreamingIstft = struct {
 
     pub fn deinit(self: *StreamingIstft) void {
         self.cache.deinit();
-        gpa.free(self.overlap_buffer);
-        gpa.free(self.window_sum_buffer);
-        gpa.free(self.ifft_in);
-        gpa.free(self.ifft_out);
+        std.heap.c_allocator.free(self.overlap_buffer);
+        std.heap.c_allocator.free(self.window_sum_buffer);
+        std.heap.c_allocator.free(self.ifft_in);
+        std.heap.c_allocator.free(self.ifft_out);
     }
 
     /// Ports `reset` (mtmd-audio.cpp:1902 @b1b770d90), a member of `mtmd_audio_streaming_istft`.
@@ -2297,7 +2289,7 @@ pub const StreamingIstft = struct {
     /// Return: up to `hop_length` samples; the caller owns them.
     pub fn processFrame(self: *StreamingIstft, frame_spectrum: [*]const f32) !std.ArrayList(f32) {
         var output: std.ArrayList(f32) = .empty;
-        try output.appendNTimes(gpa, 0, @intCast(self.hop_length));
+        try output.appendNTimes(std.heap.c_allocator, 0, @intCast(self.hop_length));
         const bins: usize = @intCast(self.n_fft_bins);
         const nu: usize = @intCast(self.n_fft);
 
@@ -2347,7 +2339,7 @@ pub const StreamingIstft = struct {
         var remaining = self.n_fft - self.hop_length;
         while (remaining > 0) {
             const chunk_size: usize = @intCast(@min(remaining, self.hop_length));
-            for (0..chunk_size) |i| try output.append(gpa, self.sampleAt(i));
+            for (0..chunk_size) |i| try output.append(std.heap.c_allocator, self.sampleAt(i));
             self.shift(chunk_size);
             remaining -= @intCast(chunk_size);
         }

@@ -21,7 +21,7 @@ const params_mod = tc.params;
 
 comptime {
     // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama");
+    _ = @import("llama").lib;
 }
 
 const gpa = std.heap.c_allocator;
@@ -616,9 +616,6 @@ fn printCands(smpl: *sampling.Sampler, s: c_int) void {
     _ = printf("\n");
 }
 
-/// `LC_NUMERIC`: 4 on Darwin, 1 on glibc.
-const lc_numeric: c_int = if (@import("builtin").os.tag == .linux) 1 else 4;
-
 fn noLog(_: c.ggml_log_level, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
 
 fn tokEnv(ctx: ?*c.llama_context, env: [*:0]const u8, def: []const u8) std.ArrayList(c.llama_token) {
@@ -936,7 +933,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
 }
 
 fn run(argv_in: []const [:0]const u8) !u8 {
-    _ = libc.setlocale(lc_numeric, "C");
+    _ = libc.setlocale(libc.LC.NUMERIC, "C");
     if (argv_in.len < 2) return 2;
     const mode = argv_in[1];
     var argv = try gpa.dupe([:0]const u8, argv_in[1..]);

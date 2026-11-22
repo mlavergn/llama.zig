@@ -81,18 +81,12 @@
 //!   tag, then `--reasoning-budget-message` and the end tag are forced.
 
 const std = @import("std");
+const mod = @import("module.zig");
+const llama = @import("llama");
 const common_chat = @import("common_chat");
 const json = @import("json");
-const args_mod = @import("args.zig");
-const chat = @import("chat.zig");
-const session_mod = @import("session.zig");
-const reasoning_budget = @import("reasoning_budget.zig");
 
-const c = session_mod.c;
 const Allocator = std.mem.Allocator;
-const Msg = common_chat.Msg;
-const templates = common_chat.templates;
-const KwArg = templates.KwArg;
 
 /// Failures of the chat layer, told apart from the session's.
 pub const Error = error{
@@ -137,8 +131,8 @@ fn setError(text: []const u8) !void {
 /// Return: the map's entries, one per name, the last write winning. On a
 /// `--chat-template-kwargs` value that is not JSON, `error.JsonError` with
 /// the parser's `what()` in `last_error`.
-pub fn resolveKwargs(a: Allocator, ops: []const args_mod.KwargOp) ![]KwArg {
-    var map: std.ArrayList(KwArg) = .empty;
+pub fn resolveKwargs(a: Allocator, ops: []const mod.args.KwargOp) ![]common_chat.templates.KwArg {
+    var map: std.ArrayList(common_chat.templates.KwArg) = .empty;
     for (ops) |op| switch (op) {
         .object => |text| {
             var v = json.parse(a, text) catch |e| {
@@ -166,7 +160,7 @@ pub fn resolveKwargs(a: Allocator, ops: []const args_mod.KwargOp) ![]KwArg {
     return map.items;
 }
 
-fn put(a: Allocator, map: *std.ArrayList(KwArg), key: []const u8, value: []const u8) !void {
+fn put(a: Allocator, map: *std.ArrayList(common_chat.templates.KwArg), key: []const u8, value: []const u8) !void {
     for (map.items) |*kv| if (std.mem.eql(u8, kv.key, key)) {
         kv.value = value;
         return;
@@ -174,7 +168,7 @@ fn put(a: Allocator, map: *std.ArrayList(KwArg), key: []const u8, value: []const
     try map.append(a, .{ .key = key, .value = value });
 }
 
-fn find(map: []const KwArg, key: []const u8) ?[]const u8 {
+fn find(map: []const common_chat.templates.KwArg, key: []const u8) ?[]const u8 {
     for (map) |kv| if (std.mem.eql(u8, kv.key, key)) return kv.value;
     return null;
 }
@@ -300,7 +294,7 @@ pub const Reply = struct {
     /// `task_result_state::chat_session`: owns the reply so far.
     session: *common_chat.session.Session,
     /// The last message shown: `task_result_state::chat_msg`.
-    msg: Msg = .{},
+    msg: common_chat.Msg = .{},
     /// What the display was given: `generated_content`.
     content: std.ArrayList(u8) = .empty,
     reasoning: std.ArrayList(u8) = .empty,
@@ -320,7 +314,7 @@ pub const Reply = struct {
     }
 
     /// The `Session.Sink` this reply is.
-    pub fn sink(self: *Reply) session_mod.Sink {
+    pub fn sink(self: *Reply) mod.session.Sink {
         return .{ .ctx = self, .text = onText };
     }
 
@@ -373,7 +367,7 @@ pub const Reply = struct {
             }
         }
         // After the deltas are shown: they borrow from both messages.
-        std.mem.swap(Msg, &self.msg, &new_msg);
+        std.mem.swap(common_chat.Msg, &self.msg, &new_msg);
         return true;
     }
 
@@ -392,15 +386,15 @@ pub const Chat = struct {
     gpa: Allocator,
     /// Owns the kwargs and anything else that lives as long as the chat.
     arena: std.heap.ArenaAllocator,
-    tmpls: templates.Templates,
-    settings: *const args_mod.Args,
-    kwargs: []const KwArg,
+    tmpls: common_chat.templates.Templates,
+    settings: *const mod.args.Args,
+    kwargs: []const common_chat.templates.KwArg,
     /// `server_chat_params::enable_thinking`: on unless `--reasoning off`,
     /// and only for a template that thinks.
     enable_thinking: bool,
     /// The system prompt, re-added by `/clear`.
     system: []const u8,
-    history: std.ArrayList(Msg) = .empty,
+    history: std.ArrayList(common_chat.Msg) = .empty,
 
     /// Loads the templates and works out the chat options, as the server does
     /// when it loads a model.
@@ -418,19 +412,19 @@ pub const Chat = struct {
     /// does not load.
     pub fn init(
         gpa: Allocator,
-        settings: *const args_mod.Args,
-        kwargs: []const KwArg,
-        model: *const c.llama_model,
+        settings: *const mod.args.Args,
+        kwargs: []const common_chat.templates.KwArg,
+        model: *const llama.impl.c.llama_model,
         override: []const u8,
         system: []const u8,
     ) !Chat {
         var arena = std.heap.ArenaAllocator.init(gpa);
         errdefer arena.deinit();
         const a = arena.allocator();
-        const info = templates.modelInfo(a, model) catch |e| return fail(e);
-        var tmpls = templates.init(gpa, &info, override, "", "") catch |e| return fail(e);
+        const info = common_chat.templates.modelInfo(a, model) catch |e| return fail(e);
+        var tmpls = common_chat.templates.init(gpa, &info, override, "", "") catch |e| return fail(e);
         errdefer tmpls.deinit();
-        const supports = templates.supportEnableThinking(gpa, &tmpls) catch |e| return fail(e);
+        const supports = common_chat.templates.supportEnableThinking(gpa, &tmpls) catch |e| return fail(e);
         var self: Chat = .{
             .gpa = gpa,
             .arena = arena,
@@ -484,7 +478,7 @@ pub const Chat = struct {
     }
 
     fn push(self: *Chat, role: []const u8, content: []const u8, reasoning: []const u8) !void {
-        var m: Msg = .{};
+        var m: common_chat.Msg = .{};
         errdefer m.deinit(self.gpa);
         m.role = try self.gpa.dupe(u8, role);
         m.content = try dumpSafeText(self.gpa, content);
@@ -514,7 +508,7 @@ pub const Chat = struct {
     /// schema, a generation prompt, the server's reasoning format, its
     /// thinking switch -- which an `enable_thinking` kwarg overrides -- and
     /// its kwargs.
-    fn inputs(self: *const Chat) !templates.TemplatesInputs {
+    fn inputs(self: *const Chat) !common_chat.templates.TemplatesInputs {
         var enable_thinking = self.enable_thinking;
         if (find(self.kwargs, "enable_thinking")) |v| {
             if (std.mem.eql(u8, v, "true")) {
@@ -526,12 +520,12 @@ pub const Chat = struct {
                 return Error.ChatFailed;
             }
         }
-        const caps = templates.getCaps(&self.tmpls);
+        const caps = common_chat.templates.getCaps(&self.tmpls);
         return .{
             .messages = self.history.items,
             .add_generation_prompt = true,
             .use_jinja = true,
-            .parallel_tool_calls = templates.capsValue(caps, "supports_parallel_tool_calls"),
+            .parallel_tool_calls = common_chat.templates.capsValue(caps, "supports_parallel_tool_calls"),
             .reasoning_format = self.settings.reasoning_format,
             .enable_thinking = enable_thinking,
             .chat_template_kwargs = self.kwargs,
@@ -550,7 +544,7 @@ pub const Chat = struct {
     ///
     /// Return: the number of tokens generated; `session.last_stop` says why
     /// the reply ended.
-    pub fn reply(self: *Chat, session: *session_mod.Session, display: *Display, echo: ?*std.Io.Writer) !usize {
+    pub fn reply(self: *Chat, session: *mod.session.Session, display: *Display, echo: ?*std.Io.Writer) !usize {
         var arena_state = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_state.deinit();
         const a = arena_state.allocator();
@@ -570,7 +564,7 @@ pub const Chat = struct {
         }
 
         const rbudget = try self.budget(a, session, &chat_session);
-        defer if (rbudget) |rb| c.llama_sampler_free(rb);
+        defer if (rbudget) |rb| llama.sampler.core.llama_sampler_free(rb);
 
         var r = try Reply.init(self.gpa, display, &chat_session);
         defer r.deinit();
@@ -600,33 +594,33 @@ pub const Chat = struct {
     /// counting.
     ///
     /// Return: the sampler, or null.
-    fn budget(self: *const Chat, a: Allocator, session: *session_mod.Session, cs: *const common_chat.session.Session) !?*c.llama_sampler {
+    fn budget(self: *const Chat, a: Allocator, session: *mod.session.Session, cs: *const common_chat.session.Session) !?*llama.impl.c.llama_sampler {
         if (cs.thinkingEndTags().len == 0) return null;
         const n_budget = self.settings.reasoning_budget;
         if (!(cs.grammar_lazy or n_budget >= 0)) return null;
 
         const tok = struct {
-            fn run(al: Allocator, s: *session_mod.Session, text: []const u8) ![]c.llama_token {
+            fn run(al: Allocator, s: *mod.session.Session, text: []const u8) ![]llama.impl.c.llama_token {
                 const ids = try s.tokenizeText(text, .{ .add_special = false, .parse_special = true });
                 defer s.allocator.free(ids);
-                return al.dupe(c.llama_token, ids);
+                return al.dupe(llama.impl.c.llama_token, ids);
             }
         }.run;
 
         const start = try tok(a, session, cs.thinkingStartTag());
-        var ends: std.ArrayList([]const c.llama_token) = .empty;
+        var ends: std.ArrayList([]const llama.impl.c.llama_token) = .empty;
         for (cs.thinkingEndTags()) |tag| {
             if (tag.len != 0) try ends.append(a, try tok(a, session, tag));
         }
         if (start.len == 0 or ends.items.len == 0) return null;
 
-        var forced: std.ArrayList(c.llama_token) = .empty;
+        var forced: std.ArrayList(llama.impl.c.llama_token) = .empty;
         if (self.settings.reasoning_budget_message.len != 0) {
             try forced.appendSlice(a, try tok(a, session, self.settings.reasoning_budget_message));
         }
         try forced.appendSlice(a, ends.items[0]);
 
-        const rb = reasoning_budget.init(
+        const rb = mod.reasoning_budget.init(
             session.vocab,
             &.{start},
             ends.items,
@@ -643,11 +637,11 @@ pub const Chat = struct {
             for (ids, 0..) |id, i| {
                 if (i == 0) {
                     var buf: [256]u8 = undefined;
-                    const n = c.llama_token_to_piece(session.vocab, id, &buf, buf.len, 0, true);
+                    const n = llama.api.vocab.llama_token_to_piece(session.vocab, id, &buf, buf.len, 0, true);
                     const first: u8 = if (n > 0) buf[0] else 0;
                     if (std.ascii.isWhitespace(first) and !std.ascii.isWhitespace(gp[0])) continue;
                 }
-                c.llama_sampler_accept(rb, id);
+                llama.sampler.core.llama_sampler_accept(rb, id);
             }
         }
         return rb;
@@ -658,8 +652,8 @@ pub const Chat = struct {
 /// template part trusted -- special tokens parsed -- and an input part not.
 ///
 /// Return: segments borrowing from `prompt`, allocated in `a`.
-fn segmentsFor(a: Allocator, prompt: *const common_chat.prompt.Prompt) ![]chat.Segment {
-    var out: std.ArrayList(chat.Segment) = .empty;
+fn segmentsFor(a: Allocator, prompt: *const common_chat.prompt.Prompt) ![]mod.chat.Segment {
+    var out: std.ArrayList(mod.chat.Segment) = .empty;
     for (prompt.parts.items) |part| {
         if (part.text.len == 0) continue;
         try out.append(a, .{ .text = part.text, .trusted = !part.is_input });
@@ -700,7 +694,7 @@ test "kwargs replay in order, the last write wins, and preserve_reasoning defaul
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const ops = [_]args_mod.KwargOp{
+    const ops = [_]mod.args.KwargOp{
         .{ .object = "{\"enable_thinking\": false, \"x\": [1, \"a\"]}" },
         .{ .set = .{ .key = "enable_thinking", .value = "true" } },
         .{ .effort = "high" },
@@ -716,8 +710,8 @@ test "kwargs replay in order, the last write wins, and preserve_reasoning defaul
 
 test "the stop-string search holds back a partial stop and cuts at a full one" {
     const stops = [_][]const u8{"</s>"};
-    try std.testing.expectEqual(@as(?usize, 5), session_mod.findStop(&stops, "hello</", 2, false));
-    try std.testing.expectEqual(@as(?usize, 5), session_mod.findStop(&stops, "hello</s>", 2, true));
-    try std.testing.expectEqual(@as(?usize, null), session_mod.findStop(&stops, "hello", 2, false));
-    try std.testing.expectEqual(@as(usize, 1), session_mod.validUtf8Len("a\xc3"));
+    try std.testing.expectEqual(@as(?usize, 5), mod.session.findStop(&stops, "hello</", 2, false));
+    try std.testing.expectEqual(@as(?usize, 5), mod.session.findStop(&stops, "hello</s>", 2, true));
+    try std.testing.expectEqual(@as(?usize, null), mod.session.findStop(&stops, "hello", 2, false));
+    try std.testing.expectEqual(@as(usize, 1), mod.session.validUtf8Len("a\xc3"));
 }

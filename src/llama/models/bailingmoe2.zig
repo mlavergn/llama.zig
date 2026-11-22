@@ -10,20 +10,11 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_bailingmoe2`'s `load_arch_hparams` (models/bailingmoe2.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -44,12 +35,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_bailingmoe2`'s `load_arch_tensors` (models/bailingmoe2.cpp:20 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
     const n_ff_exp: i64 = hp.nFfExp(0);
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -57,13 +48,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
-    impl.assert(l.n_expert > 0, "models/bailingmoe2.cpp", 32, "n_expert > 0 && \"n_expert must be > 0 for bailingmoe2\"");
-    impl.assert(l.n_expert_used > 0, "models/bailingmoe2.cpp", 33, "n_expert_used > 0 && \"n_expert_used must be > 0 for bailingmoe2\"");
+    llama.impl.assert(l.n_expert > 0, "models/bailingmoe2.cpp", 32, "n_expert > 0 && \"n_expert must be > 0 for bailingmoe2\"");
+    llama.impl.assert(l.n_expert_used > 0, "models/bailingmoe2.cpp", 33, "n_expert_used > 0 && \"n_expert_used must be > 0 for bailingmoe2\"");
 
     var i: i32 = 0;
     while (i < l.n_layer_all) : (i += 1) {
         // Every tensor of the NextN layers is skipped.
-        const flags: u32 = if (i >= l.n_layer) loader.tensor_skip else 0;
+        const flags: u32 = if (i >= l.n_layer) llama.loader.tensor_skip else 0;
 
         const layer = &self.layers[@intCast(i)];
 
@@ -113,18 +104,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_bailingmoe2`'s `build_arch_graph` (models/bailingmoe2.cpp:86 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_bailingmoe2`'s `graph`
 /// (models/bailingmoe2.cpp:90 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bailingmoe2.cpp", 94, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bailingmoe2.cpp", 94, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -165,15 +156,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const sa_out = c.ggml_add(ctx, cur, inpSA);
+        const sa_out = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(sa_out, "sa_out", il);
 
         // The mixture-of-experts branch.
@@ -203,12 +194,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
                 b.cb(ffn_shexp, "ffn_shexp", il);
 
-                cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+                cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
                 b.cb(cur, "ffn_out", il);
             }
         }
 
-        cur = c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

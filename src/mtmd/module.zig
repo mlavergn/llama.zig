@@ -41,10 +41,12 @@ pub const mtmd = @import("mtmd.zig");
 pub const helper = @import("helper.zig");
 pub const helper_gen = @import("helper_gen.zig");
 
+/// The C API: every `mtmd.h` and `mtmd-helper.h` entry point. Forced below
+/// only when libmtmd is the compilation root or under test; see `lib.zig`.
+pub const lib = @import("lib.zig");
+
 comptime {
-    // Every mtmd.h and mtmd-helper.h entry point, by name. The harnesses
-    // root at harness_root.zig instead, which exports nothing.
-    _ = @import("exports.zig");
+    if (@import("root") == @This() or @import("builtin").is_test) _ = lib;
 }
 
 // -----------------------------------------------------------------------------

@@ -14,22 +14,13 @@
 //! `build_stack`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 const src = "models/hrm-text.cpp";
 
 /// Ports `llama_model_hrm_text`'s `load_arch_hparams` (models/hrm-text.cpp:6 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -44,13 +35,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // flag is kept for the round trip.
     if (try meta.getKey(bool, .hrm_prefix_lm, false, exc)) |v| hp.hrm_prefix_lm = v;
 
-    impl.assert(hp.n_hrm_layers_per_stack > 0, src, 17, "hparams.n_hrm_layers_per_stack > 0");
-    impl.assert(hp.n_hrm_h_cycles > 0, src, 18, "hparams.n_hrm_h_cycles > 0");
-    impl.assert(hp.n_hrm_l_cycles > 0, src, 19, "hparams.n_hrm_l_cycles > 0");
+    llama.impl.assert(hp.n_hrm_layers_per_stack > 0, src, 17, "hparams.n_hrm_layers_per_stack > 0");
+    llama.impl.assert(hp.n_hrm_h_cycles > 0, src, 18, "hparams.n_hrm_h_cycles > 0");
+    llama.impl.assert(hp.n_hrm_l_cycles > 0, src, 19, "hparams.n_hrm_l_cycles > 0");
 
     // The GGUF block count is the expanded cache-slot count.
     const n_slot: u32 = hp.n_hrm_layers_per_stack *% hp.n_hrm_h_cycles *% (hp.n_hrm_l_cycles +% 1);
-    impl.assert(hp.nLayer() == n_slot, src, 23, "hparams.n_layer() == n_slot");
+    llama.impl.assert(hp.nLayer() == n_slot, src, 23, "hparams.n_layer() == n_slot");
 
     self.type = switch (hp.n_embd) {
         1536 => .@"1b",
@@ -59,16 +50,16 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_hrm_text`'s `load_arch_tensors` (models/hrm-text.cpp:34 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     // The output, or the input token embedding when there is none.
-    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
+    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_not_required, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     self.hrm_z_l_init = try self.createTensor(.{ .tensor = .hrm_z_l_init, .bid = 0 }, &.{l.n_embd}, 0, exc);
@@ -122,17 +113,17 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_hrm_text`'s `build_arch_graph` (models/hrm-text.cpp:88 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports `llama_model_hrm_text::graph`'s `build_stack` (models/hrm-text.cpp:93
 /// @b1b770d90): one stack invocation, `lps` pre-norm decoder layers in the
 /// cache slots from `slot_base`, then the parameterless final norm.
-fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, slot_base: c_int) *Tensor {
+fn buildStack(model: *const llama.model.Model, b: *const llama.graph.Builder, inp_attn: *llama.graph.InpAttnKv, inp_pos: *llama.impl.c.ggml_tensor, cur_: *llama.impl.c.ggml_tensor, slot_base: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     var cur = cur_;
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k);
 
     const lps: c_int = @intCast(model.hparams.n_hrm_layers_per_stack);
 
@@ -165,17 +156,17 @@ fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.Inp
             cur = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, qkv.v, null, null, null, kq_scale, s);
             b.cb(cur, "attn_pregate", s);
 
-            gate = c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
             b.cb(gate, "attn_gate_sigmoid", s);
 
-            cur = c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", s);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
             b.cb(cur, "attn_out", s);
         }
 
-        cur = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "attn_add", s);
 
         inpSA = cur;
@@ -185,7 +176,7 @@ fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.Inp
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, s);
         b.cb(cur, "ffn_out", s);
 
-        cur = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "ffn_add", s);
 
         cur = b.buildCvec(cur, s);
@@ -200,12 +191,12 @@ fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.Inp
 
 /// Ports the constructor of `llama_model_hrm_text`'s `graph`
 /// (models/hrm-text.cpp:166 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = &model.hparams;
 
     // {n_embd, n_tokens}, scaled by f_embedding_scale inside buildInpEmbd.
-    var zH: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var zH: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
 
@@ -215,7 +206,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // The learned low-cycle state is [n_embd]; the binary ops broadcast it
     // over [n_embd, n_tokens].
-    var zL: *Tensor = model.hrm_z_l_init.?;
+    var zL: *llama.impl.c.ggml_tensor = model.hrm_z_l_init.?;
 
     const n_l: u32 = hp.n_hrm_l_cycles;
     const lps: u32 = hp.n_hrm_layers_per_stack;
@@ -226,17 +217,17 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         while (lc < n_l) : (lc += 1) {
             const slot_base: c_int = @bitCast((h *% (n_l +% 1) +% lc) *% lps);
 
-            zL = buildStack(model, b, inp_attn, inp_pos, c.ggml_add(ctx, zH, zL), slot_base);
+            zL = buildStack(model, b, inp_attn, inp_pos, llama.impl.c.ggml_add(ctx, zH, zL), slot_base);
         }
 
         const slot_base: c_int = @bitCast((h *% (n_l +% 1) +% n_l) *% lps);
 
-        zH = buildStack(model, b, inp_attn, inp_pos, c.ggml_add(ctx, zH, zL), slot_base);
+        zH = buildStack(model, b, inp_attn, inp_pos, llama.impl.c.ggml_add(ctx, zH, zL), slot_base);
     }
 
     var cur = zH;
 
-    cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;

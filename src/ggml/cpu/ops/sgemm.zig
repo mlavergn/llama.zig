@@ -57,22 +57,8 @@
 //! `tinyBLAS_Q0_AVX`, with its `__AVX2__ && __F16C__` tile kernels.
 
 const std = @import("std");
+const ggml = @import("../../module.zig");
 const builtin = @import("builtin");
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const defs = @import("../defs.zig");
-const threading = @import("../threading.zig");
-const convert = @import("../convert.zig");
-const simd = @import("../simd.zig");
-const neon = simd.neon;
-const qblocks = @import("../../quants/blocks.zig");
-const avx = @import("../quants/x86/avx2.zig");
-
-const c = impl.c;
-const ComputeParams = common.ComputeParams;
-const f32x4 = neon.f32x4;
-const f16x8 = neon.f16x8;
-const i8x16 = neon.i8x16;
 
 /// `__m256`.
 const f32x8 = @Vector(8, f32);
@@ -97,20 +83,20 @@ const f32x16 = @Vector(16, f32);
 ///
 /// `GGML_CPU_FP16_TO_FP32`, which on NEON is the hardware conversion the
 /// other ported ARM kernels reach through `convert.cpuFp16ToFp32`.
-inline fn unhalf(d: c.ggml_fp16_t) f32 {
-    return convert.cpuFp16ToFp32(d);
+inline fn unhalf(d: ggml.impl.c.ggml_fp16_t) f32 {
+    return ggml.cpu.convert.cpuFp16ToFp32(d);
 }
 
 /// Ports `hsum` (sgemm.cpp:232 @b1b770d90): `vaddvq_f32`, a
 /// **pairwise** reduce, not the ordered one `@reduce(.Add, ...)` gives.
-inline fn hsum4(x: f32x4) f32 {
-    return neon.addvq_f32(x);
+inline fn hsum4(x: ggml.cpu.simd.neon.f32x4) f32 {
+    return ggml.cpu.simd.neon.addvq_f32(x);
 }
 
 /// Ports `hsum` (sgemm.cpp:238 @b1b770d90): widen both halves
 /// to `f32x4`, add, then the pairwise reduce.
-inline fn hsum8(x: f16x8) f32 {
-    return neon.addvq_f32(neon.cvt_f32_f16_half(x, false) + neon.cvt_f32_f16_half(x, true));
+inline fn hsum8(x: ggml.cpu.simd.neon.f16x8) f32 {
+    return ggml.cpu.simd.neon.addvq_f32(ggml.cpu.simd.neon.cvt_f32_f16_half(x, false) + ggml.cpu.simd.neon.cvt_f32_f16_half(x, true));
 }
 
 /// Ports `hsum`, `hsum` (sgemm.cpp:268, 252 @b1b770d90), the `__m256` one and the
@@ -126,7 +112,7 @@ inline fn hsumAvx(x: f32x8) f32 {
 /// Ports `hsum` (sgemm.cpp:275 @b1b770d90), the `__m512` one:
 /// `_mm512_reduce_add_ps`, in `simd.reduceAdd512`'s tree.
 inline fn hsumAvx512(x: f32x16) f32 {
-    return simd.reduceAdd512(x);
+    return ggml.cpu.simd.reduceAdd512(x);
 }
 
 /// Ports `load`, `load`, `load` (sgemm.cpp:366, 369, 372 @b1b770d90), the
@@ -134,7 +120,7 @@ inline fn hsumAvx512(x: f32x16) f32 {
 /// widened by a 16-bit shift, exactly.
 inline fn loadAvx512(comptime T: type, p: [*]const T) f32x16 {
     if (T == f32) return p[0..16].*;
-    if (T == c.ggml_bf16_t) {
+    if (T == ggml.impl.c.ggml_bf16_t) {
         const p16: [*]const u16 = @ptrCast(p);
         const h: @Vector(16, u16) = p16[0..16].*;
         return @bitCast(@as(@Vector(16, u32), h) << @splat(16));
@@ -148,7 +134,7 @@ inline fn loadAvx512(comptime T: type, p: [*]const T) f32x16 {
 /// and with F16C `_mm256_cvtph_ps`, also exact.
 inline fn loadAvx(comptime T: type, p: [*]const T) f32x8 {
     if (T == f32) return p[0..8].*;
-    if (T == c.ggml_bf16_t) {
+    if (T == ggml.impl.c.ggml_bf16_t) {
         const p16: [*]const u16 = @ptrCast(p);
         const h: @Vector(8, u16) = p16[0..8].*;
         return @bitCast(@as(@Vector(8, u32), h) << @splat(16));
@@ -195,7 +181,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
     return struct {
         const Self = @This();
 
-        params: *const ComputeParams,
+        params: *const ggml.cpu.defs.ComputeParams,
         A: [*]const TA,
         B: [*]const TB,
         C: [*]f32,
@@ -212,7 +198,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             if (V == f32x16) return loadAvx512(T, p);
             if (V == f32x8) return loadAvx(T, p);
             if (T == f32) return p[0..4].*;
-            if (V == f32x4) return neon.cvt_f32_f16(neon.load_f16x4(p));
+            if (V == ggml.cpu.simd.neon.f32x4) return ggml.cpu.simd.neon.cvt_f32_f16(ggml.cpu.simd.neon.load_f16x4(p));
             return @bitCast(@as(@Vector(8, u16), p[0..8].*));
         }
 
@@ -227,7 +213,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
         inline fn hsum(x: V) f32 {
             if (V == f32x16) return hsumAvx512(x);
             if (V == f32x8) return hsumAvx(x);
-            return if (V == f32x4) hsum4(x) else hsum8(x);
+            return if (V == ggml.cpu.simd.neon.f32x4) hsum4(x) else hsum8(x);
         }
 
         /// Ports `matmul` (sgemm.cpp:574 @b1b770d90): `RN` 6 and `bn` 12 with
@@ -275,8 +261,8 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             inline while (RN >= 1) : (RN -= 1) {
                 if (size_n == RN) return self.gemm(RM, RN, BM, m, n, bn);
             }
-            impl.logError("mnpack block size not supported\n", .{});
-            impl.abort("false");
+            ggml.impl.logError("mnpack block size not supported\n", .{});
+            ggml.impl.abort("false");
         }
 
         /// Ports `gemm_bloc` (sgemm.cpp:631 @b1b770d90).
@@ -354,7 +340,7 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             n: i64,
             bn: i64,
         ) void {
-            impl.assert(@rem(m, RM * BM) == 0, "m % (RM * BM) == 0");
+            ggml.impl.assert(@rem(m, RM * BM) == 0, "m % (RM * BM) == 0");
             const ytiles = @divTrunc(m, RM * BM);
             const xtiles = @divTrunc(n + RN - 1, RN);
             const jj_RN = xtiles - (xtiles * RN - n);
@@ -363,12 +349,12 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
             const jj_BN = NB_BN - (NB_BN * SIZE_BN - xtiles);
             const nb_job = ytiles * NB_BN;
 
-            const tp: *defs.Threadpool = @ptrCast(@alignCast(self.params.threadpool.?));
+            const tp: *ggml.cpu.defs.Threadpool = @ptrCast(@alignCast(self.params.threadpool.?));
             if (self.params.ith == 0) {
-                impl.assert(jj_BN * SIZE_BN + (NB_BN - jj_BN) * (SIZE_BN - 1) == xtiles, "jj_BN * SIZE_BN + (NB_BN - jj_BN) * (SIZE_BN - 1) == xtiles");
-                threading.ggml_threadpool_chunk_set(tp, self.params.nth);
+                ggml.impl.assert(jj_BN * SIZE_BN + (NB_BN - jj_BN) * (SIZE_BN - 1) == xtiles, "jj_BN * SIZE_BN + (NB_BN - jj_BN) * (SIZE_BN - 1) == xtiles");
+                ggml.cpu.threading.ggml_threadpool_chunk_set(tp, self.params.nth);
             }
-            threading.ggml_barrier(tp);
+            ggml.cpu.threading.ggml_barrier(tp);
 
             var job: i64 = self.params.ith;
             while (job < nb_job) {
@@ -391,11 +377,11 @@ fn TinyBLAS(comptime KN: i64, comptime V: type, comptime TA: type, comptime TB: 
                             self.gemmBloc(RM, RN - 1, ii + bi, jj);
                         }
                     }
-                    impl.assert(jj == jj2, "jj == jj2");
+                    ggml.impl.assert(jj == jj2, "jj == jj2");
                 }
-                job = threading.ggml_threadpool_chunk_add(tp, 1);
+                job = ggml.cpu.threading.ggml_threadpool_chunk_add(tp, 1);
             }
-            threading.ggml_barrier(tp);
+            ggml.cpu.threading.ggml_barrier(tp);
         }
     };
 }
@@ -410,7 +396,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         const Self = @This();
 
         A: [*]const TA,
-        B: [*]const c.block_q8_0,
+        B: [*]const ggml.impl.c.block_q8_0,
         C: [*]f32,
         k: i64,
         lda: i64,
@@ -422,10 +408,10 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         /// For `block_q8_0`, ports `load_lo` and `load_hi`
         /// (sgemm.cpp:1499, 1503 @b1b770d90): the two halves of a 32-byte
         /// `qs`, loaded as-is.
-        inline fn loadLoQ8(b: *const c.block_q8_0) i8x16 {
+        inline fn loadLoQ8(b: *const ggml.impl.c.block_q8_0) ggml.cpu.simd.neon.i8x16 {
             return @bitCast(@as(@Vector(16, i8), b.qs[0..16].*));
         }
-        inline fn loadHiQ8(b: *const c.block_q8_0) i8x16 {
+        inline fn loadHiQ8(b: *const ggml.impl.c.block_q8_0) ggml.cpu.simd.neon.i8x16 {
             return @bitCast(@as(@Vector(16, i8), b.qs[16..32].*));
         }
 
@@ -434,22 +420,22 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
         /// or shifted high, then the `-8` bias both nibbles carry.
         ///
         /// **NEON integer arithmetic wraps**, so the subtraction is `-%`.
-        inline fn loadLoQ4(b: *const c.block_q4_0) i8x16 {
+        inline fn loadLoQ4(b: *const ggml.impl.c.block_q4_0) ggml.cpu.simd.neon.i8x16 {
             const raw: @Vector(16, u8) = b.qs[0..16].*;
             const lo: @Vector(16, i8) = @bitCast(raw & @as(@Vector(16, u8), @splat(0x0f)));
             return lo -% @as(@Vector(16, i8), @splat(8));
         }
-        inline fn loadHiQ4(b: *const c.block_q4_0) i8x16 {
+        inline fn loadHiQ4(b: *const ggml.impl.c.block_q4_0) ggml.cpu.simd.neon.i8x16 {
             const raw: @Vector(16, u8) = b.qs[0..16].*;
             const hi: @Vector(16, i8) = @bitCast(raw >> @as(@Vector(16, u3), @splat(4)));
             return hi -% @as(@Vector(16, i8), @splat(8));
         }
 
-        inline fn loadLo(b: *const TA) i8x16 {
-            return if (TA == c.block_q8_0) loadLoQ8(b) else loadLoQ4(b);
+        inline fn loadLo(b: *const TA) ggml.cpu.simd.neon.i8x16 {
+            return if (TA == ggml.impl.c.block_q8_0) loadLoQ8(b) else loadLoQ4(b);
         }
-        inline fn loadHi(b: *const TA) i8x16 {
-            return if (TA == c.block_q8_0) loadHiQ8(b) else loadHiQ4(b);
+        inline fn loadHi(b: *const TA) ggml.cpu.simd.neon.i8x16 {
+            return if (TA == ggml.impl.c.block_q8_0) loadHiQ8(b) else loadHiQ4(b);
         }
 
         /// Ports `matmul` (sgemm.cpp:1405 @b1b770d90).
@@ -531,7 +517,7 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
             while (job < end) : (job += 1) {
                 const ii = m0 + @divTrunc(job, xtiles) * RM;
                 const jj = n0 + @rem(job, xtiles) * RN;
-                var Cv: [RN][RM]f32x4 = @splat(@splat(@as(f32x4, @splat(0))));
+                var Cv: [RN][RM]ggml.cpu.simd.neon.f32x4 = @splat(@splat(@as(ggml.cpu.simd.neon.f32x4, @splat(0))));
 
                 var l: i64 = 0;
                 while (l < self.k) : (l += 1) {
@@ -539,14 +525,14 @@ fn TinyBlasQ0Arm(comptime TA: type) type {
                         inline for (0..RM) |i| {
                             const a = &self.A[@intCast(self.lda * (ii + @as(i64, i)) + l)];
                             const b = &self.B[@intCast(self.ldb * (jj + @as(i64, j)) + l)];
-                            const dot = neon.dotq_s32(
-                                neon.dotq_s32(@splat(0), loadLo(a), loadLoQ8(b)),
+                            const dot = ggml.cpu.simd.neon.dotq_s32(
+                                ggml.cpu.simd.neon.dotq_s32(@splat(0), loadLo(a), loadLoQ8(b)),
                                 loadHi(a),
                                 loadHiQ8(b),
                             );
-                            Cv[j][i] = neon.mla_n_f32(
+                            Cv[j][i] = ggml.cpu.simd.neon.mla_n_f32(
                                 Cv[j][i],
-                                neon.cvt_f32_s32(dot),
+                                ggml.cpu.simd.neon.cvt_f32_s32(dot),
                                 unhalf(a.d) * unhalf(b.d),
                             );
                         }
@@ -580,7 +566,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
         const Self = @This();
 
         A: [*]const TA,
-        B: [*]const qblocks.Q8_0,
+        B: [*]const ggml.quants.blocks.Q8_0,
         C: [*]f32,
         k: i64,
         lda: i64,
@@ -591,64 +577,64 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
 
         /// Ports `denibble` (sgemm.cpp:1945 @b1b770d90): sixteen bytes to
         /// 32 nibbles, low first.
-        inline fn denibble(p: *const [16]u8) avx.m256i {
-            const x = avx.mm_loadu_si128(p);
-            return avx.mm256_and_si256(avx.mm256_set1_epi8(15), avx.mm256_set_m128i(avx.mm_srli_epi16(x, 4), x));
+        inline fn denibble(p: *const [16]u8) ggml.cpu.quants.arch.avx2.m256i {
+            const x = ggml.cpu.quants.arch.avx2.mm_loadu_si128(p);
+            return ggml.cpu.quants.arch.avx2.mm256_and_si256(ggml.cpu.quants.arch.avx2.mm256_set1_epi8(15), ggml.cpu.quants.arch.avx2.mm256_set_m128i(ggml.cpu.quants.arch.avx2.mm_srli_epi16(x, 4), x));
         }
 
         /// Ports `bittobyte` (sgemm.cpp:1952 @b1b770d90): `q5_0`'s fifth
         /// bits as `0xF0` where the bit is clear, so OR-ing them in makes the
         /// nibble minus 16, signed.
-        inline fn bittobyte(p: *const [4]u8) avx.m256i {
+        inline fn bittobyte(p: *const [4]u8) ggml.cpu.quants.arch.avx2.m256i {
             const x32 = std.mem.readInt(u32, p, .little);
-            const bytes = avx.mm256_cmpeq_epi8(
-                avx.mm256_set1_epi64x(-1),
-                avx.mm256_or_si256(
-                    avx.mm256_set1_epi64x(0x7fbfdfeff7fbfdfe),
-                    avx.mm256_shuffle_epi8(avx.mm256_set1_epi32(@bitCast(x32)), avx.mm256_set_epi64x(0x0303030303030303, 0x0202020202020202, 0x0101010101010101, 0x0000000000000000)),
+            const bytes = ggml.cpu.quants.arch.avx2.mm256_cmpeq_epi8(
+                ggml.cpu.quants.arch.avx2.mm256_set1_epi64x(-1),
+                ggml.cpu.quants.arch.avx2.mm256_or_si256(
+                    ggml.cpu.quants.arch.avx2.mm256_set1_epi64x(0x7fbfdfeff7fbfdfe),
+                    ggml.cpu.quants.arch.avx2.mm256_shuffle_epi8(ggml.cpu.quants.arch.avx2.mm256_set1_epi32(@bitCast(x32)), ggml.cpu.quants.arch.avx2.mm256_set_epi64x(0x0303030303030303, 0x0202020202020202, 0x0101010101010101, 0x0000000000000000)),
                 ),
             );
-            return avx.mm256_andnot_si256(bytes, avx.mm256_set1_epi8(@bitCast(@as(u8, 0xF0))));
+            return ggml.cpu.quants.arch.avx2.mm256_andnot_si256(bytes, ggml.cpu.quants.arch.avx2.mm256_set1_epi8(@bitCast(@as(u8, 0xF0))));
         }
 
         /// Ports `load`, `load`, `load`, `load` (sgemm.cpp:1863, 1875, 1889, 1919 @b1b770d90):
         /// a block's 32 weights as signed bytes. `iq4_nl`'s is `load1` over
         /// `load0`, each a `pshufb` through the codebook, which the
         /// constructor copies into `iq4nlt`.
-        inline fn load(comptime T: type, b: *const T) avx.m256i {
-            if (T == qblocks.Q8_0) return avx.mm256_loadu_si256(&b.qs);
-            if (T == qblocks.Q4_0) return avx.mm256_sub_epi8(denibble(&b.qs), avx.mm256_set1_epi8(8));
-            if (T == qblocks.Q5_0) return avx.mm256_or_si256(denibble(&b.qs), bittobyte(&b.qh));
-            comptime std.debug.assert(T == qblocks.IQ4_NL);
-            const iq4nlt = avx.mm_loadu_si128(&c.kvalues_iq4nl);
-            const x = avx.mm_loadu_si128(&b.qs);
-            const lo = avx.mm_shuffle_epi8(iq4nlt, avx.mm_and_si128(avx.mm_set1_epi8(15), x));
-            const hi = avx.mm_shuffle_epi8(iq4nlt, avx.mm_and_si128(avx.mm_set1_epi8(15), avx.mm_srli_epi16(x, 4)));
-            return avx.mm256_set_m128i(hi, lo);
+        inline fn load(comptime T: type, b: *const T) ggml.cpu.quants.arch.avx2.m256i {
+            if (T == ggml.quants.blocks.Q8_0) return ggml.cpu.quants.arch.avx2.mm256_loadu_si256(&b.qs);
+            if (T == ggml.quants.blocks.Q4_0) return ggml.cpu.quants.arch.avx2.mm256_sub_epi8(denibble(&b.qs), ggml.cpu.quants.arch.avx2.mm256_set1_epi8(8));
+            if (T == ggml.quants.blocks.Q5_0) return ggml.cpu.quants.arch.avx2.mm256_or_si256(denibble(&b.qs), bittobyte(&b.qh));
+            comptime std.debug.assert(T == ggml.quants.blocks.IQ4_NL);
+            const iq4nlt = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&ggml.impl.c.kvalues_iq4nl);
+            const x = ggml.cpu.quants.arch.avx2.mm_loadu_si128(&b.qs);
+            const lo = ggml.cpu.quants.arch.avx2.mm_shuffle_epi8(iq4nlt, ggml.cpu.quants.arch.avx2.mm_and_si128(ggml.cpu.quants.arch.avx2.mm_set1_epi8(15), x));
+            const hi = ggml.cpu.quants.arch.avx2.mm_shuffle_epi8(iq4nlt, ggml.cpu.quants.arch.avx2.mm_and_si128(ggml.cpu.quants.arch.avx2.mm_set1_epi8(15), ggml.cpu.quants.arch.avx2.mm_srli_epi16(x, 4)));
+            return ggml.cpu.quants.arch.avx2.mm256_set_m128i(hi, lo);
         }
 
         /// Ports `updot` (sgemm.cpp:1933 @b1b770d90): unsigned by signed
         /// bytes, summed in fours, as floats -- `vpdpbusd` with
         /// `__AVX512VNNI__ && __AVX512VL__`, otherwise summed in pairs
         /// twice.
-        inline fn updot(u: avx.m256i, s: avx.m256i) avx.m256 {
-            if (comptime avx.has_avx512vnni_vl) return avx.mm256_cvtepi32_ps(avx.mm256_dpbusd_epi32(avx.mm256_setzero_si256(), u, s));
-            if (comptime avx.has_avxvnni_only) @compileError("the __AVXVNNI__ arm of updot is not ported");
-            const res = avx.mm256_madd_epi16(avx.mm256_set1_epi16(1), avx.mm256_maddubs_epi16(u, s));
-            return avx.mm256_cvtepi32_ps(res);
+        inline fn updot(u: ggml.cpu.quants.arch.avx2.m256i, s: ggml.cpu.quants.arch.avx2.m256i) ggml.cpu.quants.arch.avx2.m256 {
+            if (comptime ggml.cpu.quants.arch.avx2.has_avx512vnni_vl) return ggml.cpu.quants.arch.avx2.mm256_cvtepi32_ps(ggml.cpu.quants.arch.avx2.mm256_dpbusd_epi32(ggml.cpu.quants.arch.avx2.mm256_setzero_si256(), u, s));
+            if (comptime ggml.cpu.quants.arch.avx2.has_avxvnni_only) @compileError("the __AVXVNNI__ arm of updot is not ported");
+            const res = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(ggml.cpu.quants.arch.avx2.mm256_set1_epi16(1), ggml.cpu.quants.arch.avx2.mm256_maddubs_epi16(u, s));
+            return ggml.cpu.quants.arch.avx2.mm256_cvtepi32_ps(res);
         }
 
         /// The C's `updot(_mm256_sign_epi8(a, a), _mm256_sign_epi8(b, a))`:
         /// a signed dot product through the unsigned instruction.
-        inline fn dot(av: avx.m256i, bv: avx.m256i) avx.m256 {
-            return updot(avx.mm256_sign_epi8(av, av), avx.mm256_sign_epi8(bv, av));
+        inline fn dot(av: ggml.cpu.quants.arch.avx2.m256i, bv: ggml.cpu.quants.arch.avx2.m256i) ggml.cpu.quants.arch.avx2.m256 {
+            return updot(ggml.cpu.quants.arch.avx2.mm256_sign_epi8(av, av), ggml.cpu.quants.arch.avx2.mm256_sign_epi8(bv, av));
         }
 
         inline fn aAt(self: *const Self, row: i64, l: i64) *const TA {
             return &self.A[@intCast(self.lda * row + l)];
         }
 
-        inline fn bAt(self: *const Self, col: i64, l: i64) *const qblocks.Q8_0 {
+        inline fn bAt(self: *const Self, col: i64, l: i64) *const ggml.quants.blocks.Q8_0 {
             return &self.B[@intCast(self.ldb * col + l)];
         }
 
@@ -776,12 +762,12 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             while (job < end) : (job += 1) {
                 const ii = m0 + @divTrunc(job, xtiles) * 4;
                 const jj = n0 + @rem(job, xtiles) * RN;
-                var Cv: [RN][4]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var Cv: [RN][4]ggml.cpu.quants.arch.avx2.m256 = @splat(@splat(ggml.cpu.quants.arch.avx2.mm256_setzero_ps()));
                 var l: i64 = 0;
                 while (l < self.k) : (l += 1) {
                     // Convert delta values for four blocks to float values
                     const da = cvtph4(self.aAt(ii + 0, l).d, self.aAt(ii + 1, l).d, self.aAt(ii + 2, l).d, self.aAt(ii + 3, l).d);
-                    var avec: [4]avx.m256i = undefined;
+                    var avec: [4]ggml.cpu.quants.arch.avx2.m256i = undefined;
                     inline for (0..4) |i| avec[i] = load(TA, self.aAt(ii + i, l));
                     inline for (0..RN) |j| {
                         const b = self.bAt(jj + j, l);
@@ -790,7 +776,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
                         // the vector by `_mm256_shuffle_ps`
                         const dvec = da * db;
                         inline for (0..4) |i| {
-                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(dvec[i]), dot(avec[i], load(qblocks.Q8_0, b)), Cv[j][i]);
+                            Cv[j][i] = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(@splat(dvec[i]), dot(avec[i], load(ggml.quants.blocks.Q8_0, b)), Cv[j][i]);
                         }
                     }
                 }
@@ -812,19 +798,19 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             while (job < end) : (job += 1) {
                 const ii = m0 + @divTrunc(job, xtiles) * RM;
                 const jj = n0 + @rem(job, xtiles) * 4;
-                var Cv: [4][RM]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var Cv: [4][RM]ggml.cpu.quants.arch.avx2.m256 = @splat(@splat(ggml.cpu.quants.arch.avx2.mm256_setzero_ps()));
                 var l: i64 = 0;
                 while (l < self.k) : (l += 1) {
                     // Convert delta values for four blocks to float values
                     const db = cvtph4(self.bAt(jj + 0, l).d, self.bAt(jj + 1, l).d, self.bAt(jj + 2, l).d, self.bAt(jj + 3, l).d);
-                    var bvec: [4]avx.m256i = undefined;
-                    inline for (0..4) |j| bvec[j] = load(qblocks.Q8_0, self.bAt(jj + j, l));
+                    var bvec: [4]ggml.cpu.quants.arch.avx2.m256i = undefined;
+                    inline for (0..4) |j| bvec[j] = load(ggml.quants.blocks.Q8_0, self.bAt(jj + j, l));
                     inline for (0..RM) |i| {
                         const a = self.aAt(ii + i, l);
                         const da: @Vector(4, f32) = @splat(unhalf(a.d));
                         const dvec = da * db;
                         inline for (0..4) |j| {
-                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(dvec[j]), dot(load(TA, a), bvec[j]), Cv[j][i]);
+                            Cv[j][i] = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(@splat(dvec[j]), dot(load(TA, a), bvec[j]), Cv[j][i]);
                         }
                     }
                 }
@@ -845,15 +831,15 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
             while (job < end) : (job += 1) {
                 const ii = m0 + @divTrunc(job, xtiles) * RM;
                 const jj = n0 + @rem(job, xtiles) * RN;
-                var Cv: [RN][RM]avx.m256 = @splat(@splat(avx.mm256_setzero_ps()));
+                var Cv: [RN][RM]ggml.cpu.quants.arch.avx2.m256 = @splat(@splat(ggml.cpu.quants.arch.avx2.mm256_setzero_ps()));
                 var l: i64 = 0;
                 while (l < self.k) : (l += 1) {
                     inline for (0..RN) |j| {
                         inline for (0..RM) |i| {
                             const a = self.aAt(ii + i, l);
                             const b = self.bAt(jj + j, l);
-                            const udTmp = dot(load(TA, a), load(qblocks.Q8_0, b));
-                            Cv[j][i] = avx.mm256_fmadd_ps(@splat(unhalf(a.d) * unhalf(b.d)), udTmp, Cv[j][i]);
+                            const udTmp = dot(load(TA, a), load(ggml.quants.blocks.Q8_0, b));
+                            Cv[j][i] = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(@splat(unhalf(a.d) * unhalf(b.d)), udTmp, Cv[j][i]);
                         }
                     }
                 }
@@ -881,7 +867,7 @@ fn TinyBlasQ0Avx(comptime TA: type) type {
 ///
 /// Return: true if the product was computed here.
 pub export fn llamafile_sgemm(
-    params: *const ComputeParams,
+    params: *const ggml.cpu.defs.ComputeParams,
     m: i64,
     n: i64,
     k: i64,
@@ -896,15 +882,15 @@ pub export fn llamafile_sgemm(
     Ctype: c_int,
 ) callconv(.c) bool {
     if (n < 2) return false;
-    if (Ctype != c.GGML_TYPE_F32) return false;
+    if (Ctype != ggml.impl.c.GGML_TYPE_F32) return false;
 
     if (comptime is_x86) return sgemmAvx(params, m, n, k, A, lda, B, ldb, C, ldc, Atype, Btype);
 
     switch (Atype) {
-        c.GGML_TYPE_F32 => {
-            if (Btype != c.GGML_TYPE_F32) return false;
+        ggml.impl.c.GGML_TYPE_F32 => {
+            if (Btype != ggml.impl.c.GGML_TYPE_F32) return false;
             if (n < 4) return false;
-            const tb = TinyBLAS(4, f32x4, f32, f32){
+            const tb = TinyBLAS(4, ggml.cpu.simd.neon.f32x4, f32, f32){
                 .params = params,
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
@@ -918,10 +904,10 @@ pub export fn llamafile_sgemm(
         },
         // The `__ARM_FEATURE_FP16_VECTOR_ARITHMETIC` arm, then the plain
         // `__ARM_NEON` one (sgemm.cpp:4175, 4185 @b1b770d90).
-        c.GGML_TYPE_F16 => if (comptime neon.has_fp16_va) {
+        ggml.impl.c.GGML_TYPE_F16 => if (comptime ggml.cpu.simd.neon.has_fp16_va) {
             if (n < 8) return false;
-            if (Btype != c.GGML_TYPE_F16) return false;
-            const tb = TinyBLAS(8, f16x8, c.ggml_fp16_t, c.ggml_fp16_t){
+            if (Btype != ggml.impl.c.GGML_TYPE_F16) return false;
+            const tb = TinyBLAS(8, ggml.cpu.simd.neon.f16x8, ggml.impl.c.ggml_fp16_t, ggml.impl.c.ggml_fp16_t){
                 .params = params,
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
@@ -933,8 +919,8 @@ pub export fn llamafile_sgemm(
             };
             return tb.matmul(m, n);
         } else {
-            if (Btype != c.GGML_TYPE_F32) return false;
-            const tb = TinyBLAS(4, f32x4, c.ggml_fp16_t, f32){
+            if (Btype != ggml.impl.c.GGML_TYPE_F32) return false;
+            const tb = TinyBLAS(4, ggml.cpu.simd.neon.f32x4, ggml.impl.c.ggml_fp16_t, f32){
                 .params = params,
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
@@ -949,10 +935,10 @@ pub export fn llamafile_sgemm(
         // Both quantized arms run `tinyBLAS_Q0_ARM` only behind
         // `__ARM_FEATURE_DOTPROD` (sgemm.cpp:4253 @b1b770d90); without it
         // each is the `#else`, which returns false.
-        c.GGML_TYPE_Q8_0 => {
-            if (comptime !neon.has_dotprod) return false;
-            if (Btype != c.GGML_TYPE_Q8_0) return false;
-            const tb = TinyBlasQ0Arm(c.block_q8_0){
+        ggml.impl.c.GGML_TYPE_Q8_0 => {
+            if (comptime !ggml.cpu.simd.neon.has_dotprod) return false;
+            if (Btype != ggml.impl.c.GGML_TYPE_Q8_0) return false;
+            const tb = TinyBlasQ0Arm(ggml.impl.c.block_q8_0){
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
                 .lda = lda,
@@ -966,10 +952,10 @@ pub export fn llamafile_sgemm(
             tb.matmul(m, n);
             return true;
         },
-        c.GGML_TYPE_Q4_0 => {
-            if (comptime !neon.has_dotprod) return false;
-            if (Btype != c.GGML_TYPE_Q8_0) return false;
-            const tb = TinyBlasQ0Arm(c.block_q4_0){
+        ggml.impl.c.GGML_TYPE_Q4_0 => {
+            if (comptime !ggml.cpu.simd.neon.has_dotprod) return false;
+            if (Btype != ggml.impl.c.GGML_TYPE_Q8_0) return false;
+            const tb = TinyBlasQ0Arm(ggml.impl.c.block_q4_0){
                 .k = k,
                 .A = @ptrCast(@alignCast(A.?)),
                 .lda = lda,
@@ -992,8 +978,8 @@ pub export fn llamafile_sgemm(
 }
 
 /// One `tinyBLAS_Q0_AVX` row of the switch: `B` must be `q8_0`.
-fn q0(comptime TA: type, params: *const ComputeParams, m: i64, n: i64, k: i64, A: ?*const anyopaque, lda: i64, B: ?*const anyopaque, ldb: i64, C: ?*anyopaque, ldc: i64, Btype: c_int) bool {
-    if (Btype != c.GGML_TYPE_Q8_0) return false;
+fn q0(comptime TA: type, params: *const ggml.cpu.defs.ComputeParams, m: i64, n: i64, k: i64, A: ?*const anyopaque, lda: i64, B: ?*const anyopaque, ldb: i64, C: ?*anyopaque, ldc: i64, Btype: c_int) bool {
+    if (Btype != ggml.impl.c.GGML_TYPE_Q8_0) return false;
     const tb = TinyBlasQ0Avx(TA){
         .A = @ptrCast(@alignCast(A.?)),
         .B = @ptrCast(@alignCast(B.?)),
@@ -1016,7 +1002,7 @@ fn q0(comptime TA: type, params: *const ComputeParams, m: i64, n: i64, k: i64, A
 /// `tinyBLAS_Q0_AVX` rows. Both f16 arms (#31854) also take an
 /// `f32` `B`, which is what `mul_mat` hands an f16 weight.
 fn sgemmAvx(
-    params: *const ComputeParams,
+    params: *const ggml.cpu.defs.ComputeParams,
     m: i64,
     n: i64,
     k: i64,
@@ -1030,7 +1016,7 @@ fn sgemmAvx(
     Btype: c_int,
 ) bool {
     const float = struct {
-        fn run(comptime TA: type, comptime TB: type, p: *const ComputeParams, mm: i64, nn: i64, kk: i64, a: ?*const anyopaque, la: i64, b: ?*const anyopaque, lb: i64, cc: ?*anyopaque, lc: i64) bool {
+        fn run(comptime TA: type, comptime TB: type, p: *const ggml.cpu.defs.ComputeParams, mm: i64, nn: i64, kk: i64, a: ?*const anyopaque, la: i64, b: ?*const anyopaque, lb: i64, cc: ?*anyopaque, lc: i64) bool {
             const tb = if (comptime is_avx512) TinyBLAS(16, f32x16, TA, TB){
                 .params = p,
                 .k = kk,
@@ -1054,25 +1040,25 @@ fn sgemmAvx(
         }
     }.run;
     switch (Atype) {
-        c.GGML_TYPE_F32 => {
-            if (Btype != c.GGML_TYPE_F32) return false;
+        ggml.impl.c.GGML_TYPE_F32 => {
+            if (Btype != ggml.impl.c.GGML_TYPE_F32) return false;
             return float(f32, f32, params, m, n, k, A, lda, B, ldb, C, ldc);
         },
-        c.GGML_TYPE_BF16 => {
-            if (Btype != c.GGML_TYPE_BF16) return false;
-            return float(c.ggml_bf16_t, c.ggml_bf16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
+        ggml.impl.c.GGML_TYPE_BF16 => {
+            if (Btype != ggml.impl.c.GGML_TYPE_BF16) return false;
+            return float(ggml.impl.c.ggml_bf16_t, ggml.impl.c.ggml_bf16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
         },
-        c.GGML_TYPE_F16 => {
-            if (Btype == c.GGML_TYPE_F16) return float(c.ggml_fp16_t, c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
-            if (Btype == c.GGML_TYPE_F32) return float(c.ggml_fp16_t, f32, params, m, n, k, A, lda, B, ldb, C, ldc);
+        ggml.impl.c.GGML_TYPE_F16 => {
+            if (Btype == ggml.impl.c.GGML_TYPE_F16) return float(ggml.impl.c.ggml_fp16_t, ggml.impl.c.ggml_fp16_t, params, m, n, k, A, lda, B, ldb, C, ldc);
+            if (Btype == ggml.impl.c.GGML_TYPE_F32) return float(ggml.impl.c.ggml_fp16_t, f32, params, m, n, k, A, lda, B, ldb, C, ldc);
             return false;
         },
         // sgemm.cpp:4242, 4290, 4327, 4343 @b1b770d90: each `__AVX2__` arm
         // takes `tinyBLAS_Q0_AVX` against `q8_0`, with no minimum `n`.
-        c.GGML_TYPE_Q8_0 => return q0(qblocks.Q8_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
-        c.GGML_TYPE_Q4_0 => return q0(qblocks.Q4_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
-        c.GGML_TYPE_Q5_0 => return q0(qblocks.Q5_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
-        c.GGML_TYPE_IQ4_NL => return q0(qblocks.IQ4_NL, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        ggml.impl.c.GGML_TYPE_Q8_0 => return q0(ggml.quants.blocks.Q8_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        ggml.impl.c.GGML_TYPE_Q4_0 => return q0(ggml.quants.blocks.Q4_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        ggml.impl.c.GGML_TYPE_Q5_0 => return q0(ggml.quants.blocks.Q5_0, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
+        ggml.impl.c.GGML_TYPE_IQ4_NL => return q0(ggml.quants.blocks.IQ4_NL, params, m, n, k, A, lda, B, ldb, C, ldc, Btype),
         else => return false,
     }
 }

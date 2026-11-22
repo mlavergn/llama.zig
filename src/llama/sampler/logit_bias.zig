@@ -6,41 +6,33 @@
 //! Each declaration below names the C++ it replaces and the line it began at.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const core = @import("core.zig");
-
-const c = impl.c;
-const Sampler = core.Sampler;
-const SamplerI = core.SamplerI;
-const TokenDataArray = core.TokenDataArray;
-const Backend = core.Backend;
-const src = core.src;
+const llama = @import("../module.zig");
 
 /// Ports `llama_sampler_logit_bias` (llama-sampler.cpp:3882 @b1b770d90).
 const LogitBias = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
 
     n_vocab: i32,
 
-    logit_bias: []c.llama_logit_bias,
+    logit_bias: []llama.impl.c.llama_logit_bias,
 
-    to_search: std.ArrayList(c.llama_logit_bias),
+    to_search: std.ArrayList(llama.impl.c.llama_logit_bias),
 
-    inp_logit_bias: ?*c.struct_ggml_tensor,
-    inp_logit_idxs: ?*c.struct_ggml_tensor,
+    inp_logit_bias: ?*llama.impl.c.struct_ggml_tensor,
+    inp_logit_idxs: ?*llama.impl.c.struct_ggml_tensor,
 };
 
 /// Ports `llama_sampler_logit_bias_name` (llama-sampler.cpp:3893 @b1b770d90).
-fn logitBiasName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(LogitBias, smpl).base.getName();
+fn logitBiasName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(LogitBias, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_logit_bias_apply` (llama-sampler.cpp:3898 @b1b770d90).
 ///
 /// A bias whose token sits at its own index is applied directly; the rest
 /// are searched for, each candidate taking the first bias that names it.
-fn logitBiasApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(LogitBias, smpl);
+fn logitBiasApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(LogitBias, smpl);
 
     if (ctx.logit_bias.len == 0) return;
 
@@ -50,13 +42,13 @@ fn logitBiasApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
         if (lb.token >= 0 and cur_p.*.size > @as(usize, @intCast(lb.token)) and cur_p.*.data[@intCast(lb.token)].id == lb.token) {
             cur_p.*.data[@intCast(lb.token)].logit += lb.bias;
         } else {
-            ctx.to_search.append(impl.allocator, lb) catch impl.abort(src, 3916, "out of memory");
+            ctx.to_search.append(std.heap.c_allocator, lb) catch llama.impl.abort(llama.sampler.core.src, 3916, "out of memory");
         }
     }
 
     if (ctx.to_search.items.len == 0) return;
 
-    for (core.items(cur_p)) |*d| {
+    for (llama.sampler.core.items(cur_p)) |*d| {
         for (ctx.to_search.items) |lb| {
             if (d.id == lb.token) {
                 d.logit += lb.bias;
@@ -67,78 +59,78 @@ fn logitBiasApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
 }
 
 /// Ports `llama_sampler_logit_bias_clone` (llama-sampler.cpp:3931 @b1b770d90).
-fn logitBiasClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(LogitBias, smpl);
+fn logitBiasClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(LogitBias, smpl);
     return llama_sampler_init_logit_bias(ctx.n_vocab, @intCast(ctx.logit_bias.len), ctx.logit_bias.ptr);
 }
 
 /// Ports `llama_sampler_logit_bias_free` (llama-sampler.cpp:3936 @b1b770d90).
-fn logitBiasFree(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(LogitBias, smpl);
-    impl.allocator.free(ctx.logit_bias);
-    ctx.to_search.deinit(impl.allocator);
-    core.destroy(LogitBias, ctx);
+fn logitBiasFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(LogitBias, smpl);
+    std.heap.c_allocator.free(ctx.logit_bias);
+    ctx.to_search.deinit(std.heap.c_allocator);
+    llama.sampler.core.destroy(LogitBias, ctx);
 }
 
 /// Ports `llama_sampler_logit_bias_backend_apply` (llama-sampler.cpp:3940 @b1b770d90).
 ///
 /// Scatters the biases into a zero tensor shaped like the logits and adds it.
-fn logitBiasBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
+fn logitBiasBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
     _ = gf;
 
-    const sctx = core.ctxOf(LogitBias, smpl);
+    const sctx = llama.sampler.core.ctxOf(LogitBias, smpl);
     if (sctx.logit_bias.len == 0) return;
 
     const n: i64 = @intCast(sctx.logit_bias.len);
 
     if (sctx.inp_logit_bias == null) {
-        impl.assert(sctx.inp_logit_idxs == null, src, 3990, "sctx->inp_logit_idxs == nullptr");
+        llama.impl.assert(sctx.inp_logit_idxs == null, llama.sampler.core.src, 3990, "sctx->inp_logit_idxs == nullptr");
 
-        sctx.inp_logit_bias = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, n);
-        _ = c.ggml_set_name(sctx.inp_logit_bias, "logit_bias");
-        c.ggml_set_input(sctx.inp_logit_bias);
+        sctx.inp_logit_bias = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n);
+        _ = llama.impl.c.ggml_set_name(sctx.inp_logit_bias, "logit_bias");
+        llama.impl.c.ggml_set_input(sctx.inp_logit_bias);
 
-        sctx.inp_logit_idxs = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, n);
-        _ = c.ggml_set_name(sctx.inp_logit_idxs, "logit_idxs");
-        c.ggml_set_input(sctx.inp_logit_idxs);
+        sctx.inp_logit_idxs = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, n);
+        _ = llama.impl.c.ggml_set_name(sctx.inp_logit_idxs, "logit_idxs");
+        llama.impl.c.ggml_set_input(sctx.inp_logit_idxs);
     }
 
-    var cur = c.ggml_fill(ctx, data.*.logits, 0.0);
+    var cur = llama.impl.c.ggml_fill(ctx, data.*.logits, 0.0);
 
-    cur = c.ggml_reshape_2d(ctx, cur, 1, c.ggml_nelements(cur));
-    cur = c.ggml_set_rows(ctx, cur, sctx.inp_logit_bias, sctx.inp_logit_idxs);
-    cur = c.ggml_reshape_1d(ctx, cur, c.ggml_nelements(cur));
+    cur = llama.impl.c.ggml_reshape_2d(ctx, cur, 1, llama.impl.c.ggml_nelements(cur));
+    cur = llama.impl.c.ggml_set_rows(ctx, cur, sctx.inp_logit_bias, sctx.inp_logit_idxs);
+    cur = llama.impl.c.ggml_reshape_1d(ctx, cur, llama.impl.c.ggml_nelements(cur));
 
-    data.*.logits = c.ggml_add(ctx, data.*.logits, cur);
+    data.*.logits = llama.impl.c.ggml_add(ctx, data.*.logits, cur);
 }
 
 /// Ports `llama_sampler_logit_bias_backend_set_input` (llama-sampler.cpp:3976 @b1b770d90).
-fn logitBiasBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
-    const sctx = core.ctxOf(LogitBias, smpl);
+fn logitBiasBackendSetInput(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(LogitBias, smpl);
     if (sctx.logit_bias.len == 0) return;
 
-    impl.assert(sctx.inp_logit_bias != null, src, 4016, "sctx->inp_logit_bias != nullptr");
-    impl.assert(sctx.inp_logit_idxs != null, src, 4017, "sctx->inp_logit_idxs != nullptr");
+    llama.impl.assert(sctx.inp_logit_bias != null, llama.sampler.core.src, 4016, "sctx->inp_logit_bias != nullptr");
+    llama.impl.assert(sctx.inp_logit_idxs != null, llama.sampler.core.src, 4017, "sctx->inp_logit_idxs != nullptr");
 
     const n = sctx.logit_bias.len;
 
-    const data_logit_bias = impl.allocator.alloc(f32, n) catch impl.abort(src, 3991, "out of memory");
-    defer impl.allocator.free(data_logit_bias);
-    const data_logit_idxs = impl.allocator.alloc(i32, n) catch impl.abort(src, 3992, "out of memory");
-    defer impl.allocator.free(data_logit_idxs);
+    const data_logit_bias = std.heap.c_allocator.alloc(f32, n) catch llama.impl.abort(llama.sampler.core.src, 3991, "out of memory");
+    defer std.heap.c_allocator.free(data_logit_bias);
+    const data_logit_idxs = std.heap.c_allocator.alloc(i32, n) catch llama.impl.abort(llama.sampler.core.src, 3992, "out of memory");
+    defer std.heap.c_allocator.free(data_logit_idxs);
     for (sctx.logit_bias, 0..) |lb, i| {
-        impl.assert(lb.token >= 0 and lb.token < sctx.n_vocab, src, 4025, "lb.token >= 0 && lb.token < (int32_t) sctx->n_vocab");
+        llama.impl.assert(lb.token >= 0 and lb.token < sctx.n_vocab, llama.sampler.core.src, 4025, "lb.token >= 0 && lb.token < (int32_t) sctx->n_vocab");
         data_logit_bias[i] = lb.bias;
         data_logit_idxs[i] = lb.token;
     }
 
-    c.ggml_backend_tensor_set(sctx.inp_logit_bias, data_logit_bias.ptr, 0, c.ggml_nbytes(sctx.inp_logit_bias));
-    c.ggml_backend_tensor_set(sctx.inp_logit_idxs, data_logit_idxs.ptr, 0, c.ggml_nbytes(sctx.inp_logit_idxs));
+    llama.impl.c.ggml_backend_tensor_set(sctx.inp_logit_bias, data_logit_bias.ptr, 0, llama.impl.c.ggml_nbytes(sctx.inp_logit_bias));
+    llama.impl.c.ggml_backend_tensor_set(sctx.inp_logit_idxs, data_logit_idxs.ptr, 0, llama.impl.c.ggml_nbytes(sctx.inp_logit_idxs));
 }
 
 /// Ports `llama_sampler_logit_bias_backend_reset` (llama-sampler.cpp:4000 @b1b770d90).
-fn logitBiasBackendReset(smpl: [*c]Sampler) callconv(.c) void {
-    const sctx = core.ctxOf(LogitBias, smpl);
+fn logitBiasBackendReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(LogitBias, smpl);
     sctx.inp_logit_bias = null;
     sctx.inp_logit_idxs = null;
 }
@@ -147,24 +139,24 @@ fn logitBiasBackendReset(smpl: [*c]Sampler) callconv(.c) void {
 ///
 /// Always claims the backend: its ops are the fill, scatter and add every
 /// device has.
-fn logitBiasBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn logitBiasBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = buft;
     _ = n_outputs_max_per_seq;
 
-    const sctx = core.ctxOf(LogitBias, smpl);
+    const sctx = llama.sampler.core.ctxOf(LogitBias, smpl);
 
     sctx.base.initBackend(true);
 
     return true;
 }
 
-fn logitBiasCopyState(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callconv(.c) void {
+fn logitBiasCopyState(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     _ = src_smpl;
     _ = dst_smpl;
 }
 
 /// Ports `llama_sampler_logit_bias_i` (llama-sampler.cpp:4024 @b1b770d90).
-var logit_bias_iface: SamplerI = .{
+var logit_bias_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = logitBiasName,
     .accept = null,
     .apply = logitBiasApply,
@@ -187,15 +179,15 @@ var logit_bias_iface: SamplerI = .{
 /// - `logit_bias`: the biases; copied.
 ///
 /// Return: the sampler, or the `?logit-bias` placeholder when disabled.
-pub export fn llama_sampler_init_logit_bias(n_vocab: i32, n_logit_bias: i32, logit_bias: [*c]const c.llama_logit_bias) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_logit_bias(n_vocab: i32, n_logit_bias: i32, logit_bias: [*c]const llama.impl.c.llama_logit_bias) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = n_logit_bias <= 0;
 
-    if (is_empty) return core.initEmpty("?logit-bias");
+    if (is_empty) return llama.sampler.core.initEmpty("?logit-bias");
 
-    const copy = impl.allocator.dupe(c.llama_logit_bias, logit_bias[0..@intCast(n_logit_bias)]) catch impl.abort(src, 4058, "out of memory");
+    const copy = std.heap.c_allocator.dupe(llama.impl.c.llama_logit_bias, logit_bias[0..@intCast(n_logit_bias)]) catch llama.impl.abort(llama.sampler.core.src, 4058, "out of memory");
 
-    return core.llama_sampler_init(&logit_bias_iface, core.create(LogitBias, .{
-        .base = Backend.init("logit-bias"),
+    return llama.sampler.core.llama_sampler_init(&logit_bias_iface, llama.sampler.core.create(LogitBias, .{
+        .base = llama.sampler.core.Backend.init("logit-bias"),
         .n_vocab = n_vocab,
         .logit_bias = copy,
         .to_search = .empty,

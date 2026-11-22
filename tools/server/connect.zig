@@ -11,18 +11,11 @@
 //! what it ports and the line it began at.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const tc = @import("tools_common");
-const common = @import("common.zig");
-const context = @import("context.zig");
-const models_mod = @import("models.zig");
-const ws_mod = @import("httplib/ws.zig");
 
-const log = tc.log;
-const Params = tc.params.Params;
 const Allocator = std.mem.Allocator;
-const srv = common.srv;
-const gpa = context.gpa;
 
 /// Ports `CONNECT_ROOM_CODE_LEN` and `CONNECT_PASS_CODE_LEN`
 /// (server-connect.cpp:18, 19 @b1b770d90): share code = room code + pass
@@ -50,7 +43,7 @@ fn genShareCode(a: Allocator) Allocator.Error![]u8 {
     for (code) |*ch| {
         var b: [1]u8 = undefined;
         while (true) {
-            ws_mod.fillRandomBytes(&b);
+            mod.httplib.ws.fillRandomBytes(&b);
             if (b[0] < limit) break;
         }
         ch.* = connect_code_chars[b[0] % n];
@@ -123,10 +116,10 @@ fn forwardChildLog(line: [*:0]const u8) void {
     }
 
     switch (level) {
-        .err => log.err("connect | %s", .{text}),
-        .wrn => log.wrn("connect | %s", .{text}),
-        .dbg => log.dbg("connect | %s", .{text}),
-        .inf => log.inf("connect | %s", .{text}),
+        .err => tc.log.err("connect | %s", .{text}),
+        .wrn => tc.log.wrn("connect | %s", .{text}),
+        .dbg => tc.log.dbg("connect | %s", .{text}),
+        .inf => tc.log.inf("connect | %s", .{text}),
     }
 }
 
@@ -168,14 +161,14 @@ pub const ServerConnect = struct {
     ///
     /// Return: empty if not found.
     pub fn findBinary(a: Allocator) Allocator.Error![]const u8 {
-        if (models_mod.getServerExecPath(a)) |exe| {
+        if (mod.models.getServerExecPath(a)) |exe| {
             const sibling = try stdlib.path.join(a, stdlib.path.parent(exe), connect_exe_name);
             if (stdlib.fs.isRegularFile(sibling)) {
                 return sibling;
             }
         } else |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
-            srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try common.zs(a, common.what(e))});
+            mod.common.srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try mod.common.zs(a, mod.common.what(e))});
         }
 
         const path_env: []const u8 = stdlib.env.get("PATH") orelse "";
@@ -199,7 +192,7 @@ pub const ServerConnect = struct {
     /// `--connect` cannot work here.
     ///
     /// Return: empty if it can.
-    pub fn unavailableReason(a: Allocator, params: *const Params) Allocator.Error![]const u8 {
+    pub fn unavailableReason(a: Allocator, params: *const tc.params.Params) Allocator.Error![]const u8 {
         if (!stdlib.subproc.Subproc.isSupported()) {
             return "this build has subprocess support disabled, rebuild with -DLLAMA_SUBPROCESS=ON";
         }
@@ -248,7 +241,7 @@ pub const ServerConnect = struct {
     /// EOF, which means the child is gone.
     fn logLoop(self: *ServerConnect) void {
         const out = self.proc.?.stdoutFile() orelse {
-            srv(.err, "operator()", "%s", .{@as([*:0]const u8, "failed to get stdout of the llama-connect process\n")});
+            mod.common.srv(.err, "operator()", "%s", .{@as([*:0]const u8, "failed to get stdout of the llama-connect process\n")});
             return;
         };
         var read_buf: [4096]u8 = undefined;
@@ -259,7 +252,7 @@ pub const ServerConnect = struct {
         }
         // EOF means the child is gone
         if (!self.stopping.load(.acquire)) {
-            srv(.err, "operator()", "%s", .{@as([*:0]const u8, "llama-connect exited on its own, remote access is no longer available\n")});
+            mod.common.srv(.err, "operator()", "%s", .{@as([*:0]const u8, "llama-connect exited on its own, remote access is no longer available\n")});
         }
     }
 
@@ -269,11 +262,11 @@ pub const ServerConnect = struct {
     /// Parameters:
     /// - `port`: the bound one, which differs from `params.port` with
     ///   `--port 0` or the GCP override.
-    pub fn start(self: *ServerConnect, a: Allocator, params: *const Params, port: c_int) !bool {
+    pub fn start(self: *ServerConnect, a: Allocator, params: *const tc.params.Params, port: c_int) !bool {
         const func = "start";
         const bin = try findBinary(a);
         if (bin.len == 0) {
-            srv(.err, func, "%s", .{@as([*:0]const u8, "llama-connect binary not found\n")});
+            mod.common.srv(.err, func, "%s", .{@as([*:0]const u8, "llama-connect binary not found\n")});
             return false;
         }
 
@@ -294,7 +287,7 @@ pub const ServerConnect = struct {
             "--exit-on-stdin-eof",
         };
 
-        const proc = try gpa.create(stdlib.subproc.Subproc);
+        const proc = try mod.context.gpa.create(stdlib.subproc.Subproc);
         proc.* = .{};
 
         const options = stdlib.subproc.option_no_window |
@@ -302,20 +295,20 @@ pub const ServerConnect = struct {
             stdlib.subproc.option_inherit_environment;
 
         if (!proc.create(&args, options, &.{}, null)) {
-            srv(.err, func, "failed to spawn '%s'\n", .{try common.zs(a, bin)});
+            mod.common.srv(.err, func, "failed to spawn '%s'\n", .{try mod.common.zs(a, bin)});
             proc.deinit();
-            gpa.destroy(proc);
+            mod.context.gpa.destroy(proc);
             return false;
         }
         self.proc = proc;
 
         self.log_thread = try std.Thread.spawn(.{}, logLoop, .{self});
 
-        srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
-        srv(.inf, func, "%s", .{@as([*:0]const u8, "remote access is enabled via llama-connect\n")});
-        srv(.inf, func, "share code (enter it in the Web UI under Settings -> Remote Access): %s\n", .{try common.zs(a, try formatShareCode(a, code))});
-        srv(.wrn, func, "%s", .{@as([*:0]const u8, "anyone with this code can use this server, do not share it publicly\n")});
-        srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
+        mod.common.srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
+        mod.common.srv(.inf, func, "%s", .{@as([*:0]const u8, "remote access is enabled via llama-connect\n")});
+        mod.common.srv(.inf, func, "share code (enter it in the Web UI under Settings -> Remote Access): %s\n", .{try mod.common.zs(a, try formatShareCode(a, code))});
+        mod.common.srv(.wrn, func, "%s", .{@as([*:0]const u8, "anyone with this code can use this server, do not share it publicly\n")});
+        mod.common.srv(.inf, func, "%s", .{@as([*:0]const u8, "-----------------\n")});
 
         return true;
     }
@@ -325,7 +318,7 @@ pub const ServerConnect = struct {
     pub fn stop(self: *ServerConnect) void {
         const proc = self.proc orelse return;
 
-        srv(.inf, "stop", "%s", .{@as([*:0]const u8, "stopping llama-connect...\n")});
+        mod.common.srv(.inf, "stop", "%s", .{@as([*:0]const u8, "stopping llama-connect...\n")});
 
         self.stopping.store(true, .release);
 
@@ -348,7 +341,7 @@ pub const ServerConnect = struct {
 
         _ = proc.join(); // reap the zombie
         proc.deinit();
-        gpa.destroy(proc);
+        mod.context.gpa.destroy(proc);
         self.proc = null;
     }
 

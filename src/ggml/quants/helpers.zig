@@ -59,8 +59,6 @@
 //! there, and every fusion is named.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const c = impl.c;
 
 /// Ports the `GROUP_MAX_EPS` family (ggml-quants.c:20 @b1b770d90).
 ///

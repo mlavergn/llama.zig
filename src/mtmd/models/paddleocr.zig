@@ -6,34 +6,30 @@
 //! Ports `llama.cpp/tools/mtmd/models/paddleocr.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const dotsocr = @import("dotsocr.zig");
-const c = impl.c;
+const mtmd = @import("../module.zig");
 
 /// Ports `build` (mtmd/models/paddleocr.cpp:3 @b1b770d90), a member of `mtmd_graph_paddleocr`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
     const hparams = g.hparams;
-    impl.ggmlAssert(@rem(g.img.nx(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 4, "img.nx() % (patch_size * model.hparams.n_merge) == 0");
-    impl.ggmlAssert(@rem(g.img.ny(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 5, "img.ny() % (patch_size * model.hparams.n_merge) == 0");
+    mtmd.impl.ggmlAssert(@rem(g.img.nx(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 4, "img.nx() % (patch_size * model.hparams.n_merge) == 0");
+    mtmd.impl.ggmlAssert(@rem(g.img.ny(), g.patch_size * model.hparams.n_merge) == 0, "paddleocr.cpp", 5, "img.ny() % (patch_size * model.hparams.n_merge) == 0");
     const n_pos = g.n_patches;
     const num_position_ids = n_pos * 4; // m-rope requires 4 dim per position
 
     const q = @divTrunc(g.d_head, 4);
-    var rope: dotsocr.MropeVision = .{ .positions = null, .mrope_sections = .{ q, q, q, q } };
+    var rope: mtmd.models.dotsocr.MropeVision = .{ .positions = null, .mrope_sections = .{ q, q, q, q } };
 
-    const positions = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, num_position_ids);
-    _ = c.ggml_set_name(positions, "positions");
-    c.ggml_set_input(positions);
+    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, num_position_ids);
+    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
+    mtmd.impl.c.ggml_set_input(positions);
     rope.positions = positions;
 
-    const learned_pos_embd = g.resizePositionEmbeddings(graph.default_interpolation_mode);
+    const learned_pos_embd = g.resizePositionEmbeddings(mtmd.graph.default_interpolation_mode);
     const inp = g.buildInp();
-    var cur = g.buildVit(inp, g.n_patches, .normal, hparams.ffn_op, learned_pos_embd, .{ .ctx = &rope, .f = dotsocr.MropeVision.addPos }, .{});
+    var cur = g.buildVit(inp, g.n_patches, .normal, hparams.ffn_op, learned_pos_embd, .{ .ctx = &rope, .f = mtmd.models.dotsocr.MropeVision.addPos }, .{});
 
     g.cb(cur, "vit_out", -1);
 
@@ -49,7 +45,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     }
 
     // build the graph
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

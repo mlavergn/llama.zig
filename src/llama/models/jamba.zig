@@ -9,21 +9,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const mamba_base = @import("mamba_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_jamba`'s `load_arch_hparams` (models/jamba.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.ssm_d_conv = (try meta.getKey(u32, .ssm_conv_kernel, true, exc)).?;
@@ -44,10 +34,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_jamba`'s `load_arch_tensors` (models/jamba.cpp:23 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     const d_conv: i64 = hp.ssm_d_conv;
     const d_inner: i64 = hp.ssm_d_inner;
@@ -55,7 +45,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     const dt_rank: i64 = hp.ssm_dt_rank;
 
     // Only an expansion factor of 2 is supported for now.
-    impl.assert(2 * l.n_embd == d_inner, "models/jamba.cpp", 32, "2 * n_embd == d_inner");
+    llama.impl.assert(2 * l.n_embd == d_inner, "models/jamba.cpp", 32, "2 * n_embd == d_inner");
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -67,7 +57,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         // Without an output, the input token embedding is used, duplicated
         // to allow offloading.
         if (self.output == null) {
-            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
         }
     }
 
@@ -129,12 +119,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_jamba`'s `build_arch_graph` (models/jamba.cpp:104 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_jamba`'s `graph` (models/jamba.cpp:108 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -146,7 +136,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     const inp_out_ids = b.buildInpOutIds();
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -156,20 +146,20 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "attn_norm", il);
 
         if (n_head_kv == 0) {
-            cur = mamba_base.buildMambaLayer(b, inp_hybrid.getRecr(), cur, model, il);
+            cur = llama.models.mamba_base.buildMambaLayer(b, inp_hybrid.getRecr(), cur, model, il);
         } else {
             // Attention.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, n_head_kv, il);
 
             // No RoPE :)
-            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         // The residual. The C++ names `cur` here, not `ffn_inp`.
-        const ffn_inp: *Tensor = c.ggml_add(ctx, inpL, cur);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inpL, cur);
         b.cb(cur, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -197,7 +187,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "ffn_moe_out", il);
         }
         // The residual.
-        cur = c.ggml_add(ctx, ffn_inp, cur);
+        cur = llama.impl.c.ggml_add(ctx, ffn_inp, cur);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

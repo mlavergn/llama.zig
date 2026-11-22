@@ -27,30 +27,11 @@
 //! Everything lives in the arena `a` the analysis is given.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const template = @import("../template.zig");
-const chat_peg = @import("../chat_peg.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
-const types = @import("types.zig");
-const helpers = @import("helpers.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const Template = template.Template;
-const TemplateParams = types.TemplateParams;
-const Autoparser = types.Autoparser;
-const ParserId = peg.ParserId;
-const B = peg.Builder;
-const PegError = peg.Error;
-
-const trimWhitespace = helpers.trimWhitespace;
-const trimLeadingWhitespace = helpers.trimLeadingWhitespace;
-const compareVariants = helpers.compareVariants;
-const npos = util.npos;
 
 // -----------------------------------------------------------------------------
 // Probes
@@ -105,19 +86,19 @@ const assistant_content = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_
 
 /// A probe's params: these messages, the probe tools when `with_tools`, no
 /// generation prompt, thinking on.
-fn probe(a: Allocator, comptime messages: []const u8, with_tools: bool) Error!TemplateParams {
+fn probe(a: Allocator, comptime messages: []const u8, with_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
     return .{
-        .messages = json.parse(a, messages) catch |e| return util.fromJson(e),
-        .tools = if (with_tools) json.parse(a, probe_tools) catch |e| return util.fromJson(e) else .null,
+        .messages = json.parse(a, messages) catch |e| return common_chat.util.fromJson(e),
+        .tools = if (with_tools) json.parse(a, probe_tools) catch |e| return common_chat.util.fromJson(e) else .null,
         .add_generation_prompt = false,
         .enable_thinking = true,
     };
 }
 
 /// `params` with its messages replaced, as the C++'s modifier lambdas do.
-fn withMessages(a: Allocator, params: TemplateParams, comptime messages: []const u8) Error!TemplateParams {
+fn withMessages(a: Allocator, params: common_chat.autoparser.types.TemplateParams, comptime messages: []const u8) common_chat.exception.Error!common_chat.autoparser.types.TemplateParams {
     var p = params;
-    p.messages = json.parse(a, messages) catch |e| return util.fromJson(e);
+    p.messages = json.parse(a, messages) catch |e| return common_chat.util.fromJson(e);
     return p;
 }
 
@@ -127,7 +108,7 @@ fn withMessages(a: Allocator, params: TemplateParams, comptime messages: []const
 /// A tagged parse's outcome and its tags.
 const Tagged = struct {
     ok: bool,
-    tags: chat_peg.TagMap,
+    tags: common_chat.chat_peg.TagMap,
 
     /// `result.tags[key]`: "" for a tag that matched nothing.
     fn get(self: *const Tagged, key: []const u8) []const u8 {
@@ -137,40 +118,40 @@ const Tagged = struct {
 };
 
 /// `build_tagged_peg_parser(f).parse_anywhere_and_extract(input)`.
-fn anywhere(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *B) PegError!ParserId, input: []const u8) Error!Tagged {
-    var tp = chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return util.fromPeg(e);
+fn anywhere(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
+    var tp = common_chat.chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return common_chat.util.fromPeg(e);
     defer tp.deinit();
-    const r = tp.parseAnywhereAndExtract(a, input) catch |e| return util.fromPeg(e);
+    const r = tp.parseAnywhereAndExtract(a, input) catch |e| return common_chat.util.fromPeg(e);
     return .{ .ok = r.result.success(), .tags = r.tags };
 }
 
 /// `build_tagged_peg_parser(f).parse_and_extract(input)`.
-fn extract(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *B) PegError!ParserId, input: []const u8) Error!Tagged {
-    var tp = chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return util.fromPeg(e);
+fn extract(a: Allocator, ctx: anytype, comptime f: fn (@TypeOf(ctx), *peg.Builder) peg.Error!peg.ParserId, input: []const u8) common_chat.exception.Error!Tagged {
+    var tp = common_chat.chat_peg.buildTaggedPegParser(a, ctx, f) catch |e| return common_chat.util.fromPeg(e);
     defer tp.deinit();
-    const r = tp.parseAndExtract(a, input, peg.Flags.none) catch |e| return util.fromPeg(e);
+    const r = tp.parseAndExtract(a, input, peg.Flags.none) catch |e| return common_chat.util.fromPeg(e);
     return .{ .ok = r.result.success(), .tags = r.tags };
 }
 
 /// `p.marker() + p.space()`.
-fn markerSpace(b: *B) PegError!ParserId {
+fn markerSpace(b: *peg.Builder) peg.Error!peg.ParserId {
     return b.plus(try b.marker(), try b.space());
 }
 
 /// `p.zero_or_more(p.negate(p.marker()) + p.any())`: everything up to the
 /// next marker.
-fn upToMarker(b: *B) PegError!ParserId {
+fn upToMarker(b: *peg.Builder) peg.Error!peg.ParserId {
     return b.zeroOrMore(try b.plus(try b.negate(try b.marker()), try b.any()));
 }
 
 /// `p.marker() + p.zero_or_more(p.negate(p.marker()) + p.any()) + p.end()`:
 /// the last marker and the text after it.
-fn lastMarker(b: *B) PegError!ParserId {
+fn lastMarker(b: *peg.Builder) peg.Error!peg.ParserId {
     return b.plus(try b.plus(try b.marker(), try upToMarker(b)), try b.end());
 }
 
 /// `p.zero_or_more(p.negate(last) + p.any()) + p.tag(name, last)`.
-fn untilLastMarker(b: *B, comptime name: []const u8) PegError!ParserId {
+fn untilLastMarker(b: *peg.Builder, comptime name: []const u8) peg.Error!peg.ParserId {
     const last = try lastMarker(b);
     return b.plus(try b.zeroOrMore(try b.plus(try b.negate(last), try b.any())), try b.tag(name, last));
 }
@@ -179,13 +160,13 @@ fn untilLastMarker(b: *B, comptime name: []const u8) PegError!ParserId {
 // Workarounds
 
 /// `std::string::find(x) != npos` on the template's source.
-fn srcHas(tmpl: *const Template, needle: []const u8) bool {
-    return util.contains(tmpl.src, needle);
+fn srcHas(tmpl: *const common_chat.template.Template, needle: []const u8) bool {
+    return common_chat.util.contains(tmpl.src, needle);
 }
 
 /// Ports `workarounds` (chat-diff-analyzer.cpp:36 @b1b770d90): the
 /// templates the analysis reads wrong, patched by name.
-fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) Error!void {
+fn applyWorkarounds(tmpl: *const common_chat.template.Template, analysis: *common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
     // Old reasoning Qwen templates - they don't really display reasoning content, but we still want to
     // support reasoning on them
     if (srcHas(tmpl, "content.split('</think>')") and
@@ -198,7 +179,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         analysis.reasoning.end = "</think>";
         try analysis.preserved_tokens.append(a, "<think>");
         try analysis.preserved_tokens.append(a, "</think>");
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: old Qwen/Deepseek thinking template]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: old Qwen/Deepseek thinking template]\n\x1b[0m", .{});
     }
     // Granite 3.3, with separate reasoning and content markers
     if (srcHas(tmpl, "Write your thoughts between <think></think> and write your response between " ++
@@ -214,7 +195,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         analysis.content.end = "</response>";
         try analysis.preserved_tokens.append(a, "<response>");
         try analysis.preserved_tokens.append(a, "</response>");
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Granite 3.3]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Granite 3.3]\n\x1b[0m", .{});
     }
     // Cohere Command R+ - content wrapped in <|CHATBOT_TOKEN|>...<|END_OF_TURN_TOKEN|>
     if (srcHas(tmpl, "<|CHATBOT_TOKEN|>") and
@@ -226,7 +207,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         try analysis.preserved_tokens.append(a, "<|CHATBOT_TOKEN|>");
         try analysis.preserved_tokens.append(a, "<|END_OF_TURN_TOKEN|>");
         analysis.user_start = "<|START_OF_TURN_TOKEN|><|USER_TOKEN|>";
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Cohere Command R+]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Cohere Command R+]\n\x1b[0m", .{});
     }
     // Functionary - no tool call section delimiter
     if (srcHas(tmpl, "set has_code_interpreter = tools | selectattr(\"type\", \"equalto\", " ++
@@ -246,7 +227,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         try analysis.preserved_tokens.append(a, "<function=");
         try analysis.preserved_tokens.append(a, ">");
         try analysis.preserved_tokens.append(a, "</function>");
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Functionary 3.1]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Functionary 3.1]\n\x1b[0m", .{});
     }
     // DeepSeek-R1-Distill-Qwen
     if (srcHas(tmpl, "{{'<｜Assistant｜><｜tool▁calls▁begin｜><｜tool▁call▁begin｜>' + tool['type'] + '<｜tool▁sep｜>'")) {
@@ -256,7 +237,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         analysis.tools.function.name_prefix = "<｜tool▁sep｜>";
         analysis.tools.format.per_call_end = "<｜tool▁call▁end｜>";
         analysis.tools.function.close = "```";
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: DeepSeek-R1-Distill-Qwen]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: DeepSeek-R1-Distill-Qwen]\n\x1b[0m", .{});
     }
     // Nemotron Nano v2
     if (srcHas(tmpl, "<SPECIAL_10>") and srcHas(tmpl, "<SPECIAL_11>") and
@@ -281,7 +262,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
         try analysis.preserved_tokens.append(a, "</think>");
         try analysis.preserved_tokens.append(a, "<TOOLCALL>");
         try analysis.preserved_tokens.append(a, "</TOOLCALL>");
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Nemotron Nano v2]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Nemotron Nano v2]\n\x1b[0m", .{});
     }
     // Fireworks
     if (srcHas(tmpl, "{%- set system_prompt = '<|start_header_id|>' + 'system' + '<|end_header_id|>\\n\\n'" ++
@@ -289,25 +270,25 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
     {
         analysis.assistant_start = "<|start_header_id|>assistant<|end_header_id|>";
         analysis.user_start = "<|start_header_id|>user<|end_header_id|>";
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Fireworks v2]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Fireworks v2]\n\x1b[0m", .{});
     }
     // Solar Open
     if (srcHas(tmpl, "<|begin|>assistant<|think|><|end|>")) {
         analysis.assistant_start = "<|begin|>assistant";
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Solar Open]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Solar Open]\n\x1b[0m", .{});
     }
     // Apriel 1.6
     if (srcHas(tmpl, "if not loop.last and '[BEGIN FINAL RESPONSE]' in asst_text")) {
         analysis.user_start = "<|begin_user|>";
         analysis.assistant_start = "<|begin_assistant|>";
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Apriel 1.6]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Apriel 1.6]\n\x1b[0m", .{});
     }
     // template uses the JSON {name, parameters} tool instruction, emits the OpenAI function wrapper
     if (srcHas(tmpl, "Respond in the format {\"name\": function name") and
         srcHas(tmpl, "Do not use variables."))
     {
         analysis.tools.format.openai_wrapper_trigger = true;
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: JSON name/parameters tool instruction]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: JSON name/parameters tool instruction]\n\x1b[0m", .{});
     }
     // Laguna (poolside) - the v4 chat template renders reasoning and tool-arg
     // delimiters with formatting whitespace ("<think>\n", "</arg_value>\n") that
@@ -315,23 +296,23 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
     // newline and never match the model output. Trim to the bare tag. (v8
     // renders without the whitespace, so this is a no-op there.)
     if (srcHas(tmpl, "laguna_glm_thinking")) {
-        analysis.reasoning.start = trimWhitespace(analysis.reasoning.start);
-        analysis.reasoning.end = trimWhitespace(analysis.reasoning.end);
-        analysis.tools.arguments.value_prefix = trimWhitespace(analysis.tools.arguments.value_prefix);
-        analysis.tools.arguments.value_suffix = trimWhitespace(analysis.tools.arguments.value_suffix);
-        analysis.tools.arguments.separator = trimWhitespace(analysis.tools.arguments.separator);
+        analysis.reasoning.start = common_chat.autoparser.helpers.trimWhitespace(analysis.reasoning.start);
+        analysis.reasoning.end = common_chat.autoparser.helpers.trimWhitespace(analysis.reasoning.end);
+        analysis.tools.arguments.value_prefix = common_chat.autoparser.helpers.trimWhitespace(analysis.tools.arguments.value_prefix);
+        analysis.tools.arguments.value_suffix = common_chat.autoparser.helpers.trimWhitespace(analysis.tools.arguments.value_suffix);
+        analysis.tools.arguments.separator = common_chat.autoparser.helpers.trimWhitespace(analysis.tools.arguments.separator);
         analysis.tools.arguments.tolerate_intertag_whitespace = true;
         // The CONTROL/eot </assistant> token only halts generation when emitted as the
         // single token; after tool calls the model can spell it out as text tokens.
         // A literal stop string catches it either way.
         try analysis.additional_stops.append(a, "</assistant>");
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Laguna]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Laguna]\n\x1b[0m", .{});
     }
     // Bailing V3
     if (srcHas(tmpl, "Bailing V3 chat template")) {
-        analysis.tools.arguments.value_suffix = trimWhitespace(analysis.tools.arguments.value_suffix);
+        analysis.tools.arguments.value_suffix = common_chat.autoparser.helpers.trimWhitespace(analysis.tools.arguments.value_suffix);
         analysis.tools.arguments.tolerate_intertag_whitespace = true;
-        log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Bailing V3]\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m[Patch: Bailing V3]\n\x1b[0m", .{});
     }
 }
 
@@ -340,7 +321,7 @@ fn applyWorkarounds(tmpl: *const Template, analysis: *Autoparser, a: Allocator) 
 
 /// Ports `autoparser`'s `analyze_template` (chat-diff-analyzer.cpp:257
 /// @b1b770d90): every phase of the analysis, then the workarounds.
-pub fn analyzeTemplate(self: *Autoparser, a: Allocator, tmpl: *const Template) Error!void {
+pub fn analyzeTemplate(self: *common_chat.autoparser.types.Autoparser, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     self.jinja_caps = tmpl.originalCaps();
     self.reasoning = try analyzeReasoning(a, tmpl, self.jinja_caps.supports_tool_calls);
     self.content = try analyzeContent(a, tmpl, &self.reasoning);
@@ -351,60 +332,60 @@ pub fn analyzeTemplate(self: *Autoparser, a: Allocator, tmpl: *const Template) E
 
     try applyWorkarounds(tmpl, self, a);
 
-    if (log.debugEnabled()) try logAnalysis(self, a);
+    if (common_chat.log.debugEnabled()) try logAnalysis(self, a);
     self.analysis_complete = true;
 }
 
 /// The `LOG_DBG` report at the end of `analyze_template`.
-fn logAnalysis(self: *const Autoparser, a: Allocator) Error!void {
-    log.dbg("\n--- Reasoning & Content Structure ---\n", .{});
-    log.dbg("user_msg_start: {s}\n", .{self.user_start});
-    log.dbg("assistant_msg_start: {s}\n", .{self.assistant_start});
-    log.dbg("reasoning_mode: {s}\n", .{self.reasoning.mode.name()});
-    log.dbg("reasoning_start: '{s}'\n", .{self.reasoning.start});
-    log.dbg("reasoning_end: '{s}'\n", .{self.reasoning.end});
-    log.dbg("content_mode: {s}\n", .{self.content.mode.name()});
-    log.dbg("content_start: '{s}'\n", .{self.content.start});
-    log.dbg("content_end: '{s}'\n", .{self.content.end});
+fn logAnalysis(self: *const common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
+    common_chat.log.dbg("\n--- Reasoning & Content Structure ---\n", .{});
+    common_chat.log.dbg("user_msg_start: {s}\n", .{self.user_start});
+    common_chat.log.dbg("assistant_msg_start: {s}\n", .{self.assistant_start});
+    common_chat.log.dbg("reasoning_mode: {s}\n", .{self.reasoning.mode.name()});
+    common_chat.log.dbg("reasoning_start: '{s}'\n", .{self.reasoning.start});
+    common_chat.log.dbg("reasoning_end: '{s}'\n", .{self.reasoning.end});
+    common_chat.log.dbg("content_mode: {s}\n", .{self.content.mode.name()});
+    common_chat.log.dbg("content_start: '{s}'\n", .{self.content.start});
+    common_chat.log.dbg("content_end: '{s}'\n", .{self.content.end});
 
     const t = &self.tools;
-    log.dbg("\n--- Tool Call Structure ---\n", .{});
-    log.dbg("tool_mode: {s}\n", .{t.format.mode.name()});
-    log.dbg("supports_tools: {s}\n", .{if (self.jinja_caps.supports_tools) "true" else "false"});
-    log.dbg("supports_parallel_calls: {s}\n", .{if (self.jinja_caps.supports_parallel_tool_calls) "true" else "false"});
-    log.dbg("tool_section_start: '{s}'\n", .{t.format.section_start});
-    log.dbg("tool_section_end: '{s}'\n", .{t.format.section_end});
-    log.dbg("per_call_start: '{s}'\n", .{t.format.per_call_start});
-    log.dbg("per_call_end: '{s}'\n", .{t.format.per_call_end});
-    log.dbg("func_name_prefix: '{s}'\n", .{t.function.name_prefix});
-    log.dbg("func_name_suffix: '{s}'\n", .{t.function.name_suffix});
-    log.dbg("func_args_separator: '{s}'\n", .{t.function.args_separator});
-    log.dbg("func_close: '{s}'\n", .{t.function.close});
-    log.dbg("call_id_prefix: '{s}'\n", .{t.call_id.prefix});
-    log.dbg("call_id_suffix: '{s}'\n", .{t.call_id.suffix});
-    log.dbg("call_id_pos: '{s}'\n", .{t.call_id.pos.name()});
-    log.dbg("args_start: '{s}'\n", .{t.arguments.start});
-    log.dbg("args_end: '{s}'\n", .{t.arguments.end});
-    log.dbg("arg_name_prefix: '{s}'\n", .{t.arguments.name_prefix});
-    log.dbg("arg_name_suffix: '{s}'\n", .{t.arguments.name_suffix});
-    log.dbg("arg_value_prefix: '{s}'\n", .{t.arguments.value_prefix});
-    log.dbg("arg_value_suffix: '{s}'\n", .{t.arguments.value_suffix});
-    log.dbg("name_field: '{s}'\n", .{t.format.name_field});
-    log.dbg("args_field: '{s}'\n", .{t.format.args_field});
-    log.dbg("id_field: '{s}'\n", .{t.format.id_field});
-    log.dbg("gen_id_field: '{s}'\n", .{t.format.gen_id_field});
+    common_chat.log.dbg("\n--- Tool Call Structure ---\n", .{});
+    common_chat.log.dbg("tool_mode: {s}\n", .{t.format.mode.name()});
+    common_chat.log.dbg("supports_tools: {s}\n", .{if (self.jinja_caps.supports_tools) "true" else "false"});
+    common_chat.log.dbg("supports_parallel_calls: {s}\n", .{if (self.jinja_caps.supports_parallel_tool_calls) "true" else "false"});
+    common_chat.log.dbg("tool_section_start: '{s}'\n", .{t.format.section_start});
+    common_chat.log.dbg("tool_section_end: '{s}'\n", .{t.format.section_end});
+    common_chat.log.dbg("per_call_start: '{s}'\n", .{t.format.per_call_start});
+    common_chat.log.dbg("per_call_end: '{s}'\n", .{t.format.per_call_end});
+    common_chat.log.dbg("func_name_prefix: '{s}'\n", .{t.function.name_prefix});
+    common_chat.log.dbg("func_name_suffix: '{s}'\n", .{t.function.name_suffix});
+    common_chat.log.dbg("func_args_separator: '{s}'\n", .{t.function.args_separator});
+    common_chat.log.dbg("func_close: '{s}'\n", .{t.function.close});
+    common_chat.log.dbg("call_id_prefix: '{s}'\n", .{t.call_id.prefix});
+    common_chat.log.dbg("call_id_suffix: '{s}'\n", .{t.call_id.suffix});
+    common_chat.log.dbg("call_id_pos: '{s}'\n", .{t.call_id.pos.name()});
+    common_chat.log.dbg("args_start: '{s}'\n", .{t.arguments.start});
+    common_chat.log.dbg("args_end: '{s}'\n", .{t.arguments.end});
+    common_chat.log.dbg("arg_name_prefix: '{s}'\n", .{t.arguments.name_prefix});
+    common_chat.log.dbg("arg_name_suffix: '{s}'\n", .{t.arguments.name_suffix});
+    common_chat.log.dbg("arg_value_prefix: '{s}'\n", .{t.arguments.value_prefix});
+    common_chat.log.dbg("arg_value_suffix: '{s}'\n", .{t.arguments.value_suffix});
+    common_chat.log.dbg("name_field: '{s}'\n", .{t.format.name_field});
+    common_chat.log.dbg("args_field: '{s}'\n", .{t.format.args_field});
+    common_chat.log.dbg("id_field: '{s}'\n", .{t.format.id_field});
+    common_chat.log.dbg("gen_id_field: '{s}'\n", .{t.format.gen_id_field});
     var order: std.ArrayList(u8) = .empty;
     for (t.format.parameter_order.items) |p| {
         if (order.items.len != 0) try order.appendSlice(a, ", ");
         try order.appendSlice(a, p);
     }
-    log.dbg("parameter_order: '{s}'\n", .{order.items});
-    log.dbg("\x1b[1m\x1b[38;5;126m=== Differential analysis complete ===\n\x1b[0m", .{});
+    common_chat.log.dbg("parameter_order: '{s}'\n", .{order.items});
+    common_chat.log.dbg("\x1b[1m\x1b[38;5;126m=== Differential analysis complete ===\n\x1b[0m", .{});
 }
 
 /// Ports `autoparser`'s `collect_preserved_tokens` (chat-diff-analyzer.cpp:313
 /// @b1b770d90): every marker found, trimmed, once.
-fn collectPreservedTokens(self: *Autoparser, a: Allocator) Error!void {
+fn collectPreservedTokens(self: *common_chat.autoparser.types.Autoparser, a: Allocator) common_chat.exception.Error!void {
     const t = &self.tools;
     const all = [_][]const u8{
         self.reasoning.start,      self.reasoning.end,
@@ -420,7 +401,7 @@ fn collectPreservedTokens(self: *Autoparser, a: Allocator) Error!void {
         t.call_id.suffix,
     };
     outer: for (all) |org_token| {
-        const token = trimWhitespace(org_token);
+        const token = common_chat.autoparser.helpers.trimWhitespace(org_token);
         if (token.len == 0) continue;
         // Avoid duplicates
         for (self.preserved_tokens.items) |have| if (std.mem.eql(u8, have, token)) continue :outer;
@@ -430,77 +411,77 @@ fn collectPreservedTokens(self: *Autoparser, a: Allocator) Error!void {
 
 /// Ports `autoparser`'s `detect_assistant_start_marker` (chat-diff-analyzer.cpp:347
 /// @b1b770d90): what a template writes before an assistant message's text.
-fn detectAssistantStartMarker(self: *const Autoparser, a: Allocator, tmpl: *const Template) Error![]const u8 {
+fn detectAssistantStartMarker(self: *const common_chat.autoparser.types.Autoparser, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
     const params = try probe(a, "[" ++ user_msg ++ "]", false);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_content ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, skipping assistant start detection\n\x1b[0m", .{"detect_assistant_start_marker"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, skipping assistant start detection\n\x1b[0m", .{"detect_assistant_start_marker"});
         return "";
     };
 
     const usermsg = comparison.diff.right;
-    if (!util.contains(usermsg, ASSISTANT_MSG)) {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Did not find assistant message in assistant message block, skipping detection\n\x1b[0m", .{"detect_assistant_start_marker"});
+    if (!common_chat.util.contains(usermsg, ASSISTANT_MSG)) {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Did not find assistant message in assistant message block, skipping detection\n\x1b[0m", .{"detect_assistant_start_marker"});
     }
 
-    var ast_prefix = try util.substr(usermsg, 0, util.find(usermsg, ASSISTANT_MSG));
-    if (self.reasoning.start.len != 0 and util.contains(ast_prefix, trimWhitespace(self.reasoning.start))) {
-        ast_prefix = try util.substr(ast_prefix, 0, util.find(ast_prefix, trimWhitespace(self.reasoning.start)));
+    var ast_prefix = try common_chat.util.substr(usermsg, 0, common_chat.util.find(usermsg, ASSISTANT_MSG));
+    if (self.reasoning.start.len != 0 and common_chat.util.contains(ast_prefix, common_chat.autoparser.helpers.trimWhitespace(self.reasoning.start))) {
+        ast_prefix = try common_chat.util.substr(ast_prefix, 0, common_chat.util.find(ast_prefix, common_chat.autoparser.helpers.trimWhitespace(self.reasoning.start)));
     }
-    if (self.reasoning.end.len != 0 and util.contains(ast_prefix, trimWhitespace(self.reasoning.end))) {
-        ast_prefix = try util.substr(ast_prefix, 0, util.find(ast_prefix, trimWhitespace(self.reasoning.end)));
+    if (self.reasoning.end.len != 0 and common_chat.util.contains(ast_prefix, common_chat.autoparser.helpers.trimWhitespace(self.reasoning.end))) {
+        ast_prefix = try common_chat.util.substr(ast_prefix, 0, common_chat.util.find(ast_prefix, common_chat.autoparser.helpers.trimWhitespace(self.reasoning.end)));
     }
-    return trimWhitespace(ast_prefix);
+    return common_chat.autoparser.helpers.trimWhitespace(ast_prefix);
 }
 
 /// Ports `autoparser`'s `detect_user_start_marker` (chat-diff-analyzer.cpp:389
 /// @b1b770d90): what a template writes before a user message's text, an
 /// end marker of the turn before skipped.
-fn detectUserStartMarker(a: Allocator, tmpl: *const Template) Error![]const u8 {
+fn detectUserStartMarker(a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error![]const u8 {
     const user_msg_two = "{\"role\":\"user\",\"content\":\"" ++ USER_MSG_TWO ++ "\"}";
     var params = try probe(a, "[]", false);
     var b = try withMessages(a, params, "[" ++ user_msg ++ "]");
-    var comparison = try compareVariants(a, tmpl, &params, &b);
+    var comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b);
 
     if (comparison == null) {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, unsupported empty messages? trying complex variant\n\x1b[0m", .{"detect_user_start_marker"});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, unsupported empty messages? trying complex variant\n\x1b[0m", .{"detect_user_start_marker"});
         params = try withMessages(a, params, "[" ++ user_msg_two ++ "," ++ assistant_content ++ "]");
         b = try withMessages(a, params, "[" ++ user_msg_two ++ "," ++ assistant_content ++ "," ++ user_msg ++ "]");
-        comparison = try compareVariants(a, tmpl, &params, &b);
+        comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b);
         if (comparison == null) {
-            log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed for reserve variant, aborting\n\x1b[0m", .{"detect_user_start_marker"});
+            common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed for reserve variant, aborting\n\x1b[0m", .{"detect_user_start_marker"});
             return "";
         }
     }
 
     var usermsg = comparison.?.diff.right;
-    if (!util.contains(usermsg, USER_MSG)) {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Did not find user message in user message block, aborting detection\n\x1b[0m", .{"detect_user_start_marker"});
+    if (!common_chat.util.contains(usermsg, USER_MSG)) {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Did not find user message in user message block, aborting detection\n\x1b[0m", .{"detect_user_start_marker"});
     }
 
-    if (util.contains(usermsg, ASSISTANT_MSG)) {
-        usermsg = try util.substrFrom(usermsg, util.find(usermsg, ASSISTANT_MSG) + ASSISTANT_MSG.len);
+    if (common_chat.util.contains(usermsg, ASSISTANT_MSG)) {
+        usermsg = try common_chat.util.substrFrom(usermsg, common_chat.util.find(usermsg, ASSISTANT_MSG) + ASSISTANT_MSG.len);
     }
 
-    const candidate = try util.substr(usermsg, 0, util.find(usermsg, USER_MSG));
-    const candidate_split = try helpers.segmentizeMarkers(a, candidate);
+    const candidate = try common_chat.util.substr(usermsg, 0, common_chat.util.find(usermsg, USER_MSG));
+    const candidate_split = try common_chat.autoparser.helpers.segmentizeMarkers(a, candidate);
     var result: std.ArrayList(u8) = .empty;
     var encountered_marker = false;
     for (candidate_split) |mrk| {
         const lower_mrk = try std.ascii.allocLowerString(a, mrk.value);
         // heuristic to weed out potential end markers, but only at the start
         if (mrk.type == .MARKER and !encountered_marker and
-            (util.contains(lower_mrk, "end") or util.contains(lower_mrk, "close")))
+            (common_chat.util.contains(lower_mrk, "end") or common_chat.util.contains(lower_mrk, "close")))
         {
             continue;
         }
-        if (mrk.type == .TEXT and !encountered_marker and trimWhitespace(mrk.value).len == 0) {
+        if (mrk.type == .TEXT and !encountered_marker and common_chat.autoparser.helpers.trimWhitespace(mrk.value).len == 0) {
             continue;
         }
         encountered_marker = encountered_marker or mrk.type == .MARKER;
         try result.appendSlice(a, mrk.value);
     }
-    return trimWhitespace(result.items);
+    return common_chat.autoparser.helpers.trimWhitespace(result.items);
 }
 
 // -----------------------------------------------------------------------------
@@ -508,10 +489,10 @@ fn detectUserStartMarker(a: Allocator, tmpl: *const Template) Error![]const u8 {
 
 /// Ports `analyze_reasoning`'s constructor (chat-diff-analyzer.cpp:461
 /// @b1b770d90).
-fn analyzeReasoning(a: Allocator, tmpl: *const Template, supports_tools: bool) Error!types.AnalyzeReasoning {
-    log.dbg("\x1b[1m\x1b[38;5;126m=== Starting differential analysis ===\n\x1b[0m", .{});
-    log.dbg("\x1b[1m\x1b[38;5;214mPhase 1: Reasoning analysis\n\x1b[0m", .{});
-    var r: types.AnalyzeReasoning = .{};
+fn analyzeReasoning(a: Allocator, tmpl: *const common_chat.template.Template, supports_tools: bool) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeReasoning {
+    common_chat.log.dbg("\x1b[1m\x1b[38;5;126m=== Starting differential analysis ===\n\x1b[0m", .{});
+    common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 1: Reasoning analysis\n\x1b[0m", .{});
+    var r: common_chat.autoparser.types.AnalyzeReasoning = .{};
     try compareReasoningPresence(&r, a, tmpl);
     try compareThinkingEnabled(&r, a, tmpl);
     if (supports_tools) {
@@ -522,27 +503,27 @@ fn analyzeReasoning(a: Allocator, tmpl: *const Template, supports_tools: bool) E
 
 const ReasoningParsers = struct {
     /// `p.literal(reasoning_content) + p.space() + p.optional(p.tag("post", (p.marker() + p.space())) + p.rest())`
-    fn delimiter(_: void, b: *B) PegError!ParserId {
+    fn delimiter(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const head = try b.plus(try b.literal(THINKING_CONTENT), try b.space());
         return b.plus(head, try b.optional(try b.plus(try b.tag("post", try markerSpace(b)), try b.rest())));
     }
 
     /// `p.tag("pre", p.marker() + p.space()) + p.literal(reasoning_content) + p.tag("post", (p.space() + p.marker() + p.space())) + p.rest()`
-    fn wrapped(_: void, b: *B) PegError!ParserId {
+    fn wrapped(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         var x = try b.plus(try b.tag("pre", try markerSpace(b)), try b.literal(THINKING_CONTENT));
         x = try b.plus(x, try b.tag("post", try b.plus(try b.plus(try b.space(), try b.marker()), try b.space())));
         return b.plus(x, try b.rest());
     }
 
     /// `p.tag("pre", p.marker() + p.space()) + p.literal(reasoning_content) + p.space() + p.tag("post", (p.marker() + p.space()))`
-    fn scopeWrapped(_: void, b: *B) PegError!ParserId {
+    fn scopeWrapped(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         var x = try b.plus(try b.tag("pre", try markerSpace(b)), try b.literal(THINKING_CONTENT));
         x = try b.plus(x, try b.space());
         return b.plus(x, try b.tag("post", try markerSpace(b)));
     }
 
     /// `p.literal(reasoning_content) + p.space() + p.optional(p.tag("post", (p.marker() + p.space())))`
-    fn scopeDelimiter(_: void, b: *B) PegError!ParserId {
+    fn scopeDelimiter(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const head = try b.plus(try b.literal(THINKING_CONTENT), try b.space());
         return b.plus(head, try b.optional(try b.tag("post", try markerSpace(b))));
     }
@@ -550,17 +531,17 @@ const ReasoningParsers = struct {
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_presence` (chat-diff-analyzer.cpp:473
 /// @b1b770d90): the markers around reasoning content in an assistant turn.
-fn compareReasoningPresence(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
+fn compareReasoningPresence(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const assistant_with_reasoning = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", false);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_with_reasoning ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, skipping reasoning detection\n\x1b[0m", .{"compare_reasoning_presence"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed, skipping reasoning detection\n\x1b[0m", .{"compare_reasoning_presence"});
         return;
     };
 
     const diff = comparison.diff;
-    if (diff.right.len != 0 and util.contains(diff.right, THINKING_CONTENT)) {
+    if (diff.right.len != 0 and common_chat.util.contains(diff.right, THINKING_CONTENT)) {
         // try the more aggressive parse first, if it fails, fall back to the delimiter one
         var result = try anywhere(a, {}, ReasoningParsers.wrapped, comparison.output_B);
         if (!result.ok) {
@@ -581,20 +562,20 @@ fn compareReasoningPresence(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *con
 
 /// Ports `analyze_reasoning`'s `compare_thinking_enabled` (chat-diff-analyzer.cpp:532
 /// @b1b770d90): what `enable_thinking` changes in the generation prompt.
-fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
+fn compareThinkingEnabled(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     var params = try probe(a, "[" ++ user_msg ++ "]", false);
     params.add_generation_prompt = true;
     params.enable_thinking = false;
     var b = params;
     b.enable_thinking = true;
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"compare_thinking_enabled"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"compare_thinking_enabled"});
         return;
     };
 
     const diff = comparison.diff;
-    const left_trimmed = trimWhitespace(diff.left);
-    const right_trimmed = trimWhitespace(diff.right);
+    const left_trimmed = common_chat.autoparser.helpers.trimWhitespace(diff.left);
+    const right_trimmed = common_chat.autoparser.helpers.trimWhitespace(diff.right);
 
     if (left_trimmed.len == 0 and diff.right.len != 0) {
         if (right_trimmed.len != 0 and std.mem.endsWith(u8, comparison.output_B, right_trimmed)) {
@@ -606,7 +587,7 @@ fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const
     } else if (right_trimmed.len == 0 and diff.left.len != 0) {
         if (left_trimmed.len != 0 and std.mem.endsWith(u8, comparison.output_A, left_trimmed)) {
             if (r.end.len == 0) {
-                const seg = try helpers.pruneWhitespaceSegments(a, try helpers.segmentizeMarkers(a, comparison.output_A));
+                const seg = try common_chat.autoparser.helpers.pruneWhitespaceSegments(a, try common_chat.autoparser.helpers.segmentizeMarkers(a, comparison.output_A));
                 if (seg.len >= 2 and std.mem.eql(u8, seg[seg.len - 1].value, left_trimmed) and seg[seg.len - 2].type == .MARKER) {
                     r.start = seg[seg.len - 2].value;
                 }
@@ -628,13 +609,13 @@ fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const
 
             const len = @min(base.len, anchor_len);
             const anchor = base[base.len - len ..];
-            const pos = util.rfind(extended, anchor);
-            if (pos == npos or pos + len >= extended.len) continue;
+            const pos = common_chat.util.rfind(extended, anchor);
+            if (pos == common_chat.util.npos or pos + len >= extended.len) continue;
 
-            const extra = trimWhitespace(extended[pos + len ..]);
+            const extra = common_chat.autoparser.helpers.trimWhitespace(extended[pos + len ..]);
             if (extra.len == 0) continue;
 
-            const seg = try helpers.pruneWhitespaceSegments(a, try helpers.segmentizeMarkers(a, extra));
+            const seg = try common_chat.autoparser.helpers.pruneWhitespaceSegments(a, try common_chat.autoparser.helpers.segmentizeMarkers(a, extra));
             if (seg.len == 2 and seg[0].type == .MARKER and seg[1].type == .MARKER) {
                 if (r.start.len == 0) {
                     r.start = seg[0].value;
@@ -655,25 +636,25 @@ fn compareThinkingEnabled(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const
 
 /// Ports `analyze_reasoning`'s `compare_reasoning_scope` (chat-diff-analyzer.cpp:616
 /// @b1b770d90): reasoning that a template shows only beside tool calls.
-fn compareReasoningScope(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const Template) Error!void {
+fn compareReasoningScope(r: *common_chat.autoparser.types.AnalyzeReasoning, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const assistant_reasoning_content = "{\"role\":\"assistant\",\"content\":\"" ++ ASSISTANT_MSG ++ "\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
     const assistant_reasoning_tools = "{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\",\"tool_calls\":[" ++
         comptime buildToolCall(FUN_FIRST, "{\"" ++ ARG_FIRST ++ "\":\"VVVV\",\"" ++ ARG_SECOND ++ "\":\"XXXX\"}", CALL_ID_001) ++ "]}";
 
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_reasoning_content ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_reasoning_tools ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"compare_reasoning_scope"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"compare_reasoning_scope"});
         return;
     };
 
     // Check if reasoning only appears in variant B (with tools)
-    const reasoning_in_A = util.contains(comparison.output_A, THINKING_CONTENT);
-    const reasoning_in_B = util.contains(comparison.output_B, THINKING_CONTENT);
+    const reasoning_in_A = common_chat.util.contains(comparison.output_A, THINKING_CONTENT);
+    const reasoning_in_B = common_chat.util.contains(comparison.output_B, THINKING_CONTENT);
 
     if (!reasoning_in_A and reasoning_in_B) {
         r.mode = .TOOLS_ONLY;
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Detected TOOLS_ONLY reasoning mode\n\x1b[0m", .{"compare_reasoning_scope"});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Detected TOOLS_ONLY reasoning mode\n\x1b[0m", .{"compare_reasoning_scope"});
 
         const result = try anywhere(a, {}, ReasoningParsers.scopeWrapped, comparison.output_B);
         if (result.ok) {
@@ -684,7 +665,7 @@ fn compareReasoningScope(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const 
             if (delim.ok) {
                 r.end = delim.get("post");
             } else {
-                log.dbg("\x1b[1m\x1b[38;5;214m{s}: Unable to extract reasoning markers, falling back to reasoning = NONE\n\x1b[0m", .{"compare_reasoning_scope"});
+                common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Unable to extract reasoning markers, falling back to reasoning = NONE\n\x1b[0m", .{"compare_reasoning_scope"});
                 r.mode = .NONE;
             }
         }
@@ -696,7 +677,7 @@ fn compareReasoningScope(r: *types.AnalyzeReasoning, a: Allocator, tmpl: *const 
 
 const ContentParsers = struct {
     /// `p.space() + diff_reasoning.left + p.space() + p.optional(p.marker()) + p.space() + p.end()`
-    fn plain(left: []const u8, b: *B) PegError!ParserId {
+    fn plain(left: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
         var x = try b.plusLit(try b.space(), left);
         x = try b.plus(x, try b.space());
         x = try b.plus(x, try b.optional(try b.marker()));
@@ -705,12 +686,12 @@ const ContentParsers = struct {
     }
 
     /// `p.literal(reasoning.end) + p.space() + p.literal(response)`
-    fn postReasoning(end: []const u8, b: *B) PegError!ParserId {
+    fn postReasoning(end: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
         return b.plus(try b.plus(try b.literal(end), try b.space()), try b.literal(ASSISTANT_MSG));
     }
 
     /// `p.tag("pre", p.marker() + p.space()) + p.literal(response) + p.space() + p.tag("post", (p.marker() + p.space())) + p.rest()`
-    fn wrapped(_: void, b: *B) PegError!ParserId {
+    fn wrapped(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         var x = try b.plus(try b.tag("pre", try markerSpace(b)), try b.literal(ASSISTANT_MSG));
         x = try b.plus(x, try b.space());
         x = try b.plus(x, try b.tag("post", try markerSpace(b)));
@@ -720,21 +701,21 @@ const ContentParsers = struct {
 
 /// Ports `analyze_content`'s constructor (chat-diff-analyzer.cpp:677
 /// @b1b770d90): the markers around an assistant message's text.
-fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.AnalyzeReasoning) Error!types.AnalyzeContent {
-    log.dbg("\x1b[1m\x1b[38;5;214mPhase 2: Content analysis\n\x1b[0m", .{});
-    var c: types.AnalyzeContent = .{};
+fn analyzeContent(a: Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeContent {
+    common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 2: Content analysis\n\x1b[0m", .{});
+    var c: common_chat.autoparser.types.AnalyzeContent = .{};
 
     const assistant_with_tools = "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[" ++ comptime buildToolCall("test_func", "{\"arg1\":\"value1\"}", CALL_ID_001) ++ "]}";
     const assistant_with_reasoning = "{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"" ++ THINKING_CONTENT ++ "\"}";
 
     const params_content_only = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", true);
     const with_tools = try withMessages(a, params_content_only, "[" ++ user_msg ++ "," ++ assistant_with_tools ++ "]");
-    const comparison_with_tools = try compareVariants(a, tmpl, &params_content_only, &with_tools);
+    const comparison_with_tools = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params_content_only, &with_tools);
     const with_reasoning = try withMessages(a, params_content_only, "[" ++ user_msg ++ "," ++ assistant_with_reasoning ++ "]");
-    const comparison_with_reasoning = try compareVariants(a, tmpl, &params_content_only, &with_reasoning);
+    const comparison_with_reasoning = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params_content_only, &with_reasoning);
 
     if (comparison_with_tools == null or comparison_with_reasoning == null) {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_content"});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_content"});
         return c;
     }
 
@@ -744,7 +725,7 @@ fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.A
     const response = ASSISTANT_MSG;
 
     var found_plain_content = false;
-    if (std.mem.eql(u8, trimWhitespace(diff_tools.left), response)) {
+    if (std.mem.eql(u8, common_chat.autoparser.helpers.trimWhitespace(diff_tools.left), response)) {
         if ((try extract(a, diff_reasoning.left, ContentParsers.plain, diff_reasoning.left)).ok) {
             // We only have the content text in the diff (possibly with a stray EOG marker), so no markers
             c.mode = .PLAIN;
@@ -758,8 +739,8 @@ fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.A
     }
     if (!found_plain_content) {
         var rdiff = diff_reasoning.left;
-        if (reasoning.end.len != 0 and util.contains(rdiff, reasoning.end)) {
-            rdiff = try util.substrFrom(rdiff, util.find(rdiff, reasoning.end) + reasoning.end.len);
+        if (reasoning.end.len != 0 and common_chat.util.contains(rdiff, reasoning.end)) {
+            rdiff = try common_chat.util.substrFrom(rdiff, common_chat.util.find(rdiff, reasoning.end) + reasoning.end.len);
         }
         // Take the more promising diff
         const pure_content = if (rdiff.len > diff_tools.left.len) rdiff else diff_tools.left;
@@ -783,9 +764,9 @@ fn analyzeContent(a: Allocator, tmpl: *const Template, reasoning: *const types.A
 /// Ports `analyze_tools`'s constructor (chat-diff-analyzer.cpp:768
 /// @b1b770d90): the tool-call format, then, outside JSON, the function,
 /// argument and call-id markers.
-fn analyzeTools(a: Allocator, tmpl: *const Template, caps: *const @import("../caps.zig").Caps, reasoning: *const types.AnalyzeReasoning) Error!types.AnalyzeTools {
-    log.dbg("\x1b[1m\x1b[38;5;214mPhase 3: Tool call analysis\n\x1b[0m", .{});
-    var t: types.AnalyzeTools = .{};
+fn analyzeTools(a: Allocator, tmpl: *const common_chat.template.Template, caps: *const @import("../caps.zig").Caps, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning) common_chat.exception.Error!common_chat.autoparser.types.AnalyzeTools {
+    common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 3: Tool call analysis\n\x1b[0m", .{});
+    var t: common_chat.autoparser.types.AnalyzeTools = .{};
 
     try analyzeToolCalls(&t, a, tmpl, reasoning, caps.supports_parallel_tool_calls);
 
@@ -793,15 +774,15 @@ fn analyzeTools(a: Allocator, tmpl: *const Template, caps: *const @import("../ca
         if (caps.supports_parallel_tool_calls) {
             try checkPerCallMarkers(&t, a, tmpl);
         }
-        log.dbg("\x1b[1m\x1b[38;5;214mPhase 3a: Function call analysis\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 3a: Function call analysis\n\x1b[0m", .{});
         try extractFunctionMarkers(&t, a, tmpl);
-        log.dbg("\x1b[1m\x1b[38;5;214mPhase 3b: Argument analysis\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 3b: Argument analysis\n\x1b[0m", .{});
         if (t.format.mode == .TAG_WITH_TAGGED) {
             try analyzeArguments(&t, a, tmpl);
         }
         try extractArgumentSeparator(&t, a, tmpl);
         try extractArgsMarkers(&t, a, tmpl);
-        log.dbg("\x1b[1m\x1b[38;5;214mPhase 3c: Call id analysis\n\x1b[0m", .{});
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214mPhase 3c: Call id analysis\n\x1b[0m", .{});
         try extractCallIdMarkers(&t, a, tmpl);
     }
     return t;
@@ -809,11 +790,11 @@ fn analyzeTools(a: Allocator, tmpl: *const Template, caps: *const @import("../ca
 
 /// Ports `analyze_tools`'s `analyze_tool_calls` (chat-diff-analyzer.cpp:793
 /// @b1b770d90): the text one tool call adds to an assistant turn.
-fn analyzeToolCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template, reasoning: *const types.AnalyzeReasoning, supports_parallel_tool_calls: bool) Error!void {
+fn analyzeToolCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ assistant_content ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_tool_calls"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_tool_calls"});
         return;
     };
 
@@ -825,7 +806,7 @@ fn analyzeToolCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template,
 
 const ToolParsers = struct {
     /// `p.choice({ p.literal("{"), p.literal(":") }) << p.choice({ p.tag("dq", p.literal("\"") + p.literal(needle) + p.literal("\"")) })`
-    fn inJson(needle: []const u8, b: *B) PegError!ParserId {
+    fn inJson(needle: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
         const opener = try b.choice(&.{ try b.literal("{"), try b.literal(":") });
         const quoted = try b.plus(try b.plus(try b.literal("\""), try b.literal(needle)), try b.literal("\""));
         return b.shl(opener, try b.choice(&.{try b.tag("dq", quoted)}));
@@ -835,7 +816,7 @@ const ToolParsers = struct {
 /// Ports `analyze_tools`'s `analyze_tool_call_format` (chat-diff-analyzer.cpp:830
 /// @b1b770d90): JSON, tagged with JSON arguments, or tagged throughout,
 /// decided by whether the names appear quoted after `{` or `:`.
-fn analyzeToolCallFormat(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template, haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8, reasoning: *const types.AnalyzeReasoning, supports_parallel_tool_calls: bool) Error!void {
+fn analyzeToolCallFormat(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template, haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8, reasoning: *const common_chat.autoparser.types.AnalyzeReasoning, supports_parallel_tool_calls: bool) common_chat.exception.Error!void {
     if (fun_name_needle.len == 0 or arg_name_needle.len == 0 or haystack.len == 0) return;
 
     const fun_quote = (try anywhere(a, fun_name_needle, ToolParsers.inJson, haystack)).ok;
@@ -853,14 +834,14 @@ fn analyzeToolCallFormat(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Temp
     // first, remove any reasoning markers
     var clean_haystack = haystack;
     if (reasoning.start.len != 0) {
-        const pos = util.find(haystack, reasoning.start);
-        if (pos != npos) {
+        const pos = common_chat.util.find(haystack, reasoning.start);
+        if (pos != common_chat.util.npos) {
             clean_haystack = try std.mem.concat(a, u8, &.{ haystack[0..pos], haystack[pos + reasoning.start.len ..] });
         }
     }
     if (reasoning.end.len != 0) {
-        const pos = util.find(clean_haystack, reasoning.end);
-        if (pos != npos) {
+        const pos = common_chat.util.find(clean_haystack, reasoning.end);
+        if (pos != common_chat.util.npos) {
             clean_haystack = try std.mem.concat(a, u8, &.{ clean_haystack[0..pos], clean_haystack[pos + reasoning.end.len ..] });
         }
     }
@@ -874,22 +855,22 @@ fn analyzeToolCallFormat(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Temp
         try analyzeToolCallFormatNonJson(t, a, clean_haystack, fun_name_needle);
     }
     // always relax whitespace requirements on ending markers since they don't influence content
-    t.format.section_end = trimWhitespace(t.format.section_end);
-    t.format.per_call_end = trimWhitespace(t.format.per_call_end);
+    t.format.section_end = common_chat.autoparser.helpers.trimWhitespace(t.format.section_end);
+    t.format.per_call_end = common_chat.autoparser.helpers.trimWhitespace(t.format.per_call_end);
 }
 
 /// Ports `analyze_tools`'s `analyze_json_native_parallel_calls` (chat-diff-analyzer.cpp:888
 /// @b1b770d90): a section marker repeated per call is a per-call marker.
-fn analyzeJsonNativeParallelCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn analyzeJsonNativeParallelCalls(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_json_native_parallel_calls"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"analyze_json_native_parallel_calls"});
         return;
     };
 
     const second_call = comparison.diff.right;
-    if (t.format.section_start.len != 0 and util.contains(second_call, t.format.section_start)) {
+    if (t.format.section_start.len != 0 and common_chat.util.contains(second_call, t.format.section_start)) {
         t.format.per_call_start = t.format.section_start;
         t.format.per_call_end = t.format.section_end;
         t.format.section_start = "";
@@ -900,38 +881,38 @@ fn analyzeJsonNativeParallelCalls(t: *types.AnalyzeTools, a: Allocator, tmpl: *c
 /// `std::string::substr(pos, n)` with C++'s `int` positions converted as
 /// the C++ converts them: a negative `pos` is a huge one, which throws, and
 /// a negative `n` a huge count, which is the rest of the string.
-fn substrInt(s: []const u8, pos: i64, n: i64) Error![]const u8 {
-    return util.substr(s, @bitCast(@as(i64, pos)), @bitCast(@as(i64, n)));
+fn substrInt(s: []const u8, pos: i64, n: i64) common_chat.exception.Error![]const u8 {
+    return common_chat.util.substr(s, @bitCast(@as(i64, pos)), @bitCast(@as(i64, n)));
 }
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format_json_native` (chat-diff-analyzer.cpp:924
 /// @b1b770d90): the call's JSON parsed, its fields named by what they hold,
 /// and the markers around it.
-fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8) Error!void {
+fn analyzeToolCallFormatJsonNative(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8, arg_name_needle: []const u8) common_chat.exception.Error!void {
     // we might not have the typical OpenAI tool calling structure
     var json_start: i64 = if (std.mem.indexOfScalar(u8, clean_haystack, '{')) |i| @intCast(i) else -1;
     var json_end: i64 = if (std.mem.lastIndexOfScalar(u8, clean_haystack, '}')) |i| @intCast(i) else -1;
     const cut = try substrInt(clean_haystack, json_start, json_end - json_start + 1);
-    var call_struct = json.parse(a, cut) catch |e| return util.fromJson(e);
+    var call_struct = json.parse(a, cut) catch |e| return common_chat.util.fromJson(e);
 
     const Reg = struct {
-        t: *types.AnalyzeTools,
+        t: *common_chat.autoparser.types.AnalyzeTools,
         a: Allocator,
         fun: []const u8,
         arg: []const u8,
 
-        fn field(self: @This(), prefix: []const u8, key: []const u8) Error![]const u8 {
+        fn field(self: @This(), prefix: []const u8, key: []const u8) common_chat.exception.Error![]const u8 {
             return if (prefix.len != 0) try std.mem.concat(self.a, u8, &.{ prefix, ".", key }) else try self.a.dupe(u8, key);
         }
 
-        fn register(self: @This(), prefix: []const u8, key: []const u8, value: *const Value) Error!void {
-            if (value.isString() and util.contains(value.string, "call0000")) {
+        fn register(self: @This(), prefix: []const u8, key: []const u8, value: *const json.Value) common_chat.exception.Error!void {
+            if (value.isString() and common_chat.util.contains(value.string, "call0000")) {
                 self.t.format.id_field = try self.field(prefix, key);
             } else if (value.isString() and std.mem.eql(u8, value.string, self.fun)) {
                 self.t.format.name_field = try self.field(prefix, key);
-            } else if (util.contains(json.dump(self.a, value, -1) catch |e| return util.fromJson(e), self.arg)) { // handle both string and JSON obj variants
+            } else if (common_chat.util.contains(json.dump(self.a, value, -1) catch |e| return common_chat.util.fromJson(e), self.arg)) { // handle both string and JSON obj variants
                 self.t.format.args_field = try self.field(prefix, key);
-            } else if (util.contains(key, "id")) {
+            } else if (common_chat.util.contains(key, "id")) {
                 // heuristics for generated id field
                 self.t.format.gen_id_field = try self.field(prefix, key);
             }
@@ -950,7 +931,7 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
             // Don't register this element - the function name IS the key, not a field
         } else {
             if (el.value.isObject() and
-                !util.contains(json.dump(a, el.value, -1) catch |e| return util.fromJson(e), arg_name_needle))
+                !common_chat.util.contains(json.dump(a, el.value, -1) catch |e| return common_chat.util.fromJson(e), arg_name_needle))
             { // not the args object
                 t.format.function_field = key;
                 var sub = el.value.items();
@@ -964,7 +945,7 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
     }
 
     const ArrayParser = struct {
-        fn f(c: []const u8, b: *B) PegError!ParserId {
+        fn f(c: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
             const pre = try b.tag("pre", try b.plus(try b.literal("["), try b.space()));
             const x = try b.plus(pre, try b.literal(c));
             return b.plus(x, try b.tag("post", try b.plus(try b.space(), try b.literal("]"))));
@@ -981,16 +962,16 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
     const Located = struct { pos: usize, name: []const u8 };
     var located_params: std.ArrayList(Located) = .empty;
     if (t.format.name_field.len != 0) {
-        try located_params.append(a, .{ .pos = util.find(clean_haystack, t.format.name_field), .name = t.format.name_field });
+        try located_params.append(a, .{ .pos = common_chat.util.find(clean_haystack, t.format.name_field), .name = t.format.name_field });
     }
     if (t.format.args_field.len != 0) {
-        try located_params.append(a, .{ .pos = util.find(clean_haystack, t.format.args_field), .name = t.format.args_field });
+        try located_params.append(a, .{ .pos = common_chat.util.find(clean_haystack, t.format.args_field), .name = t.format.args_field });
     }
     if (t.format.id_field.len != 0) {
-        try located_params.append(a, .{ .pos = util.find(clean_haystack, t.format.id_field), .name = t.format.id_field });
+        try located_params.append(a, .{ .pos = common_chat.util.find(clean_haystack, t.format.id_field), .name = t.format.id_field });
     }
     if (t.format.gen_id_field.len != 0) {
-        try located_params.append(a, .{ .pos = util.find(clean_haystack, t.format.gen_id_field), .name = t.format.gen_id_field });
+        try located_params.append(a, .{ .pos = common_chat.util.find(clean_haystack, t.format.gen_id_field), .name = t.format.gen_id_field });
     }
     std.mem.sort(Located, located_params.items, {}, struct {
         fn lt(_: void, x: Located, y: Located) bool {
@@ -1002,8 +983,8 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
         try t.format.parameter_order.append(a, pair.name);
     }
     // we can immediately extract tool calling markers too
-    t.format.section_start = trimLeadingWhitespace(try substrInt(clean_haystack, 0, json_start));
-    t.format.section_end = trimWhitespace(try substrInt(clean_haystack, json_end, -1));
+    t.format.section_start = common_chat.autoparser.helpers.trimLeadingWhitespace(try substrInt(clean_haystack, 0, json_start));
+    t.format.section_end = common_chat.autoparser.helpers.trimWhitespace(try substrInt(clean_haystack, json_end, -1));
     // When tools_array_wrapped is true, the closing bracket is part of the array structure,
     // not a separate section end marker. Clear tool_section_end to avoid duplicate brackets.
     if (t.format.tools_array_wrapped and std.mem.eql(u8, t.format.section_end, "]")) {
@@ -1013,10 +994,10 @@ fn analyzeToolCallFormatJsonNative(t: *types.AnalyzeTools, a: Allocator, clean_h
 
 /// Ports `analyze_tools`'s `analyze_tool_call_format_non_json` (chat-diff-analyzer.cpp:1003
 /// @b1b770d90): the section and per-call markers around a tagged call.
-fn analyzeToolCallFormatNonJson(t: *types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8) Error!void {
+fn analyzeToolCallFormatNonJson(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, clean_haystack: []const u8, fun_name_needle: []const u8) common_chat.exception.Error!void {
     const P = struct {
         // first, let's find out if the function is inside a tag or standalone
-        fn funMarker(fun: []const u8, b: *B) PegError!ParserId {
+        fn funMarker(fun: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
             var angle = try b.tag("fun_pre", try b.plus(try b.literal("<"), try b.untilOneOf(&.{ ">", fun })));
             angle = try b.plus(angle, try b.literal(fun));
             var post = try b.plus(try b.negate(try b.plus(try b.space(), try b.literal("<"))), try b.until(">"));
@@ -1032,24 +1013,24 @@ fn analyzeToolCallFormatNonJson(t: *types.AnalyzeTools, a: Allocator, clean_hays
         }
 
         // now, consume up to two markers, then treat everything up to the function marker as function name prefix
-        fn perTool(fun_marker: []const u8, b: *B) PegError!ParserId {
+        fn perTool(fun_marker: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
             var x = try b.plus(try b.tag("sec_start", try markerSpace(b)), try b.tag("call_start", try markerSpace(b)));
             x = try b.plus(x, try b.tag("fun_pre", try b.until(fun_marker)));
             x = try b.plusLit(x, fun_marker);
             return b.plus(x, try b.tag("rest", try b.rest()));
         }
 
-        fn section(fun_marker: []const u8, b: *B) PegError!ParserId {
+        fn section(fun_marker: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
             const x = try b.plusLit(try b.tag("sec_start", try markerSpace(b)), fun_marker);
             return b.plus(x, try b.tag("rest", try b.rest()));
         }
 
-        fn doubleCloser(_: void, b: *B) PegError!ParserId {
+        fn doubleCloser(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
             const x = try b.plus(try b.tag("call_end", try markerSpace(b)), try b.tag("sec_end", try markerSpace(b)));
             return b.plus(x, try b.end());
         }
 
-        fn singleCloser(_: void, b: *B) PegError!ParserId {
+        fn singleCloser(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
             return b.plus(try b.tag("sec_end", try markerSpace(b)), try b.end());
         }
     };
@@ -1076,19 +1057,19 @@ fn analyzeToolCallFormatNonJson(t: *types.AnalyzeTools, a: Allocator, clean_hays
 
 /// Ports `analyze_tools`'s `check_per_call_markers` (chat-diff-analyzer.cpp:1047
 /// @b1b770d90): whether a second call repeats the section markers.
-fn checkPerCallMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn checkPerCallMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call ++ "," ++ second_tool_call) ++ "]");
-    const one_vs_two = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Generating double tool call comparison failed\n\x1b[0m", .{"check_per_call_markers"});
+    const one_vs_two = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Generating double tool call comparison failed\n\x1b[0m", .{"check_per_call_markers"});
         return;
     };
 
-    const filter_common_call_part = try helpers.calculateDiffSplit(a, one_vs_two.diff.suffix, one_vs_two.diff.right);
+    const filter_common_call_part = try common_chat.autoparser.helpers.calculateDiffSplit(a, one_vs_two.diff.suffix, one_vs_two.diff.right);
 
-    const second_tool_content = trimLeadingWhitespace(filter_common_call_part.right);
+    const second_tool_content = common_chat.autoparser.helpers.trimLeadingWhitespace(filter_common_call_part.right);
     if (t.format.section_start.len != 0 and
-        util.find(second_tool_content, t.format.section_start) == 0)
+        common_chat.util.find(second_tool_content, t.format.section_start) == 0)
     {
         t.format.per_call_start = t.format.section_start;
         t.format.per_call_end = t.format.section_end;
@@ -1109,38 +1090,38 @@ fn checkPerCallMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templa
 /// `count_occurrences` in `check_per_call_markers`: non-overlapping.
 fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
     var count: usize = 0;
-    var pos = util.find(haystack, needle);
-    while (pos != npos) : (pos = util.findFrom(haystack, needle, pos + needle.len)) count += 1;
+    var pos = common_chat.util.find(haystack, needle);
+    while (pos != common_chat.util.npos) : (pos = common_chat.util.findFrom(haystack, needle, pos + needle.len)) count += 1;
     return count;
 }
 
 const FunctionParsers = struct {
-    fn name(_: void, b: *B) PegError!ParserId {
+    fn name(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try b.tag("pre", try b.until(FUN_FIRST)), try b.literal(FUN_FIRST));
         return b.plus(x, try b.tag("post", try upToMarker(b)));
     }
 
-    fn jsonSuffix(_: void, b: *B) PegError!ParserId {
+    fn jsonSuffix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const non_json = try b.orr(try b.marker(), try b.plus(try b.plus(try b.negate(try b.literal("{")), try b.negate(try b.literal("["))), try b.any()));
         const after_json = try b.plus(try upToMarker(b), try b.marker());
         return b.plus(try b.tag("ext", try b.zeroOrMore(non_json)), after_json);
     }
 
-    fn taggedSuffix(_: void, b: *B) PegError!ParserId {
+    fn taggedSuffix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         return b.tag("ext", try upToMarker(b));
     }
 
-    fn argStart(b: *B) PegError!ParserId {
+    fn argStart(b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try b.marker(), try b.space());
         return b.plus(x, try b.choice(&.{ try b.literal(ARG_FIRST), try b.literal(ARG_SECOND) }));
     }
 
-    fn sep(_: void, b: *B) PegError!ParserId {
+    fn sep(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const body = try b.zeroOrMore(try b.plus(try b.negate(try argStart(b)), try b.any()));
         return b.plus(try b.tag("sep", body), try argStart(b));
     }
 
-    fn closerTagged(_: void, b: *B) PegError!ParserId {
+    fn closerTagged(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         var x = try b.plus(try b.until("YYYY"), try b.literal("YYYY"));
         x = try b.plus(x, try b.space());
         x = try b.plus(x, try b.marker());
@@ -1148,7 +1129,7 @@ const FunctionParsers = struct {
         return b.plus(x, try b.tag("close", try b.rest()));
     }
 
-    fn closerJson(_: void, b: *B) PegError!ParserId {
+    fn closerJson(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try b.until("YYYY"), try b.literal("YYYY"));
         return b.plus(x, try b.tag("post_val", try b.rest()));
     }
@@ -1157,20 +1138,20 @@ const FunctionParsers = struct {
 /// Ports `analyze_tools`'s `extract_function_markers` (chat-diff-analyzer.cpp:1103
 /// @b1b770d90): the markers around a function's name, before its arguments
 /// and after them.
-fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractFunctionMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(second_tool_call) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_function_markers"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_function_markers"});
         return;
     };
 
     const diff = comparison.diff;
 
-    if (util.contains(diff.left, FUN_FIRST) and util.contains(diff.right, FUN_SECOND)) {
+    if (common_chat.util.contains(diff.left, FUN_FIRST) and common_chat.util.contains(diff.right, FUN_SECOND)) {
         const prefix_marker = if (t.format.per_call_start.len != 0) t.format.per_call_start else t.format.section_start;
-        if (prefix_marker.len != 0 and util.rfind(diff.prefix, prefix_marker) != npos) {
-            t.function.name_prefix = try util.substrFrom(diff.prefix, util.rfind(diff.prefix, prefix_marker) + prefix_marker.len);
+        if (prefix_marker.len != 0 and common_chat.util.rfind(diff.prefix, prefix_marker) != common_chat.util.npos) {
+            t.function.name_prefix = try common_chat.util.substrFrom(diff.prefix, common_chat.util.rfind(diff.prefix, prefix_marker) + prefix_marker.len);
         }
 
         // Extract name prefix/suffix from diff.left (stop at the next marker boundary)
@@ -1195,9 +1176,9 @@ fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Tem
             if (suf_result.ok) {
                 t.function.name_suffix = try std.mem.concat(a, u8, &.{ t.function.name_suffix, suf_result.get("ext") });
 
-                const sep_result = try extract(a, {}, FunctionParsers.sep, try util.substrFrom(diff.suffix, suf_result.get("ext").len));
+                const sep_result = try extract(a, {}, FunctionParsers.sep, try common_chat.util.substrFrom(diff.suffix, suf_result.get("ext").len));
                 if (sep_result.ok) {
-                    t.function.args_separator = trimWhitespace(sep_result.get("sep"));
+                    t.function.args_separator = common_chat.autoparser.helpers.trimWhitespace(sep_result.get("sep"));
                 }
             }
         }
@@ -1208,12 +1189,12 @@ fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Tem
         if (suffix_marker.len == 0) {
             // we'll have to rely on an extra diff with no-calls version
             const nocall = try withMessages(a, params, "[" ++ user_msg ++ "," ++ assistant_content ++ "]");
-            if (try compareVariants(a, tmpl, &params, &nocall)) |notool_comp| {
+            if (try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &nocall)) |notool_comp| {
                 const nt_diff = notool_comp.diff;
-                closer_suffix = try util.substrFrom(nt_diff.left, util.find(nt_diff.left, "YYYY") +% 4);
+                closer_suffix = try common_chat.util.substrFrom(nt_diff.left, common_chat.util.find(nt_diff.left, "YYYY") +% 4);
             }
         } else {
-            closer_suffix = try util.substr(diff.suffix, 0, util.find(diff.suffix, suffix_marker));
+            closer_suffix = try common_chat.util.substr(diff.suffix, 0, common_chat.util.find(diff.suffix, suffix_marker));
         }
         if (closer_suffix.len != 0) {
             if (t.format.mode == .TAG_WITH_TAGGED) {
@@ -1229,42 +1210,42 @@ fn extractFunctionMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Tem
                     const post = close_result.get("post_val");
                     if (std.mem.lastIndexOfAny(u8, post, "}]")) |pos| {
                         if (pos < post.len -% 1) {
-                            t.function.close = trimLeadingWhitespace(post[pos + 1 ..]);
+                            t.function.close = common_chat.autoparser.helpers.trimLeadingWhitespace(post[pos + 1 ..]);
                         }
                     }
                 }
             }
         }
-        t.function.close = trimLeadingWhitespace(t.function.close);
+        t.function.close = common_chat.autoparser.helpers.trimLeadingWhitespace(t.function.close);
     }
 }
 
 /// Ports `analyze_tools`'s `analyze_arguments` (chat-diff-analyzer.cpp:1246 @b1b770d90).
-fn analyzeArguments(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn analyzeArguments(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     try extractArgumentNameMarkers(t, a, tmpl);
     try extractArgumentValueMarkers(t, a, tmpl);
 }
 
 const ArgumentParsers = struct {
-    fn left(_: void, b: *B) PegError!ParserId {
+    fn left(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try b.tag("pre", try b.until(ARG_FIRST)), try b.literal(ARG_FIRST));
         return b.plus(x, try b.tag("suffix", try b.untilOneOf(&.{ "\"", "X" })));
     }
 
-    fn right(_: void, b: *B) PegError!ParserId {
+    fn right(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try b.tag("pre", try b.until(ARG_SECOND)), try b.literal(ARG_SECOND));
         return b.plus(x, try b.tag("suffix", try b.untilOneOf(&.{ "\"", "Y" })));
     }
 
-    fn namePrefix(_: void, b: *B) PegError!ParserId {
+    fn namePrefix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         return untilLastMarker(b, "name_prefix");
     }
 
-    fn valPrefix(_: void, b: *B) PegError!ParserId {
+    fn valPrefix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         return untilLastMarker(b, "val_prefix");
     }
 
-    fn suffix(_: void, b: *B) PegError!ParserId {
+    fn suffix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.plus(try upToMarker(b), try b.marker());
         return b.tag("suffix", try b.plus(x, try b.space()));
     }
@@ -1272,11 +1253,11 @@ const ArgumentParsers = struct {
 
 /// Ports `analyze_tools`'s `extract_argument_name_markers` (chat-diff-analyzer.cpp:1251
 /// @b1b770d90): the markers around an argument's name.
-fn extractArgumentNameMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractArgumentNameMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_other_arg) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_name_markers"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_name_markers"});
         return;
     };
 
@@ -1295,14 +1276,14 @@ fn extractArgumentNameMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const
             // Name is inside a structure (e.g., JSON key): prefix is the shared wrapper
             t.arguments.name_prefix = left_result.get("pre");
             t.arguments.name_suffix = left_result.get("suffix");
-        } else if (std.mem.eql(u8, try util.substr(diff.left, 0, ARG_FIRST.len), ARG_FIRST) and std.mem.eql(u8, try util.substr(diff.right, 0, ARG_SECOND.len), ARG_SECOND)) {
+        } else if (std.mem.eql(u8, try common_chat.util.substr(diff.left, 0, ARG_FIRST.len), ARG_FIRST) and std.mem.eql(u8, try common_chat.util.substr(diff.right, 0, ARG_SECOND.len), ARG_SECOND)) {
             // Name is directly in the diff: prefix comes from last marker in diff.prefix
             const pre_result = try extract(a, {}, ArgumentParsers.namePrefix, diff.prefix);
             t.arguments.name_prefix = if (pre_result.ok) pre_result.get("name_prefix") else diff.prefix;
 
             // Suffix extends from after ARG_FIRST to the first marker (+ optional whitespace).
             // The marker could be in diff.left itself or in diff.suffix, so we concatenate.
-            const after_first = try std.mem.concat(a, u8, &.{ try util.substrFrom(diff.left, ARG_FIRST.len), diff.suffix });
+            const after_first = try std.mem.concat(a, u8, &.{ try common_chat.util.substrFrom(diff.left, ARG_FIRST.len), diff.suffix });
             const suf_result = try anywhere(a, {}, ArgumentParsers.suffix, after_first);
             if (suf_result.ok) {
                 t.arguments.name_suffix = suf_result.get("suffix");
@@ -1313,11 +1294,11 @@ fn extractArgumentNameMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const
 
 /// Ports `analyze_tools`'s `extract_argument_value_markers` (chat-diff-analyzer.cpp:1325
 /// @b1b770d90): the markers around an argument's value.
-fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractArgumentValueMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg_other_val) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_value_markers"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_value_markers"});
         return;
     };
 
@@ -1326,8 +1307,8 @@ fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *cons
     if (std.mem.eql(u8, diff.left, "XXXX") and std.mem.eql(u8, diff.right, "YYYY")) {
         const arg_name_ending = try std.mem.concat(a, u8, &.{ ARG_FIRST, t.arguments.name_suffix });
         var prefix = diff.prefix;
-        if (util.rfind(prefix, arg_name_ending) != npos) {
-            prefix = try util.substrFrom(prefix, util.rfind(prefix, arg_name_ending) + arg_name_ending.len);
+        if (common_chat.util.rfind(prefix, arg_name_ending) != common_chat.util.npos) {
+            prefix = try common_chat.util.substrFrom(prefix, common_chat.util.rfind(prefix, arg_name_ending) + arg_name_ending.len);
         }
         if (prefix.len != 0) {
             // Find the last marker + any trailing non-marker text to end
@@ -1337,18 +1318,18 @@ fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *cons
 
         var value_suffix = diff.suffix;
         if (t.function.close.len != 0) {
-            const func_close_pos = util.find(value_suffix, t.function.close);
-            if (func_close_pos != npos) {
+            const func_close_pos = common_chat.util.find(value_suffix, t.function.close);
+            if (func_close_pos != common_chat.util.npos) {
                 value_suffix = value_suffix[0..func_close_pos];
             }
         } else if (t.format.per_call_end.len != 0 or t.format.section_end.len != 0) {
             const end_marker = if (t.format.per_call_end.len != 0) t.format.per_call_end else t.format.section_end;
-            const end_marker_pos = util.find(value_suffix, end_marker);
-            if (end_marker_pos != npos) {
+            const end_marker_pos = common_chat.util.find(value_suffix, end_marker);
+            if (end_marker_pos != common_chat.util.npos) {
                 value_suffix = value_suffix[0..end_marker_pos];
             }
         }
-        if (trimWhitespace(value_suffix).len != 0) {
+        if (common_chat.autoparser.helpers.trimWhitespace(value_suffix).len != 0) {
             t.arguments.value_suffix = value_suffix;
         }
     }
@@ -1356,28 +1337,28 @@ fn extractArgumentValueMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *cons
 
 /// Ports `analyze_tools`'s `extract_argument_separator` (chat-diff-analyzer.cpp:1390
 /// @b1b770d90): what a second argument is preceded by.
-fn extractArgumentSeparator(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractArgumentSeparator(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_separator"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_argument_separator"});
         return;
     };
 
     const diff = comparison.diff;
     if (diff.right.len != 0) {
-        const separator = helpers.untilCommonPrefix(diff.right, ARG_FIRST, ARG_SECOND);
+        const separator = common_chat.autoparser.helpers.untilCommonPrefix(diff.right, ARG_FIRST, ARG_SECOND);
         t.arguments.separator = separator;
     }
 }
 
 /// Ports `analyze_tools`'s `extract_args_markers` (chat-diff-analyzer.cpp:1425
 /// @b1b770d90): markers around a JSON call's arguments.
-fn extractArgsMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractArgsMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_zero_args) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_one_arg) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_args_markers"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed\n\x1b[0m", .{"extract_args_markers"});
         return;
     };
 
@@ -1387,23 +1368,23 @@ fn extractArgsMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templat
         const prefix_marker = if (t.format.section_start.len != 0) t.format.section_start else t.format.per_call_start;
         const suffix_marker = if (t.format.section_end.len != 0) t.format.section_end else t.format.per_call_end;
         // these might happen earlier in the tools section as an example or somewhere else, so we need to find the closest ones
-        var prefix_pos = if (prefix_marker.len == 0) 0 else util.rfind(diff.prefix, prefix_marker);
-        var suffix_pos = if (suffix_marker.len == 0) diff.suffix.len else util.find(diff.suffix, suffix_marker);
-        if (prefix_pos == npos) prefix_pos = 0;
-        if (suffix_pos == npos) suffix_pos = diff.suffix.len;
-        const prefix_cut = try util.substrFrom(diff.prefix, prefix_pos + prefix_marker.len);
-        const suffix_cut = try util.substr(diff.suffix, 0, suffix_pos);
-        var args_start = helpers.untilCommonPrefix(prefix_cut, "{}", "{\"first\":");
-        const args_end = helpers.afterCommonSuffix(suffix_cut, "{}", "\"XXXX\"}");
+        var prefix_pos = if (prefix_marker.len == 0) 0 else common_chat.util.rfind(diff.prefix, prefix_marker);
+        var suffix_pos = if (suffix_marker.len == 0) diff.suffix.len else common_chat.util.find(diff.suffix, suffix_marker);
+        if (prefix_pos == common_chat.util.npos) prefix_pos = 0;
+        if (suffix_pos == common_chat.util.npos) suffix_pos = diff.suffix.len;
+        const prefix_cut = try common_chat.util.substrFrom(diff.prefix, prefix_pos + prefix_marker.len);
+        const suffix_cut = try common_chat.util.substr(diff.suffix, 0, suffix_pos);
+        var args_start = common_chat.autoparser.helpers.untilCommonPrefix(prefix_cut, "{}", "{\"first\":");
+        const args_end = common_chat.autoparser.helpers.afterCommonSuffix(suffix_cut, "{}", "\"XXXX\"}");
 
         if (args_start.len != 0 or args_end.len != 0) {
-            const find_fun = util.find(args_start, FUN_FIRST);
-            if (find_fun != npos) {
-                args_start = try util.substr(args_start, find_fun + FUN_FIRST.len, args_start.len - find_fun - FUN_FIRST.len);
+            const find_fun = common_chat.util.find(args_start, FUN_FIRST);
+            if (find_fun != common_chat.util.npos) {
+                args_start = try common_chat.util.substr(args_start, find_fun + FUN_FIRST.len, args_start.len - find_fun - FUN_FIRST.len);
             }
-            const find_call_id = util.find(args_start, CALL_ID_001);
-            if (find_call_id != npos) {
-                args_start = try util.substr(args_start, find_call_id + CALL_ID_001.len, args_start.len - find_call_id - CALL_ID_001.len);
+            const find_call_id = common_chat.util.find(args_start, CALL_ID_001);
+            if (find_call_id != common_chat.util.npos) {
+                args_start = try common_chat.util.substr(args_start, find_call_id + CALL_ID_001.len, args_start.len - find_call_id - CALL_ID_001.len);
             }
             t.arguments.start = args_start;
             t.arguments.end = args_end;
@@ -1412,22 +1393,22 @@ fn extractArgsMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templat
 }
 
 const CallIdParsers = struct {
-    fn last(_: void, b: *B) PegError!ParserId {
+    fn last(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const l = try lastMarker(b);
         return b.plus(try b.zeroOrMore(try b.plus(try b.negate(l), try b.any())), try b.tag("m", try b.marker()));
     }
 
-    fn first(_: void, b: *B) PegError!ParserId {
+    fn first(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         return b.tag("m", try b.marker());
     }
 
-    fn idPrefix(common_id_part: []const u8, b: *B) PegError!ParserId {
+    fn idPrefix(common_id_part: []const u8, b: *peg.Builder) peg.Error!peg.ParserId {
         const x = try b.tag("prefix", try b.marker());
         const skip = try b.plus(try b.plus(try b.negate(try b.marker()), try b.negate(try b.literal(common_id_part))), try b.any());
         return b.plus(try b.plus(x, try b.zeroOrMore(skip)), try b.literal(common_id_part));
     }
 
-    fn suffix(_: void, b: *B) PegError!ParserId {
+    fn suffix(_: void, b: *peg.Builder) peg.Error!peg.ParserId {
         const skip = try b.plus(try b.plus(try b.negate(try b.marker()), try b.negate(try b.literal("{"))), try b.any());
         return b.plus(try b.zeroOrMore(skip), try b.tag("suffix", try b.marker()));
     }
@@ -1435,24 +1416,24 @@ const CallIdParsers = struct {
 
 /// `find_last_marker` in `extract_call_id_markers`: the last marker in
 /// `str`, without the text after it.
-fn findLastMarker(a: Allocator, str: []const u8) Error![]const u8 {
+fn findLastMarker(a: Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
     const res = try anywhere(a, {}, CallIdParsers.last, str);
     return if (res.ok) res.get("m") else "";
 }
 
 /// `find_first_marker` in `extract_call_id_markers`.
-fn findFirstMarker(a: Allocator, str: []const u8) Error![]const u8 {
+fn findFirstMarker(a: Allocator, str: []const u8) common_chat.exception.Error![]const u8 {
     const res = try anywhere(a, {}, CallIdParsers.first, str);
     return if (res.ok) res.get("m") else "";
 }
 
 /// Ports `analyze_tools`'s `extract_call_id_markers` (chat-diff-analyzer.cpp:1486
 /// @b1b770d90): where a call's id sits, and the markers around it.
-fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Template) Error!void {
+fn extractCallIdMarkers(t: *common_chat.autoparser.types.AnalyzeTools, a: Allocator, tmpl: *const common_chat.template.Template) common_chat.exception.Error!void {
     const params = try probe(a, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call) ++ "]", true);
     const b = try withMessages(a, params, "[" ++ user_msg ++ "," ++ comptime assistantCalls(first_tool_call_alt_id) ++ "]");
-    const comparison = try compareVariants(a, tmpl, &params, &b) orelse {
-        log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed for call_id detection\n\x1b[0m", .{"extract_call_id_markers"});
+    const comparison = try common_chat.autoparser.helpers.compareVariants(a, tmpl, &params, &b) orelse {
+        common_chat.log.dbg("\x1b[1m\x1b[38;5;214m{s}: Template application failed for call_id detection\n\x1b[0m", .{"extract_call_id_markers"});
         return;
     };
 
@@ -1476,23 +1457,23 @@ fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templ
     // Check if the function name is in the prefix (normal case: BETWEEN_FUNC_AND_ARGS or POST_ARGS)
     // or in the suffix (call_id is PRE_FUNC_NAME)
     const func_name = FUN_FIRST;
-    const func_name_in_prefix = util.rfind(diff.prefix, func_name);
-    const func_name_in_suffix = util.find(diff.suffix, func_name);
+    const func_name_in_prefix = common_chat.util.rfind(diff.prefix, func_name);
+    const func_name_in_suffix = common_chat.util.find(diff.suffix, func_name);
 
-    if (func_name_in_prefix != npos and func_name_in_suffix == npos) {
+    if (func_name_in_prefix != common_chat.util.npos and func_name_in_suffix == common_chat.util.npos) {
         // Function name is only in prefix - call_id is BETWEEN_FUNC_AND_ARGS or POST_ARGS
         // Check if args indicator "{" is in prefix or suffix
-        const args_in_prefix = if (std.mem.indexOfScalarPos(u8, diff.prefix, func_name_in_prefix, '{')) |i| i else npos;
-        const args_in_suffix = if (std.mem.indexOfScalar(u8, diff.suffix, '{')) |i| i else npos;
+        const args_in_prefix = if (std.mem.indexOfScalarPos(u8, diff.prefix, func_name_in_prefix, '{')) |i| i else common_chat.util.npos;
+        const args_in_suffix = if (std.mem.indexOfScalar(u8, diff.suffix, '{')) |i| i else common_chat.util.npos;
 
-        if (args_in_suffix != npos and
-            (args_in_prefix == npos or args_in_prefix > diff.prefix.len))
+        if (args_in_suffix != common_chat.util.npos and
+            (args_in_prefix == common_chat.util.npos or args_in_prefix > diff.prefix.len))
         {
             // Args are in suffix, so call_id is BETWEEN_FUNC_AND_ARGS
             t.call_id.pos = .BETWEEN_FUNC_AND_ARGS;
 
             // Find call_id_prefix: marker immediately preceding common_id_part (no intervening markers)
-            const after_func = try util.substrFrom(diff.prefix, func_name_in_prefix + func_name.len);
+            const after_func = try common_chat.util.substrFrom(diff.prefix, func_name_in_prefix + func_name.len);
             const id_res = try anywhere(a, common_id_part, CallIdParsers.idPrefix, after_func);
             if (id_res.ok) {
                 t.call_id.prefix = id_res.get("prefix");
@@ -1506,12 +1487,12 @@ fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templ
             if (suf_res.ok) {
                 t.call_id.suffix = suf_res.get("suffix");
             }
-        } else if (args_in_prefix != npos) {
+        } else if (args_in_prefix != common_chat.util.npos) {
             // Args are in prefix, so call_id is POST_ARGS
             t.call_id.pos = .POST_ARGS;
 
             // Extract last marker between args closing brace and the ID
-            const after_args = try util.substrFrom(diff.prefix, args_in_prefix);
+            const after_args = try common_chat.util.substrFrom(diff.prefix, args_in_prefix);
             if (std.mem.lastIndexOfScalar(u8, after_args, '}')) |closing_brace| {
                 const between_args_and_id = after_args[closing_brace + 1 ..];
                 t.call_id.prefix = try findLastMarker(a, between_args_and_id);
@@ -1520,7 +1501,7 @@ fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templ
             // call_id_suffix: first marker in diff.suffix
             t.call_id.suffix = try findFirstMarker(a, diff.suffix);
         }
-    } else if (func_name_in_suffix != npos and func_name_in_prefix == npos) {
+    } else if (func_name_in_suffix != common_chat.util.npos and func_name_in_prefix == common_chat.util.npos) {
         // Function name is only in suffix - call_id is PRE_FUNC_NAME
         t.call_id.pos = .PRE_FUNC_NAME;
 
@@ -1543,7 +1524,7 @@ fn extractCallIdMarkers(t: *types.AnalyzeTools, a: Allocator, tmpl: *const Templ
     // When call_id is detected, per_call_end may have been incorrectly set to include
     // the call_id_suffix and sample args. Clear it if it starts with call_id_suffix.
     if (t.call_id.pos != .NONE and t.call_id.suffix.len != 0 and
-        util.find(t.format.per_call_end, t.call_id.suffix) == 0)
+        common_chat.util.find(t.format.per_call_end, t.call_id.suffix) == 0)
     {
         t.format.per_call_end = "";
     }

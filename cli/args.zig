@@ -33,8 +33,8 @@
 //! a drop-in.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const upstream = @import("upstream_flags.zig");
 const common_chat = @import("common_chat");
 
 /// Sampling and generation settings, plus what to run them on.
@@ -615,7 +615,7 @@ pub fn parse(argv: []const []const u8, w: *std.Io.Writer) !Result {
             args.chat = true;
         } else if (eq(a, &.{ "-st", "--single-turn", "-no-cnv", "--no-conversation" })) {
             args.one_shot = true;
-        } else if (upstream.contains(a)) {
+        } else if (mod.upstream_flags.contains(a)) {
             // Real flag, we are behind. Distinguished from a typo on purpose.
             return .{ .fail = .{ .err = error.UnsupportedFlag, .arg = a } };
         } else {
@@ -848,7 +848,7 @@ test "a minimal command line yields upstream's defaults" {
 }
 
 test "max_devices is libllama's" {
-    try testing.expectEqual(@as(usize, max_devices), @import("c.zig").api.llama_max_devices());
+    try testing.expectEqual(@as(usize, max_devices), @import("llama").api.llama.llama_max_devices());
 }
 
 test "--fit takes upstream's truthy and falsey words and nothing else" {
@@ -978,7 +978,7 @@ test "no flag is both supported and reported as unsupported" {
     // there should be none today.
     for (specs) |s| {
         for (s.names) |n| {
-            if (!upstream.contains(n)) {
+            if (!mod.upstream_flags.contains(n)) {
                 std.debug.print("flag {s} is not an upstream spelling\n", .{n});
                 return error.NotUpstreamSpelling;
             }

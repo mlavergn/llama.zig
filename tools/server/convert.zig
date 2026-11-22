@@ -21,51 +21,45 @@
 //! the arena's, and nothing is freed singly.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const common = @import("common.zig");
 
-const log = tools.log;
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Error = common.Error;
-const throw = common.throw;
-const jsonValue = common.jsonValue;
-const jsonValueJson = common.jsonValueJson;
 
 /// `j.contains(key) && j.at(key).is_array()`.
-fn existsAndIsArray(j: *const Value, key: []const u8) bool {
+fn existsAndIsArray(j: *const json.Value, key: []const u8) bool {
     return j.contains(key) and (j.at(key) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
     }).isArray();
 }
 
 /// `j.contains(key) && j.at(key).is_string()`.
-fn existsAndIsString(j: *const Value, key: []const u8) bool {
+fn existsAndIsString(j: *const json.Value, key: []const u8) bool {
     return j.contains(key) and (j.at(key) catch |err| switch (err) {
         error.OutOfMemory, error.JsonError => unreachable,
     }).isString();
 }
 
 /// `j.at(key) == s`: false for anything but that string.
-fn atIs(j: *const Value, key: []const u8, s: []const u8) Error!bool {
+fn atIs(j: *const json.Value, key: []const u8, s: []const u8) mod.common.Error!bool {
     const v = try j.at(key);
     return v.isString() and std.mem.eql(u8, v.string, s);
 }
 
 /// `json { {k0, v0}, {k1, v1}, ... }`: an object of the pairs in order, a
 /// repeated key keeping its first place.
-fn object(a: Allocator, pairs: anytype) Error!Value {
-    var o = Value.emptyObject();
-    inline for (pairs) |p| try o.set(a, p[0], try common.from(a, p[1]));
+fn object(a: Allocator, pairs: anytype) mod.common.Error!json.Value {
+    var o = json.Value.emptyObject();
+    inline for (pairs) |p| try o.set(a, p[0], try mod.common.from(a, p[1]));
     return o;
 }
 
 /// `json::array({ v })`.
-fn arrayOf(a: Allocator, v: Value) Error!Value {
-    var arr = Value.emptyArray();
+fn arrayOf(a: Allocator, v: json.Value) mod.common.Error!json.Value {
+    var arr = json.Value.emptyArray();
     try arr.pushBack(a, v);
     return arr;
 }
@@ -78,25 +72,25 @@ fn arrayOf(a: Allocator, v: Value) Error!Value {
 /// non-function tools skipped.
 ///
 /// Return: owned by `a`.
-pub fn responsesTools(a: Allocator, tools_in: *const Value) Error!Value {
+pub fn responsesTools(a: Allocator, tools_in: *const json.Value) mod.common.Error!json.Value {
     if (!tools_in.isArray()) {
-        return throw(error.InvalidArgument, "'tools' must be an array of objects", .{});
+        return mod.common.throw(error.InvalidArgument, "'tools' must be an array of objects", .{});
     }
-    var chatcmpl_tools = Value.emptyArray();
+    var chatcmpl_tools = json.Value.emptyArray();
     for (tools_in.array.items) |*resp_tool_in| {
         var resp_tool = try resp_tool_in.clone(a);
-        var chatcmpl_tool: Value = .null;
+        var chatcmpl_tool: json.Value = .null;
 
-        const ty = jsonValue(&resp_tool, "type", []const u8, "");
+        const ty = mod.common.jsonValue(&resp_tool, "type", []const u8, "");
         if (!std.mem.eql(u8, ty, "function")) {
             // Non-function Responses tools have no Chat Completions equivalent.
-            const z = common.dupZ(ty);
-            defer common.freeZ(z);
-            common.srv(.wrn, "server_chat_convert_responses_tools", "unsupported Responses tool type '%s' skipped\n", .{z});
+            const z = mod.common.dupZ(ty);
+            defer mod.common.freeZ(z);
+            mod.common.srv(.wrn, "server_chat_convert_responses_tools", "unsupported Responses tool type '%s' skipped\n", .{z});
             continue;
         }
         try resp_tool.erase(a, "type");
-        try chatcmpl_tool.set(a, "type", try Value.initString(a, "function"));
+        try chatcmpl_tool.set(a, "type", try json.Value.initString(a, "function"));
 
         if (!resp_tool.contains("strict")) {
             try resp_tool.set(a, "strict", .{ .boolean = true });
@@ -120,23 +114,23 @@ pub fn responsesTools(a: Allocator, tools_in: *const Value) Error!Value {
 /// - `a`: an arena; the result is its.
 ///
 /// Return: the body; `error.InvalidArgument` for a request it cannot read.
-pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Value {
+pub fn responsesToChatcmpl(a: Allocator, response_body: *const json.Value) mod.common.Error!json.Value {
     if (!response_body.contains("input")) {
-        return throw(error.InvalidArgument, "'input' is required", .{});
+        return mod.common.throw(error.InvalidArgument, "'input' is required", .{});
     }
-    if (jsonValue(response_body, "previous_response_id", []const u8, "").len != 0) {
-        return throw(error.InvalidArgument, "llama.cpp does not support 'previous_response_id'.", .{});
+    if (mod.common.jsonValue(response_body, "previous_response_id", []const u8, "").len != 0) {
+        return mod.common.throw(error.InvalidArgument, "llama.cpp does not support 'previous_response_id'.", .{});
     }
 
     const input_value = try response_body.at("input");
     var chatcmpl_body = try response_body.clone(a);
     try chatcmpl_body.erase(a, "input");
-    var chatcmpl_messages = Value.emptyArray();
+    var chatcmpl_messages = json.Value.emptyArray();
 
     if (response_body.contains("instructions")) {
         try chatcmpl_messages.pushBack(a, try object(a, .{
             .{ "role", "system" },
-            .{ "content", jsonValue(response_body, "instructions", []const u8, "") },
+            .{ "content", mod.common.jsonValue(response_body, "instructions", []const u8, "") },
         }));
         try chatcmpl_body.erase(a, "instructions");
     }
@@ -173,14 +167,14 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                     try atIs(&item, "role", "developer")))
             {
                 // #responses_create-input-input_item_list-item-input_message
-                var chatcmpl_content = Value.emptyArray();
+                var chatcmpl_content = json.Value.emptyArray();
 
                 for ((try item.at("content")).array.items) |*input_item| {
-                    const ty = jsonValue(input_item, "type", []const u8, "");
+                    const ty = mod.common.jsonValue(input_item, "type", []const u8, "");
 
                     if (std.mem.eql(u8, ty, "input_text")) {
                         if (!input_item.contains("text")) {
-                            return throw(error.InvalidArgument, "'Input text' requires 'text'", .{});
+                            return mod.common.throw(error.InvalidArgument, "'Input text' requires 'text'", .{});
                         }
                         try chatcmpl_content.pushBack(a, try object(a, .{
                             .{ "text", try (try input_item.at("text")).clone(a) },
@@ -191,16 +185,16 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                         // it has default value("auto") and can be omitted.
 
                         if (!input_item.contains("image_url")) {
-                            return throw(error.InvalidArgument, "'image_url' is required", .{});
+                            return mod.common.throw(error.InvalidArgument, "'image_url' is required", .{});
                         }
                         try chatcmpl_content.pushBack(a, try object(a, .{
                             .{ "image_url", try object(a, .{.{ "url", try (try input_item.at("image_url")).clone(a) }}) },
                             .{ "type", "image_url" },
                         }));
                     } else if (std.mem.eql(u8, ty, "input_file")) {
-                        return throw(error.InvalidArgument, "'input_file' is not supported by llamacpp at this moment", .{});
+                        return mod.common.throw(error.InvalidArgument, "'input_file' is not supported by llamacpp at this moment", .{});
                     } else {
-                        return throw(error.InvalidArgument, "'type' must be one of 'input_text', 'input_image', or 'input_file'", .{});
+                        return mod.common.throw(error.InvalidArgument, "'type' must be one of 'input_text', 'input_image', or 'input_file'", .{});
                     }
                 }
 
@@ -219,7 +213,7 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 try atIs(&item, "type", "message"))
             {
                 // #responses_create-input-input_item_list-item-output_message
-                var chatcmpl_content = Value.emptyArray();
+                var chatcmpl_content = json.Value.emptyArray();
 
                 // Handle both string content and array content
                 if (item.contains("content") and (try item.at("content")).isString()) {
@@ -231,11 +225,11 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 } else if (existsAndIsArray(&item, "content")) {
                     // Array content - process each item
                     for ((try item.at("content")).array.items) |*output_text| {
-                        const ty = jsonValue(output_text, "type", []const u8, "");
+                        const ty = mod.common.jsonValue(output_text, "type", []const u8, "");
                         if (std.mem.eql(u8, ty, "output_text") or std.mem.eql(u8, ty, "input_text")) {
                             // Accept both output_text and input_text (string content gets converted to input_text)
                             if (!existsAndIsString(output_text, "text")) {
-                                return throw(error.InvalidArgument, "'Output text' requires 'text'", .{});
+                                return mod.common.throw(error.InvalidArgument, "'Output text' requires 'text'", .{});
                             }
                             try chatcmpl_content.pushBack(a, try object(a, .{
                                 .{ "text", try (try output_text.at("text")).clone(a) },
@@ -243,14 +237,14 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                             }));
                         } else if (std.mem.eql(u8, ty, "refusal")) {
                             if (!existsAndIsString(output_text, "refusal")) {
-                                return throw(error.InvalidArgument, "'Refusal' requires 'refusal'", .{});
+                                return mod.common.throw(error.InvalidArgument, "'Refusal' requires 'refusal'", .{});
                             }
                             try chatcmpl_content.pushBack(a, try object(a, .{
                                 .{ "refusal", try (try output_text.at("refusal")).clone(a) },
                                 .{ "type", "refusal" },
                             }));
                         } else {
-                            return throw(error.InvalidArgument, "'type' must be one of 'output_text' or 'refusal'", .{});
+                            return mod.common.throw(error.InvalidArgument, "'type' must be one of 'output_text' or 'refusal'", .{});
                         }
                     }
                 }
@@ -258,7 +252,7 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 if (merge_prev) {
                     const prev_msg = try chatcmpl_messages.back();
                     if (!existsAndIsArray(prev_msg, "content")) {
-                        try prev_msg.set(a, "content", Value.emptyArray());
+                        try prev_msg.set(a, "content", json.Value.emptyArray());
                     }
                     const prev_content = try prev_msg.index(a, "content");
                     try prev_content.insert(a, &chatcmpl_content);
@@ -287,7 +281,7 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 if (merge_prev) {
                     const prev_msg = try chatcmpl_messages.back();
                     if (!existsAndIsArray(prev_msg, "tool_calls")) {
-                        try prev_msg.set(a, "tool_calls", Value.emptyArray());
+                        try prev_msg.set(a, "tool_calls", json.Value.emptyArray());
                     }
                     try (try prev_msg.index(a, "tool_calls")).pushBack(a, tool_call);
                 } else {
@@ -312,20 +306,20 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                     const chatcmpl_outputs = try (try item.at("output")).clone(a);
                     for (chatcmpl_outputs.array.items) |*chatcmpl_output| {
                         if (!chatcmpl_output.contains("type")) {
-                            return throw(error.InvalidArgument, "Output of tool call missing 'type' field", .{});
+                            return mod.common.throw(error.InvalidArgument, "Output of tool call missing 'type' field", .{});
                         }
                         const is_text = try atIs(chatcmpl_output, "type", "input_text");
                         const is_image = try atIs(chatcmpl_output, "type", "input_image");
                         if (!is_text and !is_image) {
-                            return throw(error.InvalidArgument, "Output of tool call should be 'Input text' or 'Input image'", .{});
+                            return mod.common.throw(error.InvalidArgument, "Output of tool call should be 'Input text' or 'Input image'", .{});
                         }
                         if (is_text) {
-                            try chatcmpl_output.set(a, "type", try Value.initString(a, "text"));
+                            try chatcmpl_output.set(a, "type", try json.Value.initString(a, "text"));
                         } else {
                             if (!chatcmpl_output.contains("image_url")) {
-                                return throw(error.InvalidArgument, "'image_url' is required", .{});
+                                return mod.common.throw(error.InvalidArgument, "'image_url' is required", .{});
                             }
-                            try chatcmpl_output.set(a, "type", try Value.initString(a, "image_url"));
+                            try chatcmpl_output.set(a, "type", try json.Value.initString(a, "image_url"));
                             const url = try object(a, .{.{ "url", try (try chatcmpl_output.at("image_url")).clone(a) }});
                             try chatcmpl_output.set(a, "image_url", url);
                         }
@@ -343,14 +337,14 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 // #responses_create-input-input_item_list-item-reasoning
 
                 if (!existsAndIsArray(&item, "content")) {
-                    return throw(error.InvalidArgument, "item['content'] is not an array", .{});
+                    return mod.common.throw(error.InvalidArgument, "item['content'] is not an array", .{});
                 }
                 const content = try item.at("content");
                 if (content.empty()) {
-                    return throw(error.InvalidArgument, "item['content'] is empty", .{});
+                    return mod.common.throw(error.InvalidArgument, "item['content'] is empty", .{});
                 }
                 if (!existsAndIsString(&content.array.items[0], "text")) {
-                    return throw(error.InvalidArgument, "item['content']['text'] is not a string", .{});
+                    return mod.common.throw(error.InvalidArgument, "item['content']['text'] is not a string", .{});
                 }
                 const text = try (try content.array.items[0].at("text")).clone(a);
 
@@ -360,16 +354,16 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
                 } else {
                     try chatcmpl_messages.pushBack(a, try object(a, .{
                         .{ "role", "assistant" },
-                        .{ "content", Value.emptyArray() },
+                        .{ "content", json.Value.emptyArray() },
                         .{ "reasoning_content", text },
                     }));
                 }
             } else {
-                return throw(error.InvalidArgument, "Cannot determine type of 'item'", .{});
+                return mod.common.throw(error.InvalidArgument, "Cannot determine type of 'item'", .{});
             }
         }
     } else {
-        return throw(error.InvalidArgument, "'input' must be a string or array of objects", .{});
+        return mod.common.throw(error.InvalidArgument, "'input' must be a string or array of objects", .{});
     }
 
     try chatcmpl_body.set(a, "messages", chatcmpl_messages);
@@ -399,27 +393,27 @@ pub fn responsesToChatcmpl(a: Allocator, response_body: *const Value) Error!Valu
     if (response_body.contains("text")) {
         const text = try response_body.at("text");
         if (!text.isObject()) {
-            return throw(error.InvalidArgument, "'text' must be an object", .{});
+            return mod.common.throw(error.InvalidArgument, "'text' must be an object", .{});
         }
 
         try chatcmpl_body.erase(a, "text");
         if (text.contains("format")) {
             const format = try text.at("format");
             if (!format.isObject()) {
-                return throw(error.InvalidArgument, "'text.format' must be an object", .{});
+                return mod.common.throw(error.InvalidArgument, "'text.format' must be an object", .{});
             }
 
-            const ty = jsonValue(format, "type", []const u8, "");
+            const ty = mod.common.jsonValue(format, "type", []const u8, "");
             if (std.mem.eql(u8, ty, "json_schema")) {
-                var rf = Value.emptyObject();
-                try rf.set(a, "type", try Value.initString(a, "json_schema"));
+                var rf = json.Value.emptyObject();
+                try rf.set(a, "type", try json.Value.initString(a, "json_schema"));
                 try rf.set(a, "json_schema", try format.clone(a));
                 try chatcmpl_body.set(a, "response_format", rf);
                 try (try (try chatcmpl_body.index(a, "response_format")).index(a, "json_schema")).erase(a, "type");
             } else if (std.mem.eql(u8, ty, "json_object") or std.mem.eql(u8, ty, "text")) {
                 try chatcmpl_body.set(a, "response_format", try format.clone(a));
             } else if (ty.len != 0) {
-                return throw(error.InvalidArgument, "'text.format.type' must be one of 'text', 'json_object', or 'json_schema'", .{});
+                return mod.common.throw(error.InvalidArgument, "'text.format.type' must be one of 'text', 'json_object', or 'json_schema'", .{});
             }
         }
     }
@@ -465,26 +459,26 @@ pub fn normalizeAnthropicBillingHeader(system_text: []u8) void {
             system_text[index_replace + i] = 'f';
         }
     } else {
-        const z = common.dupZ(system_text);
-        defer common.freeZ(z);
-        log.err("anthropic string not as expected: %s", .{z});
+        const z = mod.common.dupZ(system_text);
+        defer mod.common.freeZ(z);
+        tools.log.err("anthropic string not as expected: %s", .{z});
     }
 }
 
 /// A `source` block's image as a chat `image_url` part: a data URI for
 /// `base64`, the URL for `url`, nothing for any other type.
-fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
-    const source_type = jsonValue(source, "type", []const u8, "");
+fn imageUrlOf(a: Allocator, source: *const json.Value) mod.common.Error!?json.Value {
+    const source_type = mod.common.jsonValue(source, "type", []const u8, "");
     if (std.mem.eql(u8, source_type, "base64")) {
-        const media_type = jsonValue(source, "media_type", []const u8, "image/jpeg");
-        const data = jsonValue(source, "data", []const u8, "");
+        const media_type = mod.common.jsonValue(source, "media_type", []const u8, "image/jpeg");
+        const data = mod.common.jsonValue(source, "data", []const u8, "");
         const url = try std.mem.concat(a, u8, &.{ "data:", media_type, ";base64,", data });
         return try object(a, .{
             .{ "type", "image_url" },
             .{ "image_url", try object(a, .{.{ "url", url }}) },
         });
     } else if (std.mem.eql(u8, source_type, "url")) {
-        const url = jsonValue(source, "url", []const u8, "");
+        const url = mod.common.jsonValue(source, "url", []const u8, "");
         return try object(a, .{
             .{ "type", "image_url" },
             .{ "image_url", try object(a, .{.{ "url", url }}) },
@@ -504,12 +498,12 @@ fn imageUrlOf(a: Allocator, source: *const Value) Error!?Value {
 /// - `a`: an arena; the result is its.
 ///
 /// Return: the body; `error.RuntimeError` without `messages`.
-pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
-    var oai_body: Value = .null;
+pub fn anthropicToOai(a: Allocator, body: *const json.Value) mod.common.Error!json.Value {
+    var oai_body: json.Value = .null;
 
     // Convert system prompt
-    var oai_messages = Value.emptyArray();
-    const system_param = try jsonValueJson(a, body, "system", .null);
+    var oai_messages = json.Value.emptyArray();
+    const system_param = try mod.common.jsonValueJson(a, body, "system", .null);
     if (!system_param.isNull()) {
         var system_content: std.ArrayList(u8) = .empty;
 
@@ -518,8 +512,8 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
             normalizeAnthropicBillingHeader(system_content.items);
         } else if (system_param.isArray()) {
             for (system_param.array.items) |*block| {
-                if (std.mem.eql(u8, jsonValue(block, "type", []const u8, ""), "text")) {
-                    const system_text = try a.dupe(u8, jsonValue(block, "text", []const u8, ""));
+                if (std.mem.eql(u8, mod.common.jsonValue(block, "type", []const u8, ""), "text")) {
+                    const system_text = try a.dupe(u8, mod.common.jsonValue(block, "text", []const u8, ""));
                     normalizeAnthropicBillingHeader(system_text);
                     try system_content.appendSlice(a, system_text);
                 }
@@ -534,12 +528,12 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 
     // Convert messages
     if (!body.contains("messages")) {
-        return throw(error.RuntimeError, "'messages' is required", .{});
+        return mod.common.throw(error.RuntimeError, "'messages' is required", .{});
     }
     const messages = try body.at("messages");
     if (messages.isArray()) {
         for (messages.array.items) |*msg| {
-            const role = jsonValue(msg, "role", []const u8, "");
+            const role = mod.common.jsonValue(msg, "role", []const u8, "");
 
             if (!msg.contains("content")) {
                 if (std.mem.eql(u8, role, "assistant")) {
@@ -561,39 +555,39 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                 continue;
             }
 
-            var tool_calls = Value.emptyArray();
-            var converted_content = Value.emptyArray();
-            var tool_results = Value.emptyArray();
+            var tool_calls = json.Value.emptyArray();
+            var converted_content = json.Value.emptyArray();
+            var tool_results = json.Value.emptyArray();
             var reasoning_content: std.ArrayList(u8) = .empty;
             var has_tool_calls = false;
 
             for (content.array.items) |*block| {
-                const ty = jsonValue(block, "type", []const u8, "");
+                const ty = mod.common.jsonValue(block, "type", []const u8, "");
 
                 if (std.mem.eql(u8, ty, "text")) {
                     try converted_content.pushBack(a, try block.clone(a));
                 } else if (std.mem.eql(u8, ty, "thinking")) {
-                    try reasoning_content.appendSlice(a, jsonValue(block, "thinking", []const u8, ""));
+                    try reasoning_content.appendSlice(a, mod.common.jsonValue(block, "thinking", []const u8, ""));
                 } else if (std.mem.eql(u8, ty, "image")) {
-                    const source = try jsonValueJson(a, block, "source", Value.emptyObject());
+                    const source = try mod.common.jsonValueJson(a, block, "source", json.Value.emptyObject());
                     if (try imageUrlOf(a, &source)) |part| {
                         try converted_content.pushBack(a, part);
                     }
                 } else if (std.mem.eql(u8, ty, "tool_use")) {
-                    const input = try jsonValueJson(a, block, "input", Value.emptyObject());
+                    const input = try mod.common.jsonValueJson(a, block, "input", json.Value.emptyObject());
                     try tool_calls.pushBack(a, try object(a, .{
-                        .{ "id", jsonValue(block, "id", []const u8, "") },
+                        .{ "id", mod.common.jsonValue(block, "id", []const u8, "") },
                         .{ "type", "function" },
                         .{ "function", try object(a, .{
-                            .{ "name", jsonValue(block, "name", []const u8, "") },
+                            .{ "name", mod.common.jsonValue(block, "name", []const u8, "") },
                             .{ "arguments", try json.dump(a, &input, -1) },
                         }) },
                     }));
                     has_tool_calls = true;
                 } else if (std.mem.eql(u8, ty, "tool_result")) {
-                    const tool_use_id = jsonValue(block, "tool_use_id", []const u8, "");
+                    const tool_use_id = mod.common.jsonValue(block, "tool_use_id", []const u8, "");
 
-                    const result_content = try jsonValueJson(a, block, "content", .null);
+                    const result_content = try mod.common.jsonValueJson(a, block, "content", .null);
                     if (result_content.isString()) {
                         try tool_results.pushBack(a, try object(a, .{
                             .{ "role", "tool" },
@@ -603,13 +597,13 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                     } else if (result_content.isArray()) {
                         // Single-pass: build both text and content_parts, decide format at the end
                         var result_text: std.ArrayList(u8) = .empty;
-                        var content_parts = Value.emptyArray();
+                        var content_parts = json.Value.emptyArray();
                         var keep_parts = false; // images or tool references
 
                         for (result_content.array.items) |*cb| {
-                            const c_type = jsonValue(cb, "type", []const u8, "");
+                            const c_type = mod.common.jsonValue(cb, "type", []const u8, "");
                             if (std.mem.eql(u8, c_type, "text")) {
-                                const text = jsonValue(cb, "text", []const u8, "");
+                                const text = mod.common.jsonValue(cb, "text", []const u8, "");
                                 try result_text.appendSlice(a, text);
                                 try content_parts.pushBack(a, try object(a, .{
                                     .{ "type", "text" },
@@ -617,7 +611,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                                 }));
                             } else if (std.mem.eql(u8, c_type, "image")) {
                                 keep_parts = true;
-                                const source = try jsonValueJson(a, cb, "source", Value.emptyObject());
+                                const source = try mod.common.jsonValueJson(a, cb, "source", json.Value.emptyObject());
                                 if (try imageUrlOf(a, &source)) |part| {
                                     try content_parts.pushBack(a, part);
                                 }
@@ -626,7 +620,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                                 keep_parts = true;
                                 try content_parts.pushBack(a, try object(a, .{
                                     .{ "type", "tool_reference" },
-                                    .{ "name", jsonValue(cb, "tool_name", []const u8, "") },
+                                    .{ "name", mod.common.jsonValue(cb, "tool_name", []const u8, "") },
                                 }));
                             }
                         }
@@ -661,13 +655,13 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
                 if (!converted_content.empty()) {
                     try new_msg.set(a, "content", converted_content);
                 } else if (has_tool_calls or reasoning_content.items.len != 0) {
-                    try new_msg.set(a, "content", try Value.initString(a, ""));
+                    try new_msg.set(a, "content", try json.Value.initString(a, ""));
                 }
                 if (!tool_calls.empty()) {
                     try new_msg.set(a, "tool_calls", tool_calls);
                 }
                 if (reasoning_content.items.len != 0) {
-                    try new_msg.set(a, "reasoning_content", try Value.initString(a, reasoning_content.items));
+                    try new_msg.set(a, "reasoning_content", try json.Value.initString(a, reasoning_content.items));
                 }
                 try oai_messages.pushBack(a, new_msg);
             }
@@ -684,14 +678,14 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
     if (body.contains("tools")) {
         const tools_in = try body.at("tools");
         if (tools_in.isArray()) {
-            var oai_tools = Value.emptyArray();
+            var oai_tools = json.Value.emptyArray();
             for (tools_in.array.items) |*tool| {
-                const parameters = if (tool.contains("input_schema")) try (try tool.at("input_schema")).clone(a) else Value.emptyObject();
+                const parameters = if (tool.contains("input_schema")) try (try tool.at("input_schema")).clone(a) else json.Value.emptyObject();
                 try oai_tools.pushBack(a, try object(a, .{
                     .{ "type", "function" },
                     .{ "function", try object(a, .{
-                        .{ "name", jsonValue(tool, "name", []const u8, "") },
-                        .{ "description", jsonValue(tool, "description", []const u8, "") },
+                        .{ "name", mod.common.jsonValue(tool, "name", []const u8, "") },
+                        .{ "description", mod.common.jsonValue(tool, "description", []const u8, "") },
                         .{ "parameters", parameters },
                     }) },
                 }));
@@ -707,11 +701,11 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
     if (body.contains("tool_choice")) {
         const tc = try body.at("tool_choice");
         if (tc.isObject()) {
-            const ty = jsonValue(tc, "type", []const u8, "");
+            const ty = mod.common.jsonValue(tc, "type", []const u8, "");
             if (std.mem.eql(u8, ty, "auto")) {
-                try oai_body.set(a, "tool_choice", try Value.initString(a, "auto"));
+                try oai_body.set(a, "tool_choice", try json.Value.initString(a, "auto"));
             } else if (std.mem.eql(u8, ty, "any") or std.mem.eql(u8, ty, "tool")) {
-                try oai_body.set(a, "tool_choice", try Value.initString(a, "required"));
+                try oai_body.set(a, "tool_choice", try json.Value.initString(a, "required"));
             }
         }
     }
@@ -737,20 +731,20 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 
     // Handle Anthropic-specific thinking param
     if (body.contains("thinking")) {
-        const thinking = try jsonValueJson(a, body, "thinking", Value.emptyObject());
-        const thinking_type = jsonValue(&thinking, "type", []const u8, "");
+        const thinking = try mod.common.jsonValueJson(a, body, "thinking", json.Value.emptyObject());
+        const thinking_type = mod.common.jsonValue(&thinking, "type", []const u8, "");
         if (std.mem.eql(u8, thinking_type, "enabled")) {
-            const budget_tokens = jsonValue(&thinking, "budget_tokens", c_int, 10000);
+            const budget_tokens = mod.common.jsonValue(&thinking, "budget_tokens", c_int, 10000);
             try oai_body.set(a, "thinking_budget_tokens", .{ .number_integer = budget_tokens });
         }
     }
 
     // Handle Anthropic-specific metadata param
     if (body.contains("metadata")) {
-        const metadata = try jsonValueJson(a, body, "metadata", Value.emptyObject());
-        const user_id = jsonValue(&metadata, "user_id", []const u8, "");
+        const metadata = try mod.common.jsonValueJson(a, body, "metadata", json.Value.emptyObject());
+        const user_id = mod.common.jsonValue(&metadata, "user_id", []const u8, "");
         if (user_id.len != 0) {
-            try oai_body.set(a, "__metadata_user_id", try Value.initString(a, user_id));
+            try oai_body.set(a, "__metadata_user_id", try json.Value.initString(a, user_id));
         }
     }
 
@@ -772,28 +766,28 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 /// parses, `out_of_range` "stoul: out of range" on `ERANGE` (thrown here
 /// as `error.RuntimeError`, which the server answers as it answers any
 /// exception but `invalid_argument`). A minus sign negates modulo 2^64.
-pub fn stoul(s: []const u8) Error!c_ulong {
+pub fn stoul(s: []const u8) mod.common.Error!c_ulong {
     const p = stdlib.num.strtoul(std.mem.sliceTo(s, 0), 10);
-    if (p.range) return throw(error.RuntimeError, "stoul: out of range", .{});
-    if (p.end == 0) return throw(error.InvalidArgument, "stoul: no conversion", .{});
+    if (p.range) return mod.common.throw(error.RuntimeError, "stoul: out of range", .{});
+    if (p.end == 0) return mod.common.throw(error.InvalidArgument, "stoul: no conversion", .{});
     return p.value;
 }
 
 /// Ports libc++'s `std::stoll` (`as_integer` over `strtoll`, base 10) on
 /// `c_str()`, as `stoul` does.
-pub fn stoll(s: []const u8) Error!c_longlong {
+pub fn stoll(s: []const u8) mod.common.Error!c_longlong {
     const p = stdlib.num.strtoll(std.mem.sliceTo(s, 0), 10);
-    if (p.range) return throw(error.RuntimeError, "stoll: out of range", .{});
-    if (p.end == 0) return throw(error.InvalidArgument, "stoll: no conversion", .{});
+    if (p.range) return mod.common.throw(error.RuntimeError, "stoll: out of range", .{});
+    if (p.end == 0) return mod.common.throw(error.InvalidArgument, "stoll: no conversion", .{});
     return p.value;
 }
 
 /// Ports libc++'s `std::stof` (`as_float` over `strtof`) on `c_str()`, as
 /// `stoul` does.
-pub fn stof(s: []const u8) Error!f32 {
+pub fn stof(s: []const u8) mod.common.Error!f32 {
     const p = stdlib.num.strtof(std.mem.sliceTo(s, 0));
-    if (p.range) return throw(error.RuntimeError, "stof: out of range", .{});
-    if (p.end == 0) return throw(error.InvalidArgument, "stof: no conversion", .{});
+    if (p.range) return mod.common.throw(error.RuntimeError, "stof: out of range", .{});
+    if (p.end == 0) return mod.common.throw(error.InvalidArgument, "stof: no conversion", .{});
     return p.value;
 }
 
@@ -814,27 +808,27 @@ pub fn stof(s: []const u8) Error!f32 {
 /// response format other than `json`.
 pub fn transcriptionsToChatcmpl(
     a: Allocator,
-    inp_body: *const Value,
+    inp_body: *const json.Value,
     tmpls: *const chat.templates.Templates,
     in_file: ?[]const u8,
     out_files: *std.ArrayList([]u8),
-) Error!Value {
+) mod.common.Error!json.Value {
     // TODO @ngxson : this function may need to be improved in the future
     // handle input files
     out_files.clearRetainingCapacity();
     if (in_file) |f| {
         try out_files.append(a, try a.dupe(u8, f));
     } else {
-        return throw(error.InvalidArgument, "No input file found for transcription", .{});
+        return mod.common.throw(error.InvalidArgument, "No input file found for transcription", .{});
     }
 
     // handle input data
     var prompt: std.ArrayList(u8) = .empty;
-    try prompt.appendSlice(a, jsonValue(inp_body, "prompt", []const u8, ""));
-    const language = jsonValue(inp_body, "language", []const u8, "");
-    const response_format = jsonValue(inp_body, "response_format", []const u8, "json");
+    try prompt.appendSlice(a, mod.common.jsonValue(inp_body, "prompt", []const u8, ""));
+    const language = mod.common.jsonValue(inp_body, "language", []const u8, "");
+    const response_format = mod.common.jsonValue(inp_body, "response_format", []const u8, "json");
     if (!std.mem.eql(u8, response_format, "json")) {
-        return throw(error.InvalidArgument, "Only 'json' response_format is supported for transcription", .{});
+        return mod.common.throw(error.InvalidArgument, "Only 'json' response_format is supported for transcription", .{});
     }
     const preset = try chat.templates.getAsrPrompt(a, tmpls, language);
     if (prompt.items.len == 0) {
@@ -845,9 +839,9 @@ pub fn transcriptionsToChatcmpl(
         const lang = language[0 .. std.mem.indexOfScalar(u8, language, 0) orelse language.len];
         try prompt.print(a, " (language: {s})", .{lang});
     }
-    try prompt.appendSlice(a, common.getMediaMarker());
+    try prompt.appendSlice(a, mod.common.getMediaMarker());
 
-    var messages = Value.emptyArray();
+    var messages = json.Value.emptyArray();
     if (preset.system.len != 0) {
         try messages.pushBack(a, try object(a, .{ .{ "role", "system" }, .{ "content", preset.system } }));
     }
@@ -857,7 +851,7 @@ pub fn transcriptionsToChatcmpl(
     try chatcmpl_body.set(a, "messages", messages);
 
     // because input from form-data, everything is string, we need to correct the types here
-    const stream = jsonValue(inp_body, "stream", []const u8, "false");
+    const stream = mod.common.jsonValue(inp_body, "stream", []const u8, "false");
     try chatcmpl_body.set(a, "stream", .{ .boolean = std.mem.eql(u8, stream, "true") });
 
     if (inp_body.contains("max_tokens")) {
@@ -867,7 +861,7 @@ pub fn transcriptionsToChatcmpl(
 
     if (inp_body.contains("temperature")) {
         const inp = try (try inp_body.at("temperature")).get([]const u8);
-        try chatcmpl_body.set(a, "temperature", try Value.from(a, try stof(inp)));
+        try chatcmpl_body.set(a, "temperature", try json.Value.from(a, try stof(inp)));
     }
 
     return chatcmpl_body;
@@ -886,37 +880,37 @@ pub fn transcriptionsToChatcmpl(
 /// - `a`: an arena; the result is its.
 ///
 /// Return: the body; `error.InvalidArgument` for what it cannot convert.
-pub fn speechToTts(a: Allocator, inp_body: *const Value) Error!Value {
+pub fn speechToTts(a: Allocator, inp_body: *const json.Value) mod.common.Error!json.Value {
     var tts_body = try inp_body.clone(a); // copy all fields
 
     // a custom voice is given as {"id": "..."}
     if (inp_body.contains("voice") and (try inp_body.at("voice")).isObject()) {
-        try tts_body.set(a, "voice", try Value.initString(a, jsonValue(try inp_body.at("voice"), "id", []const u8, "")));
+        try tts_body.set(a, "voice", try json.Value.initString(a, mod.common.jsonValue(try inp_body.at("voice"), "id", []const u8, "")));
     }
 
     // the default of the OpenAI API is mp3, we have no encoder for it
-    const response_format = jsonValue(inp_body, "response_format", []const u8, "wav");
+    const response_format = mod.common.jsonValue(inp_body, "response_format", []const u8, "wav");
     if (std.mem.eql(u8, response_format, "pcm")) {
-        try tts_body.set(a, "response_format", try Value.initString(a, "pcm16")); // "pcm" is float32 in /tts
+        try tts_body.set(a, "response_format", try json.Value.initString(a, "pcm16")); // "pcm" is float32 in /tts
     } else if (std.mem.eql(u8, response_format, "wav")) {
-        try tts_body.set(a, "response_format", try Value.initString(a, "wav"));
+        try tts_body.set(a, "response_format", try json.Value.initString(a, "wav"));
     } else {
-        return throw(error.InvalidArgument, "Only 'wav' and 'pcm' response_format are supported for speech", .{});
+        return mod.common.throw(error.InvalidArgument, "Only 'wav' and 'pcm' response_format are supported for speech", .{});
     }
 
-    const stream_format = jsonValue(inp_body, "stream_format", []const u8, "");
+    const stream_format = mod.common.jsonValue(inp_body, "stream_format", []const u8, "");
     if (std.mem.eql(u8, stream_format, "audio")) {
         try tts_body.set(a, "stream", .{ .boolean = true });
     } else if (stream_format.len != 0) {
-        return throw(error.InvalidArgument, "Only 'audio' stream_format is supported for speech", .{});
+        return mod.common.throw(error.InvalidArgument, "Only 'audio' stream_format is supported for speech", .{});
     }
 
-    if (jsonValue(inp_body, "speed", f64, 1.0) != 1.0) {
-        return throw(error.InvalidArgument, "'speed' is not supported for speech", .{});
+    if (mod.common.jsonValue(inp_body, "speed", f64, 1.0) != 1.0) {
+        return mod.common.throw(error.InvalidArgument, "'speed' is not supported for speech", .{});
     }
 
-    if (jsonValue(inp_body, "instructions", []const u8, "").len != 0) {
-        common.srv(.wrn, "convert_speech_to_tts", "%s", .{@as([*:0]const u8, "'instructions' is not supported for speech and is ignored\n")});
+    if (mod.common.jsonValue(inp_body, "instructions", []const u8, "").len != 0) {
+        mod.common.srv(.wrn, "convert_speech_to_tts", "%s", .{@as([*:0]const u8, "'instructions' is not supported for speech and is ignored\n")});
     }
 
     return tts_body;
@@ -931,11 +925,11 @@ pub fn speechToTts(a: Allocator, inp_body: *const Value) Error!Value {
 /// `error.RuntimeError` on a template error.
 ///
 /// Return: owned by `gpa`.
-pub fn getAsrPrompt(gpa: Allocator, model: ?*const common.c.llama_model) Error![]common.Token {
-    const c = common.c;
+pub fn getAsrPrompt(gpa: Allocator, model: ?*const mod.common.c.llama_model) mod.common.Error![]mod.common.Token {
+    const c = mod.common.c;
     const src = c.llama_model_chat_template(model, "asr");
     if (src == null) {
-        return gpa.alloc(common.Token, 0);
+        return gpa.alloc(mod.common.Token, 0);
     }
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -943,13 +937,13 @@ pub fn getAsrPrompt(gpa: Allocator, model: ?*const common.c.llama_model) Error![
 
     const vocab = c.llama_model_get_vocab(model);
     const bos = c.llama_vocab_bos(vocab);
-    const bos_text: []const u8 = if (bos == common.token_null) "" else try tools.common.tokenToPiece(a, vocab, bos, true);
+    const bos_text: []const u8 = if (bos == mod.common.token_null) "" else try tools.common.tokenToPiece(a, vocab, bos, true);
     var tmpl = try chat.template.Template.init(a, std.mem.span(src), bos_text, "");
     defer tmpl.deinit();
 
-    var inp = Value.emptyObject();
-    try inp.set(a, "bos_token", try Value.initString(a, tmpl.bosToken()));
-    try inp.set(a, "messages", Value.emptyArray());
+    var inp = json.Value.emptyObject();
+    try inp.set(a, "bos_token", try json.Value.initString(a, tmpl.bosToken()));
+    try inp.set(a, "messages", json.Value.emptyArray());
     try inp.set(a, "add_generation_prompt", .{ .boolean = true });
 
     var r: chat.template.Render = undefined;
@@ -957,7 +951,7 @@ pub fn getAsrPrompt(gpa: Allocator, model: ?*const common.c.llama_model) Error![
     defer r.deinit();
     try r.bindJson(&inp, false);
     const prompt = try r.run(&tmpl, a);
-    return gpa.dupe(common.Token, try common.tokenize(a, vocab, prompt, false, true));
+    return gpa.dupe(mod.common.Token, try mod.common.tokenize(a, vocab, prompt, false, true));
 }
 
 // -----------------------------------------------------------------------------

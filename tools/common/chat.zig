@@ -22,11 +22,9 @@
 //! (capabilities, role workarounds, the auto-parser) is not ported.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const c = @import("tools_h");
-const log = @import("log.zig");
-const common = @import("common.zig");
-const io = @import("io.zig");
 
 /// `CHATML_TEMPLATE_SRC` (chat.cpp:792 @b1b770d90).
 const chatml_template_src =
@@ -47,7 +45,7 @@ pub const Msg = struct {
 /// What escapes `main` from these paths: libc++'s message for an uncaught
 /// `std::runtime_error`, then `abort`.
 fn terminate(what: [*:0]const u8) noreturn {
-    io.eprintf("libc++abi: terminating due to uncaught exception of type std::runtime_error: %s\n", .{what});
+    mod.io.eprintf("libc++abi: terminating due to uncaught exception of type std::runtime_error: %s\n", .{what});
     std.process.abort();
 }
 
@@ -161,12 +159,12 @@ pub const Templates = struct {
             if (std.mem.indexOf(u8, default_src, jinja_variable_name) != null or
                 std.mem.indexOf(u8, tool_use_src, jinja_variable_name) != null)
             {
-                log.wrn("common_chat_templates_init: warning: vocab does not have a %s token, jinja template won't " ++
+                mod.log.wrn("common_chat_templates_init: warning: vocab does not have a %s token, jinja template won't " ++
                     "work as intended.\n", .{name});
             }
             return "";
         }
-        return common.tokenToPiece(a, vocab, token, true);
+        return mod.common.tokenToPiece(a, vocab, token, true);
     }
 
     /// Ports `common_chat_templates_apply_legacy` (chat.cpp:1633 @b1b770d90):
@@ -258,7 +256,7 @@ pub const Templates = struct {
 /// count clipped to what is left.
 fn substr(s: []const u8, pos: usize, count: usize) []const u8 {
     if (pos > s.len) {
-        io.eprintf("libc++abi: terminating due to uncaught exception of type std::out_of_range: basic_string\n", .{});
+        mod.io.eprintf("libc++abi: terminating due to uncaught exception of type std::out_of_range: basic_string\n", .{});
         std.process.abort();
     }
     return s[pos..][0..@min(count, s.len - pos)];

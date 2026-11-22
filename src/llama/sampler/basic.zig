@@ -25,26 +25,15 @@
 //! exact. `make sampler-diff` is the oracle that confirms each.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const libcxx = @import("stdlib").libcxx;
-const core = @import("core.zig");
-
-const c = impl.c;
-const Sampler = core.Sampler;
-const SamplerI = core.SamplerI;
-const TokenData = core.TokenData;
-const TokenDataArray = core.TokenDataArray;
-const Token = core.Token;
-const Backend = core.Backend;
-const src = core.src;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 const inf = std.math.inf(f32);
 
 /// Ports `llama_sampler_backend_copy_state` (llama-sampler.cpp:575 @b1b770d90)
 /// for the samplers whose only state is immutable configuration:
 /// `llama_sampler_backend::copy_state` does nothing.
-fn copyStateNone(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callconv(.c) void {
+fn copyStateNone(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     _ = src_smpl;
     _ = dst_smpl;
 }
@@ -54,34 +43,34 @@ fn copyStateNone(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callconv(.c
 
 /// Ports `llama_sampler_greedy` (llama-sampler.cpp:1022 @b1b770d90).
 const Greedy = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
 };
 
 /// Ports `llama_sampler_greedy_name` (llama-sampler.cpp:1025 @b1b770d90).
-fn greedyName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(Greedy, smpl).base.getName();
+fn greedyName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(Greedy, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_greedy_reset` (llama-sampler.cpp:1030 @b1b770d90).
-fn greedyReset(smpl: [*c]Sampler) callconv(.c) void {
+fn greedyReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     _ = smpl;
 }
 
 /// Ports `llama_sampler_greedy_clone` (llama-sampler.cpp:1035 @b1b770d90).
-fn greedyClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
+fn greedyClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     _ = smpl;
     return llama_sampler_init_greedy();
 }
 
 /// Ports `llama_sampler_greedy_free` (llama-sampler.cpp:1050 @b1b770d90).
-fn greedyFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(Greedy, core.ctxOf(Greedy, smpl));
+fn greedyFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(Greedy, llama.sampler.core.ctxOf(Greedy, smpl));
 }
 
 /// Ports `llama_sampler_greedy_apply` (llama-sampler.cpp:1054 @b1b770d90).
 ///
 /// Selects the first maximum.
-fn greedyApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
+fn greedyApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
     _ = smpl;
     cur_p.*.selected = 0;
     for (1..cur_p.*.size) |i| {
@@ -92,10 +81,10 @@ fn greedyApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_greedy_backend_init` (llama-sampler.cpp:1063 @b1b770d90).
-fn greedyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn greedyBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(Greedy, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(Greedy, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
@@ -105,26 +94,26 @@ fn greedyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_ou
 /// A chain whose earlier samplers left `candidates` -- a
 /// filtered list, so the argmax is a position in it -- maps the argmax back
 /// to the token id through it.
-fn greedyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
+fn greedyBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
     _ = gf;
     _ = smpl;
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    var curl = c.ggml_argmax(ctx, logits);
-    _ = c.ggml_set_name(curl, "greedy_argmax");
+    var curl = llama.impl.c.ggml_argmax(ctx, logits);
+    _ = llama.impl.c.ggml_set_name(curl, "greedy_argmax");
 
     if (data.*.candidates != null) {
-        const candidates = c.ggml_reshape_2d(ctx, data.*.candidates, 1, c.ggml_nelements(data.*.candidates));
-        curl = c.ggml_get_rows(ctx, candidates, curl);
-        _ = c.ggml_set_name(curl, "greedy_sampled_token");
+        const candidates = llama.impl.c.ggml_reshape_2d(ctx, data.*.candidates, 1, llama.impl.c.ggml_nelements(data.*.candidates));
+        curl = llama.impl.c.ggml_get_rows(ctx, candidates, curl);
+        _ = llama.impl.c.ggml_set_name(curl, "greedy_sampled_token");
     }
 
     data.*.sampled = curl;
 }
 
 /// Ports `llama_sampler_greedy_i` (llama-sampler.cpp:1099 @b1b770d90).
-var greedy_iface: SamplerI = .{
+var greedy_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = greedyName,
     .accept = null,
     .apply = greedyApply,
@@ -142,8 +131,8 @@ var greedy_iface: SamplerI = .{
 /// Ports `llama_sampler_init_greedy` (llama-sampler.cpp:1114 @b1b770d90).
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_greedy() callconv(.c) [*c]Sampler {
-    return core.llama_sampler_init(&greedy_iface, core.create(Greedy, .{ .base = Backend.init("greedy") }));
+pub export fn llama_sampler_init_greedy() callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama.sampler.core.llama_sampler_init(&greedy_iface, llama.sampler.core.create(Greedy, .{ .base = llama.sampler.core.Backend.init("greedy") }));
 }
 
 // -----------------------------------------------------------------------------
@@ -151,21 +140,21 @@ pub export fn llama_sampler_init_greedy() callconv(.c) [*c]Sampler {
 
 /// Ports `llama_sampler_dist` (llama-sampler.cpp:1125 @b1b770d90).
 pub const Dist = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     seed: u32,
     seed_cur: u32,
 
-    rng: libcxx.Mt19937,
+    rng: stdlib.libcxx.Mt19937,
 
     /// Draws for multi-output backend sampling come from this scratch engine,
     /// so a rejected token does not advance `rng`.
     backend_transactional: bool,
-    rng_backend: libcxx.Mt19937,
+    rng_backend: stdlib.libcxx.Mt19937,
     n_backend_draws_generated: usize,
     n_backend_draws_committed: usize,
 
     /// The current sampling graph's inputs.
-    inp_uniforms: std.ArrayList(*c.struct_ggml_tensor),
+    inp_uniforms: std.ArrayList(*llama.impl.c.struct_ggml_tensor),
 
     /// Ports `llama_sampler_dist`'s `copy_state` (llama-sampler.cpp:1142 @b1b770d90).
     fn copyState(self: *Dist, other: *const Dist) void {
@@ -179,8 +168,8 @@ pub const Dist = struct {
 };
 
 /// Ports `llama_sampler_dist_name` (llama-sampler.cpp:1152 @b1b770d90).
-fn distName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(Dist, smpl).base.getName();
+fn distName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(Dist, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_dist_apply` (llama-sampler.cpp:1157 @b1b770d90).
@@ -189,8 +178,8 @@ fn distName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// `double`, the target is that sum times one `uniform<double>` draw, and the
 /// first candidate whose running `double` sum reaches it is selected. Each
 /// `p` is then divided by the `double` sum and rounded back to `float`.
-fn distApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(Dist, smpl);
+fn distApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Dist, smpl);
 
     if (cur_p.*.size == 0) {
         cur_p.*.selected = -1;
@@ -202,30 +191,30 @@ fn distApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     if (cur_p.*.size == 1) {
         // Keeps the engine aligned with backend sampling, which draws once
         // per output.
-        _ = libcxx.uniformF64(&ctx.rng);
+        _ = stdlib.libcxx.uniformF64(&ctx.rng);
         cur_p.*.data[0].p = 1.0;
         return;
     }
 
     var max_l = cur_p.*.data[0].logit;
     if (!cur_p.*.sorted) {
-        for (1..cur_p.*.size) |i| max_l = libcxx.max(f32, max_l, cur_p.*.data[i].logit);
+        for (1..cur_p.*.size) |i| max_l = stdlib.libcxx.max(f32, max_l, cur_p.*.data[i].logit);
     }
 
     var sum_cum: f64 = 0.0;
-    for (core.items(cur_p)) |*d| {
-        const p = libm.expf(d.logit - max_l);
+    for (llama.sampler.core.items(cur_p)) |*d| {
+        const p = stdlib.libm.expf(d.logit - max_l);
         d.p = p;
         sum_cum += p;
     }
 
-    const rnd = libcxx.uniformF64(&ctx.rng);
+    const rnd = stdlib.libcxx.uniformF64(&ctx.rng);
 
     var sum_run: f64 = 0.0;
     const sum_tgt = sum_cum * rnd;
 
     var found = false;
-    for (core.items(cur_p), 0..) |*d, i| {
+    for (llama.sampler.core.items(cur_p), 0..) |*d, i| {
         if (!found) {
             sum_run += d.p;
             if (sum_run >= sum_tgt) {
@@ -242,9 +231,9 @@ fn distApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_dist_reset` (llama-sampler.cpp:1232 @b1b770d90).
-fn distReset(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(Dist, smpl);
-    ctx.seed_cur = core.getRngSeed(ctx.seed);
+fn distReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Dist, smpl);
+    ctx.seed_cur = llama.sampler.core.getRngSeed(ctx.seed);
     ctx.rng.seed(ctx.seed_cur);
     ctx.rng_backend = ctx.rng;
     ctx.n_backend_draws_generated = 0;
@@ -252,11 +241,11 @@ fn distReset(smpl: [*c]Sampler) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_dist_clone` (llama-sampler.cpp:1241 @b1b770d90).
-fn distClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(Dist, smpl);
+fn distClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(Dist, smpl);
     const result = llama_sampler_init_dist(ctx.seed);
 
-    const result_ctx = core.ctxOf(Dist, result);
+    const result_ctx = llama.sampler.core.ctxOf(Dist, result);
     result_ctx.seed_cur = ctx.seed_cur;
     result_ctx.rng = ctx.rng;
     result_ctx.backend_transactional = ctx.backend_transactional;
@@ -268,17 +257,17 @@ fn distClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
 }
 
 /// Ports `llama_sampler_dist_free` (llama-sampler.cpp:1260 @b1b770d90).
-fn distFree(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(Dist, smpl);
-    ctx.inp_uniforms.deinit(impl.allocator);
-    core.destroy(Dist, ctx);
+fn distFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Dist, smpl);
+    ctx.inp_uniforms.deinit(std.heap.c_allocator);
+    llama.sampler.core.destroy(Dist, ctx);
 }
 
 /// Ports `llama_sampler_dist_backend_init` (llama-sampler.cpp:1264 @b1b770d90).
-fn distBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
-    const sctx = core.ctxOf(Dist, smpl);
+fn distBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+    const sctx = llama.sampler.core.ctxOf(Dist, smpl);
 
-    const res = core.backendSupport(smpl, buft);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
 
     sctx.base.initBackend(res);
     sctx.backend_transactional = n_outputs_max_per_seq > 1;
@@ -293,44 +282,44 @@ fn distBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outp
 ///
 /// Softmax, cumulative sum, and the index where the sum first exceeds a
 /// uniform input: counted as the number of steps that are past it.
-fn distBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
+fn distBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
     _ = gf;
 
-    const sctx = core.ctxOf(Dist, smpl);
+    const sctx = llama.sampler.core.ctxOf(Dist, smpl);
 
-    const inp_uniform = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, 1);
-    _ = c.ggml_format_name(inp_uniform, "uniform_%zu", sctx.inp_uniforms.items.len);
-    c.ggml_set_input(inp_uniform);
-    sctx.inp_uniforms.append(impl.allocator, inp_uniform) catch impl.abort(src, 1286, "out of memory");
+    const inp_uniform = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, 1);
+    _ = llama.impl.c.ggml_format_name(inp_uniform, "uniform_%zu", sctx.inp_uniforms.items.len);
+    llama.impl.c.ggml_set_input(inp_uniform);
+    sctx.inp_uniforms.append(std.heap.c_allocator, inp_uniform) catch llama.impl.abort(llama.sampler.core.src, 1286, "out of memory");
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    const probs = c.ggml_soft_max(ctx, logits);
-    _ = c.ggml_set_name(probs, "dist_probs");
+    const probs = llama.impl.c.ggml_soft_max(ctx, logits);
+    _ = llama.impl.c.ggml_set_name(probs, "dist_probs");
 
-    const cumsum = c.ggml_cumsum(ctx, probs);
-    _ = c.ggml_set_name(cumsum, "dist_cumsum");
+    const cumsum = llama.impl.c.ggml_cumsum(ctx, probs);
+    _ = llama.impl.c.ggml_set_name(cumsum, "dist_cumsum");
 
-    const diff = c.ggml_sub(ctx, cumsum, inp_uniform);
-    _ = c.ggml_set_name(diff, "dist_cumsum");
+    const diff = llama.impl.c.ggml_sub(ctx, cumsum, inp_uniform);
+    _ = llama.impl.c.ggml_set_name(diff, "dist_cumsum");
 
-    const mask = c.ggml_step(ctx, diff);
-    _ = c.ggml_set_name(mask, "dist_mask");
+    const mask = llama.impl.c.ggml_step(ctx, diff);
+    _ = llama.impl.c.ggml_set_name(mask, "dist_mask");
 
-    var idxf = c.ggml_sum(ctx, mask);
-    _ = c.ggml_set_name(idxf, "dist_index_f32");
+    var idxf = llama.impl.c.ggml_sum(ctx, mask);
+    _ = llama.impl.c.ggml_set_name(idxf, "dist_index_f32");
 
-    idxf = c.ggml_clamp(ctx, idxf, 1.0, @floatFromInt(mask[0].ne[0]));
+    idxf = llama.impl.c.ggml_clamp(ctx, idxf, 1.0, @floatFromInt(mask[0].ne[0]));
 
-    const idx = c.ggml_cast(ctx, c.ggml_scale_bias(ctx, idxf, -1.0, @floatFromInt(mask[0].ne[0])), c.GGML_TYPE_I32);
-    _ = c.ggml_set_name(idx, "dist_index_i32");
+    const idx = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_scale_bias(ctx, idxf, -1.0, @floatFromInt(mask[0].ne[0])), llama.impl.c.GGML_TYPE_I32);
+    _ = llama.impl.c.ggml_set_name(idx, "dist_index_i32");
 
     var sampled_token = idx;
     if (data.*.candidates != null) {
-        const candidates = c.ggml_reshape_2d(ctx, data.*.candidates, 1, c.ggml_nelements(data.*.candidates));
+        const candidates = llama.impl.c.ggml_reshape_2d(ctx, data.*.candidates, 1, llama.impl.c.ggml_nelements(data.*.candidates));
 
-        sampled_token = c.ggml_get_rows(ctx, candidates, idx);
-        _ = c.ggml_set_name(sampled_token, "dist_sampled_token");
+        sampled_token = llama.impl.c.ggml_get_rows(ctx, candidates, idx);
+        _ = llama.impl.c.ggml_set_name(sampled_token, "dist_sampled_token");
     }
 
     data.*.sampled = sampled_token;
@@ -341,16 +330,16 @@ fn distBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.str
 ///
 /// One `uniform<double>` draw per graph input, rounded to `float`, so the
 /// backend sees the same numbers the CPU path's draws would be.
-fn distBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
-    const sctx = core.ctxOf(Dist, smpl);
+fn distBackendSetInput(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(Dist, smpl);
 
-    impl.assert(sctx.inp_uniforms.items.len != 0, src, 1348, "!sctx->inp_uniforms.empty()");
+    llama.impl.assert(sctx.inp_uniforms.items.len != 0, llama.sampler.core.src, 1348, "!sctx->inp_uniforms.empty()");
 
     const rng = if (sctx.backend_transactional) &sctx.rng_backend else &sctx.rng;
 
     for (sctx.inp_uniforms.items) |inp_uniform| {
-        const rnd: f32 = @floatCast(libcxx.uniformF64(rng));
-        c.ggml_backend_tensor_set(inp_uniform, &rnd, 0, @sizeOf(f32));
+        const rnd: f32 = @floatCast(stdlib.libcxx.uniformF64(rng));
+        llama.impl.c.ggml_backend_tensor_set(inp_uniform, &rnd, 0, @sizeOf(f32));
 
         if (sctx.backend_transactional) {
             sctx.n_backend_draws_generated += 1;
@@ -359,32 +348,32 @@ fn distBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_dist_backend_reset` (llama-sampler.cpp:1371 @b1b770d90).
-fn distBackendReset(smpl: [*c]Sampler) callconv(.c) void {
-    core.ctxOf(Dist, smpl).inp_uniforms.clearRetainingCapacity();
+fn distBackendReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.ctxOf(Dist, smpl).inp_uniforms.clearRetainingCapacity();
 }
 
 /// Ports `llama_sampler_dist_accept` (llama-sampler.cpp:1376 @b1b770d90).
 ///
 /// Commits one transactional backend draw to the real engine.
-fn distAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
+fn distAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
     _ = token;
 
-    const sctx = core.ctxOf(Dist, smpl);
+    const sctx = llama.sampler.core.ctxOf(Dist, smpl);
 
     if (!sctx.backend_transactional or sctx.n_backend_draws_committed >= sctx.n_backend_draws_generated) {
         return;
     }
 
-    _ = libcxx.uniformF64(&sctx.rng);
+    _ = stdlib.libcxx.uniformF64(&sctx.rng);
     sctx.n_backend_draws_committed += 1;
 }
 
-fn distCopyState(src_smpl: [*c]const Sampler, dst_smpl: [*c]Sampler) callconv(.c) void {
-    core.ctxOf(Dist, dst_smpl).copyState(core.ctxOf(Dist, src_smpl));
+fn distCopyState(src_smpl: [*c]const llama.impl.c.struct_llama_sampler, dst_smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.ctxOf(Dist, dst_smpl).copyState(llama.sampler.core.ctxOf(Dist, src_smpl));
 }
 
 /// Ports `llama_sampler_dist_i` (llama-sampler.cpp:1391 @b1b770d90).
-pub var dist_iface: SamplerI = .{
+pub var dist_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = distName,
     .accept = distAccept,
     .apply = distApply,
@@ -405,15 +394,15 @@ pub var dist_iface: SamplerI = .{
 /// - `seed`: the seed; `LLAMA_DEFAULT_SEED` picks a random one.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_dist(seed: u32) callconv(.c) [*c]Sampler {
-    const seed_cur = core.getRngSeed(seed);
-    return core.llama_sampler_init(&dist_iface, core.create(Dist, .{
-        .base = Backend.init("dist"),
+pub export fn llama_sampler_init_dist(seed: u32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const seed_cur = llama.sampler.core.getRngSeed(seed);
+    return llama.sampler.core.llama_sampler_init(&dist_iface, llama.sampler.core.create(Dist, .{
+        .base = llama.sampler.core.Backend.init("dist"),
         .seed = seed,
         .seed_cur = seed_cur,
-        .rng = libcxx.Mt19937.init(seed_cur),
+        .rng = stdlib.libcxx.Mt19937.init(seed_cur),
         .backend_transactional = false,
-        .rng_backend = libcxx.Mt19937.init(seed_cur),
+        .rng_backend = stdlib.libcxx.Mt19937.init(seed_cur),
         .n_backend_draws_generated = 0,
         .n_backend_draws_committed = 0,
         .inp_uniforms = .empty,
@@ -425,65 +414,65 @@ pub export fn llama_sampler_init_dist(seed: u32) callconv(.c) [*c]Sampler {
 
 /// Ports `llama_sampler_top_k` (llama-sampler.cpp:1447 @b1b770d90).
 const TopK = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     k: i32,
 };
 
 /// Ports `llama_sampler_top_k_name` (llama-sampler.cpp:1451 @b1b770d90).
-fn topKName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(TopK, smpl).base.getName();
+fn topKName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(TopK, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_top_k_apply` (llama-sampler.cpp:1456 @b1b770d90).
-fn topKApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    core.topKImpl(cur_p, core.ctxOf(TopK, smpl).k);
+fn topKApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    llama.sampler.core.topKImpl(cur_p, llama.sampler.core.ctxOf(TopK, smpl).k);
 }
 
 /// Ports `llama_sampler_top_k_clone` (llama-sampler.cpp:1461 @b1b770d90).
-fn topKClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    return llama_sampler_init_top_k(core.ctxOf(TopK, smpl).k);
+fn topKClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama_sampler_init_top_k(llama.sampler.core.ctxOf(TopK, smpl).k);
 }
 
 /// Ports `llama_sampler_top_k_free` (llama-sampler.cpp:1466 @b1b770d90).
-fn topKFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(TopK, core.ctxOf(TopK, smpl));
+fn topKFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(TopK, llama.sampler.core.ctxOf(TopK, smpl));
 }
 
 /// Ports `llama_sampler_top_k_backend_init` (llama-sampler.cpp:1470 @b1b770d90).
-fn topKBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn topKBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(TopK, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(TopK, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
 
 /// Ports `llama_sampler_top_k_backend_apply` (llama-sampler.cpp:1484 @b1b770d90).
-fn topKBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
-    const sctx = core.ctxOf(TopK, smpl);
+fn topKBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(TopK, smpl);
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    const top_k = c.ggml_top_k(ctx, logits, sctx.k);
-    _ = c.ggml_set_name(top_k, "top_k");
+    const top_k = llama.impl.c.ggml_top_k(ctx, logits, sctx.k);
+    _ = llama.impl.c.ggml_set_name(top_k, "top_k");
 
     if (data.*.candidates != null) {
-        const candidates_rows = c.ggml_reshape_2d(ctx, data.*.candidates, 1, data.*.candidates[0].ne[0]);
-        data.*.candidates = c.ggml_get_rows(ctx, candidates_rows, top_k);
-        _ = c.ggml_set_name(data.*.candidates, "top_k_candidates");
+        const candidates_rows = llama.impl.c.ggml_reshape_2d(ctx, data.*.candidates, 1, data.*.candidates[0].ne[0]);
+        data.*.candidates = llama.impl.c.ggml_get_rows(ctx, candidates_rows, top_k);
+        _ = llama.impl.c.ggml_set_name(data.*.candidates, "top_k_candidates");
     } else {
         data.*.candidates = top_k;
     }
 
-    const logits_rows = c.ggml_reshape_2d(ctx, logits, 1, logits[0].ne[0]);
-    data.*.logits = c.ggml_get_rows(ctx, logits_rows, top_k);
-    _ = c.ggml_set_name(data.*.logits, "top_k_rows");
+    const logits_rows = llama.impl.c.ggml_reshape_2d(ctx, logits, 1, logits[0].ne[0]);
+    data.*.logits = llama.impl.c.ggml_get_rows(ctx, logits_rows, top_k);
+    _ = llama.impl.c.ggml_set_name(data.*.logits, "top_k_rows");
 
     _ = gf;
 }
 
 /// Ports `llama_sampler_top_k_i` (llama-sampler.cpp:1511 @b1b770d90).
-var top_k_iface: SamplerI = .{
+var top_k_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = topKName,
     .accept = null,
     .apply = topKApply,
@@ -504,12 +493,12 @@ var top_k_iface: SamplerI = .{
 /// - `k`: how many candidates to keep; `<= 0` disables it.
 ///
 /// Return: the sampler, or the `?top-k` placeholder when disabled.
-pub export fn llama_sampler_init_top_k(k: i32) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_top_k(k: i32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = k <= 0;
 
-    if (is_empty) return core.initEmpty("?top-k");
+    if (is_empty) return llama.sampler.core.initEmpty("?top-k");
 
-    return core.llama_sampler_init(&top_k_iface, core.create(TopK, .{ .base = Backend.init("top-k"), .k = k }));
+    return llama.sampler.core.llama_sampler_init(&top_k_iface, llama.sampler.core.create(TopK, .{ .base = llama.sampler.core.Backend.init("top-k"), .k = k }));
 }
 
 // -----------------------------------------------------------------------------
@@ -517,15 +506,15 @@ pub export fn llama_sampler_init_top_k(k: i32) callconv(.c) [*c]Sampler {
 
 /// Ports `llama_sampler_top_p` (llama-sampler.cpp:1544 @b1b770d90).
 const TopP = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     p: f32,
     min_keep: usize,
-    buf_sort: std.ArrayList(TokenData),
+    buf_sort: std.ArrayList(llama.impl.c.llama_token_data),
 };
 
 /// Ports `llama_sampler_top_p_name` (llama-sampler.cpp:1551 @b1b770d90).
-fn topPName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(TopP, smpl).base.getName();
+fn topPName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(TopP, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_top_p_apply` (llama-sampler.cpp:1556 @b1b770d90).
@@ -533,24 +522,24 @@ fn topPName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// Over 1024 unsorted candidates it first tries a 256-wide partial sort, and
 /// widens to a full one only when the cumulative probability has not reached
 /// `p` by then.
-fn topPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(TopP, smpl);
+fn topPApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(TopP, smpl);
 
     if (ctx.p >= 1.0) return;
 
-    core.softmaxImpl(cur_p, false);
+    llama.sampler.core.softmaxImpl(cur_p, false);
 
     var k: usize = cur_p.*.size;
-    var pdata: [*c]TokenData = cur_p.*.data;
+    var pdata: [*c]llama.impl.c.llama_token_data = cur_p.*.data;
 
     const buf_sort = &ctx.buf_sort;
 
     if (!cur_p.*.sorted and cur_p.*.size > 1024) {
-        k = libcxx.min(usize, 256, cur_p.*.size);
-        core.partialSortInto(cur_p, @intCast(k), buf_sort);
+        k = stdlib.libcxx.min(usize, 256, cur_p.*.size);
+        llama.sampler.core.partialSortInto(cur_p, @intCast(k), buf_sort);
         pdata = buf_sort.items.ptr;
     } else if (!cur_p.*.sorted) {
-        core.partialSortInplace(cur_p, @intCast(k));
+        llama.sampler.core.partialSortInplace(cur_p, @intCast(k));
     }
 
     var cum_sum: f32 = 0.0;
@@ -566,7 +555,7 @@ fn topPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 
         if (!cur_p.*.sorted and i == k - 1) {
             k = cur_p.*.size;
-            core.partialSortInto(cur_p, @intCast(k), buf_sort);
+            llama.sampler.core.partialSortInto(cur_p, @intCast(k), buf_sort);
             pdata = buf_sort.items.ptr;
         }
     }
@@ -580,91 +569,91 @@ fn topPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_top_p_clone` (llama-sampler.cpp:1611 @b1b770d90).
-fn topPClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(TopP, smpl);
+fn topPClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(TopP, smpl);
     return llama_sampler_init_top_p(ctx.p, ctx.min_keep);
 }
 
 /// Ports `llama_sampler_top_p_free` (llama-sampler.cpp:1616 @b1b770d90).
-fn topPFree(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(TopP, smpl);
-    ctx.buf_sort.deinit(impl.allocator);
-    core.destroy(TopP, ctx);
+fn topPFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(TopP, smpl);
+    ctx.buf_sort.deinit(std.heap.c_allocator);
+    llama.sampler.core.destroy(TopP, ctx);
 }
 
 /// Ports `llama_sampler_top_p_backend_init` (llama-sampler.cpp:1620 @b1b770d90).
-fn topPBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn topPBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(TopP, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(TopP, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
 
 /// The `ggml_sort` lambda (llama-sampler.cpp:1644 @b1b770d90) in
 /// `llama_sampler_top_p_backend_apply`: a 1-row tensor reordered by indices.
-fn ggmlSort(ctx: ?*c.struct_ggml_context, a: [*c]c.struct_ggml_tensor, b: [*c]c.struct_ggml_tensor) [*c]c.struct_ggml_tensor {
-    impl.assert(c.ggml_nrows(a) == 1, src, 1645, "ggml_nrows(a) == 1");
-    const a_reshaped = c.ggml_reshape_2d(ctx, a, 1, a[0].ne[0]);
-    return c.ggml_get_rows(ctx, a_reshaped, b);
+fn ggmlSort(ctx: ?*llama.impl.c.struct_ggml_context, a: [*c]llama.impl.c.struct_ggml_tensor, b: [*c]llama.impl.c.struct_ggml_tensor) [*c]llama.impl.c.struct_ggml_tensor {
+    llama.impl.assert(llama.impl.c.ggml_nrows(a) == 1, llama.sampler.core.src, 1645, "ggml_nrows(a) == 1");
+    const a_reshaped = llama.impl.c.ggml_reshape_2d(ctx, a, 1, a[0].ne[0]);
+    return llama.impl.c.ggml_get_rows(ctx, a_reshaped, b);
 }
 
 /// Ports `llama_sampler_top_p_backend_apply` (llama-sampler.cpp:1634 @b1b770d90).
-fn topPBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
-    const sctx = core.ctxOf(TopP, smpl);
+fn topPBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(TopP, smpl);
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    const sorted_idx = c.ggml_argsort(ctx, logits, c.GGML_SORT_ORDER_DESC);
-    _ = c.ggml_set_name(sorted_idx, "top_p_sorted_idx");
+    const sorted_idx = llama.impl.c.ggml_argsort(ctx, logits, llama.impl.c.GGML_SORT_ORDER_DESC);
+    _ = llama.impl.c.ggml_set_name(sorted_idx, "top_p_sorted_idx");
 
     var sorted_logits = ggmlSort(ctx, logits, sorted_idx);
-    _ = c.ggml_set_name(sorted_logits, "top_p_sorted_logits");
+    _ = llama.impl.c.ggml_set_name(sorted_logits, "top_p_sorted_logits");
 
-    sorted_logits = c.ggml_reshape_1d(ctx, sorted_logits, c.ggml_nelements(sorted_logits));
-    const softmax = c.ggml_soft_max(ctx, sorted_logits);
-    _ = c.ggml_set_name(softmax, "top_p_softmax");
+    sorted_logits = llama.impl.c.ggml_reshape_1d(ctx, sorted_logits, llama.impl.c.ggml_nelements(sorted_logits));
+    const softmax = llama.impl.c.ggml_soft_max(ctx, sorted_logits);
+    _ = llama.impl.c.ggml_set_name(softmax, "top_p_softmax");
 
     if (data.*.candidates != null) {
         data.*.candidates = ggmlSort(ctx, data.*.candidates, sorted_idx);
     } else {
         data.*.candidates = sorted_idx;
     }
-    _ = c.ggml_set_name(data.*.candidates, "top_p_candidates");
+    _ = llama.impl.c.ggml_set_name(data.*.candidates, "top_p_candidates");
 
-    const cdf = c.ggml_cumsum(ctx, softmax);
-    _ = c.ggml_set_name(cdf, "top_p_cdf");
+    const cdf = llama.impl.c.ggml_cumsum(ctx, softmax);
+    _ = llama.impl.c.ggml_set_name(cdf, "top_p_cdf");
 
-    const cdf_scaled = c.ggml_scale_bias(ctx, cdf, -1.0, sctx.p);
-    _ = c.ggml_set_name(cdf_scaled, "top_p_cdf_scaled");
+    const cdf_scaled = llama.impl.c.ggml_scale_bias(ctx, cdf, -1.0, sctx.p);
+    _ = llama.impl.c.ggml_set_name(cdf_scaled, "top_p_cdf_scaled");
 
-    var mask = c.ggml_step(ctx, cdf_scaled);
-    _ = c.ggml_set_name(mask, "top_p_mask");
+    var mask = llama.impl.c.ggml_step(ctx, cdf_scaled);
+    _ = llama.impl.c.ggml_set_name(mask, "top_p_mask");
 
-    var idxf = c.ggml_sum(ctx, mask);
-    _ = c.ggml_set_name(idxf, "top_p_index_f32");
+    var idxf = llama.impl.c.ggml_sum(ctx, mask);
+    _ = llama.impl.c.ggml_set_name(idxf, "top_p_index_f32");
 
-    idxf = c.ggml_clamp(ctx, idxf, 0.0, @floatFromInt(mask[0].ne[0] - 1));
+    idxf = llama.impl.c.ggml_clamp(ctx, idxf, 0.0, @floatFromInt(mask[0].ne[0] - 1));
 
-    const ones = c.ggml_scale_bias(ctx, idxf, 0.0, 1.0);
-    _ = c.ggml_set_name(ones, "top_p_ones");
+    const ones = llama.impl.c.ggml_scale_bias(ctx, idxf, 0.0, 1.0);
+    _ = llama.impl.c.ggml_set_name(ones, "top_p_ones");
 
-    var mask_reshaped = c.ggml_reshape_2d(ctx, mask, 1, mask[0].ne[0]);
+    var mask_reshaped = llama.impl.c.ggml_reshape_2d(ctx, mask, 1, mask[0].ne[0]);
 
-    mask_reshaped = c.ggml_set_rows(ctx, mask_reshaped, ones, c.ggml_cast(ctx, idxf, c.GGML_TYPE_I32));
-    mask = c.ggml_reshape_1d(ctx, mask_reshaped, mask[0].ne[0]);
+    mask_reshaped = llama.impl.c.ggml_set_rows(ctx, mask_reshaped, ones, llama.impl.c.ggml_cast(ctx, idxf, llama.impl.c.GGML_TYPE_I32));
+    mask = llama.impl.c.ggml_reshape_1d(ctx, mask_reshaped, mask[0].ne[0]);
 
-    const top_p_bias = c.ggml_log(ctx, mask);
-    _ = c.ggml_set_name(top_p_bias, "top_p_bias");
+    const top_p_bias = llama.impl.c.ggml_log(ctx, mask);
+    _ = llama.impl.c.ggml_set_name(top_p_bias, "top_p_bias");
 
-    data.*.logits = c.ggml_add(ctx, sorted_logits, top_p_bias);
-    _ = c.ggml_set_name(data.*.logits, "top_p_logits");
+    data.*.logits = llama.impl.c.ggml_add(ctx, sorted_logits, top_p_bias);
+    _ = llama.impl.c.ggml_set_name(data.*.logits, "top_p_logits");
 
     _ = gf;
 }
 
 /// Ports `llama_sampler_top_p_i` (llama-sampler.cpp:1711 @b1b770d90).
-var top_p_iface: SamplerI = .{
+var top_p_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = topPName,
     .accept = null,
     .apply = topPApply,
@@ -686,13 +675,13 @@ var top_p_iface: SamplerI = .{
 /// - `min_keep`: the fewest candidates to leave.
 ///
 /// Return: the sampler, or the `?top-p` placeholder when disabled.
-pub export fn llama_sampler_init_top_p(p: f32, min_keep: usize) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_top_p(p: f32, min_keep: usize) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = p >= 1.0;
 
-    if (is_empty) return core.initEmpty("?top-p");
+    if (is_empty) return llama.sampler.core.initEmpty("?top-p");
 
-    return core.llama_sampler_init(&top_p_iface, core.create(TopP, .{
-        .base = Backend.init("top-p"),
+    return llama.sampler.core.llama_sampler_init(&top_p_iface, llama.sampler.core.create(TopP, .{
+        .base = llama.sampler.core.Backend.init("top-p"),
         .p = p,
         .min_keep = min_keep,
         .buf_sort = .empty,
@@ -704,14 +693,14 @@ pub export fn llama_sampler_init_top_p(p: f32, min_keep: usize) callconv(.c) [*c
 
 /// Ports `llama_sampler_min_p` (llama-sampler.cpp:1746 @b1b770d90).
 const MinP = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     p: f32,
     min_keep: usize,
 };
 
 /// Ports `llama_sampler_min_p_name` (llama-sampler.cpp:1751 @b1b770d90).
-fn minPName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(MinP, smpl).base.getName();
+fn minPName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(MinP, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_min_p_apply` (llama-sampler.cpp:1756 @b1b770d90).
@@ -719,24 +708,24 @@ fn minPName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// Keeps the candidates whose logit is within `log(p)` of the best. Unsorted
 /// input is filtered in place order first; only when that leaves fewer than
 /// `min_keep` does it sort and cut.
-fn minPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(MinP, smpl);
+fn minPApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(MinP, smpl);
 
     if (ctx.p <= 0.0 or cur_p.*.size == 0) return;
 
     var min_p_applied = false;
 
     if (!cur_p.*.sorted) {
-        var filtered_tokens: std.ArrayList(TokenData) = .empty;
-        defer filtered_tokens.deinit(impl.allocator);
+        var filtered_tokens: std.ArrayList(llama.impl.c.llama_token_data) = .empty;
+        defer filtered_tokens.deinit(std.heap.c_allocator);
 
         var max_logit: f32 = -std.math.floatMax(f32);
-        for (core.items(cur_p)) |d| max_logit = libcxx.max(f32, max_logit, d.logit);
-        const min_logit = max_logit + libm.logf(ctx.p);
+        for (llama.sampler.core.items(cur_p)) |d| max_logit = stdlib.libcxx.max(f32, max_logit, d.logit);
+        const min_logit = max_logit + stdlib.libm.logf(ctx.p);
 
-        for (core.items(cur_p)) |d| {
+        for (llama.sampler.core.items(cur_p)) |d| {
             if (d.logit >= min_logit) {
-                filtered_tokens.append(impl.allocator, d) catch impl.abort(src, 1770, "out of memory");
+                filtered_tokens.append(std.heap.c_allocator, d) catch llama.impl.abort(llama.sampler.core.src, 1770, "out of memory");
             }
         }
 
@@ -749,10 +738,10 @@ fn minPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 
     if (!min_p_applied) {
         if (!cur_p.*.sorted) {
-            core.partialSortInplace(cur_p, @intCast(cur_p.*.size));
+            llama.sampler.core.partialSortInplace(cur_p, @intCast(cur_p.*.size));
         }
 
-        const min_logit = cur_p.*.data[0].logit + libm.logf(ctx.p);
+        const min_logit = cur_p.*.data[0].logit + stdlib.libm.logf(ctx.p);
         var i: usize = 1;
 
         while (i < cur_p.*.size) : (i += 1) {
@@ -764,59 +753,59 @@ fn minPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_min_p_clone` (llama-sampler.cpp:1810 @b1b770d90).
-fn minPClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(MinP, smpl);
+fn minPClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(MinP, smpl);
     return llama_sampler_init_min_p(ctx.p, ctx.min_keep);
 }
 
 /// Ports `llama_sampler_min_p_free` (llama-sampler.cpp:1815 @b1b770d90).
-fn minPFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(MinP, core.ctxOf(MinP, smpl));
+fn minPFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(MinP, llama.sampler.core.ctxOf(MinP, smpl));
 }
 
 /// Ports `llama_sampler_min_p_backend_init` (llama-sampler.cpp:1819 @b1b770d90).
-fn minPBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn minPBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(MinP, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(MinP, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
 
 /// Ports `llama_sampler_min_p_backend_apply` (llama-sampler.cpp:1833 @b1b770d90).
-fn minPBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
-    const sctx = core.ctxOf(MinP, smpl);
+fn minPBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(MinP, smpl);
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    const max_idx = c.ggml_argmax(ctx, logits);
-    _ = c.ggml_set_name(max_idx, "max_idx");
+    const max_idx = llama.impl.c.ggml_argmax(ctx, logits);
+    _ = llama.impl.c.ggml_set_name(max_idx, "max_idx");
 
-    const logits_rows = c.ggml_reshape_2d(ctx, logits, 1, logits[0].ne[0]);
-    _ = c.ggml_set_name(logits_rows, "logits_rows");
+    const logits_rows = llama.impl.c.ggml_reshape_2d(ctx, logits, 1, logits[0].ne[0]);
+    _ = llama.impl.c.ggml_set_name(logits_rows, "logits_rows");
 
-    const max_logit = c.ggml_get_rows(ctx, logits_rows, max_idx);
-    _ = c.ggml_set_name(max_logit, "max_logit");
+    const max_logit = llama.impl.c.ggml_get_rows(ctx, logits_rows, max_idx);
+    _ = llama.impl.c.ggml_set_name(max_logit, "max_logit");
 
-    const threshold = c.ggml_scale_bias(ctx, max_logit, 1.0, libm.logf(sctx.p));
-    _ = c.ggml_set_name(threshold, "min_p_threshold");
+    const threshold = llama.impl.c.ggml_scale_bias(ctx, max_logit, 1.0, stdlib.libm.logf(sctx.p));
+    _ = llama.impl.c.ggml_set_name(threshold, "min_p_threshold");
 
-    const sub = c.ggml_sub(ctx, logits, threshold);
+    const sub = llama.impl.c.ggml_sub(ctx, logits, threshold);
 
-    const mask = c.ggml_step(ctx, sub);
-    _ = c.ggml_set_name(mask, "min_p_mask");
+    const mask = llama.impl.c.ggml_step(ctx, sub);
+    _ = llama.impl.c.ggml_set_name(mask, "min_p_mask");
 
-    const min_p_bias = c.ggml_log(ctx, mask);
-    _ = c.ggml_set_name(min_p_bias, "min_p_bias");
+    const min_p_bias = llama.impl.c.ggml_log(ctx, mask);
+    _ = llama.impl.c.ggml_set_name(min_p_bias, "min_p_bias");
 
-    data.*.logits = c.ggml_add(ctx, logits, min_p_bias);
-    _ = c.ggml_set_name(data.*.logits, "min_p_logits");
+    data.*.logits = llama.impl.c.ggml_add(ctx, logits, min_p_bias);
+    _ = llama.impl.c.ggml_set_name(data.*.logits, "min_p_logits");
 
     _ = gf;
 }
 
 /// Ports `llama_sampler_min_p_i` (llama-sampler.cpp:1874 @b1b770d90).
-var min_p_iface: SamplerI = .{
+var min_p_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = minPName,
     .accept = null,
     .apply = minPApply,
@@ -838,13 +827,13 @@ var min_p_iface: SamplerI = .{
 /// - `min_keep`: the fewest candidates to leave.
 ///
 /// Return: the sampler, or the `?min-p` placeholder when disabled.
-pub export fn llama_sampler_init_min_p(p: f32, min_keep: usize) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_min_p(p: f32, min_keep: usize) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = p <= 0.0;
 
-    if (is_empty) return core.initEmpty("?min-p");
+    if (is_empty) return llama.sampler.core.initEmpty("?min-p");
 
-    return core.llama_sampler_init(&min_p_iface, core.create(MinP, .{
-        .base = Backend.init("min-p"),
+    return llama.sampler.core.llama_sampler_init(&min_p_iface, llama.sampler.core.create(MinP, .{
+        .base = llama.sampler.core.Backend.init("min-p"),
         .p = p,
         .min_keep = min_keep,
     }));
@@ -860,7 +849,7 @@ const Typical = struct {
 };
 
 /// Ports `llama_sampler_typical_name` (llama-sampler.cpp:1913 @b1b770d90).
-fn typicalName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn typicalName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "typical";
 }
@@ -877,12 +866,12 @@ fn lessShiftedScore(ctx: ScoreCtx, a: usize, b: usize) bool {
 ///
 /// Keeps the candidates whose surprisal is closest to the distribution's
 /// entropy. The entropy sum is fused -- see the file header.
-fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(Typical, smpl);
+fn typicalApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Typical, smpl);
 
     if (ctx.p >= 1.0) return;
 
-    core.softmaxImpl(cur_p, true);
+    llama.sampler.core.softmaxImpl(cur_p, true);
 
     // clang unrolls the loop summing `entropy` (llama-sampler.cpp:1931 @b1b770d90)
     // by four: in the
@@ -894,26 +883,26 @@ fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
     // swap order at 4096 candidates with the loop fused throughout.
     var entropy: f32 = 0.0;
     const n_unrolled = if (cur_p.*.size >= 4) cur_p.*.size & ~@as(usize, 3) else 0;
-    for (core.items(cur_p), 0..) |d, i| {
+    for (llama.sampler.core.items(cur_p), 0..) |d, i| {
         if (i < n_unrolled) {
-            entropy = entropy - d.p * libm.logf(d.p);
+            entropy = entropy - d.p * stdlib.libm.logf(d.p);
         } else {
-            entropy = @mulAdd(f32, -d.p, libm.logf(d.p), entropy);
+            entropy = @mulAdd(f32, -d.p, stdlib.libm.logf(d.p), entropy);
         }
     }
 
     const n = cur_p.*.size;
-    const shifted_scores = impl.allocator.alloc(f32, n) catch impl.abort(src, 1928, "out of memory");
-    defer impl.allocator.free(shifted_scores);
-    for (core.items(cur_p), 0..) |d, i| {
-        shifted_scores[i] = @abs(-libm.logf(d.p) - entropy);
+    const shifted_scores = std.heap.c_allocator.alloc(f32, n) catch llama.impl.abort(llama.sampler.core.src, 1928, "out of memory");
+    defer std.heap.c_allocator.free(shifted_scores);
+    for (llama.sampler.core.items(cur_p), 0..) |d, i| {
+        shifted_scores[i] = @abs(-stdlib.libm.logf(d.p) - entropy);
     }
 
-    const indices = impl.allocator.alloc(usize, n) catch impl.abort(src, 1935, "out of memory");
-    defer impl.allocator.free(indices);
+    const indices = std.heap.c_allocator.alloc(usize, n) catch llama.impl.abort(llama.sampler.core.src, 1935, "out of memory");
+    defer std.heap.c_allocator.free(indices);
     for (indices, 0..) |*v, i| v.* = i;
 
-    libcxx.sort(usize, indices, ScoreCtx{ .scores = shifted_scores }, lessShiftedScore);
+    stdlib.libcxx.sort(usize, indices, ScoreCtx{ .scores = shifted_scores }, lessShiftedScore);
 
     var cum_sum: f32 = 0.0;
     var last_idx: usize = indices.len;
@@ -927,8 +916,8 @@ fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
         }
     }
 
-    const cur_p_new = impl.allocator.alloc(TokenData, last_idx) catch impl.abort(src, 1958, "out of memory");
-    defer impl.allocator.free(cur_p_new);
+    const cur_p_new = std.heap.c_allocator.alloc(llama.impl.c.llama_token_data, last_idx) catch llama.impl.abort(llama.sampler.core.src, 1958, "out of memory");
+    defer std.heap.c_allocator.free(cur_p_new);
     for (0..last_idx) |i| cur_p_new[i] = cur_p.*.data[indices[i]];
 
     @memcpy(cur_p.*.data[0..last_idx], cur_p_new);
@@ -937,18 +926,18 @@ fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
 }
 
 /// Ports `llama_sampler_typical_clone` (llama-sampler.cpp:1977 @b1b770d90).
-fn typicalClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(Typical, smpl);
+fn typicalClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(Typical, smpl);
     return llama_sampler_init_typical(ctx.p, ctx.min_keep);
 }
 
 /// Ports `llama_sampler_typical_free` (llama-sampler.cpp:1982 @b1b770d90).
-fn typicalFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(Typical, core.ctxOf(Typical, smpl));
+fn typicalFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(Typical, llama.sampler.core.ctxOf(Typical, smpl));
 }
 
 /// Ports `llama_sampler_typical_i` (llama-sampler.cpp:1986 @b1b770d90).
-var typical_iface: SamplerI = .{
+var typical_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = typicalName,
     .accept = null,
     .apply = typicalApply,
@@ -964,12 +953,12 @@ var typical_iface: SamplerI = .{
 /// - `min_keep`: the fewest candidates to leave.
 ///
 /// Return: the sampler, or the `?typical` placeholder when disabled.
-pub export fn llama_sampler_init_typical(p: f32, min_keep: usize) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_typical(p: f32, min_keep: usize) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = p >= 1.0;
 
-    if (is_empty) return core.initEmpty("?typical");
+    if (is_empty) return llama.sampler.core.initEmpty("?typical");
 
-    return core.llama_sampler_init(&typical_iface, core.create(Typical, .{ .p = p, .min_keep = min_keep }));
+    return llama.sampler.core.llama_sampler_init(&typical_iface, llama.sampler.core.create(Typical, .{ .p = p, .min_keep = min_keep }));
 }
 
 // -----------------------------------------------------------------------------
@@ -977,74 +966,74 @@ pub export fn llama_sampler_init_typical(p: f32, min_keep: usize) callconv(.c) [
 
 /// Ports `llama_sampler_temp` (llama-sampler.cpp:2019 @b1b770d90).
 const Temp = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     temp: f32,
 };
 
 /// Ports `llama_sampler_temp_name` (llama-sampler.cpp:2023 @b1b770d90).
-fn tempName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(Temp, smpl).base.getName();
+fn tempName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(Temp, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_temp_apply` (llama-sampler.cpp:2028 @b1b770d90).
-fn tempApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    core.tempImpl(cur_p, core.ctxOf(Temp, smpl).temp);
+fn tempApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    llama.sampler.core.tempImpl(cur_p, llama.sampler.core.ctxOf(Temp, smpl).temp);
 }
 
 /// Ports `llama_sampler_temp_clone` (llama-sampler.cpp:2034 @b1b770d90).
-fn tempClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    return llama_sampler_init_temp(core.ctxOf(Temp, smpl).temp);
+fn tempClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama_sampler_init_temp(llama.sampler.core.ctxOf(Temp, smpl).temp);
 }
 
 /// Ports `llama_sampler_temp_free` (llama-sampler.cpp:2039 @b1b770d90).
-fn tempFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(Temp, core.ctxOf(Temp, smpl));
+fn tempFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(Temp, llama.sampler.core.ctxOf(Temp, smpl));
 }
 
 /// Ports `llama_sampler_backend_temp_sampling` (llama-sampler.cpp:2043 @b1b770d90).
 ///
 /// At `temp <= 0` the backend keeps the argmax alone; otherwise it scales.
-fn backendTempSampling(ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data, temp: f32) void {
+fn backendTempSampling(ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data, temp: f32) void {
     if (temp <= 0.0) {
-        const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+        const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-        const max_idx = c.ggml_argmax(ctx, logits);
-        _ = c.ggml_set_name(max_idx, "temp_max_idx");
+        const max_idx = llama.impl.c.ggml_argmax(ctx, logits);
+        _ = llama.impl.c.ggml_set_name(max_idx, "temp_max_idx");
 
         if (data.*.candidates != null) {
-            const candidates_rows = c.ggml_reshape_2d(ctx, data.*.candidates, 1, c.ggml_nelements(data.*.candidates));
-            data.*.candidates = c.ggml_get_rows(ctx, candidates_rows, max_idx);
+            const candidates_rows = llama.impl.c.ggml_reshape_2d(ctx, data.*.candidates, 1, llama.impl.c.ggml_nelements(data.*.candidates));
+            data.*.candidates = llama.impl.c.ggml_get_rows(ctx, candidates_rows, max_idx);
         } else {
             data.*.candidates = max_idx;
         }
 
-        const logits_rows = c.ggml_reshape_2d(ctx, logits, 1, c.ggml_nelements(logits));
-        data.*.logits = c.ggml_get_rows(ctx, logits_rows, max_idx);
+        const logits_rows = llama.impl.c.ggml_reshape_2d(ctx, logits, 1, llama.impl.c.ggml_nelements(logits));
+        data.*.logits = llama.impl.c.ggml_get_rows(ctx, logits_rows, max_idx);
 
         return;
     }
 
-    data.*.logits = c.ggml_scale(ctx, data.*.logits, 1.0 / temp);
+    data.*.logits = llama.impl.c.ggml_scale(ctx, data.*.logits, 1.0 / temp);
 
     _ = gf;
 }
 
 /// Ports `llama_sampler_temp_backend_init` (llama-sampler.cpp:2073 @b1b770d90).
-fn tempBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn tempBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(Temp, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(Temp, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
 
 /// Ports `llama_sampler_temp_backend_apply` (llama-sampler.cpp:2087 @b1b770d90).
-fn tempBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
-    backendTempSampling(ctx, gf, data, core.ctxOf(Temp, smpl).temp);
+fn tempBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+    backendTempSampling(ctx, gf, data, llama.sampler.core.ctxOf(Temp, smpl).temp);
 }
 
 /// Ports `llama_sampler_temp_i` (llama-sampler.cpp:2096 @b1b770d90).
-var temp_iface: SamplerI = .{
+var temp_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = tempName,
     .accept = null,
     .apply = tempApply,
@@ -1065,12 +1054,12 @@ var temp_iface: SamplerI = .{
 /// - `temp`: the temperature; exactly 1 disables it.
 ///
 /// Return: the sampler, or the `?temp` placeholder when disabled.
-pub export fn llama_sampler_init_temp(temp: f32) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_temp(temp: f32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = temp == 1.0;
 
-    if (is_empty) return core.initEmpty("?temp");
+    if (is_empty) return llama.sampler.core.initEmpty("?temp");
 
-    return core.llama_sampler_init(&temp_iface, core.create(Temp, .{ .base = Backend.init("temp"), .temp = temp }));
+    return llama.sampler.core.llama_sampler_init(&temp_iface, llama.sampler.core.create(Temp, .{ .base = llama.sampler.core.Backend.init("temp"), .temp = temp }));
 }
 
 // -----------------------------------------------------------------------------
@@ -1078,15 +1067,15 @@ pub export fn llama_sampler_init_temp(temp: f32) callconv(.c) [*c]Sampler {
 
 /// Ports `llama_sampler_temp_ext` (llama-sampler.cpp:2129 @b1b770d90).
 const TempExt = struct {
-    base: Backend,
+    base: llama.sampler.core.Backend,
     temp: f32,
     delta: f32,
     exponent: f32,
 };
 
 /// Ports `llama_sampler_temp_ext_name` (llama-sampler.cpp:2135 @b1b770d90).
-fn tempExtName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
-    return core.ctxOf(TempExt, smpl).base.getName();
+fn tempExtName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
+    return llama.sampler.core.ctxOf(TempExt, smpl).base.getName();
 }
 
 /// Ports `llama_sampler_temp_ext_apply` (llama-sampler.cpp:2140 @b1b770d90).
@@ -1095,121 +1084,121 @@ fn tempExtName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// picks a temperature within `temp ± delta`. The entropy sum and the
 /// temperature mapping are fused -- see the file header -- and the
 /// re-normalisation after scaling runs in `double`.
-fn tempExtApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(TempExt, smpl);
+fn tempExtApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(TempExt, smpl);
     if (ctx.delta > 0) {
-        const min_temp = libcxx.max(f32, 0.0, ctx.temp - ctx.delta);
+        const min_temp = stdlib.libcxx.max(f32, 0.0, ctx.temp - ctx.delta);
         const max_temp = ctx.temp + ctx.delta;
 
         const exponent_val = ctx.exponent;
 
         if (cur_p.*.size <= 1) return;
 
-        const max_entropy = -libm.logf(1.0 / @as(f32, @floatFromInt(cur_p.*.size)));
+        const max_entropy = -stdlib.libm.logf(1.0 / @as(f32, @floatFromInt(cur_p.*.size)));
 
-        core.softmaxImpl(cur_p, true);
+        llama.sampler.core.softmaxImpl(cur_p, true);
 
         var entropy: f32 = 0.0;
-        for (core.items(cur_p)) |d| {
+        for (llama.sampler.core.items(cur_p)) |d| {
             const prob = d.p;
             if (prob > 0.0) {
-                entropy = @mulAdd(f32, -prob, libm.logf(prob), entropy);
+                entropy = @mulAdd(f32, -prob, stdlib.libm.logf(prob), entropy);
             }
         }
 
         const normalized_entropy = entropy / max_entropy;
 
-        const dyn_temp = @mulAdd(f32, max_temp - min_temp, libm.powf(normalized_entropy, exponent_val), min_temp);
+        const dyn_temp = @mulAdd(f32, max_temp - min_temp, stdlib.libm.powf(normalized_entropy, exponent_val), min_temp);
 
-        core.tempImpl(cur_p, dyn_temp);
+        llama.sampler.core.tempImpl(cur_p, dyn_temp);
 
         const max_l_double: f64 = cur_p.*.data[0].logit;
 
         var cum_sum_double: f64 = 0.0;
-        for (core.items(cur_p)) |*d| {
-            const p = libm.exp(@as(f64, d.logit) - max_l_double);
+        for (llama.sampler.core.items(cur_p)) |*d| {
+            const p = stdlib.libm.exp(@as(f64, d.logit) - max_l_double);
             d.p = @floatCast(p);
             cum_sum_double += p;
         }
 
-        for (core.items(cur_p)) |*d| {
+        for (llama.sampler.core.items(cur_p)) |*d| {
             d.p = @floatCast(@as(f64, d.p) / cum_sum_double);
         }
     } else {
-        core.tempImpl(cur_p, ctx.temp);
+        llama.sampler.core.tempImpl(cur_p, ctx.temp);
     }
 }
 
 /// Ports `llama_sampler_temp_ext_clone` (llama-sampler.cpp:2211 @b1b770d90).
-fn tempExtClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(TempExt, smpl);
+fn tempExtClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(TempExt, smpl);
     return llama_sampler_init_temp_ext(ctx.temp, ctx.delta, ctx.exponent);
 }
 
 /// Ports `llama_sampler_temp_ext_free` (llama-sampler.cpp:2216 @b1b770d90).
-fn tempExtFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(TempExt, core.ctxOf(TempExt, smpl));
+fn tempExtFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(TempExt, llama.sampler.core.ctxOf(TempExt, smpl));
 }
 
 /// Ports `llama_sampler_temp_ext_backend_init` (llama-sampler.cpp:2220 @b1b770d90).
-fn tempExtBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn tempExtBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = n_outputs_max_per_seq;
-    const sctx = core.ctxOf(TempExt, smpl);
-    const res = core.backendSupport(smpl, buft);
+    const sctx = llama.sampler.core.ctxOf(TempExt, smpl);
+    const res = llama.sampler.core.backendSupport(smpl, buft);
     sctx.base.initBackend(res);
     return res;
 }
 
 /// Ports `llama_sampler_temp_ext_backend_apply` (llama-sampler.cpp:2234 @b1b770d90).
-fn tempExtBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
-    const sctx = core.ctxOf(TempExt, smpl);
+fn tempExtBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
+    const sctx = llama.sampler.core.ctxOf(TempExt, smpl);
 
     if (sctx.delta <= 0.0 or sctx.temp <= 0.0) {
         backendTempSampling(ctx, gf, data, sctx.temp);
         return;
     }
 
-    const logits = c.ggml_reshape_1d(ctx, data.*.logits, c.ggml_nelements(data.*.logits));
+    const logits = llama.impl.c.ggml_reshape_1d(ctx, data.*.logits, llama.impl.c.ggml_nelements(data.*.logits));
 
-    const min_temp = libcxx.max(f32, 0.0, sctx.temp - sctx.delta);
+    const min_temp = stdlib.libcxx.max(f32, 0.0, sctx.temp - sctx.delta);
     const max_temp = sctx.temp + sctx.delta;
-    const max_entropy = libm.logf(@floatFromInt(logits[0].ne[0]));
+    const max_entropy = stdlib.libm.logf(@floatFromInt(logits[0].ne[0]));
 
-    const probs = c.ggml_soft_max(ctx, logits);
-    _ = c.ggml_set_name(probs, "temp_ext_softmax_probs");
+    const probs = llama.impl.c.ggml_soft_max(ctx, logits);
+    _ = llama.impl.c.ggml_set_name(probs, "temp_ext_softmax_probs");
 
-    const probs_clamped = c.ggml_clamp(ctx, probs, 1e-10, 1.0);
-    _ = c.ggml_set_name(probs_clamped, "temp_ext_probs_clamped");
+    const probs_clamped = llama.impl.c.ggml_clamp(ctx, probs, 1e-10, 1.0);
+    _ = llama.impl.c.ggml_set_name(probs_clamped, "temp_ext_probs_clamped");
 
-    const log_probs = c.ggml_log(ctx, probs_clamped);
-    const p_log_p = c.ggml_mul(ctx, probs_clamped, log_probs);
-    const sum_p_log_p = c.ggml_sum(ctx, p_log_p);
-    const entropy = c.ggml_scale(ctx, sum_p_log_p, -1.0);
-    _ = c.ggml_set_name(log_probs, "temp_ext_log_probs");
-    _ = c.ggml_set_name(p_log_p, "temp_ext_p_log_p");
-    _ = c.ggml_set_name(sum_p_log_p, "temp_ext_sum_p_log_p");
-    _ = c.ggml_set_name(entropy, "temp_ext_entropy");
+    const log_probs = llama.impl.c.ggml_log(ctx, probs_clamped);
+    const p_log_p = llama.impl.c.ggml_mul(ctx, probs_clamped, log_probs);
+    const sum_p_log_p = llama.impl.c.ggml_sum(ctx, p_log_p);
+    const entropy = llama.impl.c.ggml_scale(ctx, sum_p_log_p, -1.0);
+    _ = llama.impl.c.ggml_set_name(log_probs, "temp_ext_log_probs");
+    _ = llama.impl.c.ggml_set_name(p_log_p, "temp_ext_p_log_p");
+    _ = llama.impl.c.ggml_set_name(sum_p_log_p, "temp_ext_sum_p_log_p");
+    _ = llama.impl.c.ggml_set_name(entropy, "temp_ext_entropy");
 
-    const norm_entropy = c.ggml_scale(ctx, entropy, 1.0 / max_entropy);
-    _ = c.ggml_set_name(norm_entropy, "temp_ext_norm_entropy");
+    const norm_entropy = llama.impl.c.ggml_scale(ctx, entropy, 1.0 / max_entropy);
+    _ = llama.impl.c.ggml_set_name(norm_entropy, "temp_ext_norm_entropy");
 
-    const log_norm_entropy = c.ggml_log(ctx, norm_entropy);
-    const scaled_log = c.ggml_scale(ctx, log_norm_entropy, sctx.exponent);
-    const pow_entropy = c.ggml_exp(ctx, scaled_log);
-    const dyn_temp = c.ggml_scale_bias(ctx, pow_entropy, max_temp - min_temp, min_temp);
-    _ = c.ggml_set_name(log_norm_entropy, "temp_ext_log_norm_entropy");
-    _ = c.ggml_set_name(scaled_log, "temp_ext_scaled_log");
-    _ = c.ggml_set_name(pow_entropy, "temp_ext_pow_entropy");
-    _ = c.ggml_set_name(dyn_temp, "temp_ext_dyn_temp");
+    const log_norm_entropy = llama.impl.c.ggml_log(ctx, norm_entropy);
+    const scaled_log = llama.impl.c.ggml_scale(ctx, log_norm_entropy, sctx.exponent);
+    const pow_entropy = llama.impl.c.ggml_exp(ctx, scaled_log);
+    const dyn_temp = llama.impl.c.ggml_scale_bias(ctx, pow_entropy, max_temp - min_temp, min_temp);
+    _ = llama.impl.c.ggml_set_name(log_norm_entropy, "temp_ext_log_norm_entropy");
+    _ = llama.impl.c.ggml_set_name(scaled_log, "temp_ext_scaled_log");
+    _ = llama.impl.c.ggml_set_name(pow_entropy, "temp_ext_pow_entropy");
+    _ = llama.impl.c.ggml_set_name(dyn_temp, "temp_ext_dyn_temp");
 
-    const scaled_logits = c.ggml_div(ctx, logits, dyn_temp);
-    _ = c.ggml_set_name(scaled_logits, "temp_ext_scaled_logits");
+    const scaled_logits = llama.impl.c.ggml_div(ctx, logits, dyn_temp);
+    _ = llama.impl.c.ggml_set_name(scaled_logits, "temp_ext_scaled_logits");
 
     data.*.logits = scaled_logits;
 }
 
 /// Ports `llama_sampler_temp_ext_i` (llama-sampler.cpp:2299 @b1b770d90).
-var temp_ext_iface: SamplerI = .{
+var temp_ext_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = tempExtName,
     .accept = null,
     .apply = tempExtApply,
@@ -1233,13 +1222,13 @@ var temp_ext_iface: SamplerI = .{
 ///
 /// Return: the sampler, or the `?temp-ext` placeholder at `temp == 1` with no
 /// range.
-pub export fn llama_sampler_init_temp_ext(temp: f32, delta: f32, exponent: f32) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_temp_ext(temp: f32, delta: f32, exponent: f32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = temp == 1.0 and delta <= 0.0;
 
-    if (is_empty) return core.initEmpty("?temp-ext");
+    if (is_empty) return llama.sampler.core.initEmpty("?temp-ext");
 
-    return core.llama_sampler_init(&temp_ext_iface, core.create(TempExt, .{
-        .base = Backend.init("temp-ext"),
+    return llama.sampler.core.llama_sampler_init(&temp_ext_iface, llama.sampler.core.create(TempExt, .{
+        .base = llama.sampler.core.Backend.init("temp-ext"),
         .temp = temp,
         .delta = delta,
         .exponent = exponent,
@@ -1258,11 +1247,11 @@ const Xtc = struct {
     seed: u32,
     seed_cur: u32,
 
-    rng: libcxx.Mt19937,
+    rng: stdlib.libcxx.Mt19937,
 };
 
 /// Ports `llama_sampler_xtc_name` (llama-sampler.cpp:2347 @b1b770d90).
-fn xtcName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn xtcName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "xtc";
 }
@@ -1272,19 +1261,19 @@ fn xtcName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// With probability `probability`, drops every top candidate above
 /// `threshold` except the last of them. The draw is `uniform<float>`: one
 /// engine step, which can return exactly 1.0 -- see `libcxx.canonicalF32`.
-fn xtcApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(Xtc, smpl);
+fn xtcApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Xtc, smpl);
 
     if (ctx.probability <= 0.0 or ctx.threshold > 0.5 or cur_p.*.size < 2) return;
 
-    const chance = libcxx.uniformF32(&ctx.rng);
+    const chance = stdlib.libcxx.uniformF32(&ctx.rng);
     if (chance > ctx.probability) return;
 
-    core.softmaxImpl(cur_p, true);
+    llama.sampler.core.softmaxImpl(cur_p, true);
 
     var pos_last: c_int = 0;
 
-    for (core.items(cur_p), 0..) |d, i| {
+    for (llama.sampler.core.items(cur_p), 0..) |d, i| {
         if (d.p >= ctx.threshold) {
             pos_last = @intCast(i);
         } else break;
@@ -1297,29 +1286,29 @@ fn xtcApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 }
 
 /// Ports `llama_sampler_xtc_clone` (llama-sampler.cpp:2384 @b1b770d90).
-fn xtcClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(Xtc, smpl);
+fn xtcClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(Xtc, smpl);
     const result = llama_sampler_init_xtc(ctx.probability, ctx.threshold, ctx.min_keep, ctx.seed);
 
-    core.ctxOf(Xtc, result).rng = ctx.rng;
+    llama.sampler.core.ctxOf(Xtc, result).rng = ctx.rng;
 
     return result;
 }
 
 /// Ports `llama_sampler_xtc_free` (llama-sampler.cpp:2398 @b1b770d90).
-fn xtcFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(Xtc, core.ctxOf(Xtc, smpl));
+fn xtcFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(Xtc, llama.sampler.core.ctxOf(Xtc, smpl));
 }
 
 /// Ports `llama_sampler_xtc_reset` (llama-sampler.cpp:2402 @b1b770d90).
-fn xtcReset(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(Xtc, smpl);
-    ctx.seed_cur = core.getRngSeed(ctx.seed);
+fn xtcReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Xtc, smpl);
+    ctx.seed_cur = llama.sampler.core.getRngSeed(ctx.seed);
     ctx.rng.seed(ctx.seed_cur);
 }
 
 /// Ports `llama_sampler_xtc_i` (llama-sampler.cpp:2408 @b1b770d90).
-var xtc_iface: SamplerI = .{
+var xtc_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = xtcName,
     .accept = null,
     .apply = xtcApply,
@@ -1337,20 +1326,20 @@ var xtc_iface: SamplerI = .{
 /// - `seed`: the seed; `LLAMA_DEFAULT_SEED` picks a random one.
 ///
 /// Return: the sampler, or the `?xtc` placeholder when disabled.
-pub export fn llama_sampler_init_xtc(p: f32, t: f32, min_keep: usize, seed: u32) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_xtc(p: f32, t: f32, min_keep: usize, seed: u32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = p <= 0.0 or t > 0.5;
 
-    if (is_empty) return core.initEmpty("?xtc");
+    if (is_empty) return llama.sampler.core.initEmpty("?xtc");
 
-    const seed_cur = core.getRngSeed(seed);
+    const seed_cur = llama.sampler.core.getRngSeed(seed);
 
-    return core.llama_sampler_init(&xtc_iface, core.create(Xtc, .{
+    return llama.sampler.core.llama_sampler_init(&xtc_iface, llama.sampler.core.create(Xtc, .{
         .probability = p,
         .threshold = t,
         .min_keep = min_keep,
         .seed = seed,
         .seed_cur = seed_cur,
-        .rng = libcxx.Mt19937.init(seed_cur),
+        .rng = stdlib.libcxx.Mt19937.init(seed_cur),
     }));
 }
 
@@ -1363,7 +1352,7 @@ const TopNSigma = struct {
 };
 
 /// Ports `llama_sampler_top_n_sigma_name` (llama-sampler.cpp:3206 @b1b770d90).
-fn topNSigmaName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn topNSigmaName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "top-n-sigma";
 }
@@ -1374,17 +1363,17 @@ fn topNSigmaName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
 /// ignoring -inf. `pow(x, 2)` is `pow(double, double)` in the C++ -- the
 /// `float` argument is promoted -- and the running sum rounds back to
 /// `float` each step. The cut is fused -- see the file header.
-fn topNSigmaApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(TopNSigma, smpl);
+fn topNSigmaApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(TopNSigma, smpl);
 
     if (ctx.n <= 0.0 or cur_p.*.size <= 1) return;
 
     var max = cur_p.*.data[0].logit;
     var logits_sum: f32 = 0;
     var valid_count: usize = 0;
-    for (core.items(cur_p)) |d| {
+    for (llama.sampler.core.items(cur_p)) |d| {
         if (d.logit != -inf) {
-            max = libcxx.max(f32, max, d.logit);
+            max = stdlib.libcxx.max(f32, max, d.logit);
             logits_sum += d.logit;
             valid_count += 1;
         }
@@ -1392,14 +1381,14 @@ fn topNSigmaApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     const mean: f32 = if (valid_count > 0) logits_sum / @as(f32, @floatFromInt(valid_count)) else 0;
 
     var acc: f32 = 0;
-    for (core.items(cur_p)) |d| {
+    for (llama.sampler.core.items(cur_p)) |d| {
         if (d.logit != -inf) {
-            acc = @floatCast(@as(f64, acc) + libm.pow(d.logit - mean, 2));
+            acc = @floatCast(@as(f64, acc) + stdlib.libm.pow(d.logit - mean, 2));
         }
     }
-    const std_dev: f32 = if (valid_count > 0) libm.sqrtf(acc / @as(f32, @floatFromInt(valid_count))) else 0;
+    const std_dev: f32 = if (valid_count > 0) @sqrt(@as(f32, acc / @as(f32, @floatFromInt(valid_count)))) else 0;
 
-    for (core.items(cur_p)) |*d| {
+    for (llama.sampler.core.items(cur_p)) |*d| {
         if (d.logit < @mulAdd(f32, -ctx.n, std_dev, max)) {
             d.logit = -inf;
         }
@@ -1407,17 +1396,17 @@ fn topNSigmaApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
 }
 
 /// Ports `llama_sampler_top_n_sigma_clone` (llama-sampler.cpp:3249 @b1b770d90).
-fn topNSigmaClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    return llama_sampler_init_top_n_sigma(core.ctxOf(TopNSigma, smpl).n);
+fn topNSigmaClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama_sampler_init_top_n_sigma(llama.sampler.core.ctxOf(TopNSigma, smpl).n);
 }
 
 /// Ports `llama_sampler_top_n_sigma_free` (llama-sampler.cpp:3254 @b1b770d90).
-fn topNSigmaFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(TopNSigma, core.ctxOf(TopNSigma, smpl));
+fn topNSigmaFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(TopNSigma, llama.sampler.core.ctxOf(TopNSigma, smpl));
 }
 
 /// Ports `llama_sampler_top_n_sigma_i` (llama-sampler.cpp:3258 @b1b770d90).
-var top_n_sigma_iface: SamplerI = .{
+var top_n_sigma_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = topNSigmaName,
     .accept = null,
     .apply = topNSigmaApply,
@@ -1432,12 +1421,12 @@ var top_n_sigma_iface: SamplerI = .{
 /// - `n`: how many standard deviations to keep; `<= 0` disables it.
 ///
 /// Return: the sampler, or the `?top-n-sigma` placeholder when disabled.
-pub export fn llama_sampler_init_top_n_sigma(n: f32) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_top_n_sigma(n: f32) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     const is_empty = n <= 0.0;
 
-    if (is_empty) return core.initEmpty("?top-n-sigma");
+    if (is_empty) return llama.sampler.core.initEmpty("?top-n-sigma");
 
-    return core.llama_sampler_init(&top_n_sigma_iface, core.create(TopNSigma, .{ .n = n }));
+    return llama.sampler.core.llama_sampler_init(&top_n_sigma_iface, llama.sampler.core.create(TopNSigma, .{ .n = n }));
 }
 
 // -----------------------------------------------------------------------------

@@ -10,21 +10,11 @@
 //! `Model.nanbeige`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_nanbeige`'s `load_arch_hparams` (models/nanbeige.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     const nb = &self.nanbeige;
@@ -32,7 +22,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
     const n_loops_u: u32 = (try meta.getKey(u32, .num_loops, false, exc)) orelse 1;
-    impl.assert(n_loops_u >= 1, "models/nanbeige.cpp", 8, "n_loops_u >= 1");
+    llama.impl.assert(n_loops_u >= 1, "models/nanbeige.cpp", 8, "n_loops_u >= 1");
 
     nb.skip_loop_final_norm = false;
     if (try meta.getKey(bool, .skip_loop_final_norm, false, exc)) |v| nb.skip_loop_final_norm = v;
@@ -42,7 +32,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // Bound-check before casting: a signed int multiply can overflow and
     // bypass the guard.
     const phys_sz: usize = @bitCast(@as(isize, nb.n_layer_phys));
-    impl.assert(phys_sz *% @as(usize, n_loops_u) <= hparams_mod.max_layers, "models/nanbeige.cpp", 16, "(size_t) n_layer_phys * (size_t) n_loops_u <= (size_t) LLAMA_MAX_LAYERS");
+    llama.impl.assert(phys_sz *% @as(usize, n_loops_u) <= llama.hparams.max_layers, "models/nanbeige.cpp", 16, "(size_t) n_layer_phys * (size_t) n_loops_u <= (size_t) LLAMA_MAX_LAYERS");
     nb.n_loops = @bitCast(n_loops_u);
 
     // Expand the logical layer count before load_tensors allocates the
@@ -68,11 +58,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_nanbeige`'s `load_arch_tensors` (models/nanbeige.cpp:37 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const nb = &self.nanbeige;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -117,13 +107,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// Ports `llama_model_nanbeige`'s `build_arch_graph` (models/nanbeige.cpp:76
 /// @b1b770d90) and the constructor of its `graph` (models/nanbeige.cpp:80
 /// @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const nb = &model.nanbeige;
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nanbeige.cpp", 85, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nanbeige.cpp", 85, "n_embd_head == hparams.n_embd_head_k()");
 
     const n_phys: c_int = if (nb.n_layer_phys > 0) nb.n_layer_phys else @intCast(b.n_layer);
     const n_loops: c_int = if (nb.n_loops > 0) nb.n_loops else 1;
@@ -134,7 +124,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
     const inp_attn = b.buildAttnInpKv();
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     const inp_out_ids = b.buildInpOutIds();
 
@@ -165,11 +155,11 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -178,7 +168,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, layer.ffn_up_s, layer.ffn_gate, layer.ffn_gate_b, layer.ffn_gate_s, layer.ffn_down, layer.ffn_down_b, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

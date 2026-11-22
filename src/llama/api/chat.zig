@@ -12,11 +12,11 @@
 //! and `exports.zig` exports it once libllama swaps.
 
 const std = @import("std");
-const chat = @import("../chat.zig");
+const llama = @import("../module.zig");
 
 /// Ports `llama_chat_builtin_templates` (llama-chat.cpp:950 @b1b770d90).
 pub fn llama_chat_builtin_templates(output: [*c][*c]const u8, len: usize) callconv(.c) i32 {
-    return chat.builtinTemplates(@ptrCast(output), len);
+    return llama.chat.builtinTemplates(@ptrCast(output), len);
 }
 
 // -----------------------------------------------------------------------------

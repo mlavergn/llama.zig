@@ -17,11 +17,9 @@
 //! (libc++ 22's `__copy_construct`), so iterating the original is the same.
 
 const std = @import("std");
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
-const hash_map = @import("hash_map.zig");
-const log = @import("log.zig");
-const io = @import("io.zig");
-const file = @import("stdlib").file;
 
 /// Ports `LLAMA_NGRAM_MIN`, `LLAMA_NGRAM_MAX`, `LLAMA_NGRAM_STATIC`
 /// (ngram-cache.h:9, 10, 11 @b1b770d90).
@@ -80,11 +78,11 @@ pub fn ngramHash(ngram: Ngram) u64 {
 
 /// Ports `common_ngram_cache_part` (ngram-cache.h:58 @b1b770d90): token to
 /// the number of times it has been seen, keyed by `std::hash<int>`.
-pub const CachePart = hash_map.HashMap(c.llama_token, i32, hash_map.hashInt, hash_map.eqlInt);
+pub const CachePart = mod.hash_map.HashMap(c.llama_token, i32, mod.hash_map.hashInt, mod.hash_map.eqlInt);
 
 /// Ports `common_ngram_cache` (ngram-cache.h:61 @b1b770d90): n-gram to the
 /// empirical distribution of the tokens following it. Owns its parts.
-pub const Cache = hash_map.HashMap(Ngram, CachePart, ngramHash, Ngram.eql);
+pub const Cache = mod.hash_map.HashMap(Ngram, CachePart, ngramHash, Ngram.eql);
 
 /// Frees a cache and its parts.
 pub fn deinitCache(cache: *Cache) void {
@@ -143,7 +141,7 @@ pub fn update(cache: *Cache, ngram_min_: i32, ngram_max_: i32, inp: []const c.ll
                 const eta_min = @divTrunc(eta_ms, 60 * 1000);
                 const eta_s = @divTrunc(eta_ms - 60 * 1000 * eta_min, 1000);
 
-                io.eprintf("%s: %lld/%lld done, ETA: %02lld:%02lld\n", .{ @as([*:0]const u8, "common_ngram_cache_update"), @as(c_longlong, n_done), @as(c_longlong, n_todo), @as(c_longlong, eta_min), @as(c_longlong, eta_s) });
+                mod.io.eprintf("%s: %lld/%lld done, ETA: %02lld:%02lld\n", .{ @as([*:0]const u8, "common_ngram_cache_update"), @as(c_longlong, n_done), @as(c_longlong, n_todo), @as(c_longlong, eta_min), @as(c_longlong, eta_s) });
             }
         }
     }
@@ -304,7 +302,7 @@ pub fn draft(inp: []const c.llama_token, draft_out: *std.ArrayList(c.llama_token
             break;
         }
 
-        log.dbg(" - draft candidate: token=%d\n", .{@as(c_int, drafted_token)});
+        mod.log.dbg(" - draft candidate: token=%d\n", .{@as(c_int, drafted_token)});
         try draft_out.append(allocator, drafted_token);
     }
 }
@@ -332,7 +330,7 @@ const Out = struct {
 /// - `cache`: the cache.
 /// - `filename`: where to write it.
 pub fn save(cache: *const Cache, filename: [:0]const u8) void {
-    const std_io = file.defaultIo();
+    const std_io = stdlib.file.defaultIo();
     const f = std.Io.Dir.cwd().createFile(std_io, filename, .{}) catch return;
     defer f.close(std_io);
     // records are a few bytes each: buffered, as `std::ofstream`'s are,
@@ -392,8 +390,8 @@ const Reader = struct {
 /// Return: the cache, or `error.OpenFailed` where the C++ throws
 /// `std::ifstream::failure("Unable to open file " + filename)`.
 pub fn load(allocator: std.mem.Allocator, filename: [:0]const u8) error{ OutOfMemory, OpenFailed }!Cache {
-    const std_io = file.defaultIo();
-    const f = file.openIn(std_io, filename) catch return error.OpenFailed;
+    const std_io = stdlib.file.defaultIo();
+    const f = stdlib.file.openIn(std_io, filename) catch return error.OpenFailed;
     defer f.close(std_io);
     var buf: [64 * 1024]u8 = undefined;
     var fr = f.reader(std_io, &buf);
@@ -539,7 +537,7 @@ test "save and load round-trip in iteration order, and merge adds counts" {
 test "a map keyed by the Fibonacci hash iterates as libc++'s does" {
     // measured: libc++ 22 (zig c++) iterates these keys emplaced in this
     // order as 11 2 9 3 100 7 -1 5 over 11 buckets
-    const M = hash_map.HashMap(c.llama_token, i32, tokenHash, hash_map.eqlInt);
+    const M = mod.hash_map.HashMap(c.llama_token, i32, tokenHash, mod.hash_map.eqlInt);
     var m = try M.init(std.testing.allocator);
     defer m.deinit();
     for ([_]c.llama_token{ 5, -1, 7, 100, 3, 9, 11, 2 }) |k| _ = try m.emplace(k, 1);

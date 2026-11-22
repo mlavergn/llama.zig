@@ -58,10 +58,8 @@
 //! enough: a message that reads exactly `</s>` stays untrusted.
 
 const std = @import("std");
+const llama = @import("llama");
 const jinja = @import("zigjinja");
-
-/// libllama's C ABI; see `c.zig` for why it is imported there and not here.
-pub const c = @import("c.zig").api;
 
 /// Failures worth telling apart from each other.
 pub const Error = error{
@@ -269,10 +267,10 @@ pub const Template = struct {
     /// none, which is normal for a base (non-instruct) model.
     pub fn fromModel(
         allocator: std.mem.Allocator,
-        model: *c.llama_model,
+        model: *llama.impl.c.llama_model,
         name: ?[:0]const u8,
     ) !Self {
-        const raw = c.llama_model_chat_template(model, if (name) |n| n.ptr else null) orelse
+        const raw = llama.api.model.llama_model_chat_template(model, if (name) |n| n.ptr else null) orelse
             return Error.NoTemplate;
         return init(allocator, std.mem.span(raw));
     }

@@ -18,38 +18,18 @@
 //! own.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const msg_mod = @import("../msg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const chat_peg = @import("../chat_peg.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
-const parsers = @import("../parsers/module.zig");
-const types = @import("types.zig");
-const helpers = @import("helpers.zig");
-const analyzer = @import("analyzer.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const PegError = peg.Error;
-const ParserId = peg.ParserId;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ChatParams = params_mod.ChatParams;
-const GenerationParams = template.GenerationParams;
-const Template = template.Template;
-const Autoparser = types.Autoparser;
-const trimWhitespace = helpers.trimWhitespace;
 
 /// Ports `peg_generator`'s `generate_parser` (chat-auto-parser-generator.cpp:23
 /// @b1b770d90), the overload that analyses the template first.
-pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams) Error!ChatParams {
+pub fn generateParser(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
     // Run differential analysis to extract template structure
-    var ap: Autoparser = .{};
-    try analyzer.analyzeTemplate(&ap, a, tmpl);
+    var ap: common_chat.autoparser.types.Autoparser = .{};
+    try common_chat.autoparser.analyzer.analyzeTemplate(&ap, a, tmpl);
     return generateParserAnalyzed(a, tmpl, inputs, &ap);
 }
 
@@ -57,11 +37,11 @@ pub fn generateParser(a: Allocator, tmpl: *const Template, inputs: *const Genera
 /// @b1b770d90): the prompt, the generation prompt (rebuilt for a continued
 /// message), the parser, and -- for tools or a response format -- the
 /// grammar and its lazy trigger.
-pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *const GenerationParams, ap: *const Autoparser) Error!ChatParams {
+pub fn generateParserAnalyzed(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams, ap: *const common_chat.autoparser.types.Autoparser) common_chat.exception.Error!common_chat.params.ChatParams {
     // Create the result structure
-    var data: ChatParams = .{};
-    data.prompt = try template.directApply(a, tmpl, inputs);
-    data.generation_prompt = try template.generationPrompt(a, tmpl, inputs);
+    var data: common_chat.params.ChatParams = .{};
+    data.prompt = try common_chat.template.directApply(a, tmpl, inputs);
+    data.generation_prompt = try common_chat.template.generationPrompt(a, tmpl, inputs);
     data.format = .peg_native;
     try data.preserved_tokens.appendSlice(a, ap.preserved_tokens.items);
     try data.additional_stops.appendSlice(a, ap.additional_stops.items);
@@ -75,7 +55,7 @@ pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *cons
         if (ap.reasoning.start.len != 0) {
             const gp = data.generation_prompt;
             var next: std.ArrayList(u8) = .empty;
-            try next.appendSlice(a, try util.substr(gp, 0, util.find(gp, ap.reasoning.start)));
+            try next.appendSlice(a, try common_chat.util.substr(gp, 0, common_chat.util.find(gp, ap.reasoning.start)));
             try next.appendSlice(a, ap.reasoning.start);
             try next.appendSlice(a, msg.reasoning_content);
             if (inputs.continue_final_message == .content) {
@@ -105,7 +85,7 @@ pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *cons
 
     if (include_grammar) {
         data.grammar_lazy = !has_response_format and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, parser, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, parser, data.grammar_lazy);
 
         // Set grammar triggers based on tool section markers (fall back to per-call markers)
         if (data.grammar_lazy) {
@@ -125,15 +105,15 @@ pub fn generateParserAnalyzed(a: Allocator, tmpl: *const Template, inputs: *cons
 /// constructor (chat-auto-parser-generator.cpp:18 @b1b770d90), which builds
 /// the `eps` the reasoning parser starts as.
 const Ctx = struct {
-    p: *ChatBuilder,
-    inputs: *const GenerationParams,
-    reasoning_parser: ParserId,
+    p: *common_chat.chat_peg.ChatBuilder,
+    inputs: *const common_chat.template.GenerationParams,
+    reasoning_parser: peg.ParserId,
     extracting_reasoning: bool = false,
-    reasoning: ?*const types.AnalyzeReasoning = null,
-    content: ?*const types.AnalyzeContent = null,
+    reasoning: ?*const common_chat.autoparser.types.AnalyzeReasoning = null,
+    content: ?*const common_chat.autoparser.types.AnalyzeContent = null,
     a: Allocator,
 
-    fn init(p: *ChatBuilder, inputs: *const GenerationParams, a: Allocator) PegError!Ctx {
+    fn init(p: *common_chat.chat_peg.ChatBuilder, inputs: *const common_chat.template.GenerationParams, a: Allocator) peg.Error!Ctx {
         return .{ .p = p, .inputs = inputs, .reasoning_parser = try p.b.eps(), .a = a };
     }
 };
@@ -141,11 +121,11 @@ const Ctx = struct {
 /// The state `autoparser`'s `build_parser`'s lambda closes over.
 const Root = struct {
     a: Allocator,
-    ap: *const Autoparser,
-    inputs: *const GenerationParams,
+    ap: *const common_chat.autoparser.types.Autoparser,
+    inputs: *const common_chat.template.GenerationParams,
     generation_prompt: []const u8,
 
-    fn build(self: *const Root, p: *ChatBuilder) PegError!ParserId {
+    fn build(self: *const Root, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         const b = &p.b;
         const ap = self.ap;
         const inputs = self.inputs;
@@ -183,7 +163,7 @@ const Root = struct {
         } else {
             parser = try contentBuildParser(&ap.content, &ctx);
         }
-        const reasoning_start = trimWhitespace(ap.reasoning.start);
+        const reasoning_start = common_chat.autoparser.helpers.trimWhitespace(ap.reasoning.start);
         const prefix = try p.prefix(self.generation_prompt, reasoning_start);
         return if (pure_content) b.plus(prefix, parser) else b.shl(prefix, parser);
     }
@@ -193,17 +173,17 @@ const Root = struct {
 /// @b1b770d90).
 ///
 /// Return: the arena, its `gpa` `a`; release with `deinit`.
-pub fn buildParser(a: Allocator, ap: *const Autoparser, inputs: *const GenerationParams, generation_prompt: []const u8) Error!peg.Arena {
+pub fn buildParser(a: Allocator, ap: *const common_chat.autoparser.types.Autoparser, inputs: *const common_chat.template.GenerationParams, generation_prompt: []const u8) common_chat.exception.Error!peg.Arena {
     if (!ap.analysis_complete) {
-        return exception.throw(error.InvalidArgument, "Cannot call build_parser on autoparser without performing analysis first, call analyze_template(...)", .{});
+        return common_chat.exception.throw(error.InvalidArgument, "Cannot call build_parser on autoparser without performing analysis first, call analyze_template(...)", .{});
     }
     const root: Root = .{ .a = a, .ap = ap, .inputs = inputs, .generation_prompt = generation_prompt };
-    return chat_peg.buildChatPegParser(a, &root, Root.build) catch |e| util.fromPeg(e);
+    return common_chat.chat_peg.buildChatPegParser(a, &root, Root.build) catch |e| common_chat.util.fromPeg(e);
 }
 
 /// Ports `analyze_reasoning`'s `build_parser` (chat-auto-parser-generator.cpp:137
 /// @b1b770d90).
-fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!ParserId {
+fn reasoningBuildParser(r: *const common_chat.autoparser.types.AnalyzeReasoning, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
 
@@ -215,11 +195,11 @@ fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!Pa
         if (r.end.len != 0) {
             if (r.start.len != 0) {
                 // Standard tag-based: optional(<think>reasoning</think>)
-                const x = try b.plus(try p.optspace(r.start), try p.reasoning(try b.until(trimWhitespace(r.end))));
+                const x = try b.plus(try p.optspace(r.start), try p.reasoning(try b.until(common_chat.autoparser.helpers.trimWhitespace(r.end))));
                 return b.optional(try b.plus(x, try p.optspace(r.end)));
             }
             // Delimiter-style (empty start)
-            return b.optional(try b.plus(try p.reasoning(try b.until(trimWhitespace(r.end))), try p.optspace(r.end)));
+            return b.optional(try b.plus(try p.reasoning(try b.until(common_chat.autoparser.helpers.trimWhitespace(r.end))), try p.optspace(r.end)));
         }
     }
 
@@ -228,7 +208,7 @@ fn reasoningBuildParser(r: *const types.AnalyzeReasoning, ctx: *Ctx) PegError!Pa
 
 /// Ports `analyze_content`'s `build_parser` (chat-auto-parser-generator.cpp:158
 /// @b1b770d90).
-fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
+fn contentBuildParser(c: *const common_chat.autoparser.types.AnalyzeContent, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
 
@@ -249,7 +229,7 @@ fn contentBuildParser(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!Parser
 
 /// Ports `analyze_content`'s `build_optional_wrapped` (chat-auto-parser-generator.cpp:170
 /// @b1b770d90).
-fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegError!ParserId {
+fn contentBuildOptionalWrapped(c: *const common_chat.autoparser.types.AnalyzeContent, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
 
@@ -261,13 +241,13 @@ fn contentBuildOptionalWrapped(c: *const types.AnalyzeContent, ctx: *Ctx) PegErr
 
 /// Ports `analyze_tools`'s `build_parser` (chat-auto-parser-generator.cpp:179
 /// @b1b770d90).
-fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
+fn toolsBuildParser(t: *const common_chat.autoparser.types.AnalyzeTools, ctx: *Ctx) peg.Error!peg.ParserId {
     switch (t.format.mode) {
         .JSON_NATIVE => return buildToolParserJsonNative(t, ctx),
         .TAG_WITH_JSON => return buildToolParserTagJson(t, ctx),
         .TAG_WITH_TAGGED => return buildToolParserTagTagged(t, ctx),
         else => {
-            log.err("[ERROR] Template seems to support tool calls, but failed to determine tool format. Tool calling will not work properly. " ++
+            common_chat.log.err("[ERROR] Template seems to support tool calls, but failed to determine tool format. Tool calling will not work properly. " ++
                 "Check for a fixed template for your model in the models/templates directory of your llama.cpp installation or " ++
                 "report an issue at https://github.com/ggml-org/llama.cpp/issues\n", .{});
             return ctx.p.b.eps();
@@ -277,7 +257,7 @@ fn toolsBuildParser(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
 
 /// Ports `analyze_tools`'s `build_tool_parser_json_native` (chat-auto-parser-generator.cpp:195
 /// @b1b770d90).
-fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
+fn buildToolParserJsonNative(t: *const common_chat.autoparser.types.AnalyzeTools, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
     const inputs = ctx.inputs;
@@ -294,7 +274,7 @@ fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!P
         args_field = try std.mem.concat(ctx.a, u8, &.{ format.function_field, ".", args_field });
     }
 
-    const opts: ChatBuilder.JsonToolsOptions = .{
+    const opts: common_chat.chat_peg.ChatBuilder.JsonToolsOptions = .{
         .name_key = name_field,
         .args_key = args_field,
         .array_wrapped = format.tools_array_wrapped,
@@ -336,7 +316,7 @@ fn buildToolParserJsonNative(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!P
 /// @b1b770d90): a function's opening with its name, the call id and the
 /// arguments, then its closing, atomic where a partial match would
 /// mislead.
-fn buildFuncParser(t: *const types.AnalyzeTools, p: *ChatBuilder, name: []const u8, call_id_section: ParserId, have_call_id: bool, args: ParserId, atomic_peek: ?ParserId) PegError!ParserId {
+fn buildFuncParser(t: *const common_chat.autoparser.types.AnalyzeTools, p: *common_chat.chat_peg.ChatBuilder, name: []const u8, call_id_section: peg.ParserId, have_call_id: bool, args: peg.ParserId, atomic_peek: ?peg.ParserId) peg.Error!peg.ParserId {
     const b = &p.b;
     const function = &t.function;
     var open = try p.toolOpen(try b.plusLit(try b.litPlus(function.name_prefix, try p.toolName(try b.literal(name))), function.name_suffix));
@@ -387,22 +367,22 @@ fn buildFuncParser(t: *const types.AnalyzeTools, p: *ChatBuilder, name: []const 
 
 /// The per-tool callback of `build_tool_parser_tag_json`.
 const TagJson = struct {
-    t: *const types.AnalyzeTools,
+    t: *const common_chat.autoparser.types.AnalyzeTools,
     ctx: *Ctx,
-    tool_choice: ParserId,
+    tool_choice: peg.ParserId,
 
-    fn tool(self: *TagJson, tool_index: usize, tool_def: *Value) Error!void {
-        self.build(tool_index, tool_def) catch |e| return util.fromPeg(e);
+    fn tool(self: *TagJson, tool_index: usize, tool_def: *json.Value) common_chat.exception.Error!void {
+        self.build(tool_index, tool_def) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn build(self: *TagJson, tool_index: usize, tool_def: *Value) PegError!void {
+    fn build(self: *TagJson, tool_index: usize, tool_def: *json.Value) peg.Error!void {
         const t = self.t;
         const p = self.ctx.p;
         const b = &p.b;
         const a = self.ctx.a;
         const func = tool_def.at("function") catch |e| return peg.errors.fromJson(e);
-        const name = parsers.functionName(tool_def) catch |e| return util.toPeg(e);
-        const schema = msg_mod.toolParameters(a, func) catch |e| return util.toPeg(e);
+        const name = common_chat.parsers.functionName(tool_def) catch |e| return common_chat.util.toPeg(e);
+        const schema = common_chat.msg.toolParameters(a, func) catch |e| return common_chat.util.toPeg(e);
 
         // Build call_id parser based on position (if supported)
         var have_call_id = false;
@@ -426,7 +406,7 @@ const TagJson = struct {
             args_parser = try b.plus(args_parser, try b.literal(t.arguments.end));
         }
 
-        const atomic_peek: ?ParserId = if (t.arguments.start.len != 0) try b.peek(try b.literal(t.arguments.start)) else null;
+        const atomic_peek: ?peg.ParserId = if (t.arguments.start.len != 0) try b.peek(try b.literal(t.arguments.start)) else null;
         const func_parser = try buildFuncParser(t, p, name, call_id_section, have_call_id, args_parser, atomic_peek);
         try b.orAssign(&self.tool_choice, try b.rule(try std.fmt.allocPrint(a, "tool-{d}", .{tool_index}), func_parser, false));
     }
@@ -434,14 +414,14 @@ const TagJson = struct {
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_json` (chat-auto-parser-generator.cpp:287
 /// @b1b770d90): tagged calls with JSON arguments.
-fn buildToolParserTagJson(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
+fn buildToolParserTagJson(t: *const common_chat.autoparser.types.AnalyzeTools, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
     const inputs = ctx.inputs;
     const format = &t.format;
 
     var state: TagJson = .{ .t = t, .ctx = ctx, .tool_choice = try b.choiceEmpty() };
-    parsers.foreachFunction(&inputs.tools, &state, TagJson.tool) catch |e| return util.toPeg(e);
+    common_chat.parsers.foreachFunction(&inputs.tools, &state, TagJson.tool) catch |e| return common_chat.util.toPeg(e);
     const tool_choice = state.tool_choice;
 
     const require_calls = inputs.tool_choice == .required;
@@ -485,24 +465,24 @@ fn buildToolParserTagJson(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!Pars
 
 /// The per-tool callback of `build_tool_parser_tag_tagged`.
 const TagTagged = struct {
-    t: *const types.AnalyzeTools,
+    t: *const common_chat.autoparser.types.AnalyzeTools,
     ctx: *Ctx,
-    until_suffix: ParserId,
-    tool_choice: ParserId,
+    until_suffix: peg.ParserId,
+    tool_choice: peg.ParserId,
     name: []const u8 = "",
     tool_index: usize = 0,
-    required_parsers: std.ArrayList(ParserId) = .empty,
-    optional_parsers: std.ArrayList(ParserId) = .empty,
+    required_parsers: std.ArrayList(peg.ParserId) = .empty,
+    optional_parsers: std.ArrayList(peg.ParserId) = .empty,
 
-    fn tool(self: *TagTagged, tool_index: usize, tool_def: *Value) Error!void {
-        self.build(tool_index, tool_def) catch |e| return util.fromPeg(e);
+    fn tool(self: *TagTagged, tool_index: usize, tool_def: *json.Value) common_chat.exception.Error!void {
+        self.build(tool_index, tool_def) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn param(self: *TagTagged, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        self.buildParam(param_index, prm, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *TagTagged, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) common_chat.exception.Error!void {
+        self.buildParam(param_index, prm, doc) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildParam(self: *TagTagged, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) PegError!void {
+    fn buildParam(self: *TagTagged, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) peg.Error!void {
         const t = self.t;
         const p = self.ctx.p;
         const b = &p.b;
@@ -530,20 +510,20 @@ const TagTagged = struct {
         }
     }
 
-    fn build(self: *TagTagged, tool_index: usize, tool_def: *Value) PegError!void {
+    fn build(self: *TagTagged, tool_index: usize, tool_def: *json.Value) peg.Error!void {
         self.tool_index = tool_index;
         const t = self.t;
         const p = self.ctx.p;
         const b = &p.b;
         const a = self.ctx.a;
         const func = tool_def.at("function") catch |e| return peg.errors.fromJson(e);
-        self.name = parsers.functionName(tool_def) catch |e| return util.toPeg(e);
+        self.name = common_chat.parsers.functionName(tool_def) catch |e| return common_chat.util.toPeg(e);
         const name = self.name;
 
         // Build parser for each argument, separating required and optional
         self.required_parsers = .empty;
         self.optional_parsers = .empty;
-        parsers.foreachParameter(a, func, self, param) catch |e| return util.toPeg(e);
+        common_chat.parsers.foreachParameter(a, func, self, param) catch |e| return common_chat.util.toPeg(e);
 
         // Build required arg sequence in definition order
         var args_seq = try b.eps();
@@ -586,7 +566,7 @@ const TagTagged = struct {
 
         // Only peek for an arg tag when there are required args that must follow.
         // When all args are optional, the model may emit no arg tags at all (#20650).
-        const atomic_peek: ?ParserId = if (t.arguments.name_prefix.len != 0 and self.required_parsers.items.len != 0)
+        const atomic_peek: ?peg.ParserId = if (t.arguments.name_prefix.len != 0 and self.required_parsers.items.len != 0)
             try b.peek(try b.literal(t.arguments.name_prefix))
         else
             null;
@@ -597,7 +577,7 @@ const TagTagged = struct {
 
 /// Ports `analyze_tools`'s `build_tool_parser_tag_tagged` (chat-auto-parser-generator.cpp:358
 /// @b1b770d90): tagged calls with tagged arguments.
-fn buildToolParserTagTagged(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!ParserId {
+fn buildToolParserTagTagged(t: *const common_chat.autoparser.types.AnalyzeTools, ctx: *Ctx) peg.Error!peg.ParserId {
     const p = ctx.p;
     const b = &p.b;
     const inputs = ctx.inputs;
@@ -606,7 +586,7 @@ fn buildToolParserTagTagged(t: *const types.AnalyzeTools, ctx: *Ctx) PegError!Pa
     const until_suffix = try b.rule("until-suffix", try b.until(t.arguments.value_suffix), false);
 
     var state: TagTagged = .{ .t = t, .ctx = ctx, .until_suffix = until_suffix, .tool_choice = try b.choiceEmpty() };
-    parsers.foreachFunction(&inputs.tools, &state, TagTagged.tool) catch |e| return util.toPeg(e);
+    common_chat.parsers.foreachFunction(&inputs.tools, &state, TagTagged.tool) catch |e| return common_chat.util.toPeg(e);
     const tool_choice = state.tool_choice;
 
     const require_tools = inputs.tool_choice == .required;

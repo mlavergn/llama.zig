@@ -19,7 +19,7 @@
 //! which would pull the whole `tools_common` module -- and its own
 //! `@cImport` of `llama.h` -- into the CLI. Here the trace lines are dropped
 //! (`llama-cli` logs at ERROR, where `LOG_TRC` never prints) and the piece is
-//! read through `c.zig`. Everything else is the tools' text; a change to one
+//! read through libllama's Zig API. Everything else is the tools' text; a change to one
 //! belongs in both. `make cnv-diff`'s budget scenarios hold this one to
 //! upstream's `common_reasoning_budget` in `libllama-common-ref.a`.
 //!
@@ -35,14 +35,14 @@
 //! upstream builds a `common_trie` from `std::vector<uint32_t>`.
 
 const std = @import("std");
-const c = @import("c.zig").api;
-const trie = @import("cli_fit").json.trie;
+const cli_fit = @import("cli_fit");
+const llama = @import("llama");
 
 const gpa = std.heap.c_allocator;
 
 /// What upstream's `new` does when it fails: `std::bad_alloc`, uncaught.
 fn oom() noreturn {
-    _ = c.ggml_abort("reasoning-budget.cpp", 0, "out of memory");
+    _ = llama.impl.c.ggml_abort("reasoning-budget.cpp", 0, "out of memory");
     unreachable;
 }
 
@@ -68,8 +68,8 @@ fn comTrc(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype)
 ///
 /// Return: the piece, or null when it does not fit in `buf` -- which no
 /// vocabulary's single token reaches at 256 bytes.
-fn tokenPiece(vocab: ?*const c.llama_vocab, token: c.llama_token, buf: []u8) []const u8 {
-    const n = c.llama_token_to_piece(vocab, token, buf.ptr, @intCast(buf.len), 0, false);
+fn tokenPiece(vocab: ?*const llama.impl.c.llama_vocab, token: llama.impl.c.llama_token, buf: []u8) []const u8 {
+    const n = llama.api.vocab.llama_token_to_piece(vocab, token, buf.ptr, @intCast(buf.len), 0, false);
     if (n < 0) oom();
     return buf[0..@intCast(n)];
 }
@@ -93,7 +93,7 @@ pub fn utf8IsComplete(s: []const u8) bool {
 /// trie already built: failure links in breadth-first order, the longest
 /// pattern ending at each state, the alphabet. `cli/json/trie.zig`'s
 /// `AhoCorasick.init` takes strings; the matchers here insert token ids.
-fn ahoFromTrie(t: trie.Trie) !trie.AhoCorasick {
+fn ahoFromTrie(t: cli_fit.json.trie.Trie) !cli_fit.json.trie.AhoCorasick {
     const nodes = t.nodes.items;
     const n = nodes.len;
 
@@ -141,7 +141,7 @@ fn ahoFromTrie(t: trie.Trie) !trie.AhoCorasick {
     return .{ .t = t, .fail = fail, .order = try order.toOwnedSlice(gpa), .match = match, .alphabet = try alphabet.toOwnedSlice(gpa) };
 }
 
-fn findChild(node: trie.Trie.Node, cpt: u32) ?usize {
+fn findChild(node: cli_fit.json.trie.Trie.Node, cpt: u32) ?usize {
     for (node.children.items) |e| {
         if (e.cpt == cpt) return e.child;
     }
@@ -151,15 +151,15 @@ fn findChild(node: trie.Trie.Node, cpt: u32) ?usize {
 /// Ports `token_matcher` (reasoning-budget.cpp:14 @b1b770d90): every
 /// sequence at once, through one automaton.
 const TokenMatcher = struct {
-    seqs: [][]c.llama_token,
-    ac: trie.AhoCorasick,
+    seqs: [][]llama.impl.c.llama_token,
+    ac: cli_fit.json.trie.AhoCorasick,
     state: usize = 0,
 
     /// Ports `token_matcher` (reasoning-budget.cpp:19 @b1b770d90), the
     /// constructor: `collect` then `build_trie`.
-    fn init(seqs_in: []const []const c.llama_token) !TokenMatcher {
+    fn init(seqs_in: []const []const llama.impl.c.llama_token) !TokenMatcher {
         const seqs = try collect(seqs_in);
-        var t = try trie.Trie.init(gpa, &.{});
+        var t = try cli_fit.json.trie.Trie.init(gpa, &.{});
         for (seqs) |seq| {
             const syms = try gpa.alloc(u32, seq.len);
             defer gpa.free(syms);
@@ -177,14 +177,14 @@ const TokenMatcher = struct {
 
     /// Ports `collect` (reasoning-budget.cpp:21 @b1b770d90): the non-empty
     /// sequences, first occurrence of each.
-    fn collect(seqs: []const []const c.llama_token) ![][]c.llama_token {
-        var res: std.ArrayList([]c.llama_token) = .empty;
+    fn collect(seqs: []const []const llama.impl.c.llama_token) ![][]llama.impl.c.llama_token {
+        var res: std.ArrayList([]llama.impl.c.llama_token) = .empty;
         for (seqs) |seq| {
             if (seq.len == 0) continue;
             const seen = for (res.items) |r| {
-                if (std.mem.eql(c.llama_token, r, seq)) break true;
+                if (std.mem.eql(llama.impl.c.llama_token, r, seq)) break true;
             } else false;
-            if (!seen) try res.append(gpa, try gpa.dupe(c.llama_token, seq));
+            if (!seen) try res.append(gpa, try gpa.dupe(llama.impl.c.llama_token, seq));
         }
         return res.toOwnedSlice(gpa);
     }
@@ -193,7 +193,7 @@ const TokenMatcher = struct {
     ///
     /// Return: the index into `seqs` of the longest sequence ending at this
     /// token, or -1.
-    fn advance(self: *TokenMatcher, token: c.llama_token) i32 {
+    fn advance(self: *TokenMatcher, token: llama.impl.c.llama_token) i32 {
         self.state = self.ac.next(self.state, @bitCast(token));
         const p = self.ac.matchPattern(self.state);
         if (p >= 0) self.state = 0;
@@ -208,11 +208,11 @@ const TokenMatcher = struct {
 
 /// Ports `common_reasoning_budget_ctx` (reasoning-budget.cpp:52 @b1b770d90).
 const Ctx = struct {
-    vocab: ?*const c.llama_vocab,
+    vocab: ?*const llama.impl.c.llama_vocab,
 
     start_matcher: TokenMatcher,
     end_matcher: TokenMatcher,
-    forced_tokens: []c.llama_token,
+    forced_tokens: []llama.impl.c.llama_token,
 
     budget: i32, // maximum tokens in reasoning block
     remaining: i32, // tokens remaining in budget
@@ -232,17 +232,17 @@ const Ctx = struct {
     }
 };
 
-fn ctxOf(smpl: ?*const c.llama_sampler) *Ctx {
+fn ctxOf(smpl: ?*const llama.impl.c.llama_sampler) *Ctx {
     return @ptrCast(@alignCast(smpl.?.ctx.?));
 }
 
 /// Ports `common_reasoning_budget_name` (reasoning-budget.cpp:70 @b1b770d90).
-fn name(_: ?*const c.llama_sampler) callconv(.c) [*c]const u8 {
+fn name(_: ?*const llama.impl.c.llama_sampler) callconv(.c) [*c]const u8 {
     return "reasoning-budget";
 }
 
 /// Ports `common_reasoning_budget_accept` (reasoning-budget.cpp:74 @b1b770d90).
-fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
+fn accept(smpl: ?*llama.impl.c.llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
     const ctx = ctxOf(smpl);
     const func = "common_reasoning_budget_accept";
 
@@ -331,7 +331,7 @@ fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
 
 /// Ports `common_reasoning_budget_apply` (reasoning-budget.cpp:167 @b1b770d90):
 /// while forcing, every logit but the forced token's goes to -inf.
-fn apply(smpl: ?*c.llama_sampler, cur_p: ?*c.llama_token_data_array) callconv(.c) void {
+fn apply(smpl: ?*llama.impl.c.llama_sampler, cur_p: ?*llama.impl.c.llama_token_data_array) callconv(.c) void {
     const ctx = ctxOf(smpl);
 
     if (ctx.state != .forcing) {
@@ -351,7 +351,7 @@ fn apply(smpl: ?*c.llama_sampler, cur_p: ?*c.llama_token_data_array) callconv(.c
 }
 
 /// Ports `common_reasoning_budget_reset` (reasoning-budget.cpp:189 @b1b770d90).
-fn reset(smpl: ?*c.llama_sampler) callconv(.c) void {
+fn reset(smpl: ?*llama.impl.c.llama_sampler) callconv(.c) void {
     const ctx = ctxOf(smpl);
     ctx.state = .idle;
     ctx.remaining = ctx.budget;
@@ -362,13 +362,13 @@ fn reset(smpl: ?*c.llama_sampler) callconv(.c) void {
 }
 
 /// Ports `common_reasoning_budget_free` (reasoning-budget.cpp:206 @b1b770d90).
-fn free(smpl: ?*c.llama_sampler) callconv(.c) void {
+fn free(smpl: ?*llama.impl.c.llama_sampler) callconv(.c) void {
     ctxOf(smpl).destroy();
 }
 
 /// Ports `common_reasoning_budget_i` (reasoning-budget.cpp:210 @b1b770d90).
-var iface: c.struct_llama_sampler_i = blk: {
-    var i = std.mem.zeroes(c.struct_llama_sampler_i);
+var iface: llama.impl.c.struct_llama_sampler_i = blk: {
+    var i = std.mem.zeroes(llama.impl.c.struct_llama_sampler_i);
     i.name = name;
     i.accept = accept;
     i.apply = apply;
@@ -382,7 +382,7 @@ var iface: c.struct_llama_sampler_i = blk: {
 /// a copy of the context. The matchers are rebuilt from their sequences,
 /// which `collect` already left unique and non-empty, so the automaton is
 /// the same one; the walk state is copied.
-fn clone(smpl: ?*const c.llama_sampler) callconv(.c) ?*c.llama_sampler {
+fn clone(smpl: ?*const llama.impl.c.llama_sampler) callconv(.c) ?*llama.impl.c.llama_sampler {
     const ctx = ctxOf(smpl);
     const res = initState(ctx.vocab, @ptrCast(ctx.start_matcher.seqs), @ptrCast(ctx.end_matcher.seqs), ctx.forced_tokens, ctx.budget, ctx.state) catch oom();
     const nctx = ctxOf(res);
@@ -397,13 +397,13 @@ fn clone(smpl: ?*const c.llama_sampler) callconv(.c) ?*c.llama_sampler {
 
 /// Ports `common_reasoning_budget_init_state` (reasoning-budget.cpp:234 @b1b770d90).
 fn initState(
-    vocab: ?*const c.llama_vocab,
-    start_seqs: []const []const c.llama_token,
-    end_seqs: []const []const c.llama_token,
-    forced_tokens: []const c.llama_token,
+    vocab: ?*const llama.impl.c.llama_vocab,
+    start_seqs: []const []const llama.impl.c.llama_token,
+    end_seqs: []const []const llama.impl.c.llama_token,
+    forced_tokens: []const llama.impl.c.llama_token,
     budget: i32,
     initial_state_in: State,
-) !*c.llama_sampler {
+) !*llama.impl.c.llama_sampler {
     var initial_state = initial_state_in;
     // promote COUNTING with budget <= 0 to FORCING
     if (initial_state == .counting and budget <= 0) initial_state = .forcing;
@@ -413,14 +413,14 @@ fn initState(
         .vocab = vocab,
         .start_matcher = try TokenMatcher.init(start_seqs),
         .end_matcher = try TokenMatcher.init(end_seqs),
-        .forced_tokens = try gpa.dupe(c.llama_token, forced_tokens),
+        .forced_tokens = try gpa.dupe(llama.impl.c.llama_token, forced_tokens),
         .budget = budget,
         .remaining = budget,
         .state = initial_state,
         .force_pos = 0,
         .end_match = -1,
     };
-    return c.llama_sampler_init(&iface, ctx).?;
+    return llama.sampler.core.llama_sampler_init(&iface, ctx).?;
 }
 
 /// Ports `common_reasoning_budget_init` (reasoning-budget.cpp:262 @b1b770d90).
@@ -435,18 +435,18 @@ fn initState(
 ///
 /// Return: the sampler, freed with `llama_sampler_free`.
 pub fn init(
-    vocab: ?*const c.llama_vocab,
-    start_seqs: []const []const c.llama_token,
-    end_seqs: []const []const c.llama_token,
-    forced_tokens: []const c.llama_token,
+    vocab: ?*const llama.impl.c.llama_vocab,
+    start_seqs: []const []const llama.impl.c.llama_token,
+    end_seqs: []const []const llama.impl.c.llama_token,
+    forced_tokens: []const llama.impl.c.llama_token,
     budget: i32,
     initial_state: State,
-) !*c.llama_sampler {
+) !*llama.impl.c.llama_sampler {
     return initState(vocab, start_seqs, end_seqs, forced_tokens, budget, initial_state);
 }
 
 /// Ports `common_reasoning_budget_get_state` (reasoning-budget.cpp:272 @b1b770d90).
-pub fn getState(smpl: ?*const c.llama_sampler) State {
+pub fn getState(smpl: ?*const llama.impl.c.llama_sampler) State {
     if (smpl == null) return .idle;
     return ctxOf(smpl).state;
 }
@@ -455,7 +455,7 @@ pub fn getState(smpl: ?*const c.llama_sampler) State {
 ///
 /// Return: the end sequence that moved the sampler to DONE, or null if none
 /// was recorded; borrowed from the sampler.
-pub fn getEndMatch(smpl: ?*const c.llama_sampler) ?[]const c.llama_token {
+pub fn getEndMatch(smpl: ?*const llama.impl.c.llama_sampler) ?[]const llama.impl.c.llama_token {
     if (smpl == null) return null;
     const ctx = ctxOf(smpl);
     if (ctx.end_match < 0) return null;
@@ -466,7 +466,7 @@ pub fn getEndMatch(smpl: ?*const c.llama_sampler) ?[]const c.llama_token {
 /// moves a counting sampler into FORCING.
 ///
 /// Return: whether the transition happened.
-pub fn force(smpl: ?*c.llama_sampler) bool {
+pub fn force(smpl: ?*llama.impl.c.llama_sampler) bool {
     if (smpl == null) return false;
 
     const ctx = ctxOf(smpl);

@@ -35,7 +35,8 @@
 //! upstream, but that backend is not compiled here.
 
 const std = @import("std");
-const impl = @import("impl.zig");
+const stdlib = @import("stdlib");
+const mod = @import("module.zig");
 
 /// Mirrors `ggml_critical_section_mutex` (ggml-threading.cpp:4 @b1b770d90).
 ///
@@ -44,7 +45,7 @@ const impl = @import("impl.zig");
 /// Nothing outside this file references it, in the C++ or here.
 ///
 /// libc++'s `constexpr mutex()`.
-export var ggml_critical_section_mutex: impl.Mutex = .{};
+export var ggml_critical_section_mutex: stdlib.sync.Mutex = .{};
 
 /// Ports `ggml_critical_section_start` (ggml-threading.cpp:6 @b1b770d90).
 ///

@@ -29,12 +29,7 @@
 //! calls it, and that half of the lexer is not ported.
 
 const std = @import("std");
-const errors = @import("errors.zig");
-const value_mod = @import("value.zig");
-
-const Value = value_mod.Value;
-const Error = errors.Error;
-const Position = errors.Position;
+const mod = @import("module.zig");
 
 /// `char_traits<char>::eof()`.
 const eof: i32 = -1;
@@ -118,7 +113,7 @@ const Lexer = struct {
     /// whether the next get() call should just return current
     next_unget: bool = false,
     /// the start position of the current token
-    position: Position = .{},
+    position: mod.errors.Position = .{},
     /// raw input token string (for error messages)
     token_string: std.ArrayList(u8),
     /// buffer for variable-length tokens (numbers, strings)
@@ -133,7 +128,7 @@ const Lexer = struct {
     /// Both buffers hold at most what has been read since the last reset,
     /// so the input's length (plus the end-of-input slack) bounds them and
     /// they never grow.
-    fn init(gpa: std.mem.Allocator, input: []const u8) Error!Lexer {
+    fn init(gpa: std.mem.Allocator, input: []const u8) mod.errors.Error!Lexer {
         var ts = try std.ArrayList(u8).initCapacity(gpa, input.len + 8);
         errdefer ts.deinit(gpa);
         const tb = try std.ArrayList(u8).initCapacity(gpa, input.len + 8);
@@ -577,7 +572,7 @@ const Lexer = struct {
 
     /// Ports `get_token_string` (json.hpp:8488 @b1b770d90): the bytes read
     /// for the current token, control characters as `<U+XXXX>`.
-    fn tokenString(self: *const Lexer, out: *std.ArrayList(u8), gpa: std.mem.Allocator) Error!void {
+    fn tokenString(self: *const Lexer, out: *std.ArrayList(u8), gpa: std.mem.Allocator) mod.errors.Error!void {
         for (self.token_string.items) |c| {
             if (c <= 0x1F) {
                 try out.print(gpa, "<U+{X:0>4}>", .{c});
@@ -661,11 +656,11 @@ const Parser = struct {
     allow_exceptions: bool,
 
     /// the parsed value
-    root: Value = .null,
+    root: mod.value.Value = .null,
     /// stack to model hierarchy of values
-    ref_stack: std.ArrayList(*Value) = .empty,
+    ref_stack: std.ArrayList(*mod.value.Value) = .empty,
     /// helper to hold the reference for the next object element
-    object_element: ?*Value = null,
+    object_element: ?*mod.value.Value = null,
 
     fn getToken(self: *Parser) TokenType {
         self.last_token = self.lexer.scan();
@@ -673,7 +668,7 @@ const Parser = struct {
     }
 
     /// Ports `exception_message` (json.hpp:13345 @b1b770d90).
-    fn exceptionMessage(self: *Parser, out: *std.ArrayList(u8), expected: TokenType, context: []const u8) Error!void {
+    fn exceptionMessage(self: *Parser, out: *std.ArrayList(u8), expected: TokenType, context: []const u8) mod.errors.Error!void {
         const a = self.gpa;
         try out.appendSlice(a, "syntax error ");
 
@@ -698,22 +693,22 @@ const Parser = struct {
 
     /// `sax->parse_error(..., parse_error::create(101, ...))`: the error the
     /// parser throws, or (without exceptions) just the failure.
-    fn syntaxError(self: *Parser, expected: TokenType, context: []const u8) Error {
+    fn syntaxError(self: *Parser, expected: TokenType, context: []const u8) mod.errors.Error {
         if (!self.allow_exceptions) return error.JsonError;
         var msg: std.ArrayList(u8) = .empty;
         defer msg.deinit(self.gpa);
         try self.exceptionMessage(&msg, expected, context);
-        return errors.parseError(101, self.lexer.position, msg.items);
+        return mod.errors.parseError(101, self.lexer.position, msg.items);
     }
 
     /// `parse_error::create(101, ..., "attempting to parse an empty input...")`.
-    fn emptyInputError(self: *Parser) Error {
+    fn emptyInputError(self: *Parser) mod.errors.Error {
         if (!self.allow_exceptions) return error.JsonError;
-        return errors.parseError(101, self.lexer.position, "attempting to parse an empty input; check that your input string or stream contains the expected JSON");
+        return mod.errors.parseError(101, self.lexer.position, "attempting to parse an empty input; check that your input string or stream contains the expected JSON");
     }
 
     /// Ports `json_sax_dom_parser`'s `handle_value` (json.hpp:9080 @b1b770d90).
-    fn handleValue(self: *Parser, v: Value) Error!*Value {
+    fn handleValue(self: *Parser, v: mod.value.Value) mod.errors.Error!*mod.value.Value {
         if (self.ref_stack.items.len == 0) {
             self.root = v;
             return &self.root;
@@ -739,17 +734,17 @@ const Parser = struct {
 
     /// Ports `json_sax_dom_parser`'s `key` (json.hpp:8917 @b1b770d90): the
     /// member, found or added, that the next value lands in.
-    fn key(self: *Parser) Error!void {
+    fn key(self: *Parser) mod.errors.Error!void {
         const top = self.ref_stack.items[self.ref_stack.items.len - 1];
         self.object_element = try top.object.emplace(self.gpa, self.lexer.token_buffer.items);
     }
 
-    fn string(self: *Parser) Error!Value {
-        return Value.initString(self.gpa, self.lexer.token_buffer.items);
+    fn string(self: *Parser) mod.errors.Error!mod.value.Value {
+        return mod.value.Value.initString(self.gpa, self.lexer.token_buffer.items);
     }
 
     /// Ports `sax_parse_internal` (json.hpp:13047 @b1b770d90).
-    fn saxParseInternal(self: *Parser) Error!void {
+    fn saxParseInternal(self: *Parser) mod.errors.Error!void {
         // stack to remember the hierarchy of structured values we are
         // parsing; true = array; false = object
         var states: std.ArrayList(bool) = .empty;
@@ -763,7 +758,7 @@ const Parser = struct {
                 // invariant: get_token() was called before each iteration
                 switch (self.last_token) {
                     .begin_object => {
-                        try self.ref_stack.append(self.gpa, try self.handleValue(Value.emptyObject()));
+                        try self.ref_stack.append(self.gpa, try self.handleValue(mod.value.Value.emptyObject()));
 
                         // closing } -> we are done
                         if (self.getToken() == .end_object) {
@@ -790,7 +785,7 @@ const Parser = struct {
                     },
 
                     .begin_array => {
-                        try self.ref_stack.append(self.gpa, try self.handleValue(Value.emptyArray()));
+                        try self.ref_stack.append(self.gpa, try self.handleValue(mod.value.Value.emptyArray()));
 
                         // closing ] -> we are done
                         if (self.getToken() == .end_array) {
@@ -812,7 +807,7 @@ const Parser = struct {
                             var ts: std.ArrayList(u8) = .empty;
                             defer ts.deinit(self.gpa);
                             try self.lexer.tokenString(&ts, self.gpa);
-                            return errors.fail(.out_of_range, 406, "number overflow parsing '{s}'", .{ts.items});
+                            return mod.errors.fail(.out_of_range, 406, "number overflow parsing '{s}'", .{ts.items});
                         }
 
                         _ = try self.handleValue(.{ .number_float = res });
@@ -914,7 +909,7 @@ const Parser = struct {
 
     /// Ports `parser`'s `parse` (json.hpp:12960 @b1b770d90) with `strict`:
     /// one value, then nothing but whitespace.
-    fn parse(self: *Parser) Error!void {
+    fn parse(self: *Parser) mod.errors.Error!void {
         // read first token (the parser constructor does)
         _ = self.getToken();
 
@@ -927,7 +922,7 @@ const Parser = struct {
     }
 };
 
-fn run(gpa: std.mem.Allocator, text: []const u8, allow_exceptions: bool) Error!Value {
+fn run(gpa: std.mem.Allocator, text: []const u8, allow_exceptions: bool) mod.errors.Error!mod.value.Value {
     var p: Parser = .{
         .gpa = gpa,
         .lexer = try Lexer.init(gpa, text),
@@ -951,7 +946,7 @@ fn run(gpa: std.mem.Allocator, text: []const u8, allow_exceptions: bool) Error!V
 ///
 /// Return: the value, owned by the caller; `error.JsonError` with
 /// `errors.what()` set for text that is not JSON.
-pub fn parse(gpa: std.mem.Allocator, text: []const u8) Error!Value {
+pub fn parse(gpa: std.mem.Allocator, text: []const u8) mod.errors.Error!mod.value.Value {
     return run(gpa, text, true);
 }
 
@@ -959,7 +954,7 @@ pub fn parse(gpa: std.mem.Allocator, text: []const u8) Error!Value {
 /// `parse`, but text that is not JSON gives a discarded value.
 ///
 /// Return: the value, owned by the caller.
-pub fn parseNoThrow(gpa: std.mem.Allocator, text: []const u8) error{OutOfMemory}!Value {
+pub fn parseNoThrow(gpa: std.mem.Allocator, text: []const u8) error{OutOfMemory}!mod.value.Value {
     return run(gpa, text, false) catch |e| switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => .discarded,
@@ -975,7 +970,7 @@ test {
 
 fn expectParseError(text: []const u8, what: []const u8) !void {
     try std.testing.expectError(error.JsonError, parse(std.testing.allocator, text));
-    try std.testing.expectEqualStrings(what, errors.what());
+    try std.testing.expectEqualStrings(what, mod.errors.what());
     var d = try parseNoThrow(std.testing.allocator, text);
     try std.testing.expect(d.isDiscarded());
     d.deinit(std.testing.allocator);

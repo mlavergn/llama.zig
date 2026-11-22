@@ -11,20 +11,11 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_wavtokenizer_dec`'s `load_arch_hparams` (models/wavtokenizer-dec.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -34,7 +25,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_wavtokenizer_dec`'s `load_arch_tensors` (models/wavtokenizer-dec.cpp:9 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -95,12 +86,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
                     layer.norm = try self.createTensor(.{ .tensor = .pos_net_attn_norm, .suffix = "weight", .bid = bid }, &.{ 1, n_embd }, 0, exc);
                     layer.norm_b = try self.createTensor(.{ .tensor = .pos_net_attn_norm, .suffix = "bias", .bid = bid }, &.{ 1, n_embd }, 0, exc);
                 },
-                else => impl.abort("models/wavtokenizer-dec.cpp", 73, "unknown posnet layer"),
+                else => llama.impl.abort("models/wavtokenizer-dec.cpp", 73, "unknown posnet layer"),
             }
         }
     }
 
-    impl.assert(hp.posnet.n_embd == hp.convnext.n_embd, "models/wavtokenizer-dec.cpp", 78, "hparams.posnet.n_embd == hparams.convnext.n_embd");
+    llama.impl.assert(hp.posnet.n_embd == hp.convnext.n_embd, "models/wavtokenizer-dec.cpp", 78, "hparams.posnet.n_embd == hparams.convnext.n_embd");
 
     self.tok_norm = try self.createTensor(.{ .tensor = .token_embd_norm, .suffix = "weight", .bid = 0 }, &.{hp.posnet.n_embd}, 0, exc);
     self.tok_norm_b = try self.createTensor(.{ .tensor = .token_embd_norm, .suffix = "bias", .bid = 0 }, &.{hp.posnet.n_embd}, 0, exc);
@@ -139,22 +130,22 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_wavtokenizer_dec`'s `build_arch_graph` (models/wavtokenizer-dec.cpp:114 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_wavtokenizer_dec`'s `graph`
 /// (models/wavtokenizer-dec.cpp:118 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
-    var cur: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, inpL));
+    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, inpL));
 
-    cur = c.ggml_conv_1d_ph(ctx, model.conv1d, cur, 1, 1);
-    cur = c.ggml_add(ctx, cur, model.conv1d_b);
+    cur = llama.impl.c.ggml_conv_1d_ph(ctx, model.conv1d, cur, 1, 1);
+    cur = llama.impl.c.ggml_add(ctx, cur, model.conv1d_b);
 
     // The posnet.
     var il: u32 = 0;
@@ -167,56 +158,56 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             0, 1, 3, 4 => {
                 cur = b.buildNorm(cur, layer.norm1, layer.norm1_b, .group, 0);
 
-                cur = c.ggml_mul(ctx, c.ggml_sigmoid(ctx, cur), cur);
+                cur = llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_sigmoid(ctx, cur), cur);
 
-                cur = c.ggml_conv_1d_ph(ctx, layer.conv1, cur, 1, 1);
-                cur = c.ggml_add(ctx, cur, layer.conv1_b);
+                cur = llama.impl.c.ggml_conv_1d_ph(ctx, layer.conv1, cur, 1, 1);
+                cur = llama.impl.c.ggml_add(ctx, cur, layer.conv1_b);
 
                 cur = b.buildNorm(cur, layer.norm2, layer.norm2_b, .group, 0);
 
-                cur = c.ggml_mul(ctx, c.ggml_sigmoid(ctx, cur), cur);
+                cur = llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_sigmoid(ctx, cur), cur);
 
-                cur = c.ggml_conv_1d_ph(ctx, layer.conv2, cur, 1, 1);
-                cur = c.ggml_add(ctx, cur, layer.conv2_b);
+                cur = llama.impl.c.ggml_conv_1d_ph(ctx, layer.conv2, cur, 1, 1);
+                cur = llama.impl.c.ggml_add(ctx, cur, layer.conv2_b);
 
-                cur = c.ggml_add(ctx, cur, inpL);
+                cur = llama.impl.c.ggml_add(ctx, cur, inpL);
             },
             2 => {
                 cur = b.buildNorm(cur, layer.attn_norm, layer.attn_norm_b, .group, 0);
 
-                var q: *Tensor = c.ggml_conv_1d_ph(ctx, layer.attn_q, cur, 1, 1);
-                var k: *Tensor = c.ggml_conv_1d_ph(ctx, layer.attn_k, cur, 1, 1);
-                var v: *Tensor = c.ggml_conv_1d_ph(ctx, layer.attn_v, cur, 1, 1);
+                var q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_conv_1d_ph(ctx, layer.attn_q, cur, 1, 1);
+                var k: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_conv_1d_ph(ctx, layer.attn_k, cur, 1, 1);
+                var v: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_conv_1d_ph(ctx, layer.attn_v, cur, 1, 1);
 
-                q = c.ggml_add(ctx, q, layer.attn_q_b);
-                k = c.ggml_add(ctx, k, layer.attn_k_b);
-                v = c.ggml_add(ctx, v, layer.attn_v_b);
+                q = llama.impl.c.ggml_add(ctx, q, layer.attn_q_b);
+                k = llama.impl.c.ggml_add(ctx, k, layer.attn_k_b);
+                v = llama.impl.c.ggml_add(ctx, v, layer.attn_v_b);
 
-                q = c.ggml_cont(ctx, c.ggml_transpose(ctx, q));
-                k = c.ggml_cont(ctx, c.ggml_transpose(ctx, k));
+                q = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, q));
+                k = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, k));
 
-                var kq: *Tensor = c.ggml_mul_mat(ctx, k, q);
+                var kq: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, k, q);
 
-                kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / libm.sqrtfInt(hp.posnet.n_embd), 0.0);
+                kq = llama.impl.c.ggml_soft_max_ext(ctx, kq, null, 1.0 / stdlib.libm.sqrtfInt(hp.posnet.n_embd), 0.0);
 
-                cur = c.ggml_mul_mat(ctx, kq, v);
+                cur = llama.impl.c.ggml_mul_mat(ctx, kq, v);
 
-                cur = c.ggml_conv_1d_ph(ctx, layer.attn_o, cur, 1, 1);
-                cur = c.ggml_add(ctx, cur, layer.attn_o_b);
+                cur = llama.impl.c.ggml_conv_1d_ph(ctx, layer.attn_o, cur, 1, 1);
+                cur = llama.impl.c.ggml_add(ctx, cur, layer.attn_o_b);
 
-                cur = c.ggml_add(ctx, cur, inpL);
+                cur = llama.impl.c.ggml_add(ctx, cur, inpL);
             },
             5 => {
                 cur = b.buildNorm(cur, layer.norm, layer.norm_b, .group, 0);
             },
-            else => impl.abort("models/wavtokenizer-dec.cpp", 203, "unknown posnet layer"),
+            else => llama.impl.abort("models/wavtokenizer-dec.cpp", 203, "unknown posnet layer"),
         }
     }
-    cur = c.ggml_cont(ctx, c.ggml_transpose(ctx, cur));
+    cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, cur));
 
     cur = b.buildNorm(cur, model.tok_norm, model.tok_norm_b, .norm, 0);
 
-    cur = c.ggml_cont(ctx, c.ggml_transpose(ctx, cur));
+    cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, cur));
 
     inpL = cur;
 
@@ -227,31 +218,31 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         cur = inpL;
 
-        cur = c.ggml_conv_1d_dw_ph(ctx, layer.dw, cur, 1, 1);
-        cur = c.ggml_add(ctx, cur, layer.dw_b);
+        cur = llama.impl.c.ggml_conv_1d_dw_ph(ctx, layer.dw, cur, 1, 1);
+        cur = llama.impl.c.ggml_add(ctx, cur, layer.dw_b);
 
-        cur = c.ggml_cont(ctx, c.ggml_transpose(ctx, cur));
+        cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, cur));
 
         cur = b.buildNorm(cur, layer.norm, layer.norm_b, .norm, -1);
 
         cur = b.buildFfn(cur, layer.pw1, layer.pw1_b, null, null, null, null, layer.pw2, layer.pw2_b, null, null, .gelu, .seq, @intCast(il));
 
-        cur = c.ggml_mul(ctx, cur, layer.gamma);
+        cur = llama.impl.c.ggml_mul(ctx, cur, layer.gamma);
 
-        cur = c.ggml_cont(ctx, c.ggml_transpose(ctx, cur));
+        cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, cur));
 
-        inpL = c.ggml_add(ctx, cur, inpL);
+        inpL = llama.impl.c.ggml_add(ctx, cur, inpL);
     }
     cur = inpL;
 
-    cur = c.ggml_cont(ctx, c.ggml_transpose(ctx, cur));
+    cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, cur));
 
     cur = b.buildNorm(cur, model.output_norm, model.output_norm_b, .norm, -1);
 
     // The LM head.
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
-    cur = c.ggml_add(ctx, cur, model.output_b);
+    cur = llama.impl.c.ggml_add(ctx, cur, model.output_b);
 
     b.cb(cur, "result_embd", -1);
     b.res.t_embd = cur;

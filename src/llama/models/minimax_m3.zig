@@ -19,24 +19,11 @@
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
+const llama = @import("../module.zig");
 const stdlib = @import("stdlib");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const kv_cache_msa = @import("../kv_cache_msa.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const Ubatch = @import("../batch.zig").Ubatch;
-const MsaContext = kv_cache_msa.MsaContext;
 
 /// Ports `llama_model_minimax_m3`'s `load_arch_hparams` (src/models/minimax-m3.cpp:13 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -54,7 +41,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.indexer_local_blocks = (try meta.getKey(u32, .attention_indexer_local_blocks, true, exc)).?;
 
     // Avoid a division by zero.
-    impl.assert(hp.indexer_block_size > 0, "models/minimax-m3.cpp", 33, "hparams.indexer_block_size > 0");
+    llama.impl.assert(hp.indexer_block_size > 0, "models/minimax-m3.cpp", 33, "hparams.indexer_block_size > 0");
 
     self.type = switch (hp.nLayer()) {
         60 => .@"428b_a23b",
@@ -63,7 +50,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_minimax_m3`'s `load_arch_tensors` (src/models/minimax-m3.cpp:41 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
@@ -117,7 +104,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_minimax_m3`'s `build_arch_graph` (src/models/minimax-m3.cpp:92 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
@@ -126,23 +113,23 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 /// reads, and the bias that forces the local blocks.
 const InpMsa = struct {
     /// F32 `[nblk, n_tokens]`: the local-force bias, over position blocks.
-    bias: ?*Tensor = null,
+    bias: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[n_ps, n_tokens]`: 0/-inf visibility, by position.
-    pos_mask: ?*Tensor = null,
+    pos_mask: ?*llama.impl.c.ggml_tensor = null,
     /// I32 `[n_ps, ns]`: position to cell, a `get_rows` index.
-    pos_slot_i: ?*Tensor = null,
+    pos_slot_i: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[n_ps, ns]`: position to cell as gatherable values, at decode.
-    pos_slot_f: ?*Tensor = null,
+    pos_slot_f: ?*llama.impl.c.ggml_tensor = null,
     /// I32 `[n_kv, ns]`: cell to position block, for a batch.
-    cell_blk: ?*Tensor = null,
+    cell_blk: ?*llama.impl.c.ggml_tensor = null,
 
-    mctx: *const MsaContext,
+    mctx: *const llama.kv_cache_msa.MsaContext,
 
     blk: c_int,
     local: c_int,
 
     /// Ports `llm_graph_input_msa`'s `set_input` (src/models/minimax-m3.cpp:101 @b1b770d90).
-    pub fn setInput(self: *InpMsa, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpMsa, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         if (self.pos_slot_i) |t| self.mctx.setInputPosSlot(t, ubatch);
         if (self.pos_slot_f) |t| self.mctx.setInputPosSlot(t, ubatch);
@@ -154,8 +141,8 @@ const InpMsa = struct {
             if (ubatch.pos == null) return;
             const n_tokens: i64 = ubatch.n_tokens;
             const nblk: i64 = bias.ne[0];
-            const data = impl.allocator.alloc(f32, @intCast(nblk * n_tokens)) catch impl.abort("models/minimax-m3.cpp", 111, "out of memory");
-            defer impl.allocator.free(data);
+            const data = std.heap.c_allocator.alloc(f32, @intCast(nblk * n_tokens)) catch llama.impl.abort("models/minimax-m3.cpp", 111, "out of memory");
+            defer std.heap.c_allocator.free(data);
             @memset(data, 0.0);
             var i: i64 = 0;
             while (i < n_tokens) : (i += 1) {
@@ -167,7 +154,7 @@ const InpMsa = struct {
                     }
                 }
             }
-            c.ggml_backend_tensor_set(bias, data.ptr, 0, data.len * @sizeOf(f32));
+            llama.impl.c.ggml_backend_tensor_set(bias, data.ptr, 0, data.len * @sizeOf(f32));
         }
     }
 
@@ -175,8 +162,8 @@ const InpMsa = struct {
     /// @b1b770d90): valid while the tensors' dimensions still match the new
     /// ubatch and cache window, and the ubatch is in the same regime --
     /// decode graphs have `pos_slot_f`, batch graphs `cell_blk`.
-    pub fn canReuse(self: *InpMsa, params: *const graph.Params) bool {
-        const mctx_new = params.mctx.?.cast(MsaContext);
+    pub fn canReuse(self: *InpMsa, params: *const llama.graph.Params) bool {
+        const mctx_new = params.mctx.?.cast(llama.kv_cache_msa.MsaContext);
 
         self.mctx = mctx_new;
 
@@ -225,7 +212,7 @@ const InpMsa = struct {
 /// - `q_cur`: `[D, HQ, T]`.
 /// - `k`, `v`: `[D, n_keys, 1, C]`.
 /// - `mask`: `[n_keys, R, 1, C]`, F16 and contiguous.
-fn buildAttnMsaFa(b: *const graph.Builder, q_cur: *Tensor, k: *Tensor, v: *Tensor, mask: *Tensor, Gp: i64, kq_scale: f32, il: c_int) *Tensor {
+fn buildAttnMsaFa(b: *const llama.graph.Builder, q_cur: *llama.impl.c.ggml_tensor, k: *llama.impl.c.ggml_tensor, v: *llama.impl.c.ggml_tensor, mask: *llama.impl.c.ggml_tensor, Gp: i64, kq_scale: f32, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
 
     const D = q_cur.ne[0];
@@ -233,26 +220,26 @@ fn buildAttnMsaFa(b: *const graph.Builder, q_cur: *Tensor, k: *Tensor, v: *Tenso
     const T = q_cur.ne[2];
     const C = k.ne[3];
     const R = @divTrunc(HQ * T, Gp * C);
-    impl.assert(Gp * C * R == HQ * T, "models/minimax-m3.cpp", 188, "Gp*C*R == HQ*T");
-    impl.assert(mask.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 189, "mask->type == GGML_TYPE_F16");
+    llama.impl.assert(Gp * C * R == HQ * T, "models/minimax-m3.cpp", 188, "Gp*C*R == HQ*T");
+    llama.impl.assert(mask.type == llama.impl.c.GGML_TYPE_F16, "models/minimax-m3.cpp", 189, "mask->type == GGML_TYPE_F16");
 
     // [D, HQ, T] -> [D, Gp, C, R] -> [D, R, Gp, C]
     // batch  (C = HKV,    R = T): channel = group
     // decode (C = HKV*ns, R = 1): channel = (group, stream), group innermost
-    var q: *Tensor = c.ggml_reshape_4d(ctx, q_cur, D, Gp, C, R);
-    q = c.ggml_permute(ctx, q, 0, 2, 3, 1);
+    var q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, q_cur, D, Gp, C, R);
+    q = llama.impl.c.ggml_permute(ctx, q, 0, 2, 3, 1);
 
-    var o: *Tensor = c.ggml_flash_attn_ext(ctx, q, k, v, mask, kq_scale, b.hparams.f_max_alibi_bias, 0.0);
-    _ = c.ggml_prec_set_acc(o, c.GGML_PREC_F32);
+    var o: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_flash_attn_ext(ctx, q, k, v, mask, kq_scale, b.hparams.f_max_alibi_bias, 0.0);
+    _ = llama.impl.c.ggml_prec_set_acc(o, llama.impl.c.GGML_PREC_F32);
     b.cb(o, "msa_fattn", il);
 
     // [D, Gp, R, C] -> [D, Gp, C, R] -> [n_embd, T]
-    o = c.ggml_permute(ctx, o, 0, 1, 3, 2);
-    if (!c.ggml_is_contiguous(o)) {
+    o = llama.impl.c.ggml_permute(ctx, o, 0, 1, 3, 2);
+    if (!llama.impl.c.ggml_is_contiguous(o)) {
         // A no-op layout at decode (R == 1), a copy for a batch.
-        o = c.ggml_cont(ctx, o);
+        o = llama.impl.c.ggml_cont(ctx, o);
     }
-    return c.ggml_reshape_2d(ctx, o, D * HQ, T);
+    return llama.impl.c.ggml_reshape_2d(ctx, o, D * HQ, T);
 }
 
 /// Whether the warning that MSA is off without flash attention has been
@@ -265,14 +252,14 @@ var warned_unified = false;
 /// Ports the constructor of `llama_model_minimax_m3`'s `graph`
 /// (src/models/minimax-m3.cpp:210 @b1b770d90). Partial rotary: the head size
 /// is not `n_rot`, so that is not asserted.
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cparams = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const n_tokens = b.n_tokens;
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-m3.cpp", 214, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-m3.cpp", 214, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -296,12 +283,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKvMsa(msa_enabled);
 
     if (!fa_on and !warned_no_fa) {
-        impl.logWarn("%s: flash attention disabled; MSA requires it -> running DENSE attention " ++
+        llama.impl.logWarn("%s: flash attention disabled; MSA requires it -> running DENSE attention " ++
             "(output may be degraded). Enable flash attention for MSA.\n", .{"graph"});
         warned_no_fa = true;
     }
     if (fa_on and !streams_ok and !warned_unified) {
-        impl.logWarn("%s: unified KV cache with n_seq_max > 1; MSA needs per-sequence streams " ++
+        llama.impl.logWarn("%s: unified KV cache with n_seq_max > 1; MSA needs per-sequence streams " ++
             "-> running DENSE attention. Output may be degraded. Drop --kv-unified to enable MSA.\n", .{"graph"});
         warned_unified = true;
     }
@@ -309,7 +296,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // The per-graph MSA state, shared by every sparse layer.
     var msa: ?*InpMsa = null;
-    var msa_mf: ?*Tensor = null; // an F32 copy of the FA mask, for the final mask add
+    var msa_mf: ?*llama.impl.c.ggml_tensor = null; // an F32 copy of the FA mask, for the final mask add
     var n_kv: i64 = 0;
     var n_ps: i64 = 0;
     var nblk: i64 = 0;
@@ -322,14 +309,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const Hd: i64 = hp.indexer_n_head; // one indexer head per GQA group
 
     if (msa_enabled) {
-        const mctx_msa = b.mctx.?.cast(MsaContext);
+        const mctx_msa = b.mctx.?.cast(llama.kv_cache_msa.MsaContext);
 
         const msa_kqm = inp_attn.base.self_attn_mask.raw.?;
         n_kv = msa_kqm.ne[0];
         n_tps = msa_kqm.ne[1]; // tokens per stream
         ns = msa_kqm.ne[3]; // streams in this ubatch
-        impl.assert(msa_kqm.type == c.GGML_TYPE_F16, "models/minimax-m3.cpp", 269, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
-        impl.assert(n_tps * ns == n_tokens, "models/minimax-m3.cpp", 270, "n_tps*ns == n_tokens");
+        llama.impl.assert(msa_kqm.type == llama.impl.c.GGML_TYPE_F16, "models/minimax-m3.cpp", 269, "msa_kqm->type == GGML_TYPE_F16 && \"MSA requires the FA (f16) mask\"");
+        llama.impl.assert(n_tps * ns == n_tokens, "models/minimax-m3.cpp", 270, "n_tps*ns == n_tokens");
 
         // The position axis covers every position in the cache, padded to
         // whole blocks.
@@ -337,27 +324,27 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         nblk = @divTrunc(n_ps, blk);
         msa_decode = n_tps == 1;
 
-        const inp = impl.allocator.create(InpMsa) catch impl.abort("models/minimax-m3.cpp", 277, "out of memory");
+        const inp = std.heap.c_allocator.create(InpMsa) catch llama.impl.abort("models/minimax-m3.cpp", 277, "out of memory");
         inp.* = .{ .mctx = mctx_msa, .blk = blk, .local = local };
 
         // Stream-grouped tokens.
-        inp.bias = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, nblk, n_tokens);
-        c.ggml_set_input(inp.bias);
+        inp.bias = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, nblk, n_tokens);
+        llama.impl.c.ggml_set_input(inp.bias);
 
-        inp.pos_mask = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_ps, n_tokens);
-        c.ggml_set_input(inp.pos_mask);
+        inp.pos_mask = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, n_ps, n_tokens);
+        llama.impl.c.ggml_set_input(inp.pos_mask);
 
-        inp.pos_slot_i = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_ps, ns);
-        c.ggml_set_input(inp.pos_slot_i);
+        inp.pos_slot_i = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_I32, n_ps, ns);
+        llama.impl.c.ggml_set_input(inp.pos_slot_i);
 
         if (msa_decode) {
-            inp.pos_slot_f = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_ps, ns);
-            c.ggml_set_input(inp.pos_slot_f);
+            inp.pos_slot_f = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, n_ps, ns);
+            llama.impl.c.ggml_set_input(inp.pos_slot_f);
         } else {
-            inp.cell_blk = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_I32, n_kv, ns);
-            c.ggml_set_input(inp.cell_blk);
+            inp.cell_blk = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_I32, n_kv, ns);
+            llama.impl.c.ggml_set_input(inp.cell_blk);
 
-            msa_mf = c.ggml_cast(ctx, msa_kqm, c.GGML_TYPE_F32);
+            msa_mf = llama.impl.c.ggml_cast(ctx, msa_kqm, llama.impl.c.GGML_TYPE_F32);
         }
 
         msa = b.res.addInput(InpMsa, inp);
@@ -369,7 +356,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
         var inpSA = inpL;
-        var cur: *Tensor = undefined;
+        var cur: *llama.impl.c.ggml_tensor = undefined;
 
         // Self-attention.
         {
@@ -398,7 +385,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const is_sparse = msa_enabled and il >= @as(c_int, @bitCast(hp.n_layer_dense_lead));
 
             if (!is_sparse) {
-                cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+                cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             } else {
                 const m = msa.?;
                 const n_idx_dim: i64 = hp.indexer_head_size;
@@ -406,180 +393,180 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 // The index branch: project, norm, partial RoPE, cache.
                 var iq = b.buildLoraMm(layer.index_q_proj.?, cur, null);
                 var ik = b.buildLoraMm(layer.index_k_proj.?, cur, null);
-                iq = c.ggml_reshape_3d(ctx, iq, n_idx_dim, Hd, n_tokens);
-                ik = c.ggml_reshape_3d(ctx, ik, n_idx_dim, 1, n_tokens);
+                iq = llama.impl.c.ggml_reshape_3d(ctx, iq, n_idx_dim, Hd, n_tokens);
+                ik = llama.impl.c.ggml_reshape_3d(ctx, ik, n_idx_dim, 1, n_tokens);
                 iq = b.buildNorm(iq, layer.index_q_norm, null, .rms, il); // the +1 is baked in
                 ik = b.buildNorm(ik, layer.index_k_norm, null, .rms, il);
                 iq = b.buildRope(iq, inp_pos, il);
                 ik = b.buildRope(ik, inp_pos, il);
 
-                const mctx_msa_l = b.mctx.?.cast(MsaContext);
+                const mctx_msa_l = b.mctx.?.cast(llama.kv_cache_msa.MsaContext);
                 const mctx_cur = mctx_msa_l.getBase();
                 const mctx_idx = mctx_msa_l.getIdx();
-                c.ggml_build_forward_expand(b.gf, mctx_idx.cpyK(ctx, ik, inp_attn.getKIdxsIdx(), il));
+                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_idx.cpyK(ctx, ik, inp_attn.getKIdxsIdx(), il));
                 const ik_kv = mctx_idx.getK(ctx, il);
 
                 if (inp_attn.base.self_k_rot[@intCast(il)]) |r| {
-                    Qcur = graph.mulMatHadamard(ctx, Qcur, r);
-                    Kcur = graph.mulMatHadamard(ctx, Kcur, r);
+                    Qcur = llama.graph.mulMatHadamard(ctx, Qcur, r);
+                    Kcur = llama.graph.mulMatHadamard(ctx, Kcur, r);
                 }
                 if (inp_attn.base.self_v_rot[@intCast(il)]) |r| {
-                    Vcur = graph.mulMatHadamard(ctx, Vcur, r);
+                    Vcur = llama.graph.mulMatHadamard(ctx, Vcur, r);
                 }
 
                 // The main branch: store K and V, take the cache views.
-                c.ggml_build_forward_expand(b.gf, Qcur);
-                c.ggml_build_forward_expand(b.gf, Kcur);
-                c.ggml_build_forward_expand(b.gf, Vcur);
-                c.ggml_build_forward_expand(b.gf, mctx_cur.cpyK(ctx, Kcur, inp_attn.base.getKIdxs(), il));
-                c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, Vcur, inp_attn.base.getVIdxs(), il));
+                llama.impl.c.ggml_build_forward_expand(b.gf, Qcur);
+                llama.impl.c.ggml_build_forward_expand(b.gf, Kcur);
+                llama.impl.c.ggml_build_forward_expand(b.gf, Vcur);
+                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_cur.cpyK(ctx, Kcur, inp_attn.base.getKIdxs(), il));
+                llama.impl.c.ggml_build_forward_expand(b.gf, mctx_cur.cpyV(ctx, Vcur, inp_attn.base.getVIdxs(), il));
                 const k = mctx_cur.getK(ctx, il);
                 const v = mctx_cur.getV(ctx, il);
-                impl.assert(!(v.nb[1] > v.nb[2]), "models/minimax-m3.cpp", 369, "!(v->nb[1] > v->nb[2]) && \"MSA assumes v_trans=false (FA on)\"");
+                llama.impl.assert(!(v.nb[1] > v.nb[2]), "models/minimax-m3.cpp", 369, "!(v->nb[1] > v->nb[2]) && \"MSA assumes v_trans=false (FA on)\"");
 
                 const D = k.ne[0];
                 const HKV = k.ne[1];
                 const Gp = @divTrunc(b.n_head, HKV);
-                impl.assert(HKV == Hd, "models/minimax-m3.cpp", 374, "HKV == Hd && \"MSA: one indexer head per GQA group\"");
-                impl.assert(k.ne[3] == ns, "models/minimax-m3.cpp", 375, "k->ne[3] == ns");
+                llama.impl.assert(HKV == Hd, "models/minimax-m3.cpp", 374, "HKV == Hd && \"MSA: one indexer head per GQA group\"");
+                llama.impl.assert(k.ne[3] == ns, "models/minimax-m3.cpp", 375, "k->ne[3] == ns");
                 const K: c_int = if (topk_blocks < @as(c_int, @truncate(nblk))) topk_blocks else @truncate(nblk);
                 const K64: i64 = K;
                 const blk64: i64 = blk;
 
-                const kq_scale = 1.0 / libm.sqrtfInt(n_embd_head);
+                const kq_scale = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
                 if (msa_decode) {
                     // Decode: top-k and gather batched over the streams,
                     // then one grouped flash attention.
                     // Gather the indexer keys through the position-to-cell map.
-                    const ik3: *Tensor = c.ggml_view_3d(ctx, ik_kv, n_idx_dim, n_kv, ns, ik_kv.nb[2], ik_kv.nb[3], 0);
-                    const ikp: *Tensor = c.ggml_get_rows(ctx, ik3, m.pos_slot_i); // [n_idx_dim, n_ps, ns]
-                    const iq4: *Tensor = c.ggml_reshape_4d(ctx, iq, n_idx_dim, Hd, 1, ns);
-                    var sc: *Tensor = c.ggml_mul_mat(ctx, c.ggml_reshape_4d(ctx, ikp, n_idx_dim, n_ps, 1, ns), iq4);
+                    const ik3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, ik_kv, n_idx_dim, n_kv, ns, ik_kv.nb[2], ik_kv.nb[3], 0);
+                    const ikp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, ik3, m.pos_slot_i); // [n_idx_dim, n_ps, ns]
+                    const iq4: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, iq, n_idx_dim, Hd, 1, ns);
+                    var sc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, llama.impl.c.ggml_reshape_4d(ctx, ikp, n_idx_dim, n_ps, 1, ns), iq4);
                     // The reference computes the indexer scores in F32:
                     // https://github.com/huggingface/transformers/blob/0f53828e83f2212060233d2ea552cc76617b8712/src/transformers/models/minimax_m3_vl/modeling_minimax_m3_vl.py#L562
-                    _ = c.ggml_prec_set_acc(sc, c.GGML_PREC_F32);
+                    _ = llama.impl.c.ggml_prec_set_acc(sc, llama.impl.c.GGML_PREC_F32);
                     // Unmapped positions come out -inf, so they can never
                     // rank into the top-k.
-                    sc = c.ggml_add_inplace(ctx, sc, c.ggml_reshape_4d(ctx, m.pos_mask, n_ps, 1, 1, ns));
-                    const bs: *Tensor = c.ggml_pool_2d(ctx, sc, c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
+                    sc = llama.impl.c.ggml_add_inplace(ctx, sc, llama.impl.c.ggml_reshape_4d(ctx, m.pos_mask, n_ps, 1, 1, ns));
+                    const bs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pool_2d(ctx, sc, llama.impl.c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
                     b.cb(bs, "msa_bs", il);
 
-                    const bsf: *Tensor = c.ggml_add(ctx, bs, c.ggml_reshape_4d(ctx, m.bias, nblk, 1, 1, ns));
-                    const idx: *Tensor = c.ggml_top_k(ctx, bsf, K); // position blocks
+                    const bsf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, bs, llama.impl.c.ggml_reshape_4d(ctx, m.bias, nblk, 1, 1, ns));
+                    const idx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_top_k(ctx, bsf, K); // position blocks
 
                     // position index: tj[t,k,h,s] = blk*idx[k,h,s] + t   (positions, the mask gather)
                     // cell index:     cs[t,k,h,s] = pos_slot[tj]         (position to cell)
                     // row index:      tr[t,k,h,s] = cs*HKV + h           (per-stream K/V gather)
-                    var a: *Tensor = c.ggml_scale(ctx, c.ggml_cast(ctx, idx, c.GGML_TYPE_F32), @floatFromInt(blk));
-                    a = c.ggml_reshape_4d(ctx, a, 1, K64, Hd, ns);
-                    const tj_rep: *Tensor = c.ggml_repeat_4d(ctx, a, blk64, K64, Hd, ns);
-                    const tj: *Tensor = c.ggml_add(ctx, tj_rep, c.ggml_reshape_3d(ctx, c.ggml_arange(ctx, 0.0, @floatFromInt(blk), 1.0), blk64, 1, 1));
+                    var a: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_cast(ctx, idx, llama.impl.c.GGML_TYPE_F32), @floatFromInt(blk));
+                    a = llama.impl.c.ggml_reshape_4d(ctx, a, 1, K64, Hd, ns);
+                    const tj_rep: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_repeat_4d(ctx, a, blk64, K64, Hd, ns);
+                    const tj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, tj_rep, llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_arange(ctx, 0.0, @floatFromInt(blk), 1.0), blk64, 1, 1));
 
-                    const tokj: *Tensor = c.ggml_cast(ctx, c.ggml_reshape_2d(ctx, tj, blk64 * K64 * Hd, ns), c.GGML_TYPE_I32);
+                    const tokj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_2d(ctx, tj, blk64 * K64 * Hd, ns), llama.impl.c.GGML_TYPE_I32);
 
-                    var cs: *Tensor = c.ggml_get_rows(ctx, c.ggml_reshape_3d(ctx, m.pos_slot_f, 1, n_ps, ns), tokj); // [1, blk*K*Hd, ns]
-                    cs = c.ggml_reshape_4d(ctx, cs, blk64, K64, Hd, ns);
+                    var cs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, llama.impl.c.ggml_reshape_3d(ctx, m.pos_slot_f, 1, n_ps, ns), tokj); // [1, blk*K*Hd, ns]
+                    cs = llama.impl.c.ggml_reshape_4d(ctx, cs, blk64, K64, Hd, ns);
 
-                    const cs_scaled: *Tensor = c.ggml_scale(ctx, cs, @floatFromInt(HKV));
-                    const tr: *Tensor = c.ggml_add(ctx, cs_scaled, c.ggml_reshape_3d(ctx, c.ggml_arange(ctx, 0.0, @floatFromInt(HKV), 1.0), 1, 1, Hd));
+                    const cs_scaled: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, cs, @floatFromInt(HKV));
+                    const tr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cs_scaled, llama.impl.c.ggml_reshape_3d(ctx, llama.impl.c.ggml_arange(ctx, 0.0, @floatFromInt(HKV), 1.0), 1, 1, Hd));
 
-                    const tokr: *Tensor = c.ggml_cast(ctx, c.ggml_reshape_2d(ctx, tr, blk64 * K64 * Hd, ns), c.GGML_TYPE_I32);
+                    const tokr: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_2d(ctx, tr, blk64 * K64 * Hd, ns), llama.impl.c.GGML_TYPE_I32);
 
-                    const k3: *Tensor = c.ggml_view_3d(ctx, k, D, HKV * n_kv, ns, k.nb[1], k.nb[3], 0);
-                    const v3: *Tensor = c.ggml_view_3d(ctx, v, D, HKV * n_kv, ns, v.nb[1], v.nb[3], 0);
-                    const mp: *Tensor = c.ggml_reshape_3d(ctx, m.pos_mask, 1, n_ps, ns);
+                    const k3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, k, D, HKV * n_kv, ns, k.nb[1], k.nb[3], 0);
+                    const v3: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, v, D, HKV * n_kv, ns, v.nb[1], v.nb[3], 0);
+                    const mp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, m.pos_mask, 1, n_ps, ns);
 
-                    const kg: *Tensor = c.ggml_get_rows(ctx, k3, tokr);
-                    const vg: *Tensor = c.ggml_get_rows(ctx, v3, tokr);
-                    const mg: *Tensor = c.ggml_get_rows(ctx, mp, tokj);
+                    const kg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, k3, tokr);
+                    const vg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, v3, tokr);
+                    const mg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, mp, tokj);
 
                     // Fold (group, stream) onto the FA channel dimension.
-                    const kt: c.enum_ggml_type = if (c.ggml_is_quantized(k.type)) c.GGML_TYPE_F16 else k.type;
-                    const vt: c.enum_ggml_type = if (c.ggml_is_quantized(v.type)) c.GGML_TYPE_F16 else v.type;
-                    var kfa: *Tensor = c.ggml_reshape_4d(ctx, kg, D, blk64 * K64, 1, Hd * ns);
-                    var vfa: *Tensor = c.ggml_reshape_4d(ctx, vg, D, blk64 * K64, 1, Hd * ns);
-                    if (kfa.type != kt) kfa = c.ggml_cast(ctx, kfa, kt);
-                    if (vfa.type != vt) vfa = c.ggml_cast(ctx, vfa, vt);
+                    const kt: llama.impl.c.enum_ggml_type = if (llama.impl.c.ggml_is_quantized(k.type)) llama.impl.c.GGML_TYPE_F16 else k.type;
+                    const vt: llama.impl.c.enum_ggml_type = if (llama.impl.c.ggml_is_quantized(v.type)) llama.impl.c.GGML_TYPE_F16 else v.type;
+                    var kfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, kg, D, blk64 * K64, 1, Hd * ns);
+                    var vfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, vg, D, blk64 * K64, 1, Hd * ns);
+                    if (kfa.type != kt) kfa = llama.impl.c.ggml_cast(ctx, kfa, kt);
+                    if (vfa.type != vt) vfa = llama.impl.c.ggml_cast(ctx, vfa, vt);
                     // The FA mask must be F16.
-                    const mfa: *Tensor = c.ggml_cast(ctx, c.ggml_reshape_4d(ctx, mg, blk64 * K64, 1, 1, Hd * ns), c.GGML_TYPE_F16);
+                    const mfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_4d(ctx, mg, blk64 * K64, 1, 1, Hd * ns), llama.impl.c.GGML_TYPE_F16);
 
                     cur = buildAttnMsaFa(b, Qcur, kfa, vfa, mfa, Gp, kq_scale, il);
                 } else {
                     // A batch: a loop over the streams.
-                    const outs = impl.allocator.alloc(*Tensor, @intCast(ns)) catch impl.abort("models/minimax-m3.cpp", 443, "out of memory");
-                    defer impl.allocator.free(outs);
+                    const outs = std.heap.c_allocator.alloc(*llama.impl.c.ggml_tensor, @intCast(ns)) catch llama.impl.abort("models/minimax-m3.cpp", 443, "out of memory");
+                    defer std.heap.c_allocator.free(outs);
                     const mf = msa_mf.?;
                     var st: i64 = 0;
                     while (st < ns) : (st += 1) {
                         const stu: u64 = @intCast(st);
                         const tps: u64 = @intCast(n_tps);
-                        const iq_s: *Tensor = c.ggml_view_3d(ctx, iq, n_idx_dim, Hd, n_tps, iq.nb[1], iq.nb[2], stu * tps * iq.nb[2]);
-                        const ik_s: *Tensor = c.ggml_view_2d(ctx, ik_kv, n_idx_dim, n_kv, ik_kv.nb[2], stu * ik_kv.nb[3]);
-                        const psl_s: *Tensor = c.ggml_view_1d(ctx, m.pos_slot_i, n_ps, stu * m.pos_slot_i.?.nb[1]);
-                        const pm_s: *Tensor = c.ggml_view_3d(ctx, m.pos_mask, n_ps, 1, n_tps, m.pos_mask.?.nb[1], m.pos_mask.?.nb[1], stu * tps * m.pos_mask.?.nb[1]);
-                        const cb_s: *Tensor = c.ggml_view_1d(ctx, m.cell_blk, n_kv, stu * m.cell_blk.?.nb[1]);
-                        const mf_s: *Tensor = c.ggml_view_3d(ctx, mf, n_kv, n_tps, 1, mf.nb[1], mf.nb[3], stu * mf.nb[3]);
-                        const bias_s: *Tensor = c.ggml_view_3d(ctx, m.bias, nblk, 1, n_tps, m.bias.?.nb[1], m.bias.?.nb[1], stu * tps * m.bias.?.nb[1]);
-                        const q_s: *Tensor = c.ggml_view_3d(ctx, Qcur, D, b.n_head, n_tps, Qcur.nb[1], Qcur.nb[2], stu * tps * Qcur.nb[2]);
-                        const k_s: *Tensor = c.ggml_view_4d(ctx, k, D, HKV, n_kv, 1, k.nb[1], k.nb[2], k.nb[3], stu * k.nb[3]);
-                        const v_s: *Tensor = c.ggml_view_4d(ctx, v, D, HKV, n_kv, 1, v.nb[1], v.nb[2], v.nb[3], stu * v.nb[3]);
+                        const iq_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, iq, n_idx_dim, Hd, n_tps, iq.nb[1], iq.nb[2], stu * tps * iq.nb[2]);
+                        const ik_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, ik_kv, n_idx_dim, n_kv, ik_kv.nb[2], stu * ik_kv.nb[3]);
+                        const psl_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, m.pos_slot_i, n_ps, stu * m.pos_slot_i.?.nb[1]);
+                        const pm_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, m.pos_mask, n_ps, 1, n_tps, m.pos_mask.?.nb[1], m.pos_mask.?.nb[1], stu * tps * m.pos_mask.?.nb[1]);
+                        const cb_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, m.cell_blk, n_kv, stu * m.cell_blk.?.nb[1]);
+                        const mf_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, mf, n_kv, n_tps, 1, mf.nb[1], mf.nb[3], stu * mf.nb[3]);
+                        const bias_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, m.bias, nblk, 1, n_tps, m.bias.?.nb[1], m.bias.?.nb[1], stu * tps * m.bias.?.nb[1]);
+                        const q_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, Qcur, D, b.n_head, n_tps, Qcur.nb[1], Qcur.nb[2], stu * tps * Qcur.nb[2]);
+                        const k_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, k, D, HKV, n_kv, 1, k.nb[1], k.nb[2], k.nb[3], stu * k.nb[3]);
+                        const v_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, v, D, HKV, n_kv, 1, v.nb[1], v.nb[2], v.nb[3], stu * v.nb[3]);
 
                         // Block scores: the indexer keys are gathered
                         // through the position-to-cell map first. They are
                         // unscaled; only the top-k order matters.
-                        const ikp: *Tensor = c.ggml_get_rows(ctx, ik_s, psl_s); // [n_idx_dim, n_ps]
-                        var sc: *Tensor = c.ggml_mul_mat(ctx, ikp, c.ggml_reshape_2d(ctx, iq_s, n_idx_dim, Hd * n_tps));
+                        const ikp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, ik_s, psl_s); // [n_idx_dim, n_ps]
+                        var sc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, ikp, llama.impl.c.ggml_reshape_2d(ctx, iq_s, n_idx_dim, Hd * n_tps));
                         // The reference computes the indexer scores in F32:
                         // https://github.com/huggingface/transformers/blob/0f53828e83f2212060233d2ea552cc76617b8712/src/transformers/models/minimax_m3_vl/modeling_minimax_m3_vl.py#L562
-                        _ = c.ggml_prec_set_acc(sc, c.GGML_PREC_F32);
-                        sc = c.ggml_reshape_3d(ctx, sc, n_ps, Hd, n_tps);
+                        _ = llama.impl.c.ggml_prec_set_acc(sc, llama.impl.c.GGML_PREC_F32);
+                        sc = llama.impl.c.ggml_reshape_3d(ctx, sc, n_ps, Hd, n_tps);
                         // Unmapped positions (holes, padding, empty cells) come out -inf.
-                        sc = c.ggml_add_inplace(ctx, sc, pm_s);
-                        const bs: *Tensor = c.ggml_pool_2d(ctx, sc, c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
+                        sc = llama.impl.c.ggml_add_inplace(ctx, sc, pm_s);
+                        const bs: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pool_2d(ctx, sc, llama.impl.c.GGML_OP_POOL_MAX, blk, 1, blk, 1, 0, 0);
                         b.cb(bs, "msa_bs", il);
 
                         // Bias the scores so the locally forced blocks always rank first.
-                        const bsf: *Tensor = c.ggml_add(ctx, bs, bias_s); // [nblk, Hd, n_tps]
+                        const bsf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, bs, bias_s); // [nblk, Hd, n_tps]
                         b.cb(bsf, "msa_bsf", il);
 
-                        const idx: *Tensor = c.ggml_top_k(ctx, bsf, K); // [K, Hd, n_tps] i32
+                        const idx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_top_k(ctx, bsf, K); // [K, Hd, n_tps] i32
 
-                        var ninf: *Tensor = c.ggml_cast(ctx, c.ggml_scale_bias(ctx, bias_s, 0.0, -1e30), c.GGML_TYPE_F16); // [nblk, 1, n_tps]
-                        ninf = c.ggml_repeat_4d(ctx, ninf, nblk, Hd, n_tps, 1);
-                        const zero: *Tensor = c.ggml_scale(ctx, c.ggml_cast(ctx, idx, c.GGML_TYPE_F32), 0.0);
-                        const bm_dst: *Tensor = c.ggml_reshape_3d(ctx, ninf, 1, nblk, Hd * n_tps);
-                        const bm_src: *Tensor = c.ggml_reshape_3d(ctx, zero, 1, K64, Hd * n_tps);
-                        var bm: *Tensor = c.ggml_set_rows(ctx, bm_dst, bm_src, c.ggml_reshape_2d(ctx, idx, K64, Hd * n_tps));
-                        bm = c.ggml_reshape_3d(ctx, bm, nblk, Hd, n_tps);
-                        bm = c.ggml_cont(ctx, c.ggml_permute(ctx, bm, 0, 2, 1, 3)); // [nblk, n_tps, Hd]
+                        var ninf: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_scale_bias(ctx, bias_s, 0.0, -1e30), llama.impl.c.GGML_TYPE_F16); // [nblk, 1, n_tps]
+                        ninf = llama.impl.c.ggml_repeat_4d(ctx, ninf, nblk, Hd, n_tps, 1);
+                        const zero: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_cast(ctx, idx, llama.impl.c.GGML_TYPE_F32), 0.0);
+                        const bm_dst: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, ninf, 1, nblk, Hd * n_tps);
+                        const bm_src: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, zero, 1, K64, Hd * n_tps);
+                        var bm: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_set_rows(ctx, bm_dst, bm_src, llama.impl.c.ggml_reshape_2d(ctx, idx, K64, Hd * n_tps));
+                        bm = llama.impl.c.ggml_reshape_3d(ctx, bm, nblk, Hd, n_tps);
+                        bm = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, bm, 0, 2, 1, 3)); // [nblk, n_tps, Hd]
                         b.cb(bm, "msa_block_mask", il);
 
                         // Expand blocks to cells through the cell-to-block
                         // map, then combine with the causal mask; empty
                         // cells are masked by the causal mask.
-                        const bm2: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, c.ggml_reshape_2d(ctx, bm, nblk, n_tps * Hd))); // [n_tps*Hd, nblk]
-                        const bmc: *Tensor = c.ggml_get_rows(ctx, bm2, cb_s); // [n_tps*Hd, n_kv] F32
-                        var bmx: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, bmc));
-                        bmx = c.ggml_reshape_3d(ctx, bmx, n_kv, n_tps, Hd);
-                        var mask4: *Tensor = c.ggml_add_inplace(ctx, bmx, mf_s);
-                        mask4 = c.ggml_cast(ctx, c.ggml_reshape_4d(ctx, mask4, n_kv, n_tps, 1, Hd), c.GGML_TYPE_F16);
+                        const bm2: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, llama.impl.c.ggml_reshape_2d(ctx, bm, nblk, n_tps * Hd))); // [n_tps*Hd, nblk]
+                        const bmc: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, bm2, cb_s); // [n_tps*Hd, n_kv] F32
+                        var bmx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, bmc));
+                        bmx = llama.impl.c.ggml_reshape_3d(ctx, bmx, n_kv, n_tps, Hd);
+                        var mask4: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add_inplace(ctx, bmx, mf_s);
+                        mask4 = llama.impl.c.ggml_cast(ctx, llama.impl.c.ggml_reshape_4d(ctx, mask4, n_kv, n_tps, 1, Hd), llama.impl.c.GGML_TYPE_F16);
                         b.cb(mask4, "msa_mask4", il);
 
                         // The cache views, with the groups on ne[3].
-                        const kfa: *Tensor = c.ggml_permute(ctx, k_s, 0, 3, 1, 2);
-                        const vfa: *Tensor = c.ggml_permute(ctx, v_s, 0, 3, 1, 2);
+                        const kfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, k_s, 0, 3, 1, 2);
+                        const vfa: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, v_s, 0, 3, 1, 2);
 
                         outs[@intCast(st)] = buildAttnMsaFa(b, q_s, kfa, vfa, mask4, Gp, kq_scale, il);
                     }
                     cur = outs[0];
                     st = 1;
                     while (st < ns) : (st += 1) {
-                        cur = c.ggml_concat(ctx, cur, outs[@intCast(st)], 1);
+                        cur = llama.impl.c.ggml_concat(ctx, cur, outs[@intCast(st)], 1);
                     }
                 }
                 if (inp_attn.base.self_v_rot[@intCast(il)]) |r| {
-                    cur = graph.mulMatHadamard(ctx, cur, r);
+                    cur = llama.graph.mulMatHadamard(ctx, cur, r);
                 }
                 b.cb(cur, "kqv_out", il);
                 if (layer.wo) |wo| {
@@ -589,11 +576,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -627,11 +614,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, layer.ffn_gate_shexp, null, layer.ffn_gate_shexp_s, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .swiglu_oai_moe, .par, il);
             b.cb(ffn_shexp, "ffn_shexp", il);
 
-            cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+            cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
             b.cb(cur, "ffn_out", il);
         }
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

@@ -11,13 +11,7 @@
 //! `hunyuan_vl.zig` ports; the registry names them.
 
 const std = @import("std");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hunyuan_vl = @import("hunyuan_vl.zig");
-
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_hunyuan_dense`'s `get_rope_params` (models/hunyuan-dense.cpp:3 @b1b770d90):
 /// the RoPE of a layer, for the graph and the K-shift alike.
@@ -28,7 +22,7 @@ const RopeParams = model_mod.RopeParams;
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE parameters.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     // The K norm applied after RoPE, which a K-shift has to undo.
@@ -39,8 +33,8 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 
 /// Ports `llama_model_hunyuan_dense`'s `build_arch_graph`
 /// (models/hunyuan-dense.cpp:11 @b1b770d90): Hunyuan-VL's graph.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    hunyuan_vl.buildGraph(model, b);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.models.hunyuan_vl.buildGraph(model, b);
 }
 
 // -----------------------------------------------------------------------------

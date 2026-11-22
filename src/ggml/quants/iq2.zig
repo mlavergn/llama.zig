@@ -19,14 +19,7 @@
 //! weight there is no accuracy to spare on a uniform weighting.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const blocks = @import("blocks.zig");
-const codebook = @import("codebook.zig");
-const h = @import("helpers.zig");
-const c = impl.c;
-
-const fp16 = impl.fp32ToFp16;
-const QK_K = c.QK_K;
+const ggml = @import("../module.zig");
 
 /// Ports `iq2_find_best_neighbour` (ggml-quants.c:3286 @b1b770d90).
 ///
@@ -40,7 +33,7 @@ fn findBestNeighbour(
     l_out: [*]i8,
 ) i32 {
     const num_neighbors = neighbours[0];
-    impl.assert(num_neighbors > 0, "num_neighbors > 0");
+    ggml.impl.assert(num_neighbors > 0, "num_neighbors > 0");
 
     var best_d2: f32 = std.math.floatMax(f32);
     var grid_index: i32 = -1;
@@ -57,7 +50,7 @@ fn findBestNeighbour(
             grid_index = neighbours[j];
         }
     }
-    impl.assert(grid_index >= 0, "grid_index >= 0");
+    ggml.impl.assert(grid_index >= 0, "grid_index >= 0");
 
     const pg: *const [8]i8 = @ptrCast(&grid[@intCast(grid_index)]);
     for (0..8) |i| l_out[i] = @intCast(@divTrunc(pg[i] - 1, 2));
@@ -101,38 +94,38 @@ fn splitSigns(xb: [*]const f32, weight: *const [32]f32, xval: *[32]f32, block_si
 
 /// Ports `quantize_row_iq2_xxs_impl` (ggml-quants.c:3310 @b1b770d90).
 fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f32) void {
-    const t = c.GGML_TYPE_IQ2_XXS;
-    const kgrid = codebook.iq2Grid(t);
-    const kmap = codebook.iq2Map(t);
-    const kneighbors = codebook.iq2Neighbours(t);
+    const t = ggml.impl.c.GGML_TYPE_IQ2_XXS;
+    const kgrid = ggml.quants.codebook.iq2Grid(t);
+    const kmap = ggml.quants.codebook.iq2Map(t);
+    const kneighbors = ggml.quants.codebook.iq2Neighbours(t);
 
-    std.debug.assert(@rem(n, QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     const k_max_q = 3;
-    const nbl: usize = @intCast(@divExact(n, QK_K));
-    const y: [*]blocks.IQ2_XXS = @ptrCast(@alignCast(vy.?));
+    const nbl: usize = @intCast(@divExact(n, ggml.impl.c.QK_K));
+    const y: [*]ggml.quants.blocks.IQ2_XXS = @ptrCast(@alignCast(vy.?));
 
-    var scales: [QK_K / 32]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 32]f32 = undefined;
     var weight: [32]f32 = undefined;
     var xval: [32]f32 = undefined;
     var l_buf: [32]i8 = undefined;
     var l_aux: [32]i8 = undefined;
     var waux: [32]f32 = undefined;
     var block_signs: [4]u8 = undefined;
-    var q2: [2 * (QK_K / 32)]u32 = undefined;
+    var q2: [2 * (ggml.impl.c.QK_K / 32)]u32 = undefined;
 
     for (0..nbl) |ibl| {
-        y[ibl].d = fp16(0.0);
+        y[ibl].d = ggml.impl.fp32ToFp16(0.0);
         @memset(&q2, 0);
         var max_scale: f32 = 0;
-        const xbl = x + QK_K * ibl;
+        const xbl = x + ggml.impl.c.QK_K * ibl;
         var sumx2: f32 = 0;
-        for (0..QK_K) |i| sumx2 += xbl[i] * xbl[i];
+        for (0..ggml.impl.c.QK_K) |i| sumx2 += xbl[i] * xbl[i];
         // Note: no 2x here, where iq3_xxs has one.
-        const sigma2 = sumx2 / QK_K;
+        const sigma2 = sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 32) |ib| {
+        for (0..ggml.impl.c.QK_K / 32) |ib| {
             const xb = xbl + 32 * ib;
-            const qw = quant_weights + QK_K * ibl + 32 * ib;
+            const qw = quant_weights + ggml.impl.c.QK_K * ibl + 32 * ib;
             for (0..32) |i| weight[i] = qw[i] * @sqrt(sigma2 + xb[i] * xb[i]);
             for (0..32) |i| waux[i] = @sqrt(weight[i]);
 
@@ -140,7 +133,7 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
 
             var max = xval[0];
             for (1..32) |i| max = @max(max, xval[i]);
-            if (max < h.group_max_eps) {
+            if (max < ggml.quants.helpers.group_max_eps) {
                 scales[ib] = 0;
                 @memset(&l_buf, 0);
                 continue;
@@ -148,7 +141,7 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
 
             // Unlike iq3_xxs, the starting scale comes from a proper fit
             // rather than max/(2*kMaxQ-1).
-            var scale = h.makeQpQuants(32, k_max_q + 1, &xval, @ptrCast(&l_buf), &weight);
+            var scale = ggml.quants.helpers.makeQpQuants(32, k_max_q + 1, &xval, @ptrCast(&l_buf), &weight);
             const eff_max = scale * k_max_q;
             if (eff_max <= 0) {
                 scales[ib] = 0;
@@ -163,7 +156,7 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
                 const this_scale = 1 / id;
                 for (0..4) |k| {
                     for (0..8) |i| {
-                        const l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        const l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l_aux[8 * k + i] = @intCast(@max(0, @min(k_max_q - 1, l)));
                     }
                     var u: u16 = 0;
@@ -193,7 +186,7 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
                 for (0..4) |k| {
                     var u: u16 = 0;
                     for (0..8) |i| {
-                        var l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        var l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l = @max(0, @min(k_max_q - 1, l));
                         u |= @as(u16, @intCast(l)) << @intCast(2 * i);
                     }
@@ -225,11 +218,11 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
                 var u: u16 = 0;
                 for (0..8) |i| u |= @as(u16, @intCast(l_buf[8 * k + i])) << @intCast(2 * i);
                 const grid_index = kmap[u];
-                if (grid_index < 0) impl.abort("fatal error: point not on grid");
+                if (grid_index < 0) ggml.impl.abort("fatal error: point not on grid");
                 q2[2 * ib + 0] |= @as(u32, @intCast(grid_index)) << @intCast(8 * k);
                 q2[2 * ib + 1] |= @as(u32, block_signs[k]) << @intCast(7 * k);
             }
-            impl.assert(scale >= 0, "scale >= 0");
+            ggml.impl.assert(scale >= 0, "scale >= 0");
             scales[ib] = scale;
             max_scale = @max(max_scale, scale);
         }
@@ -240,30 +233,30 @@ fn iq2XxsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const 
         }
 
         const d = max_scale / 31;
-        y[ibl].d = fp16(d);
+        y[ibl].d = ggml.impl.fp32ToFp16(d);
         const id = 1 / d;
-        for (0..QK_K / 32) |ib| {
-            var l = h.nearestInt(0.5 * (id * scales[ib] - 1));
+        for (0..ggml.impl.c.QK_K / 32) |ib| {
+            var l = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib] - 1));
             l = @max(0, @min(15, l));
             q2[2 * ib + 1] |= @as(u32, @intCast(l)) << 28;
         }
-        @memcpy(std.mem.sliceAsBytes(y[ibl].qs[0..]), std.mem.sliceAsBytes(q2[0..])[0 .. QK_K / 4]);
+        @memcpy(std.mem.sliceAsBytes(y[ibl].qs[0..]), std.mem.sliceAsBytes(q2[0..])[0 .. ggml.impl.c.QK_K / 4]);
     }
 }
 
 /// Ports `quantize_iq2_xxs` (ggml-quants.c:3668 @b1b770d90).
 pub export fn quantize_iq2_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    impl.assert(quant_weights != null, "missing quantization weights");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    ggml.impl.assert(quant_weights != null, "missing quantization weights");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
     for (0..@intCast(nrow)) |_| {
         iq2XxsImpl(s, qrow, n_per_row, quant_weights);
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ2_XXS);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ2_XXS);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_XXS);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ2_XXS);
 }
 
 /// Ports `quantize_row_iq2_xs_impl` (ggml-quants.c:3488 @b1b770d90).
@@ -273,17 +266,17 @@ pub export fn quantize_iq2_xxs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, 
 /// into the top of the quant words. It also tracks which groups landed on the
 /// grid, and only re-snaps those, where `iq2_xxs` re-snaps all of them.
 fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f32) void {
-    const t = c.GGML_TYPE_IQ2_XS;
-    const kgrid = codebook.iq2Grid(t);
-    const kmap = codebook.iq2Map(t);
-    const kneighbors = codebook.iq2Neighbours(t);
+    const t = ggml.impl.c.GGML_TYPE_IQ2_XS;
+    const kgrid = ggml.quants.codebook.iq2Grid(t);
+    const kmap = ggml.quants.codebook.iq2Map(t);
+    const kneighbors = ggml.quants.codebook.iq2Neighbours(t);
 
-    std.debug.assert(@rem(n, QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     const k_max_q = 3;
-    const nbl: usize = @intCast(@divExact(n, QK_K));
-    const y: [*]blocks.IQ2_XS = @ptrCast(@alignCast(vy.?));
+    const nbl: usize = @intCast(@divExact(n, ggml.impl.c.QK_K));
+    const y: [*]ggml.quants.blocks.IQ2_XS = @ptrCast(@alignCast(vy.?));
 
-    var scales: [QK_K / 16]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 16]f32 = undefined;
     var weight: [16]f32 = undefined;
     var xval: [16]f32 = undefined;
     var l_buf: [16]i8 = undefined;
@@ -292,22 +285,22 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
     var is_on_grid: [2]bool = undefined;
     var is_on_grid_aux: [2]bool = undefined;
     var block_signs: [2]u8 = undefined;
-    var q2: [2 * (QK_K / 16)]u16 = undefined;
+    var q2: [2 * (ggml.impl.c.QK_K / 16)]u16 = undefined;
 
     for (0..nbl) |ibl| {
-        y[ibl].d = fp16(0.0);
+        y[ibl].d = ggml.impl.fp32ToFp16(0.0);
         @memset(&q2, 0);
         @memset(&y[ibl].scales, 0);
 
         var max_scale: f32 = 0;
-        const xbl = x + QK_K * ibl;
+        const xbl = x + ggml.impl.c.QK_K * ibl;
         var sumx2: f32 = 0;
-        for (0..QK_K) |i| sumx2 += xbl[i] * xbl[i];
-        const sigma2 = sumx2 / QK_K;
+        for (0..ggml.impl.c.QK_K) |i| sumx2 += xbl[i] * xbl[i];
+        const sigma2 = sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 16) |ib| {
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
             const xb = xbl + 16 * ib;
-            const qw = quant_weights + QK_K * ibl + 16 * ib;
+            const qw = quant_weights + ggml.impl.c.QK_K * ibl + 16 * ib;
             for (0..16) |i| weight[i] = qw[i] * @sqrt(sigma2 + xb[i] * xb[i]);
             for (0..16) |i| waux[i] = @sqrt(weight[i]);
 
@@ -343,7 +336,7 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
             var max = xval[0];
             for (1..16) |i| max = @max(max, xval[i]);
             @memset(&l_buf, 0);
-            if (max < h.group_max_eps) {
+            if (max < ggml.quants.helpers.group_max_eps) {
                 scales[ib] = 0;
                 continue;
             }
@@ -359,7 +352,7 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
                 const this_scale = 1 / id;
                 for (0..2) |k| {
                     for (0..8) |i| {
-                        const l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        const l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l_aux[8 * k + i] = @intCast(@max(0, @min(k_max_q - 1, l)));
                     }
                     var u: u16 = 0;
@@ -397,7 +390,7 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
                     if (is_on_grid[k]) continue;
                     var u: u16 = 0;
                     for (0..8) |i| {
-                        var l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        var l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l = @max(0, @min(k_max_q - 1, l));
                         // Written back here, unlike iq2_xxs, which relies on
                         // the neighbour search to fill L.
@@ -429,11 +422,11 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
                 var u: u16 = 0;
                 for (0..8) |i| u |= @as(u16, @intCast(l_buf[8 * k + i])) << @intCast(2 * i);
                 const grid_index = kmap[u];
-                if (grid_index < 0) impl.abort("fatal error: point not on grid");
+                if (grid_index < 0) ggml.impl.abort("fatal error: point not on grid");
                 // Nine bits of index, seven of sign, in one u16.
                 q2[2 * ib + k] = @as(u16, @intCast(grid_index)) | (@as(u16, block_signs[k]) << 9);
             }
-            impl.assert(scale >= 0, "scale >= 0");
+            ggml.impl.assert(scale >= 0, "scale >= 0");
             scales[ib] = scale;
             max_scale = @max(max_scale, scale);
         }
@@ -444,10 +437,10 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
         }
 
         const d = max_scale / 31;
-        y[ibl].d = fp16(d);
+        y[ibl].d = ggml.impl.fp32ToFp16(d);
         const id = 1 / d;
-        for (0..QK_K / 16) |ib| {
-            var l = h.nearestInt(0.5 * (id * scales[ib] - 1));
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
+            var l = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib] - 1));
             l = @max(0, @min(15, l));
             if (ib % 2 == 0) {
                 y[ibl].scales[ib / 2] = @intCast(l);
@@ -455,23 +448,23 @@ fn iq2XsImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: [*]const f
                 y[ibl].scales[ib / 2] |= @as(u8, @intCast(l)) << 4;
             }
         }
-        @memcpy(std.mem.sliceAsBytes(y[ibl].qs[0..]), std.mem.sliceAsBytes(q2[0..])[0 .. QK_K / 4]);
+        @memcpy(std.mem.sliceAsBytes(y[ibl].qs[0..]), std.mem.sliceAsBytes(q2[0..])[0 .. ggml.impl.c.QK_K / 4]);
     }
 }
 
 /// Ports `quantize_iq2_xs` (ggml-quants.c:3680 @b1b770d90).
 pub export fn quantize_iq2_xs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    impl.assert(quant_weights != null, "missing quantization weights");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    ggml.impl.assert(quant_weights != null, "missing quantization weights");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
     for (0..@intCast(nrow)) |_| {
         iq2XsImpl(s, qrow, n_per_row, quant_weights);
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ2_XS);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ2_XS);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_XS);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ2_XS);
 }
 
 /// Ports `quantize_row_iq2_s_impl` (ggml-quants.c:5130 @b1b770d90).
@@ -483,17 +476,17 @@ pub export fn quantize_iq2_xs(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n
 /// Note the fallback weighting when there is no imatrix: `0.25*sigma2 + x*x`,
 /// where every other format here uses `x*x` alone.
 fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f32) void {
-    const t = c.GGML_TYPE_IQ2_S;
-    const kgrid = codebook.iq2Grid(t);
-    const kmap = codebook.iq2Map(t);
-    const kneighbors = codebook.iq2Neighbours(t);
+    const t = ggml.impl.c.GGML_TYPE_IQ2_S;
+    const kgrid = ggml.quants.codebook.iq2Grid(t);
+    const kmap = ggml.quants.codebook.iq2Map(t);
+    const kneighbors = ggml.quants.codebook.iq2Neighbours(t);
 
-    std.debug.assert(@rem(n, QK_K) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_K) == 0);
     const k_max_q = 3;
-    const nbl: usize = @intCast(@divExact(n, QK_K));
-    const y: [*]blocks.IQ2_S = @ptrCast(@alignCast(vy.?));
+    const nbl: usize = @intCast(@divExact(n, ggml.impl.c.QK_K));
+    const y: [*]ggml.quants.blocks.IQ2_S = @ptrCast(@alignCast(vy.?));
 
-    var scales: [QK_K / 16]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 16]f32 = undefined;
     var weight: [16]f32 = undefined;
     var xval: [16]f32 = undefined;
     var l_buf: [16]i8 = undefined;
@@ -505,18 +498,18 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
 
     for (0..nbl) |ibl| {
         @memset(std.mem.asBytes(&y[ibl]), 0);
-        y[ibl].d = fp16(0.0);
+        y[ibl].d = ggml.impl.fp32ToFp16(0.0);
 
         var max_scale: f32 = 0;
-        const xbl = x + QK_K * ibl;
+        const xbl = x + ggml.impl.c.QK_K * ibl;
         var sumx2: f32 = 0;
-        for (0..QK_K) |i| sumx2 += xbl[i] * xbl[i];
-        const sigma2 = 2 * sumx2 / QK_K;
+        for (0..ggml.impl.c.QK_K) |i| sumx2 += xbl[i] * xbl[i];
+        const sigma2 = 2 * sumx2 / ggml.impl.c.QK_K;
 
-        for (0..QK_K / 16) |ib| {
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
             const xb = xbl + 16 * ib;
             if (quant_weights) |qw_all| {
-                const qw = qw_all + QK_K * ibl + 16 * ib;
+                const qw = qw_all + ggml.impl.c.QK_K * ibl + 16 * ib;
                 for (0..16) |i| weight[i] = qw[i] * @sqrt(sigma2 + xb[i] * xb[i]);
             } else {
                 for (0..16) |i| weight[i] = 0.25 * sigma2 + xb[i] * xb[i];
@@ -539,7 +532,7 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
             var max = xval[0];
             for (1..16) |i| max = @max(max, xval[i]);
             @memset(&l_buf, 0);
-            if (max < h.group_max_eps_iq2_s) {
+            if (max < ggml.quants.helpers.group_max_eps_iq2_s) {
                 scales[ib] = 0;
                 continue;
             }
@@ -555,7 +548,7 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
                 const this_scale = 1 / id;
                 for (0..2) |k| {
                     for (0..8) |i| {
-                        const l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        const l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l_aux[8 * k + i] = @intCast(@max(0, @min(k_max_q - 1, l)));
                     }
                     var u: u16 = 0;
@@ -593,7 +586,7 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
                     if (is_on_grid[k]) continue;
                     var u: u16 = 0;
                     for (0..8) |i| {
-                        var l = h.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
+                        var l = ggml.quants.helpers.nearestInt(0.5 * (id * xval[8 * k + i] - 1));
                         l = @max(0, @min(k_max_q - 1, l));
                         u |= @as(u16, @intCast(l)) << @intCast(2 * i);
                         l_buf[8 * k + i] = @intCast(l);
@@ -623,14 +616,14 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
                 var u: u16 = 0;
                 for (0..8) |i| u |= @as(u16, @intCast(l_buf[8 * k + i])) << @intCast(2 * i);
                 const grid_index = kmap[u];
-                if (grid_index < 0) impl.abort("fatal error: point not on grid");
+                if (grid_index < 0) ggml.impl.abort("fatal error: point not on grid");
                 const i8_idx = 2 * ib + k;
                 y[ibl].qs[i8_idx] = @intCast(grid_index & 255);
                 y[ibl].qh[i8_idx / 4] |= @as(u8, @intCast(grid_index >> 8)) << @intCast(2 * (i8_idx % 4));
                 // The sign bytes live past the grid indices in the same array.
-                y[ibl].qs[QK_K / 8 + i8_idx] = block_signs[k];
+                y[ibl].qs[ggml.impl.c.QK_K / 8 + i8_idx] = block_signs[k];
             }
-            impl.assert(scale >= 0, "scale >= 0");
+            ggml.impl.assert(scale >= 0, "scale >= 0");
             scales[ib] = scale;
             max_scale = @max(max_scale, scale);
         }
@@ -639,10 +632,10 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
 
         const d = max_scale / 31;
         // Below one, where iq3's fudge factors are above.
-        y[ibl].d = fp16(d * 0.9875);
+        y[ibl].d = ggml.impl.fp32ToFp16(d * 0.9875);
         const id = 1 / d;
-        for (0..QK_K / 16) |ib| {
-            var l = h.nearestInt(0.5 * (id * scales[ib] - 1));
+        for (0..ggml.impl.c.QK_K / 16) |ib| {
+            var l = ggml.quants.helpers.nearestInt(0.5 * (id * scales[ib] - 1));
             l = @max(0, @min(15, l));
             if (ib % 2 == 0) {
                 y[ibl].scales[ib / 2] = @intCast(l);
@@ -655,20 +648,20 @@ fn iq2SImpl(x: [*]const f32, vy: ?*anyopaque, n: i64, quant_weights: ?[*]const f
 
 /// Ports `quantize_iq2_s` (ggml-quants.c:5299 @b1b770d90).
 pub export fn quantize_iq2_s(src: [*c]const f32, dst: ?*anyopaque, nrow: i64, n_per_row: i64, quant_weights: [*c]const f32) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
     for (0..@intCast(nrow)) |_| {
         iq2SImpl(s, qrow, n_per_row, if (quant_weights != null) quant_weights else null);
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ2_S);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ2_S);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ2_S);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ2_S);
 }
 
 /// Ports `quantize_row_iq2_s_ref` (ggml-quants.c:5311 @b1b770d90).
-pub export fn quantize_row_iq2_s_ref(x: [*c]const f32, y: [*c]blocks.IQ2_S, k: i64) void {
-    std.debug.assert(@rem(k, QK_K) == 0);
+pub export fn quantize_row_iq2_s_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.IQ2_S, k: i64) void {
+    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
     _ = quantize_iq2_s(x, @ptrCast(y), 1, k, null);
 }

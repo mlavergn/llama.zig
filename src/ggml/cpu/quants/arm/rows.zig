@@ -22,17 +22,9 @@
 //! to load the same models.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const convert = @import("../../convert.zig");
-const blocks = @import("../../../quants/blocks.zig");
-const neon = @import("neon.zig");
-const c = impl.c;
-
-const f32x4 = neon.f32x4;
+const ggml = @import("../../../module.zig");
 
 /// The reference quantizer `q8_K` delegates to, ported in `src/ggml/quants/`.
-extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-
 /// The absolute maximum of 32 floats, reduced as the C reduces it.
 ///
 /// The C builds an eight-entry array of vectors and folds it in three rounds:
@@ -45,16 +37,16 @@ extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
 /// - `srcv`: the eight loaded vectors.
 ///
 /// Return: the largest absolute value across all 32 elements.
-fn absMax(srcv: *const [8]f32x4) f32 {
-    var asrcv: [8]f32x4 = undefined;
-    for (0..8) |j| asrcv[j] = neon.abs_f32(srcv[j]);
+fn absMax(srcv: *const [8]ggml.cpu.quants.arch.neon.f32x4) f32 {
+    var asrcv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
+    for (0..8) |j| asrcv[j] = ggml.cpu.quants.arch.neon.abs_f32(srcv[j]);
 
-    var amaxv: [8]f32x4 = undefined;
-    for (0..4) |j| amaxv[2 * j] = neon.max_f32(asrcv[2 * j], asrcv[2 * j + 1]);
-    for (0..2) |j| amaxv[4 * j] = neon.max_f32(amaxv[4 * j], amaxv[4 * j + 2]);
-    amaxv[0] = neon.max_f32(amaxv[0], amaxv[4]);
+    var amaxv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
+    for (0..4) |j| amaxv[2 * j] = ggml.cpu.quants.arch.neon.max_f32(asrcv[2 * j], asrcv[2 * j + 1]);
+    for (0..2) |j| amaxv[4 * j] = ggml.cpu.quants.arch.neon.max_f32(amaxv[4 * j], amaxv[4 * j + 2]);
+    amaxv[0] = ggml.cpu.quants.arch.neon.max_f32(amaxv[0], amaxv[4]);
 
-    return neon.maxvq_f32(amaxv[0]);
+    return ggml.cpu.quants.arch.neon.maxvq_f32(amaxv[0]);
 }
 
 /// Ports `quantize_row_q8_0` (arch/arm/quants.c:41 @b1b770d90).
@@ -64,32 +56,32 @@ fn absMax(srcv: *const [8]f32x4) f32 {
 /// - `vy`: destination, `k / 32` blocks.
 /// - `k`: element count; must be a multiple of `QK8_0`.
 pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    comptime std.debug.assert(c.QK8_0 == 32);
-    std.debug.assert(@rem(k, c.QK8_0) == 0);
-    const nb: usize = @intCast(@divTrunc(k, c.QK8_0));
+    comptime std.debug.assert(ggml.impl.c.QK8_0 == 32);
+    std.debug.assert(@rem(k, ggml.impl.c.QK8_0) == 0);
+    const nb: usize = @intCast(@divTrunc(k, ggml.impl.c.QK8_0));
 
-    const y: [*]blocks.Q8_0 = @ptrCast(@alignCast(vy.?));
+    const y: [*]ggml.quants.blocks.Q8_0 = @ptrCast(@alignCast(vy.?));
 
     for (0..nb) |i| {
-        var srcv: [8]f32x4 = undefined;
-        for (0..8) |j| srcv[j] = neon.loadFrom(f32x4, x + i * 32 + 4 * j);
+        var srcv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
+        for (0..8) |j| srcv[j] = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.f32x4, x + i * 32 + 4 * j);
 
         const amax = absMax(&srcv);
 
         const d = amax / ((1 << 7) - 1);
         const id = if (d != 0) 1.0 / d else 0.0;
 
-        y[i].d = convert.cpuFp32ToFp16(d);
+        y[i].d = ggml.cpu.convert.cpuFp32ToFp16(d);
 
         for (0..8) |j| {
-            const v = neon.mul_n_f32(srcv[j], id);
-            const vi = neon.cvtnq_s32_f32(v);
+            const v = ggml.cpu.quants.arch.neon.mul_n_f32(srcv[j], id);
+            const vi = ggml.cpu.quants.arch.neon.cvtnq_s32_f32(v);
 
             // The C reads the four lanes out one at a time rather than
             // narrowing and storing, and the narrowing is a truncation to
             // `int8_t` either way.
             inline for (0..4) |l| {
-                y[i].qs[4 * j + l] = @truncate(neon.lane(vi, l));
+                y[i].qs[4 * j + l] = @truncate(ggml.cpu.quants.arch.neon.lane(vi, l));
             }
         }
     }
@@ -105,38 +97,38 @@ pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
 /// - `vy`: destination, `k / 32` blocks.
 /// - `k`: element count; must be a multiple of `QK8_1`.
 pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    std.debug.assert(@rem(k, c.QK8_1) == 0);
-    const nb: usize = @intCast(@divTrunc(k, c.QK8_1));
+    std.debug.assert(@rem(k, ggml.impl.c.QK8_1) == 0);
+    const nb: usize = @intCast(@divTrunc(k, ggml.impl.c.QK8_1));
 
-    const y: [*]blocks.Q8_1 = @ptrCast(@alignCast(vy.?));
+    const y: [*]ggml.quants.blocks.Q8_1 = @ptrCast(@alignCast(vy.?));
 
     for (0..nb) |i| {
-        var srcv: [8]f32x4 = undefined;
-        for (0..8) |j| srcv[j] = neon.loadFrom(f32x4, x + i * 32 + 4 * j);
+        var srcv: [8]ggml.cpu.quants.arch.neon.f32x4 = undefined;
+        for (0..8) |j| srcv[j] = ggml.cpu.quants.arch.neon.loadFrom(ggml.cpu.quants.arch.neon.f32x4, x + i * 32 + 4 * j);
 
         const amax = absMax(&srcv);
 
         const d = amax / ((1 << 7) - 1);
         const id = if (d != 0) 1.0 / d else 0.0;
 
-        y[i].d = convert.cpuFp32ToFp16(d);
+        y[i].d = ggml.cpu.convert.cpuFp32ToFp16(d);
 
-        var accv = neon.dup(neon.i32x4, 0);
+        var accv = ggml.cpu.quants.arch.neon.dup(ggml.cpu.quants.arch.neon.i32x4, 0);
 
         for (0..8) |j| {
-            const v = neon.mul_n_f32(srcv[j], id);
-            const vi = neon.cvtnq_s32_f32(v);
+            const v = ggml.cpu.quants.arch.neon.mul_n_f32(srcv[j], id);
+            const vi = ggml.cpu.quants.arch.neon.cvtnq_s32_f32(v);
 
             inline for (0..4) |l| {
-                y[i].qs[4 * j + l] = @truncate(neon.lane(vi, l));
+                y[i].qs[4 * j + l] = @truncate(ggml.cpu.quants.arch.neon.lane(vi, l));
             }
 
             // Accumulated as `i32` lanes and reduced once at the end, so the
             // sum is exact rather than eight rounded partial sums.
-            accv = neon.add(accv, vi);
+            accv = ggml.cpu.quants.arch.neon.add(accv, vi);
         }
 
-        y[i].s = convert.cpuFp32ToFp16(d * @as(f32, @floatFromInt(neon.addvq_s32(accv))));
+        y[i].s = ggml.cpu.convert.cpuFp32ToFp16(d * @as(f32, @floatFromInt(ggml.cpu.quants.arch.neon.addvq_s32(accv))));
     }
 }
 
@@ -146,7 +138,7 @@ pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void 
 /// targets": there is no NEON version, so the symbol exists only to occupy the
 /// name that `arch-fallback.h` would otherwise alias to the generic one.
 pub export fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    quantize_row_q8_K_ref(x, y, k);
+    ggml.quants.k.quantize_row_q8_K_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 // -----------------------------------------------------------------------------
@@ -156,19 +148,18 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const testing = @import("../testing.zig");
-const golden = if (@import("../../features.zig").golden_generic) @import("golden_generic.zig") else @import("golden.zig");
+const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.quants.arch.golden_generic else ggml.cpu.quants.arch.golden;
 
 test "q8_0 row quantizer matches the C" {
-    try testing.checkRow(quantize_row_q8_0, c.GGML_TYPE_Q8_0, golden.row_q8_0);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0, ggml.impl.c.GGML_TYPE_Q8_0, golden.row_q8_0);
 }
 
 test "q8_1 row quantizer matches the C" {
-    try testing.checkRow(quantize_row_q8_1, c.GGML_TYPE_Q8_1, golden.row_q8_1);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1, ggml.impl.c.GGML_TYPE_Q8_1, golden.row_q8_1);
 }
 
 test "q8_K row quantizer matches the C" {
-    try testing.checkRow(quantize_row_q8_K, c.GGML_TYPE_Q8_K, golden.row_q8_K);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K, ggml.impl.c.GGML_TYPE_Q8_K, golden.row_q8_K);
 }
 
 test "the NEON and scalar q8 quantizers agree byte for byte" {
@@ -207,7 +198,7 @@ test "an all-zero row takes the divide-by-zero guard" {
 
     quantize_row_q8_0(&x, &out, 32);
 
-    const blk: *const blocks.Q8_0 = @ptrCast(&out);
+    const blk: *const ggml.quants.blocks.Q8_0 = @ptrCast(&out);
     try std.testing.expectEqual(@as(u16, 0), blk.d);
     for (blk.qs) |q| try std.testing.expectEqual(@as(i8, 0), q);
 }

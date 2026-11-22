@@ -18,12 +18,7 @@
 //! same text.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
+const mod = @import("module.zig");
 
 /// Ports `llama_io_write_i` (llama-io.h:9 @b1b770d90): a sink for state.
 pub const Writer = struct {
@@ -31,20 +26,20 @@ pub const Writer = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        write: *const fn (ptr: *anyopaque, src: []const u8, exc: *Exception) Thrown!void,
-        writeTensor: *const fn (ptr: *anyopaque, tensor: *const c.ggml_tensor, offset: usize, size: usize, exc: *Exception) Thrown!void,
+        write: *const fn (ptr: *anyopaque, src: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void,
+        writeTensor: *const fn (ptr: *anyopaque, tensor: *const mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
         nBytes: *const fn (ptr: *anyopaque) usize,
     };
 
     /// Return: nothing, or `error.Thrown` when the sink is full.
-    pub fn write(self: Writer, src: []const u8, exc: *Exception) Thrown!void {
+    pub fn write(self: Writer, src: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.write(self.ptr, src, exc);
     }
 
     /// Writes `size` bytes of `tensor`'s data from `offset`.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn writeTensor(self: Writer, tensor: *const c.ggml_tensor, offset: usize, size: usize, exc: *Exception) Thrown!void {
+    pub fn writeTensor(self: Writer, tensor: *const mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.writeTensor(self.ptr, tensor, offset, size, exc);
     }
 
@@ -56,7 +51,7 @@ pub const Writer = struct {
     /// Writes a plain value's bytes.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn writeValue(self: Writer, value: anytype, exc: *Exception) Thrown!void {
+    pub fn writeValue(self: Writer, value: anytype, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.write(std.mem.asBytes(&value), exc);
     }
 
@@ -64,7 +59,7 @@ pub const Writer = struct {
     /// a `uint32_t` length, then the bytes.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn writeString(self: Writer, str: []const u8, exc: *Exception) Thrown!void {
+    pub fn writeString(self: Writer, str: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         const str_size: u32 = @truncate(str.len);
         try self.writeValue(str_size, exc);
         try self.write(str[0..str_size], exc);
@@ -77,8 +72,8 @@ pub const Reader = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        read: *const fn (ptr: *anyopaque, dst: []u8, exc: *Exception) Thrown!void,
-        readTensor: *const fn (ptr: *anyopaque, tensor: *c.ggml_tensor, offset: usize, size: usize, exc: *Exception) Thrown!void,
+        read: *const fn (ptr: *anyopaque, dst: []u8, exc: *mod.impl.Exception) mod.impl.Thrown!void,
+        readTensor: *const fn (ptr: *anyopaque, tensor: *mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void,
         nBytes: *const fn (ptr: *anyopaque) usize,
         /// `discard`, a no-op unless a source overrides it.
         discard: ?*const fn (ptr: *anyopaque) void = null,
@@ -92,14 +87,14 @@ pub const Reader = struct {
     }
 
     /// Return: nothing, or `error.Thrown` when the source runs out.
-    pub fn read(self: Reader, dst: []u8, exc: *Exception) Thrown!void {
+    pub fn read(self: Reader, dst: []u8, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.read(self.ptr, dst, exc);
     }
 
     /// Reads `size` bytes into `tensor`'s data at `offset`.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn readTensor(self: Reader, tensor: *c.ggml_tensor, offset: usize, size: usize, exc: *Exception) Thrown!void {
+    pub fn readTensor(self: Reader, tensor: *mod.impl.c.ggml_tensor, offset: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.readTensor(self.ptr, tensor, offset, size, exc);
     }
 
@@ -111,7 +106,7 @@ pub const Reader = struct {
     /// Reads a plain value.
     ///
     /// Return: the value, or `error.Thrown`.
-    pub fn readValue(self: Reader, comptime T: type, exc: *Exception) Thrown!T {
+    pub fn readValue(self: Reader, comptime T: type, exc: *mod.impl.Exception) mod.impl.Thrown!T {
         var v: T = undefined;
         try self.read(std.mem.asBytes(&v), exc);
         return v;
@@ -124,9 +119,9 @@ pub const Reader = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: nothing, or `error.Thrown`.
-    pub fn readString(self: Reader, out: *std.ArrayList(u8), exc: *Exception) Thrown!void {
+    pub fn readString(self: Reader, out: *std.ArrayList(u8), exc: *mod.impl.Exception) mod.impl.Thrown!void {
         const str_size = try self.readValue(u32, exc);
-        out.resize(allocator, str_size) catch impl.abort("llama-io.cpp", 15, "out of memory");
+        out.resize(std.heap.c_allocator, str_size) catch mod.impl.abort("llama-io.cpp", 15, "out of memory");
         try self.read(out.items, exc);
     }
 };

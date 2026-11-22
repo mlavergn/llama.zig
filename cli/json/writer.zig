@@ -16,7 +16,7 @@
 //! and never hold a `Value`; the escaping is `serializer.zig`'s.
 
 const std = @import("std");
-const serializer = @import("serializer.zig");
+const mod = @import("module.zig");
 
 /// Ports `dump_escaped` (json.hpp:19363 @b1b770d90), a member of
 /// `serializer`, as `dump_safe` (json.cpp:343 @b1b770d90) calls it:
@@ -30,7 +30,7 @@ const serializer = @import("serializer.zig");
 ///
 /// Return: `error.OutOfMemory` only.
 pub fn writeEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) error{OutOfMemory}!void {
-    serializer.dumpEscaped(out, a, s, false, .replace) catch |e| switch (e) {
+    mod.serializer.dumpEscaped(out, a, s, false, .replace) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.JsonError => unreachable,
     };

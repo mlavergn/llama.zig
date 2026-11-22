@@ -18,14 +18,7 @@
 //! for an empty pack is how `cu++filt` writes it.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-const half = kernels.half;
+const ggml = @import("../module.zig");
 
 /// The four `__device__` ops a launch is instantiated with, plus repeat.
 pub const Op = enum {
@@ -46,19 +39,19 @@ pub const Op = enum {
     }
 };
 
-fn binKernel(comptime unravel: bool, comptime op: Op, comptime S0: type, comptime S1: type, comptime D: type, comptime n_fuse: usize) kernels.Kernel {
+fn binKernel(comptime unravel: bool, comptime op: Op, comptime S0: type, comptime S1: type, comptime D: type, comptime n_fuse: usize) ggml.cuda.kernels.Kernel {
     const key = comptime blk: {
         var k: []const u8 = (if (unravel) "k_bin_bcast_unravel" else "k_bin_bcast") ++ "<&" ++ op.name() ++ ", " ++
-            kernels.typeName(S0) ++ ", " ++ kernels.typeName(S1) ++ ", " ++ kernels.typeName(D) ++ ", ";
+            ggml.cuda.kernels.typeName(S0) ++ ", " ++ ggml.cuda.kernels.typeName(S1) ++ ", " ++ ggml.cuda.kernels.typeName(D) ++ ", ";
         if (n_fuse == 0) {
             k = k ++ ">";
         } else {
-            for (0..n_fuse) |i| k = k ++ (if (i == 0) "" else ", ") ++ kernels.constPtr(S1);
+            for (0..n_fuse) |i| k = k ++ (if (i == 0) "" else ", ") ++ ggml.cuda.kernels.constPtr(S1);
             k = k ++ ">";
         }
         break :blk k;
     };
-    return kernels.get("binbcast", key);
+    return ggml.cuda.kernels.get("binbcast", key);
 }
 
 const u32_max = std.math.maxInt(u32);
@@ -70,13 +63,13 @@ fn launchBinBcastPack(
     comptime S1: type,
     comptime D: type,
     comptime n_fuse: usize,
-    src0: *const Tensor,
-    src1: *const Tensor,
-    dst: *const Tensor,
+    src0: *const ggml.impl.c.ggml_tensor,
+    src1: *const ggml.impl.c.ggml_tensor,
+    dst: *const ggml.impl.c.ggml_tensor,
     src0_dd: ?*const anyopaque,
     src1_dd: ?*const anyopaque,
     dst_dd: ?*anyopaque,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     const ne10 = src1.ne[0];
     const ne11 = src1.ne[1];
@@ -114,7 +107,7 @@ fn launchBinBcastPack(
         }
     }.f;
 
-    if (c.ggml_is_contiguous(src0) and c.ggml_is_contiguous(src1) and !c.ggml_is_permuted(src0) and !c.ggml_is_permuted(src1)) {
+    if (ggml.impl.c.ggml_is_contiguous(src0) and ggml.impl.c.ggml_is_contiguous(src1) and !ggml.impl.c.ggml_is_permuted(src0) and !ggml.impl.c.ggml_is_permuted(src1)) {
         for (0..4) |i| {
             if (nr[i] != 1) break;
             if (i > 0) {
@@ -160,46 +153,46 @@ fn launchBinBcastPack(
     const s02 = nb02 / @sizeOf(S0);
     const s03 = nb03 / @sizeOf(S0);
 
-    impl.assert(ne0 <= u32_max, "ne0 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(ne1 <= u32_max, "ne1 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(ne2 <= u32_max, "ne2 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(ne3 <= u32_max, "ne3 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(ne0 <= u32_max, "ne0 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(ne1 <= u32_max, "ne1 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(ne2 <= u32_max, "ne2 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(ne3 <= u32_max, "ne3 <= std::numeric_limits<uint32_t>::max()");
 
-    impl.assert(s1 <= u32_max, "s1  <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s2 <= u32_max, "s2  <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s3 <= u32_max, "s3  <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s1 <= u32_max, "s1  <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s2 <= u32_max, "s2  <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s3 <= u32_max, "s3  <= std::numeric_limits<uint32_t>::max()");
 
-    impl.assert(s00 <= u32_max, "s00 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s01 <= u32_max, "s01 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s02 <= u32_max, "s02 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s03 <= u32_max, "s03 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s00 <= u32_max, "s00 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s01 <= u32_max, "s01 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s02 <= u32_max, "s02 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s03 <= u32_max, "s03 <= std::numeric_limits<uint32_t>::max()");
 
-    impl.assert(s10 <= u32_max, "s10 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s11 <= u32_max, "s11 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s12 <= u32_max, "s12 <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(s13 <= u32_max, "s13 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s10 <= u32_max, "s10 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s11 <= u32_max, "s11 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s12 <= u32_max, "s12 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(s13 <= u32_max, "s13 <= std::numeric_limits<uint32_t>::max()");
 
-    impl.assert(cne1[0] <= u32_max, "cne1[0] <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(cne1[1] <= u32_max, "cne1[1] <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(cne1[2] <= u32_max, "cne1[2] <= std::numeric_limits<uint32_t>::max()");
-    impl.assert(cne1[3] <= u32_max, "cne1[3] <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(cne1[0] <= u32_max, "cne1[0] <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(cne1[1] <= u32_max, "cne1[1] <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(cne1[2] <= u32_max, "cne1[2] <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(cne1[3] <= u32_max, "cne1[3] <= std::numeric_limits<uint32_t>::max()");
 
-    impl.assert(nb0 % @sizeOf(D) == 0, "nb0 % sizeof(dst_t) == 0");
-    impl.assert(nb1 % @sizeOf(D) == 0, "nb1 % sizeof(dst_t) == 0");
-    impl.assert(nb2 % @sizeOf(D) == 0, "nb2 % sizeof(dst_t) == 0");
-    impl.assert(nb3 % @sizeOf(D) == 0, "nb3 % sizeof(dst_t) == 0");
+    ggml.impl.assert(nb0 % @sizeOf(D) == 0, "nb0 % sizeof(dst_t) == 0");
+    ggml.impl.assert(nb1 % @sizeOf(D) == 0, "nb1 % sizeof(dst_t) == 0");
+    ggml.impl.assert(nb2 % @sizeOf(D) == 0, "nb2 % sizeof(dst_t) == 0");
+    ggml.impl.assert(nb3 % @sizeOf(D) == 0, "nb3 % sizeof(dst_t) == 0");
 
-    impl.assert(nb00 % @sizeOf(S0) == 0, "nb00 % sizeof(src0_t) == 0");
-    impl.assert(nb01 % @sizeOf(S0) == 0, "nb01 % sizeof(src0_t) == 0");
-    impl.assert(nb02 % @sizeOf(S0) == 0, "nb02 % sizeof(src0_t) == 0");
-    impl.assert(nb03 % @sizeOf(S0) == 0, "nb03 % sizeof(src0_t) == 0");
+    ggml.impl.assert(nb00 % @sizeOf(S0) == 0, "nb00 % sizeof(src0_t) == 0");
+    ggml.impl.assert(nb01 % @sizeOf(S0) == 0, "nb01 % sizeof(src0_t) == 0");
+    ggml.impl.assert(nb02 % @sizeOf(S0) == 0, "nb02 % sizeof(src0_t) == 0");
+    ggml.impl.assert(nb03 % @sizeOf(S0) == 0, "nb03 % sizeof(src0_t) == 0");
 
-    impl.assert(nb10 % @sizeOf(S1) == 0, "nb10 % sizeof(src1_t) == 0");
-    impl.assert(nb11 % @sizeOf(S1) == 0, "nb11 % sizeof(src1_t) == 0");
-    impl.assert(nb12 % @sizeOf(S1) == 0, "nb12 % sizeof(src1_t) == 0");
-    impl.assert(nb13 % @sizeOf(S1) == 0, "nb13 % sizeof(src1_t) == 0");
+    ggml.impl.assert(nb10 % @sizeOf(S1) == 0, "nb10 % sizeof(src1_t) == 0");
+    ggml.impl.assert(nb11 % @sizeOf(S1) == 0, "nb11 % sizeof(src1_t) == 0");
+    ggml.impl.assert(nb12 % @sizeOf(S1) == 0, "nb12 % sizeof(src1_t) == 0");
+    ggml.impl.assert(nb13 % @sizeOf(S1) == 0, "nb13 % sizeof(src1_t) == 0");
 
-    impl.assert(ne2 * ne3 <= u32_max, "ne2 * ne3 <= std::numeric_limits<unsigned int>::max()");
+    ggml.impl.assert(ne2 * ne3 <= u32_max, "ne2 * ne3 <= std::numeric_limits<unsigned int>::max()");
 
     const block_size = 128;
 
@@ -207,21 +200,21 @@ fn launchBinBcastPack(
 
     // `dim3 block_dims` with each member assigned through
     // `std::min<unsigned int>`, which converts both arguments first.
-    var block_dims: kernels.Dim3 = .{};
+    var block_dims: ggml.cuda.kernels.Dim3 = .{};
     block_dims.x = @min(@as(u32, @truncate(@as(u64, @bitCast(hne0)))), block_size);
     block_dims.y = @min(@as(u32, @truncate(@as(u64, @bitCast(ne1)))), block_size / block_dims.x);
     block_dims.z = @min(@min(@as(u32, @truncate(@as(u64, @bitCast(ne2 * ne3)))), block_size / block_dims.x / block_dims.y), 64);
 
-    const block_nums: kernels.Dim3 = .{
+    const block_nums: ggml.cuda.kernels.Dim3 = .{
         .x = @truncate(@as(u64, @bitCast(@divTrunc(hne0 + block_dims.x - 1, block_dims.x)))),
         .y = @truncate(@as(u64, @bitCast(@divTrunc(ne1 + block_dims.y - 1, block_dims.y)))),
         .z = @truncate(@as(u64, @bitCast(@divTrunc(ne2 * ne3 + block_dims.z - 1, block_dims.z)))),
     };
 
-    const fd10 = common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[0])))));
-    const fd11 = common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[1])))));
-    const fd12 = common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[2])))));
-    const fd13 = common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[3])))));
+    const fd10 = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[0])))));
+    const fd11 = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[1])))));
+    const fd12 = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[2])))));
+    const fd13 = ggml.cuda.common.initFastdivValues(@as(u32, @truncate(@as(u64, @bitCast(cne1[3])))));
 
     // `(const src1_t *) dst->src[I + 1]->data...`
     var pack: [n_fuse]?*const anyopaque = undefined;
@@ -234,22 +227,22 @@ fn launchBinBcastPack(
     if (block_nums.z > 65535 or block_nums.y > 65535) {
         const block_num: i64 = @divTrunc(ne0 * ne1 * ne2 * ne3 + block_size - 1, block_size);
 
-        impl.assert(block_num <= u32_max, "block_num              <= std::numeric_limits<uint32_t>::max()");
-        impl.assert(block_num * block_size <= u32_max, "block_num * block_size <= std::numeric_limits<uint32_t>::max()");
-        impl.assert(ne0 * ne1 <= u32_max, "ne0 * ne1              <= std::numeric_limits<uint32_t>::max()");
-        impl.assert(ne0 * ne1 * ne2 <= u32_max, "ne0 * ne1 * ne2        <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(block_num <= u32_max, "block_num              <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(block_num * block_size <= u32_max, "block_num * block_size <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(ne0 * ne1 <= u32_max, "ne0 * ne1              <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(ne0 * ne1 * ne2 <= u32_max, "ne0 * ne1 * ne2        <= std::numeric_limits<uint32_t>::max()");
 
-        const prod_012 = common.initFastdivValues(@intCast(ne0 * ne1 * ne2));
-        const prod_01 = common.initFastdivValues(@intCast(ne0 * ne1));
-        const ne0_fastdiv = common.initFastdivValues(@intCast(ne0));
-        const ne1_fastdiv = common.initFastdivValues(@intCast(ne1));
-        const ne2_fastdiv = common.initFastdivValues(@intCast(ne2));
+        const prod_012 = ggml.cuda.common.initFastdivValues(@intCast(ne0 * ne1 * ne2));
+        const prod_01 = ggml.cuda.common.initFastdivValues(@intCast(ne0 * ne1));
+        const ne0_fastdiv = ggml.cuda.common.initFastdivValues(@intCast(ne0));
+        const ne1_fastdiv = ggml.cuda.common.initFastdivValues(@intCast(ne1));
+        const ne2_fastdiv = ggml.cuda.common.initFastdivValues(@intCast(ne2));
 
-        kernels.launchPdl(binKernel(true, op, S0, S1, D, n_fuse), .{
+        ggml.cuda.kernels.launchPdl(binKernel(true, op, S0, S1, D, n_fuse), .{
             .grid = .{ .x = @intCast(block_num) },
             .block = .{ .x = block_size },
             .stream = stream,
-        }, kernels.append(.{
+        }, ggml.cuda.kernels.append(.{
             p0,                      p1,                      pd,
             ne0_fastdiv,             ne1_fastdiv,             ne2_fastdiv,
             @as(u32, @intCast(ne3)), prod_012,                prod_01,
@@ -260,16 +253,16 @@ fn launchBinBcastPack(
             @as(u32, @intCast(s11)), @as(u32, @intCast(s12)), @as(u32, @intCast(s13)),
         }, n_fuse, ?*const anyopaque, pack));
     } else {
-        impl.assert(@as(i64, block_nums.x) * block_dims.x <= u32_max, "int64_t(block_nums.x) * block_dims.x <= std::numeric_limits<uint32_t>::max()");
-        impl.assert(@as(i64, block_nums.y) * block_dims.y <= u32_max, "int64_t(block_nums.y) * block_dims.y <= std::numeric_limits<uint32_t>::max()");
-        impl.assert(@as(i64, block_nums.z) * block_dims.z <= u32_max, "int64_t(block_nums.z) * block_dims.z <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(@as(i64, block_nums.x) * block_dims.x <= u32_max, "int64_t(block_nums.x) * block_dims.x <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(@as(i64, block_nums.y) * block_dims.y <= u32_max, "int64_t(block_nums.y) * block_dims.y <= std::numeric_limits<uint32_t>::max()");
+        ggml.impl.assert(@as(i64, block_nums.z) * block_dims.z <= u32_max, "int64_t(block_nums.z) * block_dims.z <= std::numeric_limits<uint32_t>::max()");
 
-        const ne3_fastdiv = common.initFastdivValues(@intCast(ne3));
-        kernels.launchPdl(binKernel(false, op, S0, S1, D, n_fuse), .{
+        const ne3_fastdiv = ggml.cuda.common.initFastdivValues(@intCast(ne3));
+        ggml.cuda.kernels.launchPdl(binKernel(false, op, S0, S1, D, n_fuse), .{
             .grid = block_nums,
             .block = block_dims,
             .stream = stream,
-        }, kernels.append(.{
+        }, ggml.cuda.kernels.append(.{
             p0,                      p1,                      pd,
             @as(u32, @intCast(ne0)), @as(u32, @intCast(ne1)), @as(u32, @intCast(ne2)),
             ne3_fastdiv,             fd10,                    fd11,
@@ -285,13 +278,13 @@ fn launchBinBcastPack(
 /// Ports `ggml_cuda_op_bin_bcast` (binbcast.cu:413 @b1b770d90) with the
 /// functor `bin_bcast_cuda` (binbcast.cu:390 @b1b770d90) it is instantiated
 /// with, as `bin_bcast_cuda<op, n_fuse>`.
-fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const Tensor, src1: *const Tensor, dst: *const Tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: cu.cudaStream_t) void {
-    impl.assert(src1.type == c.GGML_TYPE_F32 or src1.type == c.GGML_TYPE_F16 or src1.type == c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
+fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor, src0_dd: ?*const anyopaque, src1_dd: ?*const anyopaque, dst_dd: ?*anyopaque, stream: ggml.cuda.common.cu.cudaStream_t) void {
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32 or src1.type == ggml.impl.c.GGML_TYPE_F16 or src1.type == ggml.impl.c.GGML_TYPE_BF16, "src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
-    const F32 = c.GGML_TYPE_F32;
-    const F16 = c.GGML_TYPE_F16;
-    const BF16 = c.GGML_TYPE_BF16;
-    const bf16 = kernels.bf16;
+    const F32 = ggml.impl.c.GGML_TYPE_F32;
+    const F16 = ggml.impl.c.GGML_TYPE_F16;
+    const BF16 = ggml.impl.c.GGML_TYPE_BF16;
+    const bf16 = ggml.cuda.kernels.bf16;
     if (src0.type == F32 and src1.type != BF16 and dst.type == F32) {
         launchBinBcastPack(op, f32, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else if (src0.type == BF16 and src1.type == BF16 and dst.type == BF16) {
@@ -299,46 +292,46 @@ fn opBinBcast(comptime op: Op, comptime n_fuse: usize, src0: *const Tensor, src1
     } else if (src0.type == BF16 and src1.type == F32 and dst.type == BF16) {
         launchBinBcastPack(op, bf16, f32, bf16, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else if (src0.type == F16 and src1.type == F16 and dst.type == F16) {
-        launchBinBcastPack(op, half, half, half, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, ggml.cuda.kernels.half, ggml.cuda.kernels.half, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else if (src0.type == F16 and src1.type == F32 and dst.type == F16) {
-        launchBinBcastPack(op, half, f32, half, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, f32, ggml.cuda.kernels.half, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else if (src0.type == F16 and dst.type == F32) {
-        launchBinBcastPack(op, half, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0_dd, src1_dd, dst_dd, stream);
     } else {
-        impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type), c.ggml_type_name(src1.type) });
-        impl.abort("fatal error");
+        ggml.impl.fprintfStderr("%s: unsupported types: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_bin_bcast", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type), ggml.impl.c.ggml_type_name(src1.type) });
+        ggml.impl.abort("fatal error");
     }
 }
 
-fn srcOf(dst: *const Tensor, i: usize) *const Tensor {
-    return impl.one(Tensor, dst.src[i]);
+fn srcOf(dst: *const ggml.impl.c.ggml_tensor, i: usize) *const ggml.impl.c.ggml_tensor {
+    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]);
 }
 
 /// Ports `ggml_cuda_op_repeat` (binbcast.cu:438 @b1b770d90): `src0` is `dst`
 /// itself, read through a null pointer, so the kernel starts every element
 /// from zero.
-pub fn opRepeat(ctx: *common.Context, dst: *Tensor) void {
+pub fn opRepeat(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     opBinBcast(.repeat, 0, dst, srcOf(dst, 0), dst, null, srcOf(dst, 0).data, dst.data, ctx.stream());
 }
 
 /// Ports `ggml_cuda_op_add`, `ggml_cuda_op_sub`, `ggml_cuda_op_mul` and
 /// `ggml_cuda_op_div` (binbcast.cu:442, 446, 450, 454 @b1b770d90).
-pub fn opBinary(comptime op: Op, ctx: *common.Context, dst: *Tensor) void {
+pub fn opBinary(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const s0 = srcOf(dst, 0);
     const s1 = srcOf(dst, 1);
     opBinBcast(op, 1, s0, s1, dst, s0.data, s1.data, dst.data, ctx.stream());
 }
 
 /// Ports `ggml_cuda_op_fused_binbcast_impl` (binbcast.cu:459 @b1b770d90).
-fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *common.Context, dst: *Tensor) void {
+fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const stream = ctx.stream();
     const src0 = srcOf(dst, 0);
     const src1 = srcOf(dst, 1);
 
-    const F32 = c.GGML_TYPE_F32;
-    const F16 = c.GGML_TYPE_F16;
-    const BF16 = c.GGML_TYPE_BF16;
-    const bf16 = kernels.bf16;
+    const F32 = ggml.impl.c.GGML_TYPE_F32;
+    const F16 = ggml.impl.c.GGML_TYPE_F16;
+    const BF16 = ggml.impl.c.GGML_TYPE_BF16;
+    const bf16 = ggml.cuda.kernels.bf16;
     if (src0.type == F32 and src1.type != BF16 and dst.type == F32) {
         launchBinBcastPack(op, f32, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else if (src0.type == BF16 and src1.type == BF16 and dst.type == BF16) {
@@ -346,36 +339,36 @@ fn fusedBinBcastImpl(comptime op: Op, comptime n_fuse: usize, ctx: *common.Conte
     } else if (src0.type == BF16 and src1.type == F32 and dst.type == BF16) {
         launchBinBcastPack(op, bf16, f32, bf16, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else if (src0.type == F16 and src1.type == F16 and dst.type == F16) {
-        launchBinBcastPack(op, half, half, half, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, ggml.cuda.kernels.half, ggml.cuda.kernels.half, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else if (src0.type == F16 and src1.type == F32 and dst.type == F16) {
-        launchBinBcastPack(op, half, f32, half, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, f32, ggml.cuda.kernels.half, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else if (src0.type == F16 and dst.type == F32) {
-        launchBinBcastPack(op, half, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
+        launchBinBcastPack(op, ggml.cuda.kernels.half, f32, f32, n_fuse, src0, src1, dst, src0.data, src1.data, dst.data, stream);
     } else {
-        impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type), c.ggml_type_name(src1.type) });
-        impl.abort("fatal error");
+        ggml.impl.logError("%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n", .{ "ggml_cuda_op_fused_binbcast_impl", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type), ggml.impl.c.ggml_type_name(src1.type) });
+        ggml.impl.abort("fatal error");
     }
 }
 
 /// Ports `ggml_cuda_op_fused_add` and `ggml_cuda_op_fused_mul`
 /// (binbcast.cu:498, 528 @b1b770d90).
-pub fn opFused(comptime op: Op, ctx: *common.Context, dst: *Tensor, n_fuse: c_int) void {
-    impl.assert(2 <= n_fuse and n_fuse <= 8, "2 <= n_fuse && n_fuse <= 8");
+pub fn opFused(comptime op: Op, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, n_fuse: c_int) void {
+    ggml.impl.assert(2 <= n_fuse and n_fuse <= 8, "2 <= n_fuse && n_fuse <= 8");
     switch (n_fuse) {
         inline 2...8 => |n| fusedBinBcastImpl(op, n, ctx, dst),
-        else => impl.assert(false, "false && \"Unsupported n_fuse value\""),
+        else => ggml.impl.assert(false, "false && \"Unsupported n_fuse value\""),
     }
 }
 
 /// Ports `ggml_cuda_op_repeat_back` (binbcast.cu:558 @b1b770d90) with
 /// `repeat_back_cuda` (binbcast.cu:401 @b1b770d90), which launches with
 /// `<<<>>>`, not PDL.
-pub fn opRepeatBack(ctx: *common.Context, dst: *Tensor) void {
+pub fn opRepeatBack(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const src0 = srcOf(dst, 0);
 
-    impl.assert(src0.type == dst.type, "src0->type == dst->type");
-    impl.assert(c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
-    impl.assert(c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
+    ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(dst), "ggml_is_contiguous(dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
 
     const stream = ctx.stream();
     const ne0 = dst.ne[0];
@@ -383,19 +376,19 @@ pub fn opRepeatBack(ctx: *common.Context, dst: *Tensor) void {
     const ne2 = dst.ne[2];
     const ne3 = dst.ne[3];
 
-    impl.assert(ne2 * ne3 <= (1 << 15), "ne2*ne3 <= (1 << 15)");
+    ggml.impl.assert(ne2 * ne3 <= (1 << 15), "ne2*ne3 <= (1 << 15)");
 
-    const ts = c.ggml_type_size(src0.type);
+    const ts = ggml.impl.c.ggml_type_size(src0.type);
     const s00 = src0.nb[0] / ts;
     const s01 = src0.nb[1] / ts;
     const s02 = src0.nb[2] / ts;
     const s03 = src0.nb[3] / ts;
 
     switch (dst.type) {
-        c.GGML_TYPE_F32 => {
-            kernels.launch(kernels.get("binbcast", "k_repeat_back<float>"), .{
-                .grid = kernels.Dim3.of(@divTrunc(ne0 + common.warp_size - 1, common.warp_size), ne1, ne2 * ne3),
-                .block = .{ .x = common.warp_size },
+        ggml.impl.c.GGML_TYPE_F32 => {
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("binbcast", "k_repeat_back<float>"), .{
+                .grid = ggml.cuda.kernels.Dim3.of(@divTrunc(ne0 + ggml.cuda.common.warp_size - 1, ggml.cuda.common.warp_size), ne1, ne2 * ne3),
+                .block = .{ .x = ggml.cuda.common.warp_size },
                 .stream = stream,
             }, .{
                 @as(?*const anyopaque, src0.data), @as(?*anyopaque, dst.data),
@@ -407,6 +400,6 @@ pub fn opRepeatBack(ctx: *common.Context, dst: *Tensor) void {
                 ne2,                               ne3,
             });
         },
-        else => impl.assert(false, "false"),
+        else => ggml.impl.assert(false, "false"),
     }
 }

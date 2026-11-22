@@ -10,24 +10,11 @@
 //! `build_arch_graph`, its `input_t_cond`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const batch = @import("../batch.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const Ubatch = batch.Ubatch;
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_mistral3`'s `load_arch_hparams` (models/mistral3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -59,11 +46,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_mistral3`'s `load_arch_tensors` (models/mistral3.cpp:31 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -92,7 +79,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
         // The optional adaptive RMS norm (Voxtral Realtime); the hidden size
         // is taken from the tensor itself.
-        const ada_name = (loader.Tn{ .tensor = .ffn_norm_ada_down, .suffix = "weight", .bid = i }).str();
+        const ada_name = (llama.loader.Tn{ .tensor = .ffn_norm_ada_down, .suffix = "weight", .bid = i }).str();
         if (ml.getTensorMeta(ada_name.slice())) |meta| {
             const n_ada: i64 = meta.ne[1];
             layer.ffn_norm_ada_down = try self.createTensor(.{ .tensor = .ffn_norm_ada_down, .suffix = "weight", .bid = i }, &.{ l.n_embd, n_ada }, 0, exc);
@@ -100,7 +87,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         }
 
         const rope_dup: u32 = if (i != 0) dup else 0;
-        if (hp.rope_scaling_type_train == c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
+        if (hp.rope_scaling_type_train == llama.impl.c.LLAMA_ROPE_SCALING_TYPE_LONGROPE) {
             layer.rope_long = try self.createTensor(.{ .tensor = .rope_factors_long, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
             layer.rope_short = try self.createTensor(.{ .tensor = .rope_factors_short, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         } else {
@@ -137,20 +124,20 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 /// the whole session.
 const InputTCond = struct {
     /// F32 `[n_embd]`.
-    t_cond: ?*Tensor = null,
+    t_cond: ?*llama.impl.c.ggml_tensor = null,
     data: []f32,
 
     /// `input_t_cond`'s constructor (models/mistral3.cpp:101 @b1b770d90).
     fn create(n_delay: u32, n_embd: i64) *InputTCond {
-        const self = allocator.create(InputTCond) catch oom();
-        const data = allocator.alloc(f32, @intCast(n_embd)) catch oom();
+        const self = std.heap.c_allocator.create(InputTCond) catch oom();
+        const data = std.heap.c_allocator.alloc(f32, @intCast(n_embd)) catch oom();
         @memset(data, 0.0);
         const half: i64 = @divTrunc(n_embd, 2);
-        const log_10000 = libm.log(10000.0);
+        const log_10000 = stdlib.libm.log(10000.0);
         var i: i64 = 0;
         while (i < half) : (i += 1) {
-            const freq: f64 = libm.exp(-log_10000 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(half))) * @as(f64, @floatFromInt(n_delay));
-            const sc = libm.sinCos64(freq);
+            const freq: f64 = stdlib.libm.exp(-log_10000 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(half))) * @as(f64, @floatFromInt(n_delay));
+            const sc = stdlib.libm.sinCos64(freq);
             data[@intCast(i)] = @floatCast(sc.cos);
             data[@intCast(half + i)] = @floatCast(sc.sin);
         }
@@ -159,36 +146,36 @@ const InputTCond = struct {
     }
 
     pub fn deinit(self: *InputTCond) void {
-        allocator.free(self.data);
+        std.heap.c_allocator.free(self.data);
     }
 
     /// `input_t_cond`'s `set_input` (models/mistral3.cpp:110 @b1b770d90).
-    pub fn setInput(self: *InputTCond, _: ?*const Ubatch) void {
-        c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, c.ggml_nbytes(self.t_cond));
+    pub fn setInput(self: *InputTCond, _: ?*const llama.batch.Ubatch) void {
+        llama.impl.c.ggml_backend_tensor_set(self.t_cond, self.data.ptr, 0, llama.impl.c.ggml_nbytes(self.t_cond));
     }
 
     /// `input_t_cond`'s `can_reuse` (models/mistral3.cpp:116 @b1b770d90):
     /// the input does not depend on the batch.
-    pub fn canReuse(_: *InputTCond, _: *const graph.Params) bool {
+    pub fn canReuse(_: *InputTCond, _: *const llama.graph.Params) bool {
         return true;
     }
 };
 
 fn oom() noreturn {
-    impl.abort("models/mistral3.cpp", 0, "out of memory");
+    llama.impl.abort("models/mistral3.cpp", 0, "out of memory");
 }
 
 /// Mirrors the `__double2` that `__sincos_stret` returns (math.h).
 /// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:126
 /// @b1b770d90) and the constructor of its `graph` (models/mistral3.cpp:130
 /// @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mistral3.cpp", 133, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(n_embd_head == b.n_rot, "models/mistral3.cpp", 134, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/mistral3.cpp", 133, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/mistral3.cpp", 134, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -196,7 +183,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     const inp_pos = b.buildInpPos();
 
     // Optional temperature tuning.
-    var inp_attn_scale: ?*Tensor = null;
+    var inp_attn_scale: ?*llama.impl.c.ggml_tensor = null;
     if (hp.f_attn_temp_scale != 0.0) {
         inp_attn_scale = b.buildInpAttnScale();
     }
@@ -204,17 +191,17 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     const inp_attn = b.buildAttnInpKv();
 
     // (Optional) the time conditioning of the adaptive RMS norm.
-    var t_cond: ?*Tensor = null;
+    var t_cond: ?*llama.impl.c.ggml_tensor = null;
     if (model.layers[0].ffn_norm_ada_down != null) {
         const inp = InputTCond.create(hp.n_tokens_delay, b.n_embd);
-        t_cond = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, b.n_embd);
-        c.ggml_set_input(t_cond);
+        t_cond = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_embd);
+        llama.impl.c.ggml_set_input(t_cond);
         b.cb(t_cond.?, "inp_t_cond", -1);
         inp.t_cond = t_cond;
         _ = b.res.addInput(InputTCond, inp);
     }
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     const inp_out_ids = b.buildInpOutIds();
 
@@ -244,7 +231,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
             if (inp_attn_scale) |scale| {
                 // Llama 4's temperature scaling.
-                Qcur = c.ggml_mul(ctx, Qcur, scale);
+                Qcur = llama.impl.c.ggml_mul(ctx, Qcur, scale);
                 b.cb(Qcur, "Qcur_attn_temp_scaled", il);
             }
 
@@ -252,10 +239,10 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         if (layer.ffn_gate_inp == null) {
@@ -267,7 +254,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
                 // The adaptive RMS norm: scale the normalized input by
                 // (1 + mlp(t_cond)).
                 const ada = b.buildFfn(tc, layer.ffn_norm_ada_down, null, null, null, null, null, layer.ffn_norm_ada_up, null, null, null, .gelu_erf, .seq, il);
-                cur = c.ggml_add(ctx, cur, c.ggml_mul(ctx, cur, ada));
+                cur = llama.impl.c.ggml_add(ctx, cur, llama.impl.c.ggml_mul(ctx, cur, ada));
                 b.cb(cur, "ffn_norm_ada", il);
             }
 
@@ -295,7 +282,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             }, il);
             b.cb(cur, "ffn_moe_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

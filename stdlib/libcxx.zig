@@ -1812,7 +1812,7 @@ pub const RandomDevice = struct {
 
     /// `RNDGETENTCNT`, `_IOR('R', 0x00, int)`, in the generic ioctl encoding
     /// aarch64 and x86_64 share.
-    const rnd_get_ent_cnt: c_ulong = 0x80045200;
+    const rnd_get_ent_cnt: u32 = 0x80045200;
 
     const libc = @import("libc.zig");
 
@@ -1821,13 +1821,14 @@ pub const RandomDevice = struct {
     /// Return: the device; `error.OpenFailed` where the C++ throws.
     pub fn open() Error!RandomDevice {
         if (comptime uses_arc4random or uses_win32_random) return .{};
-        const fd = libc.open("/dev/urandom", @as(c_int, 0)); // O_RDONLY
+        const fd = libc.open("/dev/urandom", .{ .ACCMODE = .RDONLY });
         if (fd < 0) return error.OpenFailed;
         return .{ .fd = fd };
     }
 
     /// The destructor.
     pub fn close(self: *RandomDevice) void {
+        if (comptime uses_arc4random or uses_win32_random) return;
         if (self.fd >= 0) _ = libc.close(self.fd);
         self.fd = -1;
     }
@@ -1839,7 +1840,7 @@ pub const RandomDevice = struct {
         if (comptime uses_arc4random) return 32;
         if (comptime uses_win32_random) return 0;
         var ent: c_int = 0;
-        if (libc.ioctl(self.fd, rnd_get_ent_cnt, &ent) < 0) return 0;
+        if (libc.ioctl(self.fd, @bitCast(rnd_get_ent_cnt), &ent) < 0) return 0;
         if (ent < 0) return 0;
         if (ent > 32) return 32;
         return @floatFromInt(ent);

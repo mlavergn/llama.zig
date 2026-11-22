@@ -20,24 +20,11 @@
 //! `llama_model_vllm_decision2`'s members.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const batch = @import("../batch.zig");
-const qwen3 = @import("qwen3.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const Ubatch = batch.Ubatch;
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("models/vllm-decision2.cpp", 0, "out of memory");
+    llama.impl.abort("models/vllm-decision2.cpp", 0, "out of memory");
 }
 
 /// Ports `llama_decision_order` (llama-ext.h:130 @b1b770d90): what the
@@ -53,22 +40,22 @@ const decision_order_option: i32 = 4;
 /// `vllm_decision2`, which only this file reads or writes. The tensors are
 /// the model's; the state owns nothing.
 pub const State = struct {
-    option_norm: ?*Tensor = null,
-    option_norm_b: ?*Tensor = null,
-    query_norm: ?*Tensor = null,
-    query_norm_b: ?*Tensor = null,
-    key: ?*Tensor = null,
-    query: ?*Tensor = null,
-    option_mlp: ?*Tensor = null,
-    option_mlp_b: ?*Tensor = null,
-    query_mlp: ?*Tensor = null,
-    scorer_out: ?*Tensor = null,
+    option_norm: ?*llama.impl.c.ggml_tensor = null,
+    option_norm_b: ?*llama.impl.c.ggml_tensor = null,
+    query_norm: ?*llama.impl.c.ggml_tensor = null,
+    query_norm_b: ?*llama.impl.c.ggml_tensor = null,
+    key: ?*llama.impl.c.ggml_tensor = null,
+    query: ?*llama.impl.c.ggml_tensor = null,
+    option_mlp: ?*llama.impl.c.ggml_tensor = null,
+    option_mlp_b: ?*llama.impl.c.ggml_tensor = null,
+    query_mlp: ?*llama.impl.c.ggml_tensor = null,
+    scorer_out: ?*llama.impl.c.ggml_tensor = null,
 };
 
 /// Ports `llama_model_vllm_decision2`'s `load_arch_hparams`
 /// (models/vllm-decision2.cpp:7 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
-    try qwen3.loadArchHparams(self, ml, exc);
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    try llama.models.qwen3.loadArchHparams(self, ml, exc);
 
     const hp = &self.hparams;
 
@@ -81,14 +68,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_vllm_decision2`'s `load_arch_tensors`
 /// (models/vllm-decision2.cpp:17 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
-    try qwen3.loadArchTensors(self, ml, exc);
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    try llama.models.qwen3.loadArchTensors(self, ml, exc);
 
     const l = self.loadLocals();
     const n_embd = l.n_embd;
     const st = &self.vllm_decision2;
 
-    const name_key = (loader.Tn{ .tensor = .decision_key, .suffix = "weight" }).str();
+    const name_key = (llama.loader.Tn{ .tensor = .decision_key, .suffix = "weight" }).str();
     const w_key = ml.getWeight(name_key.slice()) orelse {
         return exc.throw(.runtime_error, "the decision head is missing", .{});
     };
@@ -109,7 +96,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
 /// Ports `llama_model_vllm_decision2`'s `build_arch_graph`
 /// (models/vllm-decision2.cpp:41 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
@@ -125,7 +112,7 @@ const Rows = struct {
     valid: bool = false,
 
     fn deinit(self: *Rows) void {
-        self.options.deinit(allocator);
+        self.options.deinit(std.heap.c_allocator);
     }
 };
 
@@ -135,15 +122,15 @@ const Rows = struct {
 /// one option at row 0.
 ///
 /// Return: the rows, which the caller deinits.
-fn getRows(ubatch: *const Ubatch) Rows {
+fn getRows(ubatch: *const llama.batch.Ubatch) Rows {
     var res: Rows = .{};
 
     const n_tokens: i32 = @intCast(ubatch.n_tokens);
     var ok = ubatch.decision_order != null and ubatch.n_seqs_unq == 1;
 
     // The output row of each token, -1 if the token has no output.
-    const rows = allocator.alloc(i32, @intCast(n_tokens)) catch oom();
-    defer allocator.free(rows);
+    const rows = std.heap.c_allocator.alloc(i32, @intCast(n_tokens)) catch oom();
+    defer std.heap.c_allocator.free(rows);
     @memset(rows, -1);
     {
         var n: i32 = 0;
@@ -168,7 +155,7 @@ fn getRows(ubatch: *const Ubatch) Rows {
                 res.query = last;
                 n_questions += 1;
             },
-            decision_order_option => res.options.append(allocator, last) catch oom(),
+            decision_order_option => res.options.append(std.heap.c_allocator, last) catch oom(),
             else => ok = false,
         }
         ok = ok and (order == decision_order_none or last >= 0);
@@ -178,7 +165,7 @@ fn getRows(ubatch: *const Ubatch) Rows {
     res.valid = ok and n_questions == 1 and res.options.items.len != 0;
     if (!res.valid) {
         res.options.clearRetainingCapacity();
-        res.options.append(allocator, 0) catch oom();
+        res.options.append(std.heap.c_allocator, 0) catch oom();
         res.query = 0;
     }
     return res;
@@ -188,17 +175,17 @@ fn getRows(ubatch: *const Ubatch) Rows {
 /// class of `llama_model_vllm_decision2`: the rows the head reads.
 const InpDecision = struct {
     /// I32 `[n_options]`.
-    options: ?*Tensor = null,
+    options: ?*llama.impl.c.ggml_tensor = null,
     /// I32 `[1]`.
-    query: ?*Tensor = null,
+    query: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[1]`, added to the scores: 0, or NaN on invalid input.
-    status: ?*Tensor = null,
+    status: ?*llama.impl.c.ggml_tensor = null,
 
     n_options: usize,
 
     /// Ports `input_decision`'s constructor (models/vllm-decision2.cpp:104
     /// @b1b770d90).
-    fn init(ubatch: *const Ubatch) InpDecision {
+    fn init(ubatch: *const llama.batch.Ubatch) InpDecision {
         var rows = getRows(ubatch);
         defer rows.deinit();
         return .{ .n_options = rows.options.items.len };
@@ -206,24 +193,24 @@ const InpDecision = struct {
 
     /// Ports `input_decision`'s `set_input` (models/vllm-decision2.cpp:106
     /// @b1b770d90).
-    pub fn setInput(self: *InpDecision, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpDecision, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         var rows = getRows(ubatch);
         defer rows.deinit();
-        impl.assert(rows.options.items.len == self.n_options, "models/vllm-decision2.cpp", 108, "rows.options.size() == n_options");
+        llama.impl.assert(rows.options.items.len == self.n_options, "models/vllm-decision2.cpp", 108, "rows.options.size() == n_options");
 
         // The scores are NaN if the batch has a decision order that cannot be used.
         const status_data: f32 = if (rows.valid or ubatch.decision_order == null) 0.0 else std.math.nan(f32);
 
-        c.ggml_backend_tensor_set(self.options, rows.options.items.ptr, 0, c.ggml_nbytes(self.options));
-        c.ggml_backend_tensor_set(self.query, &rows.query, 0, c.ggml_nbytes(self.query));
-        c.ggml_backend_tensor_set(self.status, &status_data, 0, c.ggml_nbytes(self.status));
+        llama.impl.c.ggml_backend_tensor_set(self.options, rows.options.items.ptr, 0, llama.impl.c.ggml_nbytes(self.options));
+        llama.impl.c.ggml_backend_tensor_set(self.query, &rows.query, 0, llama.impl.c.ggml_nbytes(self.query));
+        llama.impl.c.ggml_backend_tensor_set(self.status, &status_data, 0, llama.impl.c.ggml_nbytes(self.status));
     }
 
     /// Ports `input_decision`'s `can_reuse` (models/vllm-decision2.cpp:118
     /// @b1b770d90): `set_input` computes the values again, so only the
     /// shapes must match.
-    pub fn canReuse(self: *InpDecision, params: *const graph.Params) bool {
+    pub fn canReuse(self: *InpDecision, params: *const llama.graph.Params) bool {
         var rows = getRows(&params.ubatch);
         defer rows.deinit();
         return rows.options.items.len == self.n_options;
@@ -237,25 +224,25 @@ const InpDecision = struct {
 /// (models/vllm-decision2.cpp:130 @b1b770d90): Qwen3's backbone, then the
 /// head, which is always evaluated so that the graph has the same nodes for
 /// every batch.
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
 
-    const inp_decision = allocator.create(InpDecision) catch oom();
+    const inp_decision = std.heap.c_allocator.create(InpDecision) catch oom();
     inp_decision.* = InpDecision.init(b.ubatch);
     _ = b.res.addInput(InpDecision, inp_decision);
 
-    var cur = qwen3.buildBackbone(model, b);
+    var cur = llama.models.qwen3.buildBackbone(model, b);
 
     cur = buildHead(model, b, cur, inp_decision);
 
     // Row i of the output is the score of option i.
-    cur = c.ggml_pad(ctx, cur, 0, @intCast(b.n_outputs - cur.ne[1]), 0, 0);
-    cur = c.ggml_add(ctx, cur, inp_decision.status);
+    cur = llama.impl.c.ggml_pad(ctx, cur, 0, @intCast(b.n_outputs - cur.ne[1]), 0, 0);
+    cur = llama.impl.c.ggml_add(ctx, cur, inp_decision.status);
     b.cb(cur, "result_decision", -1);
 
     b.res.t_embd = cur;
 
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_vllm_decision2::graph`'s `build_head`
@@ -265,35 +252,35 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 /// - `hidden`: `[n_embd, n_outputs]`.
 ///
 /// Return: one score per option, `[1, n_options]`.
-fn buildHead(model: *const Model, b: *const graph.Builder, hidden: *Tensor, inp: *InpDecision) *Tensor {
+fn buildHead(model: *const llama.model.Model, b: *const llama.graph.Builder, hidden: *llama.impl.c.ggml_tensor, inp: *InpDecision) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const st = &model.vllm_decision2;
 
-    inp.options = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, @intCast(inp.n_options));
-    inp.query = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, 1);
-    inp.status = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, 1);
-    for ([_]?*Tensor{ inp.options, inp.query, inp.status }) |t| {
-        c.ggml_set_input(t);
+    inp.options = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, @intCast(inp.n_options));
+    inp.query = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, 1);
+    inp.status = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, 1);
+    for ([_]?*llama.impl.c.ggml_tensor{ inp.options, inp.query, inp.status }) |t| {
+        llama.impl.c.ggml_set_input(t);
     }
 
-    var options: *Tensor = c.ggml_get_rows(ctx, hidden, inp.options); // [n_embd, n_options]
-    var query: *Tensor = c.ggml_get_rows(ctx, hidden, inp.query); // [n_embd, 1]
+    var options: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, hidden, inp.options); // [n_embd, n_options]
+    var query: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, hidden, inp.query); // [n_embd, 1]
 
     options = b.buildNorm(options, st.option_norm, st.option_norm_b, .norm, -1);
     query = b.buildNorm(query, st.query_norm, st.query_norm_b, .norm, -1);
 
     // The scaled dot product of the option key and the query.
-    const k: *Tensor = c.ggml_mul_mat(ctx, st.key, options); // [n_embd_h, n_options]
-    const q: *Tensor = c.ggml_mul_mat(ctx, st.query, query); // [n_embd_h, 1]
-    var bilinear: *Tensor = c.ggml_sum_rows(ctx, c.ggml_mul(ctx, k, q));
-    bilinear = c.ggml_scale(ctx, bilinear, 1.0 / libm.sqrtfInt(k.ne[0])); // [1, n_options]
+    const k: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, st.key, options); // [n_embd_h, n_options]
+    const q: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, st.query, query); // [n_embd_h, 1]
+    var bilinear: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_mul(ctx, k, q));
+    bilinear = llama.impl.c.ggml_scale(ctx, bilinear, 1.0 / stdlib.libm.sqrtfInt(k.ne[0])); // [1, n_options]
 
-    var mlp: *Tensor = c.ggml_add(ctx, c.ggml_mul_mat(ctx, st.option_mlp, options), st.option_mlp_b);
-    mlp = c.ggml_add(ctx, mlp, c.ggml_mul_mat(ctx, st.query_mlp, query));
-    mlp = c.ggml_gelu_erf(ctx, mlp);
-    const nonlinear: *Tensor = c.ggml_mul_mat(ctx, st.scorer_out, mlp); // [1, n_options]
+    var mlp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul_mat(ctx, st.option_mlp, options), st.option_mlp_b);
+    mlp = llama.impl.c.ggml_add(ctx, mlp, llama.impl.c.ggml_mul_mat(ctx, st.query_mlp, query));
+    mlp = llama.impl.c.ggml_gelu_erf(ctx, mlp);
+    const nonlinear: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, st.scorer_out, mlp); // [1, n_options]
 
-    const scores: *Tensor = c.ggml_add(ctx, bilinear, nonlinear);
+    const scores: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, bilinear, nonlinear);
     b.cb(scores, "decision_scores", -1);
     return scores;
 }

@@ -29,15 +29,11 @@
 //! command is spawned as given, through `PATH`.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const json = @import("json");
-const common = @import("common.zig");
 
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Subproc = stdlib.subproc.Subproc;
-const srv = common.srv;
 
 const gpa = std.heap.c_allocator;
 
@@ -64,7 +60,7 @@ pub const StopFn = struct {
 };
 
 /// The pipe of serialized messages each way.
-const StringPipe = common.Pipe([]u8);
+const StringPipe = mod.common.Pipe([]u8);
 
 // -----------------------------------------------------------------------------
 // the NDJSON pump
@@ -121,7 +117,7 @@ fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, c
 
         // a partial line already larger than the cap and still no newline: drop it to avoid unbounded growth
         if (buf.items.len > max_line) {
-            srv(.wrn, "mcp_pump_ndjson", "MCP: dropping oversized line (> %zu bytes) from child pipe\n", .{max_line});
+            mod.common.srv(.wrn, "mcp_pump_ndjson", "MCP: dropping oversized line (> %zu bytes) from child pipe\n", .{max_line});
             buf.clearRetainingCapacity();
             skipping = true;
         }
@@ -208,7 +204,7 @@ pub const ServerConfig = struct {
     /// Ports `server_mcp_server_config`'s `parse_cursor_format` (server-mcp.cpp:140 @b1b770d90):
     /// a missing `mcpServers` yields nothing; an entry without a `command`
     /// is skipped with a warning.
-    pub fn parseCursorFormat(out: *std.ArrayList(ServerConfig), j: *const Value) !void {
+    pub fn parseCursorFormat(out: *std.ArrayList(ServerConfig), j: *const json.Value) !void {
         if (!j.contains("mcpServers") or !(try j.at("mcpServers")).isObject()) return;
         var it = (try j.at("mcpServers")).items();
         while (it.next()) |item| {
@@ -227,9 +223,9 @@ pub const ServerConfig = struct {
             }
 
             if (sc.command.len == 0) {
-                const n = common.dupZ(sc.name);
-                defer common.freeZ(n);
-                srv(.wrn, "parse_cursor_format", "MCP server '%s' has no command, skipping\n", .{n});
+                const n = mod.common.dupZ(sc.name);
+                defer mod.common.freeZ(n);
+                mod.common.srv(.wrn, "parse_cursor_format", "MCP server '%s' has no command, skipping\n", .{n});
                 continue;
             }
             try out.append(gpa, sc);
@@ -243,7 +239,7 @@ pub const ToolDef = struct {
     server_name: []const u8,
     name: []const u8, // bare tool name, no "<server>_" prefix
     description: []const u8,
-    input_schema: Value = .null, // JSON Schema for the arguments, or null
+    input_schema: json.Value = .null, // JSON Schema for the arguments, or null
 
     /// A deep copy.
     pub fn clone(self: *const ToolDef) !ToolDef {
@@ -265,7 +261,7 @@ const protocol_version = "2024-11-05";
 /// Ports `rpc_error_message` (server-mcp.cpp:182 @b1b770d90).
 ///
 /// Return: borrowed from `resp`, or a literal.
-fn rpcErrorMessage(resp: *const Value) ![]const u8 {
+fn rpcErrorMessage(resp: *const json.Value) ![]const u8 {
     if (resp.contains("error")) {
         const e = try resp.at("error");
         if (e.isObject()) return e.value("message", []const u8, "unknown error");
@@ -276,7 +272,7 @@ fn rpcErrorMessage(resp: *const Value) ![]const u8 {
 
 /// Ports `mcp_result_to_response` (server-mcp.cpp:197 @b1b770d90): the text
 /// parts of `result.content[]` joined, and an `isError` result surfaced.
-fn resultToResponse(a: Allocator, result: *const Value) !Value {
+fn resultToResponse(a: Allocator, result: *const json.Value) !json.Value {
     var text: std.ArrayList(u8) = .empty;
     if (result.contains("content") and (try result.at("content")).isArray()) {
         for ((try result.at("content")).array.items) |*part| {
@@ -286,7 +282,7 @@ fn resultToResponse(a: Allocator, result: *const Value) !Value {
             }
         }
     }
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     if (result.isObject() and try result.value("isError", bool, false)) {
         try o.put("error", if (text.items.len == 0) "MCP tool returned an error" else text.items);
         return o.done();
@@ -296,11 +292,11 @@ fn resultToResponse(a: Allocator, result: *const Value) !Value {
 }
 
 /// `{"error": {"code": -32603, "message": msg}}`.
-fn rpcError(a: Allocator, msg: []const u8) !Value {
-    var e = common.Obj.init(a);
+fn rpcError(a: Allocator, msg: []const u8) !json.Value {
+    var e = mod.common.Obj.init(a);
     try e.put("code", @as(i64, -32603));
     try e.put("message", msg);
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("error", e.done());
     return o.done();
 }
@@ -319,14 +315,14 @@ pub const Transport = struct {
     from_server: StringPipe, // serialized messages read from the server
 
     // per-transport: send_rpc() holds it across the reply wait. guards the members below.
-    rpc_mutex: sync.Mutex = .{},
+    rpc_mutex: stdlib.sync.Mutex = .{},
     next_id: u64 = 1, // reset to 1 per (re)spawn
     initialized: bool = false,
     last_error: std.ArrayList(u8) = .empty,
     tools: std.ArrayList(ToolDef) = .empty,
 
     config: *const ServerConfig,
-    proc: ?*Subproc = null,
+    proc: ?*stdlib.subproc.Subproc = null,
     reader: ?std.Thread = null, // child stdout -> NDJSON de-framing -> from_server
     writer: ?std.Thread = null, // to_server -> NDJSON framing -> child stdin
     errlog: ?std.Thread = null, // child stderr -> debug log (must be drained or the child blocks)
@@ -335,7 +331,7 @@ pub const Transport = struct {
     running: std.atomic.Value(bool) = .init(false),
 
     // bounded tail of the child's stderr, for diagnostics when it dies
-    err_mu: sync.Mutex = .{},
+    err_mu: stdlib.sync.Mutex = .{},
     err_tail: std.ArrayList(u8) = .empty,
 
     /// The `shared_ptr`'s count.
@@ -394,7 +390,7 @@ pub const Transport = struct {
     /// Ports `server_mcp_transport`'s `send_rpc` (server-mcp.cpp:215 @b1b770d90): the
     /// reply, or an `{"error": ...}`; a request abandoned to a stop or the
     /// deadline is cancelled on the server. Assumes `rpc_mutex` is held.
-    fn sendRpc(self: *Transport, a: Allocator, request: *const Value, should_stop: ?StopFn) !Value {
+    fn sendRpc(self: *Transport, a: Allocator, request: *const json.Value, should_stop: ?StopFn) !json.Value {
         const dumped = try json.dump(gpa, request, -1);
         if (!(try self.to_server.write(dumped))) {
             gpa.free(dumped);
@@ -422,7 +418,7 @@ pub const Transport = struct {
                 continue; // skip malformed frame
             };
             // no id: a notification. mismatched id: a stale reply from a timed-out request (ids are monotonic, never a future one)
-            if (!has_id or (reply.contains("id") and Value.eql(try reply.at("id"), try request.at("id")))) {
+            if (!has_id or (reply.contains("id") and json.Value.eql(try reply.at("id"), try request.at("id")))) {
                 return reply;
             }
             if (stdlib.clock.steadyNs() >= deadline) break; // a flood of notifications must not outrun the deadline
@@ -446,17 +442,17 @@ pub const Transport = struct {
     /// abandon work nobody waits for anymore (e.g. a slow tool call after
     /// the client dropped the connection). The spec forbids cancelling
     /// `initialize`. Assumes `rpc_mutex` is held.
-    fn notifyCancelled(self: *Transport, a: Allocator, request: *const Value, reason: []const u8) !void {
+    fn notifyCancelled(self: *Transport, a: Allocator, request: *const json.Value, reason: []const u8) !void {
         if (!request.contains("id")) return;
         if (request.contains("method")) {
             // request.value("method", "")
             const m = try request.at("method");
             if (m.isString() and std.mem.eql(u8, m.string, "initialize")) return;
         }
-        var params = common.Obj.init(a);
+        var params = mod.common.Obj.init(a);
         try params.put("requestId", try (try request.at("id")).clone(a));
         try params.put("reason", reason);
-        var notif = common.Obj.init(a);
+        var notif = mod.common.Obj.init(a);
         try notif.put("jsonrpc", "2.0");
         try notif.put("method", "notifications/cancelled");
         try notif.put("params", params.done());
@@ -470,14 +466,14 @@ pub const Transport = struct {
     fn ensureInit(self: *Transport, a: Allocator, should_stop: ?StopFn) !bool {
         if (self.initialized) return true;
 
-        var client_info = common.Obj.init(a);
+        var client_info = mod.common.Obj.init(a);
         try client_info.put("name", "llama.cpp");
         try client_info.put("version", "1.0");
-        var params = common.Obj.init(a);
+        var params = mod.common.Obj.init(a);
         try params.put("protocolVersion", protocol_version);
-        try params.put("capabilities", Value.emptyObject());
+        try params.put("capabilities", json.Value.emptyObject());
         try params.put("clientInfo", client_info.done());
-        var init_req = common.Obj.init(a);
+        var init_req = mod.common.Obj.init(a);
         try init_req.put("jsonrpc", "2.0");
         try init_req.put("id", self.next_id);
         self.next_id += 1;
@@ -492,7 +488,7 @@ pub const Transport = struct {
         }
 
         // notifications/initialized: no id, no reply expected
-        var notif = common.Obj.init(a);
+        var notif = mod.common.Obj.init(a);
         try notif.put("jsonrpc", "2.0");
         try notif.put("method", "notifications/initialized");
         const nv = notif.done();
@@ -516,7 +512,7 @@ pub const Transport = struct {
         if (!try self.ensureInit(a, should_stop)) return &.{};
         if (self.tools.items.len != 0) return cloneDefs(self.tools.items);
 
-        var req = common.Obj.init(a);
+        var req = mod.common.Obj.init(a);
         try req.put("jsonrpc", "2.0");
         try req.put("id", self.next_id);
         self.next_id += 1;
@@ -548,19 +544,19 @@ pub const Transport = struct {
     /// `tools/call` result in the `/tools` shape, or an `{"error": ...}`.
     ///
     /// Return: allocated by `a`.
-    pub fn callTool(self: *Transport, a: Allocator, tool_name: []const u8, arguments: *const Value, should_stop: ?StopFn) !Value {
+    pub fn callTool(self: *Transport, a: Allocator, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
         self.rpc_mutex.lock();
         defer self.rpc_mutex.unlock();
         if (!try self.ensureInit(a, should_stop)) {
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("error", self.last_error.items);
             return o.done();
         }
 
-        var params = common.Obj.init(a);
+        var params = mod.common.Obj.init(a);
         try params.put("name", tool_name);
         try params.put("arguments", try arguments.clone(a));
-        var req = common.Obj.init(a);
+        var req = mod.common.Obj.init(a);
         try req.put("jsonrpc", "2.0");
         try req.put("id", self.next_id);
         self.next_id += 1;
@@ -569,12 +565,12 @@ pub const Transport = struct {
         const rv = req.done();
         const resp = try self.sendRpc(a, &rv, should_stop);
         if (resp.contains("error")) {
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("error", try rpcErrorMessage(&resp));
             return o.done();
         }
         if (resp.contains("result")) return resultToResponse(a, try resp.at("result"));
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("error", "invalid response from MCP server");
         return o.done();
     }
@@ -598,16 +594,16 @@ pub const Transport = struct {
             envp_s = buildEnv(arena.allocator(), config) catch return false;
         }
 
-        const handle = gpa.create(Subproc) catch return false;
+        const handle = gpa.create(stdlib.subproc.Subproc) catch return false;
         handle.* = .{};
         const ok = handle.create(argv_s.items, options, envp_s, if (config.cwd.len == 0) null else config.cwd);
         if (!ok) {
             gpa.destroy(handle);
-            const n = common.dupZ(config.name);
-            defer common.freeZ(n);
-            const cmd = common.dupZ(config.command);
-            defer common.freeZ(cmd);
-            srv(.wrn, "start", "MCP '%s': failed to spawn '%s'\n", .{ n, cmd });
+            const n = mod.common.dupZ(config.name);
+            defer mod.common.freeZ(n);
+            const cmd = mod.common.dupZ(config.command);
+            defer mod.common.freeZ(cmd);
+            mod.common.srv(.wrn, "start", "MCP '%s': failed to spawn '%s'\n", .{ n, cmd });
             return false;
         }
 
@@ -698,11 +694,11 @@ pub const Transport = struct {
         const P = struct {
             fn onLine(t: *Transport, line: []u8) bool {
                 defer gpa.free(line);
-                const n = common.dupZ(t.name);
-                defer common.freeZ(n);
-                const l = common.dupZ(line);
-                defer common.freeZ(l);
-                srv(.dbg, "operator()", "MCP '%s' stderr: %s\n", .{ n, l });
+                const n = mod.common.dupZ(t.name);
+                defer mod.common.freeZ(n);
+                const l = mod.common.dupZ(line);
+                defer mod.common.freeZ(l);
+                mod.common.srv(.dbg, "operator()", "MCP '%s' stderr: %s\n", .{ n, l });
                 t.err_mu.lock();
                 defer t.err_mu.unlock();
                 t.err_tail.appendSlice(gpa, line) catch |err| switch (err) {
@@ -794,7 +790,7 @@ const warmup_timeout_seconds = 10;
 pub const Mcp = struct {
     configs: std.ArrayList(ServerConfig) = .empty,
 
-    mutex: sync.Mutex = .{}, // guards transports, dead_servers, registry
+    mutex: stdlib.sync.Mutex = .{}, // guards transports, dead_servers, registry
 
     transports: std.ArrayList(Named(*Transport)) = .empty,
     dead_servers: std.ArrayList(Named(i64)) = .empty, // spawn-failure cooldown
@@ -863,17 +859,17 @@ pub const Mcp = struct {
         defer parsed.deinit(gpa);
         ServerConfig.parseFromJson(&parsed, json_str) catch |e| {
             if (e == error.OutOfMemory) return e;
-            return common.exception.rethrow(error.RuntimeError, e, "failed to parse MCP config JSON: ", "");
+            return mod.common.exception.rethrow(error.RuntimeError, e, "failed to parse MCP config JSON: ", "");
         };
         if (parsed.items.len == 0) {
-            srv(.wrn, "operator()", "%s", .{@as([*:0]const u8, "MCP config: no servers found in JSON\n")});
+            mod.common.srv(.wrn, "operator()", "%s", .{@as([*:0]const u8, "MCP config: no servers found in JSON\n")});
         }
         for (parsed.items) |p| {
             // names must be unique across both config sources: get_or_create / find_config key on the name
             if (self.findConfig(p.name) != null) {
-                const n = common.dupZ(p.name);
-                defer common.freeZ(n);
-                srv(.wrn, "operator()", "MCP config: duplicate server name '%s', skipping\n", .{n});
+                const n = mod.common.dupZ(p.name);
+                defer mod.common.freeZ(n);
+                mod.common.srv(.wrn, "operator()", "MCP config: duplicate server name '%s', skipping\n", .{n});
                 continue;
             }
             try self.configs.append(gpa, p);
@@ -892,7 +888,7 @@ pub const Mcp = struct {
         if (config_path.len != 0) {
             // `fs_open_ifstream` and `ss << f.rdbuf()`
             const text = (stdlib.file.readStream(stdlib.file.defaultIo(), gpa, config_path) catch null) orelse
-                return common.throw(error.RuntimeError, "failed to open MCP config file: {s}", .{config_path});
+                return mod.common.throw(error.RuntimeError, "failed to open MCP config file: {s}", .{config_path});
             defer gpa.free(text);
             try self.append(text);
         }
@@ -907,11 +903,11 @@ pub const Mcp = struct {
             if (!t.start()) {
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                const n = common.dupZ(cfg.name);
-                defer common.freeZ(n);
-                const d = common.dupZ(try t.diagnostics(arena.allocator()));
-                defer common.freeZ(d);
-                srv(.wrn, "start", "MCP warmup: failed to spawn '%s': %s\n", .{ n, d });
+                const n = mod.common.dupZ(cfg.name);
+                defer mod.common.freeZ(n);
+                const d = mod.common.dupZ(try t.diagnostics(arena.allocator()));
+                defer mod.common.freeZ(d);
+                mod.common.srv(.wrn, "start", "MCP warmup: failed to spawn '%s': %s\n", .{ n, d });
                 continue;
             }
             // bound warmup per server so an unresponsive one can't stall startup for the full per-call timeout
@@ -926,9 +922,9 @@ pub const Mcp = struct {
             var stop: Stop = .{ .mgr = self, .deadline = stdlib.clock.steadyNs() + warmup_timeout_seconds * std.time.ns_per_s };
             const tools = try t.listTools(.{ .ctx = &stop, .f = Stop.f });
             defer if (tools.len != 0) gpa.free(tools);
-            const n = common.dupZ(cfg.name);
-            defer common.freeZ(n);
-            srv(.inf, "start", "MCP warmup: '%s' discovered %zu tools\n", .{ n, tools.len });
+            const n = mod.common.dupZ(cfg.name);
+            defer mod.common.freeZ(n);
+            mod.common.srv(.inf, "start", "MCP warmup: '%s' discovered %zu tools\n", .{ n, tools.len });
             try discovered.appendSlice(gpa, tools);
             t.close();
         }
@@ -954,9 +950,9 @@ pub const Mcp = struct {
     /// `should_stop` is or-ed with the manager's cancel flag.
     ///
     /// Return: allocated by `a`.
-    pub fn callTool(self: *Mcp, a: Allocator, server_name: []const u8, tool_name: []const u8, arguments: *const Value, should_stop: ?StopFn) !Value {
+    pub fn callTool(self: *Mcp, a: Allocator, server_name: []const u8, tool_name: []const u8, arguments: *const json.Value, should_stop: ?StopFn) !json.Value {
         const transport = (try self.getOrCreate(server_name)) orelse {
-            var o = common.Obj.init(a);
+            var o = mod.common.Obj.init(a);
             try o.put("error", try std.mem.concat(a, u8, &.{ "MCP server unavailable: ", server_name }));
             return o.done();
         };
@@ -1003,11 +999,11 @@ pub const Mcp = struct {
                 if (t.value.isAlive()) return t.value.retain();
                 var arena = std.heap.ArenaAllocator.init(gpa);
                 defer arena.deinit();
-                const n = common.dupZ(name);
-                defer common.freeZ(n);
-                const d = common.dupZ(try t.value.diagnostics(arena.allocator()));
-                defer common.freeZ(d);
-                srv(.wrn, "get_or_create", "MCP '%s' is no longer alive: %s\n", .{ n, d });
+                const n = mod.common.dupZ(name);
+                defer mod.common.freeZ(n);
+                const d = mod.common.dupZ(try t.value.diagnostics(arena.allocator()));
+                defer mod.common.freeZ(d);
+                mod.common.srv(.wrn, "get_or_create", "MCP '%s' is no longer alive: %s\n", .{ n, d });
                 try to_close.append(gpa, t.value);
                 _ = self.transports.orderedRemove(i);
                 break;
@@ -1021,11 +1017,11 @@ pub const Mcp = struct {
                 } else {
                     var arena = std.heap.ArenaAllocator.init(gpa);
                     defer arena.deinit();
-                    const n = common.dupZ(name);
-                    defer common.freeZ(n);
-                    const d = common.dupZ(try fresh.diagnostics(arena.allocator()));
-                    defer common.freeZ(d);
-                    srv(.wrn, "get_or_create", "MCP '%s': failed to start: %s\n", .{ n, d });
+                    const n = mod.common.dupZ(name);
+                    defer mod.common.freeZ(n);
+                    const d = mod.common.dupZ(try fresh.diagnostics(arena.allocator()));
+                    defer mod.common.freeZ(d);
+                    mod.common.srv(.wrn, "get_or_create", "MCP '%s': failed to start: %s\n", .{ n, d });
                     try to_close.append(gpa, fresh);
                     try self.setDead(cfg.name, now + cooldown_seconds * std.time.ns_per_s);
                 }

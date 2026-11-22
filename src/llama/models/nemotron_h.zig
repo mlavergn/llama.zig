@@ -13,18 +13,8 @@
 //! shares.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const mamba_base = @import("mamba_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// `int64_t / int64_t` as aarch64 computes it: `sdiv` by zero gives zero.
 /// The C++ is undefined there; this is what the reference binary does.
@@ -34,7 +24,7 @@ fn divI64(a: i64, b: i64) i64 {
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_hparams`
 /// (models/nemotron-h.cpp:5 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.ssm_d_conv = (try meta.getKey(u32, .ssm_conv_kernel, true, exc)).?;
@@ -85,10 +75,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_nemotron_h`'s `load_arch_tensors`
 /// (models/nemotron-h.cpp:49 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     const nf = self.nextnFlags(ml, .attn_norm);
     const trunk_flags = nf.trunk;
@@ -113,7 +103,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
         // Without an output, the input token embedding is used, duplicated
         // to allow offloading.
         if (self.output == null) {
-            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
         }
     }
 
@@ -154,7 +144,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
             if (l.n_expert != 0) {
                 // The router says how many experts the layer has, at most
                 // `n_expert`.
-                const tn_router: loader.Tn = .{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i };
+                const tn_router: llama.loader.Tn = .{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i };
                 const tn_router_name = tn_router.str();
                 const router_meta = ml.getTensorMeta(tn_router_name.slice());
                 const n_expert_layer: i64 = if (router_meta) |m| m.ne[1] else l.n_expert;
@@ -243,21 +233,21 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
 /// Ports `llama_model_nemotron_h`'s `build_arch_graph`
 /// (models/nemotron-h.cpp:198 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h`'s `graph`
 /// (models/nemotron-h.cpp:202 @b1b770d90).
-pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 205, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h.cpp", 205, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
-    c.ggml_build_forward_expand(b.gf, inpL);
+    llama.impl.c.ggml_build_forward_expand(b.gf, inpL);
 
     const inp = b.buildInpMemHybrid();
 
@@ -265,7 +255,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_layer: usize = @intCast(b.n_layer);
     const extract_final_inp = n_layer < cp.embeddings_layer_inp.len and cp.embeddings_layer_inp[n_layer];
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         b.res.t_layer_inp[@intCast(il)] = inpL;
@@ -279,7 +269,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         if (hp.isRecr(@intCast(il))) {
             // An SSM layer.
-            cur = mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
+            cur = llama.models.mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
         } else if (hp.nFf(@intCast(il)) == 0) {
             // An attention layer.
             cur = buildAttentionLayer(model, b, cur, inp.getAttn(), n_embd_head, il);
@@ -288,12 +278,12 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids) and !extract_final_inp) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         // The residual.
-        cur = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "nemotron_h_block_out", il);
 
         // The next layer's input.
@@ -305,7 +295,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.res.t_layer_inp[n_layer] = cur;
 
         if (b.cropBeforeNextn(inp_out_ids)) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
     }
 
@@ -316,7 +306,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     b.cb(cur, "result_norm", -1);
@@ -330,12 +320,12 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
 /// Ports `llama_model_nemotron_h::graph`'s `build_attention_layer`
 /// (models/nemotron-h.cpp:278 @b1b770d90): attention without RoPE.
-fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_attn: *graph.InpAttnKv, n_embd_head: i64, il: c_int) *Tensor {
+fn buildAttentionLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnKv, n_embd_head: i64, il: c_int) *llama.impl.c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
     const qkv = b.buildQkv(layer, cur_, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
     const cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, kq_scale, il);
     b.cb(cur, "attn_out", il);
     return cur;
@@ -344,7 +334,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
 /// Ports `llama_model_nemotron_h::graph`'s `build_ffn_layer`
 /// (models/nemotron-h.cpp:293 @b1b770d90): a squared-ReLU FFN, or the
 /// mixture of experts beside a shared expert.
-fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il: c_int) *Tensor {
+fn buildFfnLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
@@ -358,7 +348,7 @@ fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
         var inp_latent = cur;
 
         if (layer.ffn_latent_down) |w| {
-            inp_latent = c.ggml_mul_mat(ctx, w, cur);
+            inp_latent = llama.impl.c.ggml_mul_mat(ctx, w, cur);
         }
 
         const router_logits = b.buildLoraMm(layer.ffn_gate_inp.?, cur, null);
@@ -386,13 +376,13 @@ fn buildFfnLayer(model: *const Model, b: *const graph.Builder, cur_: *Tensor, il
         b.cb(moe_out, "ffn_moe_out", il);
 
         if (layer.ffn_latent_up) |w| {
-            moe_out = c.ggml_mul_mat(ctx, w, moe_out);
+            moe_out = llama.impl.c.ggml_mul_mat(ctx, w, moe_out);
         }
 
         const ffn_shexp = b.buildFfn(inp_emb, layer.ffn_up_shexp, null, layer.ffn_up_shexp_s, null, null, null, layer.ffn_down_shexp, null, layer.ffn_down_shexp_s, null, .relu_sqr, .par, il);
         b.cb(ffn_shexp, "ffn_shexp", il);
 
-        cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+        cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
         b.cb(cur, "ffn_out", il);
     }
 

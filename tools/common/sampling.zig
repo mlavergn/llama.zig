@@ -28,27 +28,18 @@
 //! and `no_perf` are ever read back, so only those are kept.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
-const ggml = @import("ggml.zig");
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
-const params_mod = @import("params.zig");
-const log = @import("log.zig");
-const arg = @import("arg.zig");
-const common = @import("common.zig");
-const reasoning_budget = @import("reasoning_budget.zig");
-const libcxx = @import("stdlib").libcxx;
-
-const SamplingParams = params_mod.Sampling;
-const SamplerType = params_mod.SamplerType;
 
 const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    ggml.ggmlAssert(ok, "sampling.cpp", line, expr);
+    mod.ggml.ggmlAssert(ok, "sampling.cpp", line, expr);
 }
 
 fn oom() noreturn {
-    ggml.oom("sampling.cpp");
+    mod.ggml.oom("sampling.cpp");
 }
 
 /// A C++ `throw std::runtime_error(msg)` nothing catches.
@@ -154,9 +145,9 @@ pub fn RingBuffer(comptime T: type) type {
 /// them.
 ///
 /// Return: the text, the allocator's.
-pub fn paramsPrint(a: std.mem.Allocator, p: *const SamplingParams) ![]u8 {
+pub fn paramsPrint(a: std.mem.Allocator, p: *const mod.params.Sampling) ![]u8 {
     var result: [1024]u8 = undefined;
-    const n = libc.snprintf(&result, result.len, "\trepeat_last_n = %d, repeat_penalty = %.3f, frequency_penalty = %.3f, presence_penalty = %.3f\n" ++
+    const n = stdlib.libc.snprintf(&result, result.len, "\trepeat_last_n = %d, repeat_penalty = %.3f, frequency_penalty = %.3f, presence_penalty = %.3f\n" ++
         "\tdry_multiplier = %.3f, dry_base = %.3f, dry_allowed_length = %d, dry_penalty_last_n = %d\n" ++
         "\ttop_k = %d, top_p = %.3f, min_p = %.3f, xtc_probability = %.3f, xtc_threshold = %.3f, typical_p = %.3f, top_n_sigma = %.3f, temp = %.3f\n" ++
         "\tmirostat = %d, mirostat_lr = %.3f, mirostat_ent = %.3f, adaptive_target = %.3f, adaptive_decay = %.3f", p.penalty_last_n, @as(f64, p.penalty_repeat), @as(f64, p.penalty_freq), @as(f64, p.penalty_present), @as(f64, p.dry_multiplier), @as(f64, p.dry_base), p.dry_allowed_length, p.dry_penalty_last_n, p.top_k, @as(f64, p.top_p), @as(f64, p.min_p), @as(f64, p.xtc_probability), @as(f64, p.xtc_threshold), @as(f64, p.typ_p), @as(f64, p.top_n_sigma), @as(f64, p.temp), p.mirostat, @as(f64, p.mirostat_eta), @as(f64, p.mirostat_tau), @as(f64, p.adaptive_target), @as(f64, p.adaptive_decay));
@@ -177,7 +168,7 @@ fn regexEscape(a: std.mem.Allocator, s: []const u8) ![]u8 {
 
 /// Ports `common_grammar_needs_prefill` (common/common.h:223 @b1b770d90):
 /// only output-format and tool-call grammars are prefilled.
-pub fn grammarNeedsPrefill(t: params_mod.GrammarType) bool {
+pub fn grammarNeedsPrefill(t: mod.params.GrammarType) bool {
     return t == .output_format or t == .tool_calls;
 }
 
@@ -206,7 +197,7 @@ pub const Sampler = struct {
     cur_p: c.llama_token_data_array = .{ .data = null, .size = 0, .selected = -1, .sorted = false },
 
     // for rejection sampling; independent of the draft, or the target distribution is not preserved
-    rng: libcxx.Mt19937,
+    rng: stdlib.libcxx.Mt19937,
 
     t_total_us: i64 = 0,
 
@@ -287,7 +278,7 @@ pub const Sampler = struct {
         if (self.rbudget == null) return true;
         if (self.grammar_lazy) {
             // if grammar is lazy, only apply when reasoning budget is not active
-            const state = reasoning_budget.getState(self.rbudget);
+            const state = mod.reasoning_budget.getState(self.rbudget);
             return state == .idle or state == .done;
         }
         return true;
@@ -307,9 +298,9 @@ pub const Sampler = struct {
             c.llama_sampler_accept(self.rbudget, token);
 
             // if done, replay end sequence which may contain a grammar trigger
-            const is_done = reasoning_budget.getState(self.rbudget) == .done;
+            const is_done = mod.reasoning_budget.getState(self.rbudget) == .done;
             if (self.grmr != null and !accept_grammar and is_done) {
-                if (reasoning_budget.getEndMatch(self.rbudget)) |end_seq| {
+                if (mod.reasoning_budget.getEndMatch(self.rbudget)) |end_seq| {
                     for (end_seq) |end_token| c.llama_sampler_accept(self.grmr, end_token);
                 }
             }
@@ -391,7 +382,7 @@ pub const Sampler = struct {
         {
             const id = c.llama_get_sampled_token_ith(ctx, idx);
             if (id != c.LLAMA_TOKEN_NULL) {
-                log.dbg("%s: Backend sampler selected token: '%d'. Will not run any CPU samplers\n", .{ @as([*:0]const u8, "common_sampler_sample"), id });
+                mod.log.dbg("%s: Backend sampler selected token: '%d'. Will not run any CPU samplers\n", .{ @as([*:0]const u8, "common_sampler_sample"), id });
 
                 assertC(self.grmr == null, 625, "!gsmpl->grmr    && \"using grammar in combination with backend sampling is not supported\"");
                 assertC(self.rbudget == null, 626, "!gsmpl->rbudget && \"using reasoning budget in combination with backend sampling is not supported\"");
@@ -565,7 +556,7 @@ pub const Sampler = struct {
                 }
             }
 
-            if (q_x > 0.0 and (p_x >= q_x or libcxx.uniformF32(&self.rng) < p_x / q_x)) {
+            if (q_x > 0.0 and (p_x >= q_x or stdlib.libcxx.uniformF32(&self.rng) < p_x / q_x)) {
                 self.accept(draft[i], true);
                 result.appendAssumeCapacity(draft[i]);
                 continue;
@@ -584,7 +575,7 @@ pub const Sampler = struct {
 
             var id = id_tgt;
             if (sum > 0.0) {
-                var u = libcxx.uniformF32(&self.rng) * sum;
+                var u = stdlib.libcxx.uniformF32(&self.rng) * sum;
                 id = residual.items[residual.items.len - 1].id;
                 for (residual.items) |e| {
                     u -= e.p;
@@ -636,7 +627,7 @@ pub const Sampler = struct {
     ///
     /// Return: whether it did.
     pub fn reasoningBudgetForce(self: *Sampler) bool {
-        return reasoning_budget.force(self.rbudget);
+        return mod.reasoning_budget.force(self.rbudget);
     }
 
     /// Ports `common_sampler_get_candidates` (sampling.cpp:865 @b1b770d90):
@@ -654,7 +645,7 @@ pub const Sampler = struct {
             // remember the selected token before sorting
             const id = res.data[@intCast(res.selected)].id;
 
-            libcxx.sort(c.llama_token_data, res.data[0..res.size], {}, struct {
+            stdlib.libcxx.sort(c.llama_token_data, res.data[0..res.size], {}, struct {
                 fn gt(_: void, x: c.llama_token_data, y: c.llama_token_data) bool {
                     return x.p > y.p;
                 }
@@ -718,7 +709,7 @@ pub const Sampler = struct {
 
             assertC(id != c.LLAMA_TOKEN_NULL, 917, "id != LLAMA_TOKEN_NULL && \"null token in the sampling history - should not happen\"");
 
-            const piece = try common.tokenToPiece(a, vocab, id, true);
+            const piece = try mod.common.tokenToPiece(a, vocab, id, true);
             defer a.free(piece[0 .. piece.len + 1]);
             try result.appendSlice(a, piece);
         }
@@ -736,21 +727,21 @@ pub const Sampler = struct {
 ///   grammar or a reasoning budget rules it out, as the C++ does.
 ///
 /// Return: the sampler, which the caller owns (`Sampler.destroy`).
-pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sampler {
+pub fn init(model: ?*const c.llama_model, params: *mod.params.Sampling) InitError!*Sampler {
     if (!std.math.isFinite(params.penalty_repeat) or params.penalty_repeat <= 0.0 or !std.math.isFinite(1.0 / params.penalty_repeat)) {
-        switch (arg.throwStr("penalty_repeat must be finite and greater than 0")) {
+        switch (mod.arg.throwStr("penalty_repeat must be finite and greater than 0")) {
             error.Throw => {},
         }
         return error.InvalidArgument;
     }
     if (!std.math.isFinite(params.penalty_freq)) {
-        switch (arg.throwStr("penalty_freq must be finite")) {
+        switch (mod.arg.throwStr("penalty_freq must be finite")) {
             error.Throw => {},
         }
         return error.InvalidArgument;
     }
     if (!std.math.isFinite(params.penalty_present)) {
-        switch (arg.throwStr("penalty_present must be finite")) {
+        switch (mod.arg.throwStr("penalty_present must be finite")) {
             error.Throw => {},
         }
         return error.InvalidArgument;
@@ -774,7 +765,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     const grammar_str = params.grammar;
     if (std.mem.startsWith(u8, grammar_str, "%llguidance")) {
         c.llama_sampler_free(chain);
-        switch (arg.throwStr("failed to parse grammar: llguidance is not enabled")) {
+        switch (mod.arg.throwStr("failed to parse grammar: llguidance is not enabled")) {
             error.Throw => {},
         }
         return error.Runtime;
@@ -823,7 +814,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     }
     if (grmr == null and grammar_str.len != 0) {
         c.llama_sampler_free(chain);
-        switch (arg.throwStr("failed to parse grammar")) {
+        switch (mod.arg.throwStr("failed to parse grammar")) {
             error.Throw => {},
         }
         return error.Runtime;
@@ -833,14 +824,14 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     var prefill_tokens: std.ArrayList(c.llama_token) = .empty;
     if (params.generation_prompt.len != 0) {
         assertC(vocab != null, 285, "vocab != nullptr");
-        const tokens = try common.tokenize(arena, vocab, params.generation_prompt, false, true);
+        const tokens = try mod.common.tokenize(arena, vocab, params.generation_prompt, false, true);
         for (tokens, 0..) |tok, i| {
-            const piece = try common.tokenToPiece(arena, vocab, tok, true);
+            const piece = try mod.common.tokenToPiece(arena, vocab, tok, true);
             if (i == 0 and std.ascii.isWhitespace(piece[0]) and !std.ascii.isWhitespace(params.generation_prompt[0])) {
                 // Some tokenizers will add a space before the first special token, need to exclude
                 continue;
             }
-            log.dbg("%s: prefill token: %d = %s\n", .{ @as([*:0]const u8, "common_sampler_init"), tok, piece.ptr });
+            mod.log.dbg("%s: prefill token: %d = %s\n", .{ @as([*:0]const u8, "common_sampler_init"), tok, piece.ptr });
             try prefill_tokens.append(arena, tok);
         }
     }
@@ -851,7 +842,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     if (grmr != null and !params.grammar_lazy and grammarNeedsPrefill(params.grammar_type)) {
         for (prefill_tokens.items) |token| {
             c.llama_sampler_accept(grmr, token);
-            log.dbg("%s: grammar accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
+            mod.log.dbg("%s: grammar accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
         }
     }
 
@@ -859,11 +850,11 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     if (params.reasoning_budget_start.items.len != 0 and params.reasoning_budget_end.items.len != 0 and (params.grammar_lazy or params.reasoning_budget_tokens >= 0 or params.reasoning_control)) {
         const ends = try arena.alloc([]const c.llama_token, params.reasoning_budget_end.items.len);
         for (params.reasoning_budget_end.items, ends) |e, *d| d.* = e.items;
-        rbudget = try reasoning_budget.init(vocab, &.{params.reasoning_budget_start.items}, ends, params.reasoning_budget_forced.items, if (params.reasoning_budget_tokens < 0) std.math.maxInt(i32) else params.reasoning_budget_tokens, .idle);
+        rbudget = try mod.reasoning_budget.init(vocab, &.{params.reasoning_budget_start.items}, ends, params.reasoning_budget_forced.items, if (params.reasoning_budget_tokens < 0) std.math.maxInt(i32) else params.reasoning_budget_tokens, .idle);
 
         for (prefill_tokens.items) |token| {
             c.llama_sampler_accept(rbudget, token);
-            log.dbg("%s: reasoning-budget accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
+            mod.log.dbg("%s: reasoning-budget accepted prefill token (%d)\n", .{ @as([*:0]const u8, "common_sampler_init"), token });
         }
     }
 
@@ -922,7 +913,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
             try samplers.append(arena, c.llama_sampler_init_adaptive_p(params.adaptive_target, params.adaptive_decay, params.seed).?);
         } else {
             // Keep distribution sampling when callers request probabilities.
-            const last_type: ?SamplerType = if (params.samplers.items.len == 0) null else params.samplers.items[params.samplers.items.len - 1];
+            const last_type: ?mod.params.SamplerType = if (params.samplers.items.len == 0) null else params.samplers.items[params.samplers.items.len - 1];
             const greedy = params.n_probs == 0 and last_type != null and
                 ((last_type.? == .temperature and params.temp == 0.0 and params.dynatemp_range == 0.0) or
                     (last_type.? == .top_k and params.top_k == 1));
@@ -941,13 +932,13 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
     for (samplers.items) |smpl| c.llama_sampler_chain_add(chain, smpl);
 
     if (grmr != null and params.backend_sampling) {
-        log.wrn("%s: backend sampling is not compatible with grammar, disabling\n", .{@as([*:0]const u8, "common_sampler_init")});
+        mod.log.wrn("%s: backend sampling is not compatible with grammar, disabling\n", .{@as([*:0]const u8, "common_sampler_init")});
 
         params.backend_sampling = false;
     }
 
     if (rbudget != null and params.backend_sampling) {
-        log.wrn("%s: backend sampling is not compatible with reasoning budget, disabling\n", .{@as([*:0]const u8, "common_sampler_init")});
+        mod.log.wrn("%s: backend sampling is not compatible with reasoning budget, disabling\n", .{@as([*:0]const u8, "common_sampler_init")});
 
         params.backend_sampling = false;
     }
@@ -962,7 +953,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
         .chain = chain.?,
         .prev = try RingBuffer(c.llama_token).init(gpa, @intCast(@max(32, params.n_prev))),
         // mix it, the chain and the draft are seeded from this one too
-        .rng = libcxx.Mt19937.init(c.llama_sampler_get_seed(chain) ^ 0x9e3779b9),
+        .rng = stdlib.libcxx.Mt19937.init(c.llama_sampler_get_seed(chain) ^ 0x9e3779b9),
     };
     return result;
 }
@@ -976,12 +967,12 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
 /// - `sampling`: the parameters changed.
 /// - `vocab`: must not be null.
 /// - `tokens`: the strings tried.
-pub fn addPreservedTokens(a: std.mem.Allocator, sampling: *SamplingParams, vocab: ?*const c.llama_vocab, tokens: []const []const u8) !void {
+pub fn addPreservedTokens(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const c.llama_vocab, tokens: []const []const u8) !void {
     assertC(vocab != null, 1056, "vocab != nullptr");
     var tmp = std.heap.ArenaAllocator.init(gpa);
     defer tmp.deinit();
     for (tokens) |t| {
-        const ids = try common.tokenize(tmp.allocator(), vocab, t, false, true);
+        const ids = try mod.common.tokenize(tmp.allocator(), vocab, t, false, true);
         if (ids.len == 1) try setInsert(a, &sampling.preserved_tokens, ids[0]);
     }
 }
@@ -1010,19 +1001,19 @@ fn setInsert(a: std.mem.Allocator, set: *std.ArrayList(c.llama_token), tok: c.ll
 ///
 /// Return: `error.Runtime`, the text in `arg.what()`, where the C++ throws
 /// `std::runtime_error`.
-pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *SamplingParams, vocab: ?*const c.llama_vocab, triggers: []const params_mod.GrammarTrigger) !void {
+pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *mod.params.Sampling, vocab: ?*const c.llama_vocab, triggers: []const mod.params.GrammarTrigger) !void {
     assertC(vocab != null, 1066, "vocab != nullptr");
     var tmp = std.heap.ArenaAllocator.init(gpa);
     defer tmp.deinit();
     for (triggers) |trigger| {
         if (trigger.type == .word) {
             const word = try a.dupe(u8, trigger.value);
-            const ids = try common.tokenize(tmp.allocator(), vocab, word, false, true);
+            const ids = try mod.common.tokenize(tmp.allocator(), vocab, word, false, true);
             if (ids.len == 1) {
                 const token = ids[0];
                 if (std.mem.indexOfScalar(c.llama_token, sampling.preserved_tokens.items, token) == null) {
                     const msg = try std.mem.concat(tmp.allocator(), u8, &.{ "Grammar trigger word should be marked as preserved token: ", word });
-                    switch (arg.throwStr(msg)) {
+                    switch (mod.arg.throwStr(msg)) {
                         error.Throw => {},
                     }
                     return error.Runtime;
@@ -1039,7 +1030,7 @@ pub fn addGrammarTriggers(a: std.mem.Allocator, sampling: *SamplingParams, vocab
     }
     if (sampling.grammar_lazy and sampling.grammar_triggers.items.len == 0) {
         const msg = "Error: no triggers set for lazy grammar!";
-        switch (arg.throwStr(msg)) {
+        switch (mod.arg.throwStr(msg)) {
             error.Throw => {},
         }
         return error.Runtime;
@@ -1056,8 +1047,8 @@ pub fn free(gsmpl: ?*Sampler) void {
 /// no-dash forms, and three aliases; an unknown one is logged and skipped.
 ///
 /// Return: the types, the allocator's.
-pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]SamplerType {
-    const Entry = struct { []const u8, SamplerType };
+pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]mod.params.SamplerType {
+    const Entry = struct { []const u8, mod.params.SamplerType };
     const map = [_]Entry{
         // canonical
         .{ "dry", .dry },                 .{ "top_k", .top_k },           .{ "top_p", .top_p },
@@ -1075,7 +1066,7 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Sample
         .{ "temp", .temperature },        .{ "typ", .typical_p },
     };
 
-    var samplers: std.ArrayList(SamplerType) = .empty;
+    var samplers: std.ArrayList(mod.params.SamplerType) = .empty;
     try samplers.ensureTotalCapacity(a, names.len);
     for (names) |nm| {
         const name_lower = try a.dupeSentinel(u8, nm, 0);
@@ -1088,7 +1079,7 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Sample
             samplers.appendAssumeCapacity(t);
             continue;
         }
-        log.wrn("%s: unable to match sampler by name '%s'\n", .{ @as([*:0]const u8, "common_sampler_types_from_names"), name_lower.ptr });
+        mod.log.wrn("%s: unable to match sampler by name '%s'\n", .{ @as([*:0]const u8, "common_sampler_types_from_names"), name_lower.ptr });
     }
     return samplers.toOwnedSlice(a);
 }
@@ -1096,9 +1087,9 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Sample
 /// Ports `common_sampler_types_from_chars` (sampling.cpp:1025 @b1b770d90).
 ///
 /// Return: the types, the allocator's.
-pub fn typesFromChars(a: std.mem.Allocator, chars: []const u8) ![]SamplerType {
-    const all = [_]SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
-    var samplers: std.ArrayList(SamplerType) = .empty;
+pub fn typesFromChars(a: std.mem.Allocator, chars: []const u8) ![]mod.params.SamplerType {
+    const all = [_]mod.params.SamplerType{ .dry, .top_k, .typical_p, .top_p, .top_n_sigma, .min_p, .temperature, .xtc, .infill, .penalties, .adaptive_p };
+    var samplers: std.ArrayList(mod.params.SamplerType) = .empty;
     try samplers.ensureTotalCapacity(a, chars.len);
     for (chars) |ch| {
         const found = for (all) |t| {
@@ -1107,7 +1098,7 @@ pub fn typesFromChars(a: std.mem.Allocator, chars: []const u8) ![]SamplerType {
         if (found) |t| {
             samplers.appendAssumeCapacity(t);
         } else {
-            log.wrn("%s: unable to match sampler by char '%c'\n", .{ @as([*:0]const u8, "common_sampler_types_from_chars"), @as(c_int, ch) });
+            mod.log.wrn("%s: unable to match sampler by char '%c'\n", .{ @as([*:0]const u8, "common_sampler_types_from_chars"), @as(c_int, ch) });
         }
     }
     return samplers.toOwnedSlice(a);

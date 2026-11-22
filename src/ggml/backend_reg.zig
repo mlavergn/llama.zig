@@ -41,35 +41,24 @@
 //! than one that looks for files that are not there.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const config = @import("config");
-const impl = @import("impl.zig");
-const win32 = @import("win32.zig");
-const c = impl.c;
 
 /// Mirrors `GGML_USE_METAL`, which `build/llamacpp.zig` defines for the
 /// library and not for the ported test root. The C++ constructor registers
 /// Metal behind `#ifdef GGML_USE_METAL`; this is that `#ifdef`, and it has to
 /// be a `comptime` branch rather than a runtime one so the reference to
 /// `ggml_backend_metal_reg` is not emitted where nothing defines it.
-const use_metal = config.use_metal;
-
 /// Mirrors `GGML_USE_CUDA`, which `build/llamacpp.zig` defines when built with
 /// `-Dcuda`. The CUDA backend is upstream's `ggml-cuda`, compiled unmodified by
 /// `nvcc`; see `build/llamacpp.zig`'s `addCuda`. Comptime for the same reason as
 /// `use_metal`.
-const use_cuda = config.use_cuda;
-
 /// Mirrors `GGML_USE_VULKAN`, which `build/llamacpp.zig` defines when built
 /// with `-Dvulkan`. Comptime for the same reason as `use_metal`.
-const use_vulkan = config.use_vulkan;
-
 /// Mirrors `GGML_USE_BLAS`, which `build/llamacpp.zig` defines when built
 /// with `-Dblas`. Comptime for the same reason as `use_metal`.
-const use_blas = config.use_blas;
-
 /// True when the C++ build would leave `NDEBUG` unset, which gates the
 /// registry's per-backend debug logging and the `silent` flag in
 /// `ggml_backend_load_all_from_path`.
@@ -124,10 +113,10 @@ fn dlLoadLibrary(path: [*:0]const u8) ?*anyopaque {
         const wpath = widen(std.mem.sliceTo(path, 0)) orelse return null;
         defer allocator.free(wpath);
         // suppress error dialogs for missing DLLs
-        const old_mode = win32.SetErrorMode(win32.SEM_FAILCRITICALERRORS);
-        _ = win32.SetErrorMode(old_mode | win32.SEM_FAILCRITICALERRORS);
-        const handle = win32.LoadLibraryW(wpath.ptr);
-        _ = win32.SetErrorMode(old_mode);
+        const old_mode = mod.win32.SetErrorMode(mod.win32.SEM_FAILCRITICALERRORS);
+        _ = mod.win32.SetErrorMode(old_mode | mod.win32.SEM_FAILCRITICALERRORS);
+        const handle = mod.win32.LoadLibraryW(wpath.ptr);
+        _ = mod.win32.SetErrorMode(old_mode);
         return @ptrCast(handle);
     }
     // `RTLD_LOCAL` is zero on Linux, so Zig's flag struct has no field for it.
@@ -138,10 +127,10 @@ fn dlLoadLibrary(path: [*:0]const u8) ?*anyopaque {
 /// Ports `dl_get_sym`, `dl_get_sym` (ggml-backend-dl.cpp:17, 39 @b1b770d90).
 fn dlGetSym(handle: *anyopaque, name: [*:0]const u8) ?*anyopaque {
     if (comptime is_windows) {
-        const old_mode = win32.SetErrorMode(win32.SEM_FAILCRITICALERRORS);
-        _ = win32.SetErrorMode(old_mode | win32.SEM_FAILCRITICALERRORS);
-        const p = win32.GetProcAddress(@ptrCast(handle), name);
-        _ = win32.SetErrorMode(old_mode);
+        const old_mode = mod.win32.SetErrorMode(mod.win32.SEM_FAILCRITICALERRORS);
+        _ = mod.win32.SetErrorMode(old_mode | mod.win32.SEM_FAILCRITICALERRORS);
+        const p = mod.win32.GetProcAddress(@ptrCast(handle), name);
+        _ = mod.win32.SetErrorMode(old_mode);
         return p;
     }
     return std.c.dlsym(handle, name);
@@ -161,7 +150,7 @@ fn dlError() [*:0]const u8 {
 /// @b1b770d90): its call operator, `FreeLibrary` or `dlclose`.
 fn dlClose(handle: *anyopaque) void {
     if (comptime is_windows) {
-        _ = win32.FreeLibrary(@ptrCast(handle));
+        _ = mod.win32.FreeLibrary(@ptrCast(handle));
         return;
     }
     _ = std.c.dlclose(handle);
@@ -177,33 +166,32 @@ fn dlClose(handle: *anyopaque) void {
 /// entry, deliberately, because backend threads may still be inside the
 /// library. So the handle is recorded and never closed, which is what this
 /// plain pointer does without pretending otherwise.
-/// `ggml_backend_metal_reg`, from `ggml-metal.h`. Declared rather than
-/// imported: `src/ggml/impl.zig`'s `@cImport` does not take that header, and
-/// this is its only use. `ggml_backend_cpu_reg` comes through the import,
-/// since `ggml-cpu.h` is already in it.
-extern fn ggml_backend_metal_reg() c.ggml_backend_reg_t;
+/// `ggml_backend_metal_reg`: the port's Metal host layer, which every Metal
+/// build compiles. `ggml_backend_cpu_reg` comes through the `@cImport`.
+/// `ggml_backend_cuda_reg`, from `ggml-cuda.h`: the port's or, with
+/// `-Dcuda-port=false`, upstream's, whichever the build links.
+extern fn ggml_backend_cuda_reg() mod.impl.c.ggml_backend_reg_t;
 
-/// `ggml_backend_cuda_reg`, from `ggml-cuda.h`. Declared rather than imported,
-/// as `ggml_backend_metal_reg` is.
-extern fn ggml_backend_cuda_reg() c.ggml_backend_reg_t;
+/// `ggml_backend_vk_reg`, from `ggml-vulkan.h`: the port's or, with
+/// `-Dvulkan-port=false`, upstream's, whichever the build links.
+extern fn ggml_backend_vk_reg() mod.impl.c.ggml_backend_reg_t;
 
-/// `ggml_backend_vk_reg`, from `ggml-vulkan.h`. Declared rather than imported,
-/// as `ggml_backend_metal_reg` is.
-extern fn ggml_backend_vk_reg() c.ggml_backend_reg_t;
-
-/// `ggml_backend_blas_reg`, from `ggml-blas.h`. Declared rather than
-/// imported, as `ggml_backend_metal_reg` is.
-extern fn ggml_backend_blas_reg() c.ggml_backend_reg_t;
+/// `ggml_backend_blas_reg`: the port's (`blas.zig`), or with
+/// `-Dblas-port=false` upstream's `ggml-blas.cpp`, found by name.
+const ggml_backend_blas_reg: *const fn () callconv(.c) mod.impl.c.ggml_backend_reg_t = if (config.blas_port)
+    &mod.blas.ggml_backend_blas_reg
+else
+    @extern(*const fn () callconv(.c) mod.impl.c.ggml_backend_reg_t, .{ .name = "ggml_backend_blas_reg" });
 
 const Entry = struct {
-    reg: c.ggml_backend_reg_t,
+    reg: mod.impl.c.ggml_backend_reg_t,
     handle: ?*anyopaque,
 };
 
 /// Mirrors `struct ggml_backend_registry` (src/ggml-backend-reg.cpp:115 @b1b770d90).
 const Registry = struct {
     backends: std.ArrayList(Entry) = .empty,
-    devices: std.ArrayList(c.ggml_backend_dev_t) = .empty,
+    devices: std.ArrayList(mod.impl.c.ggml_backend_dev_t) = .empty,
 
     /// Ports `ggml_backend_registry`'s constructor
     /// (src/ggml-backend-reg.cpp:119 @b1b770d90).
@@ -215,19 +203,19 @@ const Registry = struct {
     /// Return: nothing. Registration failures are not reportable through the
     /// C++ constructor either.
     fn init(self: *Registry) void {
-        if (use_cuda) self.registerBackend(ggml_backend_cuda_reg(), null);
-        if (use_metal) self.registerBackend(ggml_backend_metal_reg(), null);
-        if (use_vulkan) {
+        if (config.use_cuda) self.registerBackend(ggml_backend_cuda_reg(), null);
+        if (config.use_metal) self.registerBackend(mod.metal.backend.ggml_backend_metal_reg(), null);
+        if (config.use_vulkan) {
             // The C++'s runtime check of `GGML_DISABLE_VULKAN`
             // (src/ggml-backend-reg.cpp:131 @b1b770d90).
             if (stdlib.env.getenv("GGML_DISABLE_VULKAN") == null) {
                 self.registerBackend(ggml_backend_vk_reg(), null);
             } else {
-                impl.logDebug("Vulkan backend disabled by GGML_DISABLE_VULKAN environment variable\n", .{});
+                mod.impl.logDebug("Vulkan backend disabled by GGML_DISABLE_VULKAN environment variable\n", .{});
             }
         }
-        if (use_blas) self.registerBackend(ggml_backend_blas_reg(), null);
-        self.registerBackend(c.ggml_backend_cpu_reg(), null);
+        if (config.use_blas) self.registerBackend(ggml_backend_blas_reg(), null);
+        self.registerBackend(mod.impl.c.ggml_backend_cpu_reg(), null);
     }
 
     /// Ports `ggml_backend_registry`'s `register_backend`
@@ -239,7 +227,7 @@ const Registry = struct {
     /// - `handle`: the shared library it came from, or null for a built-in.
     ///
     /// Return: nothing.
-    fn registerBackend(self: *Registry, reg: c.ggml_backend_reg_t, handle: ?*anyopaque) void {
+    fn registerBackend(self: *Registry, reg: mod.impl.c.ggml_backend_reg_t, handle: ?*anyopaque) void {
         if (reg == null) return;
 
         for (self.backends.items) |entry| {
@@ -247,20 +235,20 @@ const Registry = struct {
         }
 
         if (debug_build) {
-            impl.logDebug("%s: registered backend %s (%zu devices)\n", .{
+            mod.impl.logDebug("%s: registered backend %s (%zu devices)\n", .{
                 "register_backend",
-                c.ggml_backend_reg_name(reg),
-                c.ggml_backend_reg_dev_count(reg),
+                mod.impl.c.ggml_backend_reg_name(reg),
+                mod.impl.c.ggml_backend_reg_dev_count(reg),
             });
         }
 
         self.backends.append(allocator, .{ .reg = reg, .handle = handle }) catch
-            impl.abort("failed to grow the backend registry");
+            mod.impl.abort("failed to grow the backend registry");
 
         var i: usize = 0;
-        const n = c.ggml_backend_reg_dev_count(reg);
+        const n = mod.impl.c.ggml_backend_reg_dev_count(reg);
         while (i < n) : (i += 1) {
-            self.registerDevice(c.ggml_backend_reg_dev_get(reg, i));
+            self.registerDevice(mod.impl.c.ggml_backend_reg_dev_get(reg, i));
         }
     }
 
@@ -271,21 +259,21 @@ const Registry = struct {
     /// - `device`: the device to add; ignored if already present.
     ///
     /// Return: nothing.
-    fn registerDevice(self: *Registry, device: c.ggml_backend_dev_t) void {
+    fn registerDevice(self: *Registry, device: mod.impl.c.ggml_backend_dev_t) void {
         for (self.devices.items) |dev| {
             if (dev == device) return;
         }
 
         if (debug_build) {
-            impl.logDebug("%s: registered device %s (%s)\n", .{
+            mod.impl.logDebug("%s: registered device %s (%s)\n", .{
                 "register_device",
-                c.ggml_backend_dev_name(device),
-                c.ggml_backend_dev_description(device),
+                mod.impl.c.ggml_backend_dev_name(device),
+                mod.impl.c.ggml_backend_dev_description(device),
             });
         }
 
         self.devices.append(allocator, device) catch
-            impl.abort("failed to grow the device registry");
+            mod.impl.abort("failed to grow the device registry");
     }
 
     /// Ports `ggml_backend_registry`'s `load_backend`
@@ -298,10 +286,10 @@ const Registry = struct {
     /// Return: the registered backend, or null if the library would not load,
     /// scored zero, exposed no `ggml_backend_init`, or reported an
     /// incompatible API version.
-    fn loadBackend(self: *Registry, path: [*:0]const u8, silent: bool) c.ggml_backend_reg_t {
+    fn loadBackend(self: *Registry, path: [*:0]const u8, silent: bool) mod.impl.c.ggml_backend_reg_t {
         const handle = dlLoadLibrary(path) orelse {
             if (!silent) {
-                impl.logError("%s: failed to load %s: %s\n", .{ "load_backend", path, dlError() });
+                mod.impl.logError("%s: failed to load %s: %s\n", .{ "load_backend", path, dlError() });
             }
             return null;
         };
@@ -314,10 +302,10 @@ const Registry = struct {
         };
 
         if (dlGetSym(handle, "ggml_backend_score")) |sym| {
-            const score_fn: c.ggml_backend_score_t = @ptrCast(@alignCast(sym));
+            const score_fn: mod.impl.c.ggml_backend_score_t = @ptrCast(@alignCast(sym));
             if (score_fn.?() == 0) {
                 if (!silent) {
-                    impl.logInfo("%s: backend %s is not supported on this system\n", .{ "load_backend", path });
+                    mod.impl.logInfo("%s: backend %s is not supported on this system\n", .{ "load_backend", path });
                 }
                 return null;
             }
@@ -325,33 +313,33 @@ const Registry = struct {
 
         const init_sym = dlGetSym(handle, "ggml_backend_init") orelse {
             if (!silent) {
-                impl.logError("%s: failed to find ggml_backend_init in %s\n", .{ "load_backend", path });
+                mod.impl.logError("%s: failed to find ggml_backend_init in %s\n", .{ "load_backend", path });
             }
             return null;
         };
-        const backend_init_fn: c.ggml_backend_init_t = @ptrCast(@alignCast(init_sym));
+        const backend_init_fn: mod.impl.c.ggml_backend_init_t = @ptrCast(@alignCast(init_sym));
 
         const reg = backend_init_fn.?();
-        if (reg == null or reg.*.api_version != c.GGML_BACKEND_API_VERSION) {
+        if (reg == null or reg.*.api_version != mod.impl.c.GGML_BACKEND_API_VERSION) {
             if (!silent) {
                 if (reg == null) {
-                    impl.logError(
+                    mod.impl.logError(
                         "%s: failed to initialize backend from %s: ggml_backend_init returned NULL\n",
                         .{ "load_backend", path },
                     );
                 } else {
-                    impl.logError(
+                    mod.impl.logError(
                         "%s: failed to initialize backend from %s: incompatible API version (backend: %d, current: %d)\n",
-                        .{ "load_backend", path, reg.*.api_version, @as(c_int, c.GGML_BACKEND_API_VERSION) },
+                        .{ "load_backend", path, reg.*.api_version, @as(c_int, mod.impl.c.GGML_BACKEND_API_VERSION) },
                     );
                 }
             }
             return null;
         }
 
-        impl.logInfo("%s: loaded %s backend from %s\n", .{
+        mod.impl.logInfo("%s: loaded %s backend from %s\n", .{
             "load_backend",
-            c.ggml_backend_reg_name(reg),
+            mod.impl.c.ggml_backend_reg_name(reg),
             path,
         });
 
@@ -368,23 +356,23 @@ const Registry = struct {
     /// - `silent`: suppress the "not found" message.
     ///
     /// Return: nothing. As in the C++, the library itself is never `dlclose`d.
-    fn unloadBackend(self: *Registry, reg: c.ggml_backend_reg_t, silent: bool) void {
+    fn unloadBackend(self: *Registry, reg: mod.impl.c.ggml_backend_reg_t, silent: bool) void {
         const found = for (self.backends.items, 0..) |entry, i| {
             if (entry.reg == reg) break i;
         } else {
-            if (!silent) impl.logError("%s: backend not found\n", .{"unload_backend"});
+            if (!silent) mod.impl.logError("%s: backend not found\n", .{"unload_backend"});
             return;
         };
 
         if (!silent) {
-            impl.logDebug("%s: unloading %s backend\n", .{ "unload_backend", c.ggml_backend_reg_name(reg) });
+            mod.impl.logDebug("%s: unloading %s backend\n", .{ "unload_backend", mod.impl.c.ggml_backend_reg_name(reg) });
         }
 
         // `std::remove_if` then `erase`: drop every device belonging to `reg`
         // while keeping the rest in order.
         var kept: usize = 0;
         for (self.devices.items) |dev| {
-            if (c.ggml_backend_dev_backend_reg(dev) == reg) continue;
+            if (mod.impl.c.ggml_backend_dev_backend_reg(dev) == reg) continue;
             self.devices.items[kept] = dev;
             kept += 1;
         }
@@ -403,7 +391,7 @@ const Registry = struct {
 /// call after the first is lock-free.
 var registry: Registry = .{};
 var registry_ready = std.atomic.Value(bool).init(false);
-var registry_mutex: impl.Mutex = .{};
+var registry_mutex: stdlib.sync.Mutex = .{};
 
 /// Ports `get_reg` (src/ggml-backend-reg.cpp:292 @b1b770d90).
 ///
@@ -428,12 +416,12 @@ fn getReg() *Registry {
 // Internal API
 
 /// Ports `ggml_backend_register` (src/ggml-backend-reg.cpp:298 @b1b770d90).
-export fn ggml_backend_register(reg: c.ggml_backend_reg_t) callconv(.c) void {
+export fn ggml_backend_register(reg: mod.impl.c.ggml_backend_reg_t) callconv(.c) void {
     getReg().registerBackend(reg, null);
 }
 
 /// Ports `ggml_backend_device_register` (src/ggml-backend-reg.cpp:302 @b1b770d90).
-export fn ggml_backend_device_register(device: c.ggml_backend_dev_t) callconv(.c) void {
+export fn ggml_backend_device_register(device: mod.impl.c.ggml_backend_dev_t) callconv(.c) void {
     getReg().registerDevice(device);
 }
 
@@ -465,8 +453,8 @@ export fn ggml_backend_reg_count() callconv(.c) usize {
 /// - `index`: position in registration order; must be in range.
 ///
 /// Return: the backend at `index`. Borrowed; owned by the registry.
-export fn ggml_backend_reg_get(index: usize) callconv(.c) c.ggml_backend_reg_t {
-    impl.assert(index < ggml_backend_reg_count(), "index < ggml_backend_reg_count()");
+export fn ggml_backend_reg_get(index: usize) callconv(.c) mod.impl.c.ggml_backend_reg_t {
+    mod.impl.assert(index < ggml_backend_reg_count(), "index < ggml_backend_reg_count()");
     return getReg().backends.items[index].reg;
 }
 
@@ -476,11 +464,11 @@ export fn ggml_backend_reg_get(index: usize) callconv(.c) c.ggml_backend_reg_t {
 /// - `name`: backend name, matched case-insensitively.
 ///
 /// Return: the backend, or null if no name matches.
-export fn ggml_backend_reg_by_name(name: [*:0]const u8) callconv(.c) c.ggml_backend_reg_t {
+export fn ggml_backend_reg_by_name(name: [*:0]const u8) callconv(.c) mod.impl.c.ggml_backend_reg_t {
     var i: usize = 0;
     while (i < ggml_backend_reg_count()) : (i += 1) {
         const reg = ggml_backend_reg_get(i);
-        if (striequals(c.ggml_backend_reg_name(reg), name)) return reg;
+        if (striequals(mod.impl.c.ggml_backend_reg_name(reg), name)) return reg;
     }
     return null;
 }
@@ -501,8 +489,8 @@ export fn ggml_backend_dev_count() callconv(.c) usize {
 /// - `index`: position in registration order; must be in range.
 ///
 /// Return: the device at `index`. Borrowed; owned by its backend.
-export fn ggml_backend_dev_get(index: usize) callconv(.c) c.ggml_backend_dev_t {
-    impl.assert(index < ggml_backend_dev_count(), "index < ggml_backend_dev_count()");
+export fn ggml_backend_dev_get(index: usize) callconv(.c) mod.impl.c.ggml_backend_dev_t {
+    mod.impl.assert(index < ggml_backend_dev_count(), "index < ggml_backend_dev_count()");
     return getReg().devices.items[index];
 }
 
@@ -512,11 +500,11 @@ export fn ggml_backend_dev_get(index: usize) callconv(.c) c.ggml_backend_dev_t {
 /// - `name`: device name, matched case-insensitively.
 ///
 /// Return: the device, or null if no name matches.
-export fn ggml_backend_dev_by_name(name: [*:0]const u8) callconv(.c) c.ggml_backend_dev_t {
+export fn ggml_backend_dev_by_name(name: [*:0]const u8) callconv(.c) mod.impl.c.ggml_backend_dev_t {
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        if (striequals(c.ggml_backend_dev_name(dev), name)) return dev;
+        if (striequals(mod.impl.c.ggml_backend_dev_name(dev), name)) return dev;
     }
     return null;
 }
@@ -527,11 +515,11 @@ export fn ggml_backend_dev_by_name(name: [*:0]const u8) callconv(.c) c.ggml_back
 /// - `dev_type`: the class of device wanted.
 ///
 /// Return: the first device of that type in registration order, or null.
-export fn ggml_backend_dev_by_type(dev_type: c.enum_ggml_backend_dev_type) callconv(.c) c.ggml_backend_dev_t {
+export fn ggml_backend_dev_by_type(dev_type: mod.impl.c.enum_ggml_backend_dev_type) callconv(.c) mod.impl.c.ggml_backend_dev_t {
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        if (c.ggml_backend_dev_type(dev) == dev_type) return dev;
+        if (mod.impl.c.ggml_backend_dev_type(dev) == dev_type) return dev;
     }
     return null;
 }
@@ -547,9 +535,9 @@ export fn ggml_backend_dev_by_type(dev_type: c.enum_ggml_backend_dev_type) callc
 ///
 /// Return: a new backend instance, or null if no such device. Owned by the
 /// caller, released with `ggml_backend_free`.
-export fn ggml_backend_init_by_name(name: [*:0]const u8, params: ?[*:0]const u8) callconv(.c) c.ggml_backend_t {
+export fn ggml_backend_init_by_name(name: [*:0]const u8, params: ?[*:0]const u8) callconv(.c) mod.impl.c.ggml_backend_t {
     const dev = ggml_backend_dev_by_name(name) orelse return null;
-    return c.ggml_backend_dev_init(dev, params);
+    return mod.impl.c.ggml_backend_dev_init(dev, params);
 }
 
 /// Ports `ggml_backend_init_by_type` (src/ggml-backend-reg.cpp:374 @b1b770d90).
@@ -560,11 +548,11 @@ export fn ggml_backend_init_by_name(name: [*:0]const u8, params: ?[*:0]const u8)
 ///
 /// Return: a new backend instance, or null. Owned by the caller.
 export fn ggml_backend_init_by_type(
-    dev_type: c.enum_ggml_backend_dev_type,
+    dev_type: mod.impl.c.enum_ggml_backend_dev_type,
     params: ?[*:0]const u8,
-) callconv(.c) c.ggml_backend_t {
+) callconv(.c) mod.impl.c.ggml_backend_t {
     const dev = ggml_backend_dev_by_type(dev_type) orelse return null;
-    return c.ggml_backend_dev_init(dev, params);
+    return mod.impl.c.ggml_backend_dev_init(dev, params);
 }
 
 /// Ports `ggml_backend_init_best` (src/ggml-backend-reg.cpp:382 @b1b770d90).
@@ -572,12 +560,12 @@ export fn ggml_backend_init_by_type(
 /// Return: a backend on the best available device — discrete GPU, then
 /// integrated GPU, then CPU — or null if nothing is registered. Owned by the
 /// caller.
-export fn ggml_backend_init_best() callconv(.c) c.ggml_backend_t {
-    var dev = ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU);
-    if (dev == null) dev = ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_IGPU);
-    if (dev == null) dev = ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU);
+export fn ggml_backend_init_best() callconv(.c) mod.impl.c.ggml_backend_t {
+    var dev = ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU);
+    if (dev == null) dev = ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU);
+    if (dev == null) dev = ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU);
     if (dev == null) return null;
-    return c.ggml_backend_dev_init(dev, null);
+    return mod.impl.c.ggml_backend_dev_init(dev, null);
 }
 
 // -----------------------------------------------------------------------------
@@ -595,7 +583,7 @@ export fn ggml_backend_init_best() callconv(.c) c.ggml_backend_t {
 ///
 /// Return: the registered backend, or null on any failure. Borrowed; owned by
 /// the registry.
-export fn ggml_backend_load(path: [*:0]const u8) callconv(.c) c.ggml_backend_reg_t {
+export fn ggml_backend_load(path: [*:0]const u8) callconv(.c) mod.impl.c.ggml_backend_reg_t {
     return getReg().loadBackend(path, false);
 }
 
@@ -605,14 +593,9 @@ export fn ggml_backend_load(path: [*:0]const u8) callconv(.c) c.ggml_backend_reg
 /// - `reg`: the backend to drop from the registry.
 ///
 /// Return: nothing. The library stays mapped, as it does in the C++.
-export fn ggml_backend_unload(reg: c.ggml_backend_reg_t) callconv(.c) void {
+export fn ggml_backend_unload(reg: mod.impl.c.ggml_backend_reg_t) callconv(.c) void {
     getReg().unloadBackend(reg, true);
 }
-
-/// `_NSGetExecutablePath`, from `<mach-o/dyld.h>`. Declared rather than
-/// imported: the header pulls in the Mach-O structures, and this is its only
-/// use.
-extern fn _NSGetExecutablePath(buf: [*]u8, bufsize: *u32) c_int;
 
 /// Ports `get_executable_path` (src/ggml-backend-reg.cpp:401 @b1b770d90), the
 /// `__APPLE__` arm.
@@ -627,7 +610,7 @@ fn getExecutablePath(buf: []u8) ?[:0]const u8 {
     if (comptime builtin.os.tag == .linux) return getExecutablePathLinux(buf);
     if (comptime is_windows) return getExecutablePathWindows(buf);
     var size: u32 = @intCast(buf.len);
-    if (_NSGetExecutablePath(buf.ptr, &size) != 0) return null;
+    if (stdlib.libc._NSGetExecutablePath(buf.ptr, &size) != 0) return null;
 
     // `_NSGetExecutablePath` null-terminates but only updates `size` when it
     // fails, so the length has to come from the string itself.
@@ -680,8 +663,8 @@ fn getExecutablePathLinux(buf: []u8) ?[:0]const u8 {
 /// `GetModuleFileNameW` gives the C++'s empty `fs::path`, which no search
 /// finds. The C++ asks for `MAX_PATH` characters once and takes what it gets.
 fn getExecutablePathWindows(buf: []u8) ?[:0]const u8 {
-    var wpath: [win32.MAX_PATH]u16 = undefined;
-    const len = win32.GetModuleFileNameW(null, &wpath, wpath.len);
+    var wpath: [mod.win32.MAX_PATH]u16 = undefined;
+    const len = mod.win32.GetModuleFileNameW(null, &wpath, wpath.len);
     if (len == 0) {
         buf[0] = 0;
         return buf[0..0 :0];
@@ -701,7 +684,7 @@ fn getExecutablePathWindows(buf: []u8) ?[:0]const u8 {
 fn currentPath(buf: []u8) ?[]const u8 {
     if (comptime is_windows) {
         var wbuf: [std.Io.Dir.max_path_bytes]u16 = undefined;
-        const len = win32.GetCurrentDirectoryW(wbuf.len, &wbuf);
+        const len = mod.win32.GetCurrentDirectoryW(wbuf.len, &wbuf);
         if (len == 0 or len >= wbuf.len) return null;
         const n = std.unicode.utf16LeToUtf8(buf, wbuf[0..len]) catch return null;
         return buf[0..n];
@@ -739,9 +722,9 @@ fn pathExists(path: [:0]const u8) bool {
     if (comptime is_windows) {
         const wpath = widen(path) orelse return false;
         defer allocator.free(wpath);
-        return win32.GetFileAttributesW(wpath.ptr) != win32.INVALID_FILE_ATTRIBUTES;
+        return mod.win32.GetFileAttributesW(wpath.ptr) != mod.win32.INVALID_FILE_ATTRIBUTES;
     }
-    return libc.access(path.ptr, Libc.F_OK) == 0;
+    return stdlib.libc.access(path.ptr, Libc.F_OK) == 0;
 }
 
 /// libc's `readdir`. Zig 0.17's `std.c.readdir` binds `readdir$INODE64` on
@@ -750,9 +733,7 @@ fn pathExists(path: [:0]const u8) bool {
 /// (`__DARWIN_ONLY_64_BIT_INO_T` in their `sys/cdefs.h`) and export plain
 /// `readdir`, so the xcframework's x86_64 simulator slices failed to link.
 const readdir = if (builtin.cpu.arch == .x86_64 and builtin.os.tag.isDarwin() and builtin.os.tag != .macos)
-    struct {
-        extern "c" fn readdir(dir: *std.c.DIR) ?*std.c.dirent;
-    }.readdir
+    struct {}.readdir
 else
     std.c.readdir;
 
@@ -765,8 +746,8 @@ else
 /// directory is a directory, and anything else is a regular file.
 const DirScan = struct {
     os: if (is_windows) struct {
-        find: win32.HANDLE,
-        data: win32.WIN32_FIND_DATAW,
+        find: mod.win32.HANDLE,
+        data: mod.win32.WIN32_FIND_DATAW,
         first: bool,
         dir: [:0]const u8,
     } else *std.c.DIR,
@@ -781,8 +762,8 @@ const DirScan = struct {
             const pattern = joinPath(&pattern_buf, dir, "*") orelse return null;
             const wpattern = widen(pattern) orelse return null;
             defer allocator.free(wpattern);
-            var data: win32.WIN32_FIND_DATAW = undefined;
-            const find = win32.FindFirstFileW(wpattern.ptr, &data);
+            var data: mod.win32.WIN32_FIND_DATAW = undefined;
+            const find = mod.win32.FindFirstFileW(wpattern.ptr, &data);
             if (find == std.os.windows.INVALID_HANDLE_VALUE) return null;
             return .{ .os = .{ .find = find, .data = data, .first = true, .dir = dir } };
         }
@@ -791,7 +772,7 @@ const DirScan = struct {
 
     fn close(self: *DirScan) void {
         if (comptime is_windows) {
-            _ = win32.FindClose(self.os.find);
+            _ = mod.win32.FindClose(self.os.find);
             return;
         }
         _ = std.c.closedir(self.os);
@@ -801,27 +782,27 @@ const DirScan = struct {
     fn next(self: *DirScan) ?[]const u8 {
         if (comptime is_windows) {
             while (true) {
-                if (!self.os.first and win32.FindNextFileW(self.os.find, &self.os.data) == 0) return null;
+                if (!self.os.first and mod.win32.FindNextFileW(self.os.find, &self.os.data) == 0) return null;
                 self.os.first = false;
                 const wname = std.mem.sliceTo(&self.os.data.cFileName, 0);
                 const n = std.unicode.utf16LeToUtf8(&self.name_buf, wname) catch continue;
                 const name = self.name_buf[0..n];
                 const attrs = self.os.data.dwFileAttributes;
-                if (attrs & win32.FILE_ATTRIBUTE_REPARSE_POINT != 0 and self.os.data.dwReserved0 == win32.IO_REPARSE_TAG_SYMLINK) {
+                if (attrs & mod.win32.FILE_ATTRIBUTE_REPARSE_POINT != 0 and self.os.data.dwReserved0 == mod.win32.IO_REPARSE_TAG_SYMLINK) {
                     // `is_regular_file` follows the link.
                     var full_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                     const full = joinPath(&full_buf, self.os.dir, name) orelse continue;
                     const wfull = widen(full) orelse continue;
                     defer allocator.free(wfull);
-                    const target = win32.GetFileAttributesW(wfull.ptr);
-                    if (target == win32.INVALID_FILE_ATTRIBUTES or target & win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
+                    const target = mod.win32.GetFileAttributesW(wfull.ptr);
+                    if (target == mod.win32.INVALID_FILE_ATTRIBUTES or target & mod.win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
                     return name;
                 }
-                if (attrs & win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
+                if (attrs & mod.win32.FILE_ATTRIBUTE_DIRECTORY != 0) continue;
                 return name;
             }
         }
-        while (readdir(self.os)) |ent| {
+        while (stdlib.libc.readdir(self.os)) |ent| {
             // DT_REG. `is_regular_file` in the C++; a `DT_UNKNOWN` filesystem
             // would need a stat, which APFS never reports.
             if (ent.type != 8) continue;
@@ -852,7 +833,7 @@ const backend_filename_extension = if (is_windows) ".dll" else ".so";
 ///
 /// Return: the loaded backend, or null if none was found. Borrowed; owned by
 /// the registry.
-fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8) c.ggml_backend_reg_t {
+fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8) mod.impl.c.ggml_backend_reg_t {
     var prefix_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const file_prefix = std.mem.print(
         &prefix_buf,
@@ -879,7 +860,7 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
             search_paths[n_paths] = p;
             n_paths += 1;
         } else {
-            impl.printDebug("%s: failed to get current directory: %s\n", .{ "load_best", lastErrorMessage() });
+            mod.impl.printDebug("%s: failed to get current directory: %s\n", .{ "load_best", lastErrorMessage() });
         }
     }
 
@@ -895,7 +876,7 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
         // one more way to fail to enumerate it, logged after the scan. A
         // failed open scans nothing, so logging here is the same order.
         var dir = DirScan.open(dir_path) orelse {
-            impl.printDebug("%s: failed to enumerate %s: %s\n", .{ "load_best", dir_path.ptr, lastErrorMessage() });
+            mod.impl.printDebug("%s: failed to enumerate %s: %s\n", .{ "load_best", dir_path.ptr, lastErrorMessage() });
             continue;
         };
         defer dir.close();
@@ -909,7 +890,7 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
 
             const handle = dlLoadLibrary(cand.ptr) orelse {
                 if (!silent) {
-                    impl.logError("%s: failed to load %s: %s\n", .{ "load_best", cand.ptr, dlError() });
+                    mod.impl.logError("%s: failed to load %s: %s\n", .{ "load_best", cand.ptr, dlError() });
                 }
                 continue;
             };
@@ -919,13 +900,13 @@ fn loadBest(name: [*:0]const u8, silent: bool, user_search_path: ?[*:0]const u8)
 
             const sym = dlGetSym(handle, "ggml_backend_score") orelse {
                 if (!silent) {
-                    impl.logInfo("%s: failed to find ggml_backend_score in %s\n", .{ "load_best", cand.ptr });
+                    mod.impl.logInfo("%s: failed to find ggml_backend_score in %s\n", .{ "load_best", cand.ptr });
                 }
                 continue;
             };
-            const score_fn: c.ggml_backend_score_t = @ptrCast(@alignCast(sym));
+            const score_fn: mod.impl.c.ggml_backend_score_t = @ptrCast(@alignCast(sym));
             const s = score_fn.?();
-            impl.printDebug("%s: %s score: %d\n", .{ "load_best", cand.ptr, s });
+            mod.impl.printDebug("%s: %s score: %d\n", .{ "load_best", cand.ptr, s });
             if (s > best_score) {
                 best_score = s;
                 @memcpy(best_buf[0..cand.len], cand);
@@ -1012,26 +993,26 @@ test "the registry reports the two backends this build compiles" {
     // Metal first, CPU last -- the order the C++ constructor registers them,
     // and what `ggml_backend_init_best` depends on. The ported test root
     // compiles without Metal, so it sees one.
-    const gpu_regs: usize = @as(usize, @intFromBool(use_metal)) + @intFromBool(use_cuda) +
-        @intFromBool(use_vulkan and stdlib.env.getenv("GGML_DISABLE_VULKAN") == null) + @intFromBool(use_blas);
+    const gpu_regs: usize = @as(usize, @intFromBool(config.use_metal)) + @intFromBool(config.use_cuda) +
+        @intFromBool(config.use_vulkan and stdlib.env.getenv("GGML_DISABLE_VULKAN") == null) + @intFromBool(config.use_blas);
     try std.testing.expectEqual(gpu_regs + 1, ggml_backend_reg_count());
 
-    if (use_cuda) {
-        try std.testing.expectEqualStrings("CUDA", std.mem.sliceTo(c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
+    if (config.use_cuda) {
+        try std.testing.expectEqualStrings("CUDA", std.mem.sliceTo(mod.impl.c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
     }
 
-    if (use_metal) {
+    if (config.use_metal) {
         // The Metal backend registers itself as `GGML_METAL_NAME`, which is
         // "MTL", not "Metal" (ggml-metal/ggml-metal.cpp:15 @b1b770d90). Asserting the real names is
         // the point: the first version of this test guessed "Metal" and failed.
-        try std.testing.expectEqualStrings("MTL", std.mem.sliceTo(c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
+        try std.testing.expectEqualStrings("MTL", std.mem.sliceTo(mod.impl.c.ggml_backend_reg_name(ggml_backend_reg_get(0)), 0));
         try std.testing.expect(ggml_backend_reg_by_name("MTL") != null);
         // Lookup folds case, as `striequals` does.
         try std.testing.expect(ggml_backend_reg_by_name("mtl") != null);
     }
 
     const cpu = ggml_backend_reg_get(ggml_backend_reg_count() - 1);
-    try std.testing.expectEqualStrings("CPU", std.mem.sliceTo(c.ggml_backend_reg_name(cpu), 0));
+    try std.testing.expectEqualStrings("CPU", std.mem.sliceTo(mod.impl.c.ggml_backend_reg_name(cpu), 0));
     try std.testing.expect(ggml_backend_reg_by_name("CPU") != null);
     try std.testing.expect(ggml_backend_reg_by_name("cpu") != null);
     try std.testing.expect(ggml_backend_reg_by_name("nonesuch") == null);
@@ -1043,11 +1024,11 @@ test "every registered device is reachable by name and by type" {
     var i: usize = 0;
     while (i < ggml_backend_dev_count()) : (i += 1) {
         const dev = ggml_backend_dev_get(i);
-        try std.testing.expectEqual(dev, ggml_backend_dev_by_name(c.ggml_backend_dev_name(dev)));
+        try std.testing.expectEqual(dev, ggml_backend_dev_by_name(mod.impl.c.ggml_backend_dev_name(dev)));
     }
 
     // This build always has a CPU device; `init_best` falls back to it.
-    try std.testing.expect(ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU) != null);
+    try std.testing.expect(ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU) != null);
 }
 
 test "loading a library that does not exist fails rather than registering" {

@@ -29,13 +29,10 @@
 //! than inferred.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const convert = @import("../convert.zig");
-const blocks = @import("../../quants/blocks.zig");
-const c = impl.c;
+const ggml = @import("../../module.zig");
 
 inline fn f(h: u16) f32 {
-    return convert.cpuFp16ToFp32(h);
+    return ggml.cpu.convert.cpuFp16ToFp32(h);
 }
 
 inline fn as(comptime Block: type, p: ?*const anyopaque) [*]const Block {
@@ -81,13 +78,13 @@ pub export fn ggml_vec_dot_tq1_0_q8_K_generic(
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.TQ1_0, vx);
-    const y = as(blocks.Q8_K, vy);
+    const x = as(ggml.quants.blocks.TQ1_0, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, c.QK_K);
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
 
-    const qs_len = @typeInfo(@FieldType(blocks.TQ1_0, "qs")).array.len;
-    const qh_len = @typeInfo(@FieldType(blocks.TQ1_0, "qh")).array.len;
+    const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ1_0, "qs")).array.len;
+    const qh_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ1_0, "qh")).array.len;
 
     var sumf: f32 = 0.0;
 
@@ -149,11 +146,11 @@ pub export fn ggml_vec_dot_tq2_0_q8_K_generic(
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.TQ2_0, vx);
-    const y = as(blocks.Q8_K, vy);
+    const x = as(ggml.quants.blocks.TQ2_0, vx);
+    const y = as(ggml.quants.blocks.Q8_K, vy);
 
-    const nb = @divTrunc(n, c.QK_K);
-    const qs_len = @typeInfo(@FieldType(blocks.TQ2_0, "qs")).array.len;
+    const nb = @divTrunc(n, ggml.impl.c.QK_K);
+    const qs_len = @typeInfo(@FieldType(ggml.quants.blocks.TQ2_0, "qs")).array.len;
 
     var sumf: f32 = 0.0;
 
@@ -186,15 +183,12 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const testing = @import("testing.zig");
-const golden = @import("golden.zig");
-
 test "tq1_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_tq1_0_q8_K_generic, c.GGML_TYPE_TQ1_0, c.GGML_TYPE_Q8_K, golden.tq1_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq1_0_q8_K_generic, ggml.impl.c.GGML_TYPE_TQ1_0, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq1_0);
 }
 
 test "tq2_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_tq2_0_q8_K_generic, c.GGML_TYPE_TQ2_0, c.GGML_TYPE_Q8_K, golden.tq2_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_tq2_0_q8_K_generic, ggml.impl.c.GGML_TYPE_TQ2_0, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.tq2_0);
 }
 
 /// Packs five ternary digits exactly as `quantize_row_tq1_0_ref` does

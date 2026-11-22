@@ -5,10 +5,11 @@
 //! # Provenance
 //!
 //! **Not a port.** A file that needs one of these calls `libc.<name>`;
-//! nothing else declares a C library function. libm is `libm.zig`. The
-//! socket API (`socket`, `getaddrinfo`, `poll`...) stays in
-//! `tools/server/httplib/socket.zig`, beside its struct layouts, until the
-//! socket pass moves it to `std.Io.net`.
+//! nothing else declares a C library function. libm is `libm.zig`.
+//!
+//! A function std declares is an alias of std's, which exists only on the
+//! targets that have it; an `extern` here is one std lacks, or one whose std
+//! type is stricter than C's (`mlock`, `setlocale`).
 //!
 //! # Types
 //!
@@ -42,10 +43,24 @@ pub extern "c" fn fwrite(ptr: ?*const anyopaque, size: usize, n: usize, stream: 
 pub extern "c" fn fseek(stream: ?*anyopaque, offset: c_long, whence: c_int) c_int;
 pub extern "c" fn fseeko(stream: ?*anyopaque, offset: i64, whence: c_int) c_int;
 pub extern "c" fn ftello(stream: ?*anyopaque) i64;
+pub extern "c" fn ftell(stream: ?*anyopaque) c_long;
+pub extern "c" fn tmpfile() ?*anyopaque;
+pub extern "c" fn fileno(stream: ?*anyopaque) c_int;
+pub extern "c" fn fscanf(stream: ?*anyopaque, format: [*:0]const u8, ...) c_int;
+pub extern "c" fn getwchar() u32;
 pub extern "c" fn fgets(buf: [*]u8, n: c_int, stream: ?*anyopaque) ?[*]u8;
 pub extern "c" fn getline(line: *?[*]u8, n: *usize, stream: ?*anyopaque) isize;
 /// Windows' `fgetwc`: `wint_t` is an `unsigned short` there.
 pub extern "c" fn fgetwc(stream: ?*anyopaque) u16;
+/// The UCRT's descriptor and 64-bit offset calls on a stream.
+pub extern "c" fn _fileno(stream: ?*anyopaque) c_int;
+pub extern "c" fn _get_osfhandle(fd: c_int) isize;
+pub extern "c" fn _ftelli64(stream: ?*anyopaque) i64;
+pub extern "c" fn _fseeki64(stream: ?*anyopaque, offset: i64, whence: c_int) c_int;
+pub extern "c" fn _setmode(fd: c_int, mode: c_int) c_int;
+/// The UCRT's descriptor calls, where std's `open` and `dup2` take `HANDLE`s.
+pub extern "c" fn _open(path: [*:0]const u8, flags: c_int, ...) c_int;
+pub extern "c" fn _dup2(old: c_int, new: c_int) c_int;
 
 /// What `va_list` is as a parameter: on x86-64 System V a one-element array
 /// of `__va_list_tag`, which decays to a pointer in a parameter list, so the
@@ -73,22 +88,42 @@ pub inline fn cVaList(ap: *std.lang.VaList) CVaList {
 // ggml's `ggml_aligned_malloc`; `setenv` is what a gate does between runs.
 // `exit` still flushes the C streams the libraries and the console write.
 
-pub extern "c" fn malloc(size: usize) ?*anyopaque;
-pub extern "c" fn free(ptr: ?*anyopaque) void;
-pub extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
+pub const malloc = std.c.malloc;
+pub const free = std.c.free;
+pub const posix_memalign = std.c.posix_memalign;
 pub extern "c" fn _aligned_malloc(size: usize, alignment: usize) ?*anyopaque;
 pub extern "c" fn _aligned_free(ptr: ?*anyopaque) void;
 pub extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-pub extern "c" fn abort() noreturn;
-pub extern "c" fn exit(code: c_int) noreturn;
-pub extern "c" fn _exit(code: c_int) noreturn;
+pub const abort = std.c.abort;
+pub const exit = std.c.exit;
+pub const _exit = std.c._exit;
 pub extern "c" fn rand() c_int;
 pub extern "c" fn arc4random() u32;
 pub extern "c" fn rand_s(r: *c_uint) c_int;
 pub extern "c" fn strlen(s: [*c]const u8) usize;
-pub extern "c" fn strncmp(a: [*]const u8, b: [*:0]const u8, n: usize) c_int;
+/// The `"C"` locale's ctype, which `llama-chat.cpp` hands a plain `char`
+/// (negative above 0x80 on Darwin): called rather than tabulated.
+pub extern "c" fn isspace(ch: c_int) c_int;
+pub extern "c" fn toupper(ch: c_int) c_int;
+pub extern "c" fn wcwidth(wc: u32) c_int;
+pub extern "c" fn iswspace(wc: u32) c_int;
+pub extern "c" fn atexit(f: *const fn () callconv(.c) void) c_int;
 pub extern "c" fn strerror(errnum: c_int) [*:0]const u8;
+/// `setlocale`, declared here because std's takes glibc's category numbers on
+/// every OS; pass an `LC` constant.
 pub extern "c" fn setlocale(category: c_int, locale: ?[*:0]const u8) ?[*:0]const u8;
+
+/// The `LC_*` categories `<locale.h>` defines on this target: glibc's and
+/// musl's on Linux, BSD's on Darwin, the UCRT's on Windows.
+pub const LC = if (builtin.os.tag == .linux) struct {
+    pub const CTYPE: c_int = 0;
+    pub const NUMERIC: c_int = 1;
+    pub const ALL: c_int = 6;
+} else struct {
+    pub const ALL: c_int = 0;
+    pub const CTYPE: c_int = 2;
+    pub const NUMERIC: c_int = 4;
+};
 pub extern "c" fn clock() c_long;
 /// `signal`, the handler as an address: `SIG_IGN` is 1, `SIG_DFL` 0, a
 /// function `@intFromPtr`.
@@ -102,26 +137,37 @@ pub extern "c" fn signal(sig: c_int, handler: usize) usize;
 // in for `stat` where `std.c.Stat` is void (Linux); `ioctl` reads the
 // entropy count libc++'s `random_device` reports.
 
-pub extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
-pub extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-pub extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
-pub extern "c" fn close(fd: c_int) c_int;
-pub extern "c" fn access(path: [*:0]const u8, mode: c_int) c_int;
-pub extern "c" fn lseek(fd: c_int, offset: i64, whence: c_int) i64;
-pub extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
-pub extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
-pub extern "c" fn fork() c_int;
-pub extern "c" fn pipe(fds: *[2]c_int) c_int;
-pub extern "c" fn dup2(old: c_int, new: c_int) c_int;
-pub extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-pub extern "c" fn sysconf(name: c_int) c_long;
-pub extern "c" fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize, newp: ?*const anyopaque, newlen: usize) c_int;
-pub extern "c" fn mmap(addr: ?*anyopaque, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) ?*anyopaque;
-pub extern "c" fn munmap(addr: ?*anyopaque, len: usize) c_int;
-pub extern "c" fn madvise(addr: ?*anyopaque, len: usize, advice: c_int) c_int;
+pub const open = std.c.open;
+pub const read = std.c.read;
+pub const write = std.c.write;
+pub const close = std.c.close;
+pub const access = std.c.access;
+pub const lseek = std.c.lseek;
+pub const fcntl = std.c.fcntl;
+pub const ioctl = std.c.ioctl;
+pub const fork = std.c.fork;
+pub const pipe = std.c.pipe;
+pub const dup2 = std.c.dup2;
+pub const waitpid = std.c.waitpid;
+pub const sysconf = std.c.sysconf;
+pub const sysctlbyname = std.c.sysctlbyname;
+pub const mmap = std.c.mmap;
+pub const munmap = std.c.munmap;
+pub const madvise = std.c.madvise;
 pub extern "c" fn posix_madvise(addr: ?*anyopaque, len: usize, advice: c_int) c_int;
-pub extern "c" fn posix_fadvise(fd: c_int, offset: i64, len: i64, advice: c_int) c_int;
-pub extern "c" fn statx(dirfd: c_int, path: [*:0]const u8, flags: c_int, mask: std.os.linux.STATX, buf: *std.os.linux.Statx) c_int;
+pub const readdir = std.c.readdir;
+/// `mlock`, declared here because std's demands a page-aligned address and
+/// C's takes any.
+pub extern "c" fn mlock(addr: ?*const anyopaque, len: usize) c_int;
+pub const prctl = std.c.prctl;
+pub const _Exit = std.c._Exit;
+pub extern "c" fn execlp(file: [*:0]const u8, arg0: [*:0]const u8, ...) c_int;
+/// glibc's resolver reset, which httplib calls before `getaddrinfo`.
+pub extern "c" fn __res_init() c_int;
+/// Darwin's `vm_allocate`; `vm_deallocate` is std's.
+pub extern "c" fn vm_allocate(target: c_uint, address: *usize, size: usize, flags: c_int) c_int;
+pub const vm_deallocate = std.c.vm_deallocate;
+pub const _NSGetExecutablePath = std.c._NSGetExecutablePath;
 pub extern "c" fn backtrace(buffer: [*]?*anyopaque, size: c_int) c_int;
 pub extern "c" fn backtrace_symbols_fd(buffer: [*]const ?*anyopaque, size: c_int, fd: c_int) void;
 pub extern "c" fn inet_pton(af: c_int, src: [*:0]const u8, dst: *anyopaque) c_int;
@@ -131,13 +177,35 @@ pub extern "c" fn _fullpath(abs: [*]u8, rel: [*:0]const u8, max: usize) ?[*:0]u8
 pub extern "c" fn __acrt_iob_func(index: c_uint) *anyopaque;
 
 // -----------------------------------------------------------------------------
-// pthreads: thread affinity, which std does not expose
+// Sockets: httplib's, until the socket pass moves it to `std.Io.net`
 
-pub extern "c" fn pthread_self() std.c.pthread_t;
-/// glibc's `getcpu`: the CPU and NUMA node the caller runs on.
-pub extern "c" fn getcpu(cpu: *c_uint, node: *c_uint) c_int;
-pub extern "c" fn pthread_setaffinity_np(thread: std.c.pthread_t, size: usize, set: *const anyopaque) c_int;
-pub extern "c" fn pthread_getaffinity_np(thread: std.c.pthread_t, size: usize, set: *anyopaque) c_int;
+pub const socket = std.c.socket;
+pub const setsockopt = std.c.setsockopt;
+pub const getsockopt = std.c.getsockopt;
+pub const bind = std.c.bind;
+pub const listen = std.c.listen;
+pub const accept = std.c.accept;
+pub const connect = std.c.connect;
+pub const recv = std.c.recv;
+pub const send = std.c.send;
+pub const poll = std.c.poll;
+pub const shutdown = std.c.shutdown;
+pub const getsockname = std.c.getsockname;
+pub const getpeername = std.c.getpeername;
+pub const getaddrinfo = std.c.getaddrinfo;
+pub const freeaddrinfo = std.c.freeaddrinfo;
+pub const getnameinfo = std.c.getnameinfo;
+
+// -----------------------------------------------------------------------------
+// pthreads and the scheduler: what std does not expose (affinity is
+// `stdlib.thread`'s syscalls)
+
+pub const pthread_self = std.c.pthread_self;
+pub extern "c" fn pthread_equal(a: std.c.pthread_t, b: std.c.pthread_t) c_int;
+/// `param` is a `struct sched_param`.
+pub extern "c" fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const anyopaque) c_int;
+pub const pthread_setname_np = std.c.pthread_setname_np;
+pub extern "c" fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

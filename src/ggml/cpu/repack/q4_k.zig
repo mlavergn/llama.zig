@@ -29,13 +29,7 @@
 //! the gemm indexes bsums as `(sb * 8) + (m * 4) - ((sb % 2) * 6)`, which
 //! is not a typo — it walks the interleaved layout.
 
-const std = @import("std");
-const impl = @import("../../impl.zig");
-const blocks = @import("blocks.zig");
-const epilogue = @import("epilogue.zig");
-const convert = @import("../convert.zig");
-
-const c = impl.c;
+const ggml = @import("../../module.zig");
 
 const QK_K = 256;
 
@@ -44,7 +38,7 @@ const kmask2: u32 = 0x0f0f0f0f;
 const kmask3: u32 = 0x03030303;
 
 /// The `utmp` shuffle, shared by every kernel here.
-inline fn unpackScales(utmp: *[32]u32, bl: *const blocks.block_q4_Kx8) void {
+inline fn unpackScales(utmp: *[32]u32, bl: *const ggml.cpu.repack.blocks.block_q4_Kx8) void {
     for (0..8) |sb| {
         const src = bl.scales[sb * 12 ..][0..12];
         @memcpy(@as([*]u8, @ptrCast(utmp))[sb * 16 ..][0..12], src);
@@ -77,18 +71,18 @@ fn gemv(
     // How many `k` steps cover one 32-value sub-block.
     const kdiv: i32 = @divTrunc(32, blocklen);
 
-    impl.assert(@rem(n, qk) == 0, "n % qk == 0");
-    impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
+    ggml.impl.assert(@rem(n, qk) == 0, "n % qk == 0");
+    ggml.impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
 
     var sumf: [8]f32 = undefined;
     var sum_minf: [8]f32 = undefined;
     var utmp: [32]u32 = undefined;
 
-    const a_ptr: [*]const c.block_q8_K = @ptrCast(@alignCast(vy));
+    const a_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
     var x: i32 = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
-        const b_ptr: [*]const blocks.block_q4_Kx8 =
-            @as([*]const blocks.block_q4_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
+        const b_ptr: [*]const ggml.cpu.repack.blocks.block_q4_Kx8 =
+            @as([*]const ggml.cpu.repack.blocks.block_q4_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
 
         for (0..8) |j| {
             sumf[j] = 0.0;
@@ -119,7 +113,7 @@ fn gemv(
                         sumi2 = sumi2 * scales_1[j];
                         sumi += sumi1 + sumi2;
                     }
-                    sumf[j] = epilogue.accumulate(sumf[j], sumi, convert.cpuFp16ToFp32(bl.d[j]), al.d);
+                    sumf[j] = ggml.cpu.repack.epilogue.accumulate(sumf[j], sumi, ggml.cpu.convert.cpuFp16ToFp32(bl.d[j]), al.d);
                 }
             }
             for (0..8) |sb| {
@@ -131,7 +125,7 @@ fn gemv(
                     // wraps where the C widens.
                     const mins_prod: i32 = @as(i32, mins[j]) *
                         (@as(i32, al.bsums[sb * 2]) + @as(i32, al.bsums[sb * 2 + 1]));
-                    sum_minf[j] = epilogue.accumulate(sum_minf[j], mins_prod, convert.cpuFp16ToFp32(bl.dmin[j]), al.d);
+                    sum_minf[j] = ggml.cpu.repack.epilogue.accumulate(sum_minf[j], mins_prod, ggml.cpu.convert.cpuFp16ToFp32(bl.dmin[j]), al.d);
                 }
             }
         }
@@ -157,9 +151,9 @@ fn gemm(
     const ncols_interleaved: i32 = 8;
     const kdiv: i32 = @divTrunc(32, blocklen);
 
-    impl.assert(@rem(n, qk) == 0, "n % qk == 0");
-    impl.assert(@rem(nr, 4) == 0, "nr % 4 == 0");
-    impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
+    ggml.impl.assert(@rem(n, qk) == 0, "n % qk == 0");
+    ggml.impl.assert(@rem(nr, 4) == 0, "nr % 4 == 0");
+    ggml.impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
 
     var sumf: [4][8]f32 = undefined;
     var sum_minf: [4][8]f32 = undefined;
@@ -167,12 +161,12 @@ fn gemm(
 
     var y: i32 = 0;
     while (y < @divTrunc(nr, 4)) : (y += 1) {
-        const a_ptr: [*]const blocks.block_q8_Kx4 =
-            @as([*]const blocks.block_q8_Kx4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
+        const a_ptr: [*]const ggml.cpu.repack.blocks.block_q8_Kx4 =
+            @as([*]const ggml.cpu.repack.blocks.block_q8_Kx4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
         var x: i32 = 0;
         while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
-            const b_ptr: [*]const blocks.block_q4_Kx8 =
-                @as([*]const blocks.block_q4_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
+            const b_ptr: [*]const ggml.cpu.repack.blocks.block_q4_Kx8 =
+                @as([*]const ggml.cpu.repack.blocks.block_q4_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
             for (0..4) |m| {
                 for (0..8) |j| {
                     sumf[m][j] = 0.0;
@@ -206,7 +200,7 @@ fn gemm(
                                 sumi2 = sumi2 * scales_1[j];
                                 sumi += sumi1 + sumi2;
                             }
-                            sumf[m][j] = epilogue.accumulate(sumf[m][j], sumi, convert.cpuFp16ToFp32(bl.d[j]), al.d[m]);
+                            sumf[m][j] = ggml.cpu.repack.epilogue.accumulate(sumf[m][j], sumi, ggml.cpu.convert.cpuFp16ToFp32(bl.d[j]), al.d[m]);
                         }
                     }
                 }
@@ -222,7 +216,7 @@ fn gemm(
                             // An integer product in the C; see the gemv.
                             const mins_prod: i32 = @as(i32, mins[j]) *
                                 (@as(i32, bsums[0]) + @as(i32, bsums[1]));
-                            sum_minf[m][j] = epilogue.accumulate(sum_minf[m][j], mins_prod, convert.cpuFp16ToFp32(bl.dmin[j]), al.d[m]);
+                            sum_minf[m][j] = ggml.cpu.repack.epilogue.accumulate(sum_minf[m][j], mins_prod, ggml.cpu.convert.cpuFp16ToFp32(bl.dmin[j]), al.d[m]);
                         }
                     }
                 }

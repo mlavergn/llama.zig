@@ -19,8 +19,8 @@ const sd = @import("server_data");
 comptime {
     // libllama and libmtmd, compiled in: their exports are what `c.llama_*`
     // and `c.mtmd_*` link against.
-    _ = @import("llama");
-    _ = @import("mtmd");
+    _ = @import("llama").lib;
+    _ = @import("mtmd").lib;
 }
 
 const c = tools.c;

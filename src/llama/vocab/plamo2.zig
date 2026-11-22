@@ -16,16 +16,10 @@
 //! does this.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const unicode = @import("../unicode.zig");
-const vm = @import("module.zig");
-
-const allocator = impl.allocator;
-const Vocab = vm.Vocab;
-const Token = vm.Token;
+const llama = @import("../module.zig");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 const table_piece_length = 0;
@@ -45,7 +39,7 @@ pub const Tokenizer = struct {
     /// `pre_segment_`: true for PLaMo-3.
     pre_segment: bool,
     /// `bytes_`: the token for each byte value.
-    bytes: [256]Token,
+    bytes: [256]llama.vocab.Token,
     /// `to_suffix_id_`: (code point, piece id) to suffix id.
     to_suffix_id: std.AutoHashMapUnmanaged(i64, i32) = .empty,
     /// `table_`: [piece_length, token_id, score, piece_id] rows.
@@ -60,22 +54,22 @@ pub const Tokenizer = struct {
     ///
     /// Return: the tokenizer, or `error.Thrown` -- a byte with no token, or
     /// a code point `unicode_cpt_to_utf8` refuses.
-    pub fn init(vocab: *const Vocab, pre_segment: bool, exc: *impl.Exception) impl.Thrown!Tokenizer {
+    pub fn init(vocab: *const llama.vocab.Vocab, pre_segment: bool, exc: *llama.impl.Exception) llama.impl.Thrown!Tokenizer {
         var t: Tokenizer = .{ .pre_segment = pre_segment, .bytes = @splat(0) };
         errdefer t.deinit();
 
-        var arena_state = std.heap.ArenaAllocator.init(allocator);
+        var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer arena_state.deinit();
         const arena = arena_state.allocator();
 
         // Build token list and byte mapping
         var suffix_to_score: std.StringHashMapUnmanaged(f32) = .empty;
-        var token_to_id: std.StringHashMapUnmanaged(Token) = .empty;
+        var token_to_id: std.StringHashMapUnmanaged(llama.vocab.Token) = .empty;
 
         const n = vocab.nTokens();
         var token_id: u32 = 0;
         while (token_id < n) : (token_id += 1) {
-            const tid: Token = @intCast(token_id);
+            const tid: llama.vocab.Token = @intCast(token_id);
             const entry = try vocab.getTokenData(tid, exc);
             const text = vocab.text(tid);
             (token_to_id.getOrPut(arena, text) catch oom()).value_ptr.* = tid;
@@ -95,8 +89,8 @@ pub const Tokenizer = struct {
             (suffix_to_score.getOrPut(arena, text) catch oom()).value_ptr.* = entry.score;
 
             // Extract suffixes character by character (UTF-8 aware)
-            const cpts = unicode.cptsFromUtf8(text);
-            defer allocator.free(cpts);
+            const cpts = llama.unicode.cptsFromUtf8(text);
+            defer std.heap.c_allocator.free(cpts);
             var i: usize = 1;
             while (i < cpts.len) : (i += 1) {
                 const suffix = try utf8Of(arena, cpts[i..], exc);
@@ -125,14 +119,14 @@ pub const Tokenizer = struct {
         for (suffixes.items) |suffix| {
             (suffix_to_id.getOrPut(arena, suffix) catch oom()).value_ptr.* = num_pieces;
             if (suffix.len != 0) {
-                const cpts = unicode.cptsFromUtf8(suffix);
-                defer allocator.free(cpts);
+                const cpts = llama.unicode.cptsFromUtf8(suffix);
+                defer std.heap.c_allocator.free(cpts);
 
                 const remaining = try utf8Of(arena, cpts[1..], exc);
                 const rid = suffix_to_id.getOrPut(arena, remaining) catch oom();
                 if (!rid.found_existing) rid.value_ptr.* = 0;
                 const piece_code: i64 = (@as(i64, cpts[0]) << 32) | @as(i64, rid.value_ptr.*);
-                (t.to_suffix_id.getOrPut(allocator, piece_code) catch oom()).value_ptr.* = num_pieces;
+                (t.to_suffix_id.getOrPut(std.heap.c_allocator, piece_code) catch oom()).value_ptr.* = num_pieces;
 
                 // Count number of pieces for this suffix
                 var pieces_for_suffix: i32 = 1; // sentinel row
@@ -148,13 +142,13 @@ pub const Tokenizer = struct {
         }
 
         // Build flattened table
-        t.table.appendNTimes(allocator, .{ 0, 0, 0, 0 }, @intCast(num_pieces)) catch oom();
+        t.table.appendNTimes(std.heap.c_allocator, .{ 0, 0, 0, 0 }, @intCast(num_pieces)) catch oom();
         var table_idx: usize = 0;
 
         for (suffixes.items) |suffix| {
             // Add all prefixes of the suffix to the table (in decreasing order of length)
-            const cpts = unicode.cptsFromUtf8(suffix);
-            defer allocator.free(cpts);
+            const cpts = llama.unicode.cptsFromUtf8(suffix);
+            defer std.heap.c_allocator.free(cpts);
             var piece_length: usize = cpts.len;
             while (piece_length > 0) : (piece_length -= 1) {
                 const piece = try utf8Of(arena, cpts[0..piece_length], exc);
@@ -184,8 +178,8 @@ pub const Tokenizer = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *Tokenizer) void {
-        self.to_suffix_id.deinit(allocator);
-        self.table.deinit(allocator);
+        self.to_suffix_id.deinit(std.heap.c_allocator);
+        self.table.deinit(std.heap.c_allocator);
     }
 
     /// Ports `llm_tokenizer_plamo2`'s `encode` (llama-vocab.cpp:1607
@@ -193,10 +187,10 @@ pub const Tokenizer = struct {
     ///
     /// Return: nothing; `error.Thrown` is not raised but kept for the
     /// tokenizers' common shape.
-    pub fn encode(self: *const Tokenizer, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    pub fn encode(self: *const Tokenizer, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         _ = exc;
-        const unicode_data = unicode.cptsFromUtf8(text);
-        defer allocator.free(unicode_data);
+        const unicode_data = llama.unicode.cptsFromUtf8(text);
+        defer std.heap.c_allocator.free(unicode_data);
         // The PLaMo-3 tokenizer keeps a leading U+FEFF in the input.
         if (!self.pre_segment) {
             const skip: usize = @intFromBool(unicode_data.len != 0 and unicode_data[0] == 0xFEFF);
@@ -205,8 +199,8 @@ pub const Tokenizer = struct {
         }
 
         const n = unicode_data.len;
-        const cut = allocator.alloc(bool, n + 1) catch oom();
-        defer allocator.free(cut);
+        const cut = std.heap.c_allocator.alloc(bool, n + 1) catch oom();
+        defer std.heap.c_allocator.free(cut);
         @memset(cut, false);
 
         // pass 1: <|plamo:...|>
@@ -224,7 +218,7 @@ pub const Tokenizer = struct {
                 // Treat U+001C..U+001F as whitespace (equivalent to Python \s).
                 while (j < n and j - (i + prefix_len) < 64 and unicode_data[j] != '|' and
                     (unicode_data[j] < 0x1C or unicode_data[j] > 0x1F) and
-                    !unicode.cptFlagsFromCpt(unicode_data[j]).is_whitespace)
+                    !llama.unicode.cptFlagsFromCpt(unicode_data[j]).is_whitespace)
                 {
                     j += 1;
                 }
@@ -273,20 +267,20 @@ pub const Tokenizer = struct {
     /// Ports `llm_tokenizer_plamo2`'s `encode_cpts` (llama-vocab.cpp:1689
     /// @b1b770d90): the dynamic program over one run of code points,
     /// appending to `output`.
-    fn encodeCpts(self: *const Tokenizer, unicode_data: []const u32, output: *std.ArrayList(Token)) void {
+    fn encodeCpts(self: *const Tokenizer, unicode_data: []const u32, output: *std.ArrayList(llama.vocab.Token)) void {
         if (unicode_data.len == 0) return;
 
         const data_len = unicode_data.len;
 
         // Initialize scores array (dynamic programming)
-        const scores = allocator.alloc(i64, data_len + 1) catch oom();
-        defer allocator.free(scores);
+        const scores = std.heap.c_allocator.alloc(i64, data_len + 1) catch oom();
+        defer std.heap.c_allocator.free(scores);
         @memset(scores, @as(i64, 1) << 60);
         scores[data_len] = 0;
 
         // Path array to track best tokenization
-        const path = allocator.alloc([3]i32, data_len + 1) catch oom();
-        defer allocator.free(path);
+        const path = std.heap.c_allocator.alloc([3]i32, data_len + 1) catch oom();
+        defer std.heap.c_allocator.free(path);
         @memset(path, .{ 0, 0, 0 });
 
         const table = self.table.items;
@@ -329,11 +323,11 @@ pub const Tokenizer = struct {
         }
 
         // Decode the best path
-        output.ensureUnusedCapacity(allocator, @intCast(path[0][path_num_tokens])) catch oom();
+        output.ensureUnusedCapacity(std.heap.c_allocator, @intCast(path[0][path_num_tokens])) catch oom();
         var pos: usize = 0;
         while (pos < data_len) {
             if (path[pos][path_token_id] >= 0) {
-                output.append(allocator, path[pos][path_token_id]) catch oom();
+                output.append(std.heap.c_allocator, path[pos][path_token_id]) catch oom();
             } else {
                 // Fall back to byte tokens
                 const ch = unicode_data[pos];
@@ -349,7 +343,7 @@ pub const Tokenizer = struct {
                         b = 0x80;
                     }
                     const idx = b | @as(u8, @truncate((ch >> @intCast((s - i - 1) * 6)) & 0x3F));
-                    output.append(allocator, self.bytes[idx]) catch oom();
+                    output.append(std.heap.c_allocator, self.bytes[idx]) catch oom();
                 }
             }
             pos += @intCast(path[pos][path_token_length]);
@@ -370,11 +364,11 @@ fn reversedLess(_: void, a: []const u8, b: []const u8) bool {
 
 /// The code points concatenated as UTF-8, as the C++'s `+=` of
 /// `unicode_cpt_to_utf8` builds them.
-fn utf8Of(arena: std.mem.Allocator, cpts: []const u32, exc: *impl.Exception) impl.Thrown![]const u8 {
+fn utf8Of(arena: std.mem.Allocator, cpts: []const u32, exc: *llama.impl.Exception) llama.impl.Thrown![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     for (cpts) |cp| {
         var b: [4]u8 = undefined;
-        const s = unicode.cptToUtf8(cp, &b) catch return exc.throw(.invalid_argument, "invalid codepoint", .{});
+        const s = llama.unicode.cptToUtf8(cp, &b) catch return exc.throw(.invalid_argument, "invalid codepoint", .{});
         out.appendSlice(arena, s) catch oom();
     }
     return out.items;

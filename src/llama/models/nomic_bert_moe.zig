@@ -9,18 +9,10 @@
 //! `llama_model_bert`'s, in `bert.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const bert = @import("bert.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_nomic_bert_moe`'s `load_arch_hparams` (models/nomic-bert-moe.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.f_norm_eps = (try meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
@@ -35,13 +27,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 /// Ports `llama_model_nomic_bert_moe`'s `load_arch_tensors` (models/nomic-bert-moe.cpp:14 @b1b770d90):
 /// BERT's body without positions or classifier, with an expert layer every
 /// `moe_every_n_layers`.
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
-    return bert.loadBertTensors(self, .{ .pos_cls = false, .moe = true, .gate = false }, exc);
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    return llama.models.bert.loadBertTensors(self, .{ .pos_cls = false, .moe = true, .gate = false }, exc);
 }
 
 /// Ports `llama_model_nomic_bert_moe`'s `build_arch_graph` (models/nomic-bert-moe.cpp:53 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    bert.buildGraph(model, b);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.models.bert.buildGraph(model, b);
 }
 
 // -----------------------------------------------------------------------------

@@ -10,23 +10,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 const DSML = "｜DSML｜";
 const THINK_START = "<think>";
@@ -39,8 +27,8 @@ const CallOrder = struct { id: []const u8, idx: usize };
 
 /// `m.value("role", "")`, which throws a type error for a role that is not
 /// a string.
-fn role(m: *const Value) Error![]const u8 {
-    return m.value("role", []const u8, "") catch |e| util.fromJson(e);
+fn role(m: *const json.Value) common_chat.exception.Error![]const u8 {
+    return m.value("role", []const u8, "") catch |e| common_chat.util.fromJson(e);
 }
 
 /// Ports `deepseek_v4_sort_tool_results` (parsers/deepseek.cpp:7 @b1b770d90): each
@@ -48,14 +36,14 @@ fn role(m: *const Value) Error![]const u8 {
 /// the preceding assistant message's tool calls, matched by id.
 ///
 /// Return: a copy owned by `a`.
-fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
+fn deepseekV4SortToolResults(a: Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
     var adjusted = try messages.clone(a);
     var call_order: std.ArrayList(CallOrder) = .empty;
 
     const size = adjusted.size();
     var i: usize = 0;
     while (i < size) {
-        const msg = adjusted.atIndex(i) catch |e| return util.fromJson(e);
+        const msg = adjusted.atIndex(i) catch |e| return common_chat.util.fromJson(e);
         const r = try role(msg);
 
         if (std.mem.eql(u8, r, "assistant") and msg.contains("tool_calls")) {
@@ -65,7 +53,7 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
             if (tool_calls.isArray() and !tool_calls.empty()) {
                 call_order.clearRetainingCapacity();
                 for (tool_calls.array.items, 0..) |*tc, idx| {
-                    const id = tc.value("id", []const u8, "") catch |e| return util.fromJson(e);
+                    const id = tc.value("id", []const u8, "") catch |e| return common_chat.util.fromJson(e);
                     if (id.len != 0) {
                         for (call_order.items) |*e| {
                             if (std.mem.eql(u8, e.id, id)) {
@@ -89,7 +77,7 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
         var tool_positions: std.ArrayList(usize) = .empty;
         var run_end = i;
         while (run_end < size) : (run_end += 1) {
-            const rr = try role(adjusted.atIndex(run_end) catch |e| return util.fromJson(e));
+            const rr = try role(adjusted.atIndex(run_end) catch |e| return common_chat.util.fromJson(e));
             if (std.mem.eql(u8, rr, "tool")) {
                 try tool_positions.append(a, run_end);
             } else if (!std.mem.eql(u8, rr, "user")) {
@@ -98,13 +86,13 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
         }
 
         if (tool_positions.items.len > 1 and call_order.items.len != 0) {
-            const Keyed = struct { order: usize, v: Value };
+            const Keyed = struct { order: usize, v: json.Value };
             const results = try a.alloc(Keyed, tool_positions.items.len);
             for (tool_positions.items, results) |pos, *res| {
                 const m = adjusted.atIndex(pos) catch |err| switch (err) {
                     error.OutOfMemory, error.JsonError => unreachable,
                 };
-                const id = m.value("tool_call_id", []const u8, "") catch |e| return util.fromJson(e);
+                const id = m.value("tool_call_id", []const u8, "") catch |e| return common_chat.util.fromJson(e);
                 var order: usize = 0;
                 for (call_order.items) |e| {
                     if (std.mem.eql(u8, e.id, id)) {
@@ -135,8 +123,8 @@ fn deepseekV4SortToolResults(a: Allocator, messages: *const Value) Error!Value {
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
-    tools: *const Value,
+    inputs: *const common_chat.template.GenerationParams,
+    tools: *const json.Value,
     is_v4: bool,
     is_v41: bool,
     fc_start: []const u8,
@@ -149,14 +137,14 @@ const Build = struct {
     extract_reasoning: bool,
     require_tools: bool,
     has_tool_calls: bool,
-    cb: *ChatBuilder = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    tool_choice: peg.ParserId = undefined,
     name: []const u8 = "",
     tool_index: usize = 0,
-    required_parsers: std.ArrayList(ParserId) = .empty,
-    optional_parsers: std.ArrayList(ParserId) = .empty,
+    required_parsers: std.ArrayList(peg.ParserId) = .empty,
+    optional_parsers: std.ArrayList(peg.ParserId) = .empty,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const generation_prompt = try b.literal(GEN_PROMPT);
@@ -165,7 +153,7 @@ const Build = struct {
         // build tool call section first since we might need it in reasoning
         self.tool_choice = try b.choiceEmpty();
         if (self.has_tool_calls) {
-            parsers.foreachFunction(self.tools, self, tool) catch |e| return util.toPeg(e);
+            common_chat.parsers.foreachFunction(self.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
         }
         const tool_choice = self.tool_choice;
 
@@ -230,18 +218,18 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(generation_prompt, reasoning), content_before_tools), tool_calls), end);
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
         self.tool_index = tool_index;
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        self.name = try parsers.functionName(t);
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        self.name = try common_chat.parsers.functionName(t);
         self.required_parsers = .empty;
         self.optional_parsers = .empty;
-        try parsers.foreachParameter(self.a, function, self, param);
-        self.finishTool() catch |e| return util.fromPeg(e);
+        try common_chat.parsers.foreachParameter(self.a, function, self, param);
+        self.finishTool() catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const named_arg = self.buildParam(param_index, prm, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) common_chat.exception.Error!void {
+        const named_arg = self.buildParam(param_index, prm, doc) catch |e| return common_chat.util.fromPeg(e);
         if (prm.required) {
             try self.required_parsers.append(self.a, named_arg);
         } else {
@@ -249,7 +237,7 @@ const Build = struct {
         }
     }
 
-    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
         const is_string = prm.schema.mayBeString() catch |e| return peg.errors.fromSchema(e);
@@ -260,13 +248,13 @@ const Build = struct {
         const value = if (is_string)
             try p.toolArgStringValue(try b.until(self.param_end))
         else
-            try p.toolArgJsonValue(try b.schemaDoc(try b.json(), try parsers.argName(self.a, self.tool_index, param_index, "-schema"), doc, prm.schema, false));
+            try p.toolArgJsonValue(try b.schemaDoc(try b.json(), try common_chat.parsers.argName(self.a, self.tool_index, param_index, "-schema"), doc, prm.schema, false));
         const arg = try p.toolArg(try b.plus(try b.plus(open, value), try p.toolArgClose(try b.literal(self.param_end))));
 
-        return b.rule(try parsers.argName(self.a, self.tool_index, param_index, ""), arg, false);
+        return b.rule(try common_chat.parsers.argName(self.a, self.tool_index, param_index, ""), arg, false);
     }
 
-    fn finishTool(self: *Build) chat_peg.Error!void {
+    fn finishTool(self: *Build) peg.Error!void {
         const p = self.cb;
         const b = &p.b;
         var args_seq = try b.eps();
@@ -291,26 +279,26 @@ const Build = struct {
         const body = try b.plus(try b.plus(try b.plus(open, invoke_body), try b.space()), try p.toolClose(try b.literal(self.invoke_end)));
         const func_parser = try p.tool(body);
 
-        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", self.tool_index, ""), func_parser, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try common_chat.parsers.indexName(self.a, "tool-", self.tool_index, ""), func_parser, false));
     }
 };
 
 /// Ports `common_chat_params_init_deepseek_v3_2` (parsers/deepseek.cpp:70 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
     // V4 uses the same DSML markup as V3.2, but names the tool call block "tool_calls"
     // instead of "function_calls", renders tool results in tool call order and its
     // non-thinking generation prompt ends with a bare </think> instead of an empty
     // <think></think> pair.
-    const is_v4 = !util.contains(tmpl.source(), "function_calls");
+    const is_v4 = !common_chat.util.contains(tmpl.source(), "function_calls");
     // V4.1: DSML tag names carry a leading space, e.g. <｜DSML｜ calls>
-    const is_v41 = is_v4 and util.contains(tmpl.source(), "｜DSML｜ calls>");
+    const is_v41 = is_v4 and common_chat.util.contains(tmpl.source(), "｜DSML｜ calls>");
 
-    var adjusted_storage: Value = .null;
-    var adjusted_messages: ?*const Value = null;
+    var adjusted_storage: json.Value = .null;
+    var adjusted_messages: ?*const json.Value = null;
     if (is_v4) {
         adjusted_storage = try deepseekV4SortToolResults(a, &inputs.messages);
         adjusted_messages = &adjusted_storage;
@@ -318,46 +306,46 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
 
     // V4.1 can declare tools on a system message instead of top-level "tools": parse calls to those too.
     var tools = try inputs.tools.clone(a);
-    if (is_v41 and !parsers.hasTools(&tools) and inputs.messages.isArray()) {
+    if (is_v41 and !common_chat.parsers.hasTools(&tools) and inputs.messages.isArray()) {
         for (inputs.messages.array.items) |*msg| {
             if (std.mem.eql(u8, try role(msg), "system") and msg.contains("tools")) {
-                const msg_tools = msg.at("tools") catch |e| return util.fromJson(e);
+                const msg_tools = msg.at("tools") catch |e| return common_chat.util.fromJson(e);
                 if (!msg_tools.isArray()) continue;
-                if (!tools.isArray()) tools = Value.emptyArray();
+                if (!tools.isArray()) tools = json.Value.emptyArray();
                 for (msg_tools.array.items) |*tool| {
-                    tools.pushBack(a, try tool.clone(a)) catch |e| return util.fromJson(e);
+                    tools.pushBack(a, try tool.clone(a)) catch |e| return common_chat.util.fromJson(e);
                 }
             }
         }
     }
 
-    const has_tools = parsers.hasTools(&tools);
+    const has_tools = common_chat.parsers.hasTools(&tools);
     const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
 
-    var additional_storage: Value = .null;
-    var additional_context: ?*const Value = null;
+    var additional_storage: json.Value = .null;
+    var additional_context: ?*const json.Value = null;
     if (is_v4 and has_response_format) {
-        additional_storage = Value.emptyObject();
+        additional_storage = json.Value.emptyObject();
         try additional_storage.set(a, "response_format", try inputs.json_schema.clone(a));
         additional_context = &additional_storage;
     }
     // V4.1 raises on anything but low/high/max or 1-100: map minimal -> low, xhigh -> max, medium -> default
     if (is_v41 and inputs.extra_context.isObject() and inputs.extra_context.contains("reasoning_effort")) {
-        const effort_v = inputs.extra_context.at("reasoning_effort") catch |e| return util.fromJson(e);
+        const effort_v = inputs.extra_context.at("reasoning_effort") catch |e| return common_chat.util.fromJson(e);
         if (effort_v.isString()) {
             const effort = effort_v.string;
             const is_minimal = std.mem.eql(u8, effort, "minimal");
             const is_xhigh = std.mem.eql(u8, effort, "xhigh");
             if (is_minimal or is_xhigh or std.mem.eql(u8, effort, "medium")) {
                 const mapped: ?[]const u8 = if (is_minimal) "low" else if (is_xhigh) "max" else null;
-                log.dbg("{s}: DeepSeek V4.1 reasoning_effort '{s}' -> {s}\n", .{ "common_chat_params_init_deepseek_v3_2", effort, mapped orelse "unset (template default)" });
+                common_chat.log.dbg("{s}: DeepSeek V4.1 reasoning_effort '{s}' -> {s}\n", .{ "common_chat_params_init_deepseek_v3_2", effort, mapped orelse "unset (template default)" });
                 if (additional_context == null) {
-                    additional_storage = Value.emptyObject();
+                    additional_storage = json.Value.emptyObject();
                     additional_context = &additional_storage;
                 }
-                try additional_storage.set(a, "reasoning_effort", if (mapped) |m| try Value.from(a, m) else .null);
+                try additional_storage.set(a, "reasoning_effort", if (mapped) |m| try json.Value.from(a, m) else .null);
             }
         }
     }
@@ -375,8 +363,8 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     try data.message_delimiters.add(a, .assistant, GEN_PROMPT);
     try data.message_delimiters.add(a, .user, "<｜User｜>");
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, adjusted_messages, null, additional_context);
     data.format = .peg_native;
     data.supports_thinking = true;
     data.thinking_start_tag = THINK_START;
@@ -421,12 +409,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .require_tools = require_tools,
         .has_tool_calls = has_tool_calls,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !has_response_format and has_tools and !require_tools;
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, fc_start);
     }
 
@@ -445,9 +433,9 @@ test "deepseek-ai-DeepSeek-V3.2.jinja applies with a tool and builds a parser an
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "llama.cpp/models/templates/deepseek-ai-DeepSeek-V3.2.jinja", a, .limited(1 << 20));
-    var t = try template.Template.init(std.testing.allocator, src, "<s>", "</s>");
+    var t = try common_chat.template.Template.init(std.testing.allocator, src, "<s>", "</s>");
     defer t.deinit();
-    var p: GenerationParams = .{ .add_generation_prompt = true };
+    var p: common_chat.template.GenerationParams = .{ .add_generation_prompt = true };
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);

@@ -37,39 +37,24 @@
 //!   so the bytes do not depend on how many threads there are.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("impl.zig");
-const arch = @import("arch.zig");
-const libcxx = @import("stdlib").libcxx;
-const loader = @import("loader.zig");
-const mmap = @import("mmap.zig");
-const model_mod = @import("model.zig");
-const regex = @import("regex.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const GgmlType = c.enum_ggml_type;
-const Ftype = c.enum_llama_ftype;
 
 /// Ports `LLAMA_QUANT_MAX_BUF_SIZE` (llama-quant.cpp:44 @b1b770d90): the
 /// most tensor data kept in memory while quantizing one tensor.
 pub const max_buf_size_default: usize = 8 * 1024 * 1024 * 1024;
 
 fn oom() noreturn {
-    impl.abort("llama-quant.cpp", 0, "out of memory");
+    mod.impl.abort("llama-quant.cpp", 0, "out of memory");
 }
 
-fn nameOf(t: *const Tensor) [:0]const u8 {
+fn nameOf(t: *const mod.impl.c.ggml_tensor) [:0]const u8 {
     return std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&t.name)), 0);
 }
 
-fn typeName(ty: GgmlType) [*:0]const u8 {
-    return c.ggml_type_name(ty);
+fn typeName(ty: mod.impl.c.enum_ggml_type) [*:0]const u8 {
+    return mod.impl.c.ggml_type_name(ty);
 }
 
 fn contains(haystack: []const u8, needle: []const u8) bool {
@@ -78,11 +63,11 @@ fn contains(haystack: []const u8, needle: []const u8) bool {
 
 /// A key's name for the gguf API, NUL-terminated.
 const KeyZ = struct {
-    buf: [arch.max_name + 1]u8 = undefined,
+    buf: [mod.arch.max_name + 1]u8 = undefined,
 
-    fn init(a: arch.Arch, kv: arch.Kv) KeyZ {
+    fn init(a: mod.arch_table.Arch, kv: mod.arch_table.Kv) KeyZ {
         var self: KeyZ = .{};
-        const n = arch.kvName(a, kv, null);
+        const n = mod.arch.kvName(a, kv, null);
         @memcpy(self.buf[0..n.len], n.slice());
         self.buf[n.len] = 0;
         return self;
@@ -164,14 +149,14 @@ fn categoryIsAttnV(cat: Category) bool {
 
 /// One compiled `tt_overrides` entry.
 const Pattern = struct {
-    re: regex.Regex,
-    type: GgmlType,
+    re: mod.regex.Regex,
+    type: mod.impl.c.enum_ggml_type,
 };
 
 /// Ports `quantize_state_impl` (llama-quant.cpp:182 @b1b770d90).
 pub const State = struct {
-    model: *const Model,
-    params: *const c.llama_model_quantize_params,
+    model: *const mod.model.Model,
+    params: *const mod.impl.c.llama_model_quantize_params,
 
     n_attention_wv: c_int = 0,
     n_ffn_down: c_int = 0,
@@ -202,15 +187,15 @@ pub const State = struct {
     /// - `exc`: receives what is thrown.
     ///
     /// Return: the state; free it with `deinit`.
-    pub fn init(model: *const Model, params: *const c.llama_model_quantize_params, exc: *Exception) Thrown!State {
+    pub fn init(model: *const mod.model.Model, params: *const mod.impl.c.llama_model_quantize_params, exc: *mod.impl.Exception) mod.impl.Thrown!State {
         var self: State = .{ .model = model, .params = params };
         errdefer self.deinit();
         if (params.tt_overrides != null) {
             var p = params.tt_overrides;
             while (p[0].pattern != null) : (p += 1) {
-                const re = regex.Regex.compile(std.mem.span(p[0].pattern)) catch |e|
-                    return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)});
-                self.tensor_type_patterns.append(allocator, .{ .re = re, .type = p[0].type }) catch oom();
+                const re = mod.regex.Regex.compile(std.mem.span(p[0].pattern)) catch |e|
+                    return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)});
+                self.tensor_type_patterns.append(std.heap.c_allocator, .{ .re = re, .type = p[0].type }) catch oom();
             }
         }
         return self;
@@ -219,22 +204,22 @@ pub const State = struct {
     /// Return: nothing.
     pub fn deinit(self: *State) void {
         for (self.tensor_type_patterns.items) |*p| p.re.deinit();
-        self.tensor_type_patterns.deinit(allocator);
+        self.tensor_type_patterns.deinit(std.heap.c_allocator);
     }
 };
 
 /// Mirrors `tensor_metadata` (llama-quant.cpp:218 @b1b770d90).
 const Metadata = struct {
     name: [:0]u8 = undefined,
-    target_type: GgmlType = 0,
+    target_type: mod.impl.c.enum_ggml_type = 0,
     category: Category = .other,
     remapped_imatrix_name: []u8 = &[_]u8{},
     allows_quantization: bool = false,
     requires_imatrix: bool = false,
 
     fn deinit(self: *Metadata) void {
-        allocator.free(self.name);
-        allocator.free(self.remapped_imatrix_name);
+        std.heap.c_allocator.free(self.name);
+        std.heap.c_allocator.free(self.remapped_imatrix_name);
     }
 };
 
@@ -244,7 +229,7 @@ const Metadata = struct {
 const blk_pattern = "blk\\.(\\d+)\\.";
 
 /// `std::stoi` on a run of digits: `stoi: out of range` past `INT_MAX`.
-fn stoi(digits: []const u8, exc: *Exception) Thrown!c_int {
+fn stoi(digits: []const u8, exc: *mod.impl.Exception) mod.impl.Thrown!c_int {
     return switch (stdlib.num.stoi(digits)) {
         .ok => |v| v,
         .no_conversion => exc.throw(.invalid_argument, "stoi: no conversion", .{}),
@@ -258,9 +243,9 @@ const LayerMap = struct {
     vals: std.ArrayList([]u8) = .empty,
 
     fn deinit(self: *LayerMap) void {
-        for (self.vals.items) |v| allocator.free(v);
-        self.keys.deinit(allocator);
-        self.vals.deinit(allocator);
+        for (self.vals.items) |v| std.heap.c_allocator.free(v);
+        self.keys.deinit(std.heap.c_allocator);
+        self.vals.deinit(std.heap.c_allocator);
     }
 
     fn get(self: *const LayerMap, k: c_int) ?[]const u8 {
@@ -271,8 +256,8 @@ const LayerMap = struct {
     fn put(self: *LayerMap, k: c_int, v: []u8) void {
         var at: usize = 0;
         while (at < self.keys.items.len and self.keys.items[at] < k) at += 1;
-        self.keys.insert(allocator, at, k) catch oom();
-        self.vals.insert(allocator, at, v) catch oom();
+        self.keys.insert(std.heap.c_allocator, at, k) catch oom();
+        self.vals.insert(std.heap.c_allocator, at, v) catch oom();
     }
 
     fn empty(self: *const LayerMap) bool {
@@ -284,12 +269,12 @@ const LayerMap = struct {
 ///
 /// Return: the new name, owned by the caller: empty when the block is
 /// pruned, `orig_name` when nothing moves.
-fn remapLayer(re: *const regex.Regex, orig_name: []const u8, prune: []const c_int, mapped: *LayerMap, next_id: *c_int, exc: *Exception) Thrown![]u8 {
-    if (prune.len == 0) return allocator.dupe(u8, orig_name) catch oom();
+fn remapLayer(re: *const mod.regex.Regex, orig_name: []const u8, prune: []const c_int, mapped: *LayerMap, next_id: *c_int, exc: *mod.impl.Exception) mod.impl.Thrown![]u8 {
+    if (prune.len == 0) return std.heap.c_allocator.dupe(u8, orig_name) catch oom();
 
-    var m = regex.Match.init();
+    var m = mod.regex.Match.init();
     defer m.deinit();
-    if (re.trySearch(orig_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)})) {
+    if (re.trySearch(orig_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)})) {
         const pos = m.position(1);
         const len = m.length(1);
         const blk = try stoi(orig_name[pos..][0..len], exc);
@@ -297,45 +282,45 @@ fn remapLayer(re: *const regex.Regex, orig_name: []const u8, prune: []const c_in
         if (mapped.get(blk) != null) {
             // Already mapped, do nothing.
         } else if (std.mem.findScalar(c_int, prune, blk) != null) {
-            mapped.put(blk, allocator.dupe(u8, "") catch oom());
+            mapped.put(blk, std.heap.c_allocator.dupe(u8, "") catch oom());
         } else if (blk < prune[0]) {
-            mapped.put(blk, std.fmt.allocPrint(allocator, "{d}", .{blk}) catch oom());
+            mapped.put(blk, std.fmt.allocPrint(std.heap.c_allocator, "{d}", .{blk}) catch oom());
             next_id.* = blk + 1;
         } else {
-            mapped.put(blk, std.fmt.allocPrint(allocator, "{d}", .{next_id.*}) catch oom());
+            mapped.put(blk, std.fmt.allocPrint(std.heap.c_allocator, "{d}", .{next_id.*}) catch oom());
             next_id.* += 1;
         }
 
         const to = mapped.get(blk).?;
-        if (to.len == 0) return allocator.dupe(u8, "") catch oom();
-        return std.mem.concat(allocator, u8, &.{ orig_name[0..pos], to, orig_name[pos + len ..] }) catch oom();
+        if (to.len == 0) return std.heap.c_allocator.dupe(u8, "") catch oom();
+        return std.mem.concat(std.heap.c_allocator, u8, &.{ orig_name[0..pos], to, orig_name[pos + len ..] }) catch oom();
     }
 
-    return allocator.dupe(u8, orig_name) catch oom();
+    return std.heap.c_allocator.dupe(u8, orig_name) catch oom();
 }
 
 /// Ports `remap_imatrix` (llama-quant.cpp:81 @b1b770d90).
 ///
 /// Return: the name the imatrix knows the tensor by, owned by the caller.
-fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const LayerMap, exc: *Exception) Thrown![]u8 {
-    if (mapped.empty()) return allocator.dupe(u8, orig_name) catch oom();
+fn remapImatrix(re: *const mod.regex.Regex, orig_name: [:0]const u8, mapped: *const LayerMap, exc: *mod.impl.Exception) mod.impl.Thrown![]u8 {
+    if (mapped.empty()) return std.heap.c_allocator.dupe(u8, orig_name) catch oom();
 
-    var m = regex.Match.init();
+    var m = mod.regex.Match.init();
     defer m.deinit();
-    if (re.trySearch(orig_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)})) {
+    if (re.trySearch(orig_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)})) {
         const pos = m.position(1);
         const len = m.length(1);
         const blk = orig_name[pos..][0..len];
 
         for (mapped.keys.items, mapped.vals.items) |k, v| {
             if (std.mem.eql(u8, v, blk)) {
-                return std.fmt.allocPrint(allocator, "{s}{d}{s}", .{ orig_name[0..pos], k, orig_name[pos + len ..] }) catch oom();
+                return std.fmt.allocPrint(std.heap.c_allocator, "{s}{d}{s}", .{ orig_name[0..pos], k, orig_name[pos + len ..] }) catch oom();
             }
         }
-        c.ggml_abort("llama-quant.cpp", 96, "\n%s: imatrix mapping error for %s\n", "remap_imatrix", orig_name.ptr);
+        mod.impl.c.ggml_abort("llama-quant.cpp", 96, "\n%s: imatrix mapping error for %s\n", "remap_imatrix", orig_name.ptr);
     }
 
-    return allocator.dupe(u8, orig_name) catch oom();
+    return std.heap.c_allocator.dupe(u8, orig_name) catch oom();
 }
 
 // -----------------------------------------------------------------------------
@@ -344,13 +329,13 @@ fn remapImatrix(re: *const regex.Regex, orig_name: [:0]const u8, mapped: *const 
 /// Ports `llama_tensor_dequantize_impl` (llama-quant.cpp:231 @b1b770d90):
 /// `nelements` of `type` at `data` as f32 in `f32_output`, split across
 /// `nthread` threads.
-fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelements: usize, nthread: c_int, exc: *Exception) Thrown!void {
-    const qtype = c.ggml_get_type_traits(ty);
-    if (c.ggml_is_quantized(ty) or ty == c.GGML_TYPE_F8_E4M3) {
+fn dequantize(ty: mod.impl.c.enum_ggml_type, data: *const anyopaque, f32_output: [*]f32, nelements: usize, nthread: c_int, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    const qtype = mod.impl.c.ggml_get_type_traits(ty);
+    if (mod.impl.c.ggml_is_quantized(ty) or ty == mod.impl.c.GGML_TYPE_F8_E4M3) {
         if (qtype.*.to_float == null) {
             return exc.throw(.runtime_error, "type {s} unsupported for integer quantization: no dequantization available", .{typeName(ty)});
         }
-    } else if (ty != c.GGML_TYPE_F16 and ty != c.GGML_TYPE_BF16) {
+    } else if (ty != mod.impl.c.GGML_TYPE_F16 and ty != mod.impl.c.GGML_TYPE_BF16) {
         return exc.throw(.runtime_error, "cannot dequantize/convert tensor type {s}", .{typeName(ty)});
     }
 
@@ -359,13 +344,13 @@ fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelement
         return;
     }
 
-    const block_size: usize = if (ty == c.GGML_TYPE_F16 or ty == c.GGML_TYPE_BF16)
+    const block_size: usize = if (ty == mod.impl.c.GGML_TYPE_F16 or ty == mod.impl.c.GGML_TYPE_BF16)
         1
     else
-        @intCast(c.ggml_blck_size(ty));
-    const block_size_bytes = c.ggml_type_size(ty);
+        @intCast(mod.impl.c.ggml_blck_size(ty));
+    const block_size_bytes = mod.impl.c.ggml_type_size(ty);
 
-    impl.assert(nelements % block_size == 0, "llama-quant.cpp", 268, "nelements % block_size == 0");
+    mod.impl.assert(nelements % block_size == 0, "llama-quant.cpp", 268, "nelements % block_size == 0");
     const nt: usize = @intCast(nthread);
     const nblocks = nelements / block_size;
     const blocks_per_thread = nblocks / nt;
@@ -374,8 +359,8 @@ fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelement
     var in_buff_offs: usize = 0;
     var out_buff_offs: usize = 0;
 
-    const workers = allocator.alloc(std.Thread, nt) catch oom();
-    defer allocator.free(workers);
+    const workers = std.heap.c_allocator.alloc(std.Thread, nt) catch oom();
+    defer std.heap.c_allocator.free(workers);
     const base: [*]const u8 = @ptrCast(data);
     for (0..nt) |tnum| {
         const thr_blocks = blocks_per_thread + (if (tnum == nt - 1) spare_blocks else 0);
@@ -392,11 +377,11 @@ fn dequantize(ty: GgmlType, data: *const anyopaque, f32_output: [*]f32, nelement
 
 /// The `compute` lambda of `llama_tensor_dequantize_impl`
 /// (llama-quant.cpp:231 @b1b770d90).
-fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, outbuf: [*]f32, nels: i64) void {
-    if (ty == c.GGML_TYPE_F16) {
-        c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
-    } else if (ty == c.GGML_TYPE_BF16) {
-        c.ggml_bf16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
+fn convertRun(ty: mod.impl.c.enum_ggml_type, to_float: mod.impl.c.ggml_to_float_t, inbuf: [*]const u8, outbuf: [*]f32, nels: i64) void {
+    if (ty == mod.impl.c.GGML_TYPE_F16) {
+        mod.impl.c.ggml_fp16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
+    } else if (ty == mod.impl.c.GGML_TYPE_BF16) {
+        mod.impl.c.ggml_bf16_to_fp32_row(@ptrCast(@alignCast(inbuf)), outbuf, nels);
     } else {
         to_float.?(inbuf, outbuf, nels);
     }
@@ -413,11 +398,11 @@ fn convertRun(ty: GgmlType, to_float: c.ggml_to_float_t, inbuf: [*]const u8, out
 /// - `tensor`: the tensor.
 ///
 /// Return: whether the tensor may be quantized.
-pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a: arch.Arch, tensor: *const Tensor) bool {
+pub fn tensorAllowsQuantization(params: *const mod.impl.c.llama_model_quantize_params, a: mod.arch_table.Arch, tensor: *const mod.impl.c.ggml_tensor) bool {
     if (params.only_copy) return false;
 
     // Only 2D+ tensors (matrices, experts, conv kernels).
-    if (c.ggml_n_dims(tensor) < 2) return false;
+    if (mod.impl.c.ggml_n_dims(tensor) < 2) return false;
 
     const name = nameOf(tensor);
 
@@ -447,8 +432,8 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
     }
 
     // Positional embeddings and token types (BERT).
-    const pos_embd = arch.tensorName(.pos_embd, "weight", -1, -1);
-    const token_types = arch.tensorName(.token_types, "weight", -1, -1);
+    const pos_embd = mod.arch.tensorName(.pos_embd, "weight", -1, -1);
+    const token_types = mod.arch.tensorName(.token_types, "weight", -1, -1);
     allowed = allowed and !std.mem.eql(u8, name, pos_embd.slice());
     allowed = allowed and !std.mem.eql(u8, name, token_types.slice());
 
@@ -529,38 +514,38 @@ pub fn tensorAllowsQuantization(params: *const c.llama_model_quantize_params, a:
 /// Ports `tensor_type_fallback` (llama-quant.cpp:451 @b1b770d90): a type
 /// whose block the tensor's rows can hold. A 32-block target with no
 /// fallback of its own goes straight to the F16 check.
-fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Exception) Thrown!GgmlType {
+fn typeFallback(qs: *State, t: *const mod.impl.c.ggml_tensor, target_type: mod.impl.c.enum_ggml_type, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.enum_ggml_type {
     var return_type = target_type;
 
     const ncols = t.ne[0];
-    const qk_k = c.ggml_blck_size(target_type);
+    const qk_k = mod.impl.c.ggml_blck_size(target_type);
 
     if (@rem(ncols, qk_k) != 0) {
-        impl.logWarn("warning: %-36s - ncols %6lld not divisible by %3lld (required for type %7s) ", .{
+        mod.impl.logWarn("warning: %-36s - ncols %6lld not divisible by %3lld (required for type %7s) ", .{
             @as([*:0]const u8, @ptrCast(&t.name)), @as(c_longlong, ncols), @as(c_longlong, qk_k), typeName(target_type),
         });
         qs.n_fallback += 1;
 
         return_type = switch (target_type) {
             // Block size 256 on the left, 32 on the right.
-            c.GGML_TYPE_IQ1_S,
-            c.GGML_TYPE_IQ1_M,
-            c.GGML_TYPE_IQ2_XXS,
-            c.GGML_TYPE_IQ2_XS,
-            c.GGML_TYPE_IQ2_S,
-            c.GGML_TYPE_IQ3_XXS,
-            c.GGML_TYPE_IQ3_S,
-            c.GGML_TYPE_IQ4_XS,
-            => c.GGML_TYPE_IQ4_NL,
-            c.GGML_TYPE_Q2_0,
-            c.GGML_TYPE_Q2_K,
-            c.GGML_TYPE_Q3_K,
-            c.GGML_TYPE_TQ1_0,
-            c.GGML_TYPE_TQ2_0,
-            => c.GGML_TYPE_Q4_0,
-            c.GGML_TYPE_Q4_K => c.GGML_TYPE_Q5_0,
-            c.GGML_TYPE_Q5_K => c.GGML_TYPE_Q5_1,
-            c.GGML_TYPE_Q6_K => c.GGML_TYPE_Q8_0,
+            mod.impl.c.GGML_TYPE_IQ1_S,
+            mod.impl.c.GGML_TYPE_IQ1_M,
+            mod.impl.c.GGML_TYPE_IQ2_XXS,
+            mod.impl.c.GGML_TYPE_IQ2_XS,
+            mod.impl.c.GGML_TYPE_IQ2_S,
+            mod.impl.c.GGML_TYPE_IQ3_XXS,
+            mod.impl.c.GGML_TYPE_IQ3_S,
+            mod.impl.c.GGML_TYPE_IQ4_XS,
+            => mod.impl.c.GGML_TYPE_IQ4_NL,
+            mod.impl.c.GGML_TYPE_Q2_0,
+            mod.impl.c.GGML_TYPE_Q2_K,
+            mod.impl.c.GGML_TYPE_Q3_K,
+            mod.impl.c.GGML_TYPE_TQ1_0,
+            mod.impl.c.GGML_TYPE_TQ2_0,
+            => mod.impl.c.GGML_TYPE_Q4_0,
+            mod.impl.c.GGML_TYPE_Q4_K => mod.impl.c.GGML_TYPE_Q5_0,
+            mod.impl.c.GGML_TYPE_Q5_K => mod.impl.c.GGML_TYPE_Q5_1,
+            mod.impl.c.GGML_TYPE_Q6_K => mod.impl.c.GGML_TYPE_Q8_0,
             // The target is already a 32-block type, so there is no
             // smaller block to demote to; the check below turns it into
             // F16, as a 256-block type does when its fallback does not fit.
@@ -569,12 +554,12 @@ fn typeFallback(qs: *State, t: *const Tensor, target_type: GgmlType, exc: *Excep
             else
                 return exc.throw(.runtime_error, "no tensor type fallback is defined for type {s}", .{typeName(target_type)}),
         };
-        if (@rem(ncols, c.ggml_blck_size(return_type)) != 0) {
+        if (@rem(ncols, mod.impl.c.ggml_blck_size(return_type)) != 0) {
             // Most likely the first dimension is not divisible by 32.
-            impl.logWarn("(WARNING: must use F16 due to unusual shape) ", .{});
-            return_type = c.GGML_TYPE_F16;
+            mod.impl.logWarn("(WARNING: must use F16 due to unusual shape) ", .{});
+            return_type = mod.impl.c.GGML_TYPE_F16;
         }
-        impl.logWarn("-> falling back to %7s\n", .{typeName(return_type)});
+        mod.impl.logWarn("-> falling back to %7s\n", .{typeName(return_type)});
     }
     return return_type;
 }
@@ -589,10 +574,10 @@ fn useMoreBits(i_layer: c_int, n_layers: c_int) bool {
 /// The `layer_info` lambda of `llama_tensor_get_type_impl`
 /// (llama-quant.cpp:507 @b1b770d90): with experts, the layer is read from
 /// the name.
-fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const u8, exc: *Exception) Thrown![2]c_int {
+fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown![2]c_int {
     var i_layer = i_layer_in;
     if (n_expert > 1) {
-        if (c.sscanf(name.ptr, "blk.%d.", &i_layer) != 1) {
+        if (mod.impl.c.sscanf(name.ptr, "blk.%d.", &i_layer) != 1) {
             return exc.throw(.runtime_error, "Failed to determine layer for tensor {s}", .{name});
         }
         if (i_layer < 0 or i_layer >= n_layer) {
@@ -604,13 +589,13 @@ fn layerInfo(n_expert: c_int, i_layer_in: c_int, n_layer: c_int, name: [:0]const
 
 /// The `bits_per_weight` lambda of `llama_tensor_get_type_impl`
 /// (llama-quant.cpp:507 @b1b770d90).
-fn bitsPerWeight(t: GgmlType) f64 {
-    return 8.0 * @as(f64, @floatFromInt(c.ggml_type_size(t))) / @as(f64, @floatFromInt(c.ggml_blck_size(t)));
+fn bitsPerWeight(t: mod.impl.c.enum_ggml_type) f64 {
+    return 8.0 * @as(f64, @floatFromInt(mod.impl.c.ggml_type_size(t))) / @as(f64, @floatFromInt(mod.impl.c.ggml_blck_size(t)));
 }
 
 /// Ports `llama_tensor_get_type_impl` (llama-quant.cpp:507 @b1b770d90): the
 /// standard mixture for a file type, by category, layer and architecture.
-fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: Ftype, category: Category, exc: *Exception) Thrown!GgmlType {
+fn getTypeImpl(qs: *State, new_type_in: mod.impl.c.enum_ggml_type, tensor: *const mod.impl.c.ggml_tensor, ftype: mod.impl.c.enum_llama_ftype, category: Category, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.enum_ggml_type {
     var new_type = new_type_in;
     const name = nameOf(tensor);
     const a = qs.model.arch;
@@ -619,7 +604,7 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
     const n_expert: c_int = @max(1, @as(c_int, @bitCast(hp.n_expert)));
 
     const F = struct {
-        fn in(f: Ftype, comptime list: anytype) bool {
+        fn in(f: mod.impl.c.enum_llama_ftype, comptime list: anytype) bool {
             inline for (list) |x| if (f == x) return true;
             return false;
         }
@@ -628,8 +613,8 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
     // GLM5-Next keeps these at Q8_0 or above by default.
     if (a == .glm5_next and (contains(name, "attn_q_a") or contains(name, "attn_q_b") or contains(name, "nextn.eh_proj"))) {
         switch (new_type) {
-            c.GGML_TYPE_F32, c.GGML_TYPE_BF16, c.GGML_TYPE_F16 => {},
-            else => return c.GGML_TYPE_Q8_0,
+            mod.impl.c.GGML_TYPE_F32, mod.impl.c.GGML_TYPE_BF16, mod.impl.c.GGML_TYPE_F16 => {},
+            else => return mod.impl.c.GGML_TYPE_Q8_0,
         }
     }
 
@@ -639,230 +624,230 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
     // Widening the guard is likely a win there too, but it changes their
     // files, so it wants a perplexity comparison per architecture first.
     if (a == .muse_spark and (category == .ffn_latent or category == .attention_gate)) {
-        if (c.ggml_is_quantized(new_type) and bitsPerWeight(new_type) < bitsPerWeight(c.GGML_TYPE_Q8_0)) {
-            new_type = c.GGML_TYPE_Q8_0;
+        if (mod.impl.c.ggml_is_quantized(new_type) and bitsPerWeight(new_type) < bitsPerWeight(mod.impl.c.GGML_TYPE_Q8_0)) {
+            new_type = mod.impl.c.GGML_TYPE_Q8_0;
         }
     }
 
     if (category == .output or (qs.has_tied_embeddings and category == .token_embd)) {
         // Tied embeddings take the output tensor's quantization.
-        if (qs.params.output_tensor_type < c.GGML_TYPE_COUNT) {
+        if (qs.params.output_tensor_type < mod.impl.c.GGML_TYPE_COUNT) {
             new_type = qs.params.output_tensor_type;
         } else {
             const nx = tensor.ne[0];
-            const qk_k = c.ggml_blck_size(new_type);
+            const qk_k = mod.impl.c.ggml_blck_size(new_type);
 
-            if (ftype == c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE) {
-                new_type = c.GGML_TYPE_Q8_0;
+            if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE) {
+                new_type = mod.impl.c.GGML_TYPE_Q8_0;
             } else if (a == .falcon or @rem(nx, qk_k) != 0) {
-                new_type = c.GGML_TYPE_Q8_0;
+                new_type = mod.impl.c.GGML_TYPE_Q8_0;
             } else if (F.in(ftype, .{
-                c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, c.LLAMA_FTYPE_MOSTLY_IQ2_XS, c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
-                c.LLAMA_FTYPE_MOSTLY_IQ1_S,   c.LLAMA_FTYPE_MOSTLY_IQ2_S,  c.LLAMA_FTYPE_MOSTLY_IQ2_M,
-                c.LLAMA_FTYPE_MOSTLY_IQ1_M,
+                mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
+                mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S,   mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S,  mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M,
+                mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M,
             })) {
-                new_type = c.GGML_TYPE_Q5_K;
-            } else if (new_type != c.GGML_TYPE_Q8_0) {
-                new_type = c.GGML_TYPE_Q6_K;
+                new_type = mod.impl.c.GGML_TYPE_Q5_K;
+            } else if (new_type != mod.impl.c.GGML_TYPE_Q8_0) {
+                new_type = mod.impl.c.GGML_TYPE_Q6_K;
             }
         }
-    } else if (ftype == c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE) {
+    } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE) {
         // MoE tensors to MXFP4, the rest to Q8_0.
         if (isExpert(name)) {
-            new_type = c.GGML_TYPE_MXFP4;
+            new_type = mod.impl.c.GGML_TYPE_MXFP4;
         } else {
-            new_type = c.GGML_TYPE_Q8_0;
+            new_type = mod.impl.c.GGML_TYPE_Q8_0;
         }
     } else if (category == .token_embd) {
-        if (qs.params.token_embedding_type < c.GGML_TYPE_COUNT) {
+        if (qs.params.token_embedding_type < mod.impl.c.GGML_TYPE_COUNT) {
             new_type = qs.params.token_embedding_type;
         } else {
-            if (F.in(ftype, .{ c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, c.LLAMA_FTYPE_MOSTLY_IQ2_XS, c.LLAMA_FTYPE_MOSTLY_IQ1_S, c.LLAMA_FTYPE_MOSTLY_IQ1_M })) {
-                new_type = c.GGML_TYPE_Q2_K;
-            } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ2_S or ftype == c.LLAMA_FTYPE_MOSTLY_IQ2_M) {
-                new_type = c.GGML_TYPE_IQ3_S;
-            } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
-                new_type = c.GGML_TYPE_IQ3_S;
-            } else if (F.in(ftype, .{ c.LLAMA_FTYPE_MOSTLY_TQ1_0, c.LLAMA_FTYPE_MOSTLY_TQ2_0, c.LLAMA_FTYPE_MOSTLY_Q2_0 })) {
-                new_type = c.GGML_TYPE_Q4_K;
+            if (F.in(ftype, .{ mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M })) {
+                new_type = mod.impl.c.GGML_TYPE_Q2_K;
+            } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M) {
+                new_type = mod.impl.c.GGML_TYPE_IQ3_S;
+            } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
+                new_type = mod.impl.c.GGML_TYPE_IQ3_S;
+            } else if (F.in(ftype, .{ mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ1_0, mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ2_0, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_0 })) {
+                new_type = mod.impl.c.GGML_TYPE_Q4_K;
             }
         }
     } else if (F.in(ftype, .{
-        c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, c.LLAMA_FTYPE_MOSTLY_IQ2_XS, c.LLAMA_FTYPE_MOSTLY_IQ1_S,
-        c.LLAMA_FTYPE_MOSTLY_IQ2_S,   c.LLAMA_FTYPE_MOSTLY_IQ2_M,  c.LLAMA_FTYPE_MOSTLY_IQ1_M,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S,   mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M,  mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M,
     })) {
-        const is_s_or_m = ftype == c.LLAMA_FTYPE_MOSTLY_IQ2_S or ftype == c.LLAMA_FTYPE_MOSTLY_IQ2_M;
+        const is_s_or_m = ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M;
         if (categoryIsAttnV(category)) {
             if (hp.nGqa(0) >= 4 or hp.n_expert >= 4) {
-                new_type = c.GGML_TYPE_Q4_K;
+                new_type = mod.impl.c.GGML_TYPE_Q4_K;
             } else {
-                new_type = if (is_s_or_m) c.GGML_TYPE_IQ3_S else c.GGML_TYPE_Q2_K;
+                new_type = if (is_s_or_m) mod.impl.c.GGML_TYPE_IQ3_S else mod.impl.c.GGML_TYPE_Q2_K;
             }
             qs.i_attention_wv += 1;
         } else if (hp.n_expert == 8 and category == .attention_k) {
-            new_type = c.GGML_TYPE_Q4_K;
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
         } else if (category == .ffn_down) {
             if (qs.i_ffn_down < @divTrunc(qs.n_ffn_down, 8)) {
-                new_type = if (is_s_or_m) c.GGML_TYPE_IQ3_S else c.GGML_TYPE_Q2_K;
+                new_type = if (is_s_or_m) mod.impl.c.GGML_TYPE_IQ3_S else mod.impl.c.GGML_TYPE_Q2_K;
             }
             qs.i_ffn_down += 1;
         } else if (category == .attention_output) {
             if (hp.n_expert == 8) {
-                new_type = c.GGML_TYPE_Q5_K;
+                new_type = mod.impl.c.GGML_TYPE_Q5_K;
             } else {
-                if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ1_S or ftype == c.LLAMA_FTYPE_MOSTLY_IQ1_M) {
-                    new_type = c.GGML_TYPE_IQ2_XXS;
+                if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M) {
+                    new_type = mod.impl.c.GGML_TYPE_IQ2_XXS;
                 } else if (is_s_or_m) {
-                    new_type = c.GGML_TYPE_IQ3_S;
+                    new_type = mod.impl.c.GGML_TYPE_IQ3_S;
                 }
             }
         }
     } else if (categoryIsAttnV(category)) {
-        if (ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K) {
-            new_type = if (hp.nGqa(0) >= 4) c.GGML_TYPE_Q4_K else c.GGML_TYPE_Q3_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K_S and hp.nGqa(0) >= 4) {
-            new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
-            new_type = if (hp.nGqa(0) >= 4) c.GGML_TYPE_Q4_K else if (!qs.has_imatrix) c.GGML_TYPE_IQ3_S else c.GGML_TYPE_IQ3_XXS;
-        } else if ((ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XS or ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_S) and hp.nGqa(0) >= 4) {
-            new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_M) {
-            new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
-            new_type = if (qs.i_attention_wv < 2) c.GGML_TYPE_Q5_K else c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
-            new_type = c.GGML_TYPE_Q5_K;
-        } else if ((ftype == c.LLAMA_FTYPE_MOSTLY_IQ4_NL or ftype == c.LLAMA_FTYPE_MOSTLY_IQ4_XS) and hp.nGqa(0) >= 4) {
-            new_type = c.GGML_TYPE_Q5_K;
-        } else if ((ftype == c.LLAMA_FTYPE_MOSTLY_Q4_K_M or ftype == c.LLAMA_FTYPE_MOSTLY_Q5_K_M) and
+        if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K) {
+            new_type = if (hp.nGqa(0) >= 4) mod.impl.c.GGML_TYPE_Q4_K else mod.impl.c.GGML_TYPE_Q3_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K_S and hp.nGqa(0) >= 4) {
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
+            new_type = if (hp.nGqa(0) >= 4) mod.impl.c.GGML_TYPE_Q4_K else if (!qs.has_imatrix) mod.impl.c.GGML_TYPE_IQ3_S else mod.impl.c.GGML_TYPE_IQ3_XXS;
+        } else if ((ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_S) and hp.nGqa(0) >= 4) {
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M) {
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
+            new_type = if (qs.i_attention_wv < 2) mod.impl.c.GGML_TYPE_Q5_K else mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
+        } else if ((ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS) and hp.nGqa(0) >= 4) {
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
+        } else if ((ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M) and
             useMoreBits(qs.i_attention_wv, qs.n_attention_wv))
         {
-            new_type = c.GGML_TYPE_Q6_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q4_K_S and qs.i_attention_wv < 4) {
-            new_type = c.GGML_TYPE_Q5_K;
+            new_type = mod.impl.c.GGML_TYPE_Q6_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_S and qs.i_attention_wv < 4) {
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
         }
         if (qs.model.type == .@"70b") {
             // Eight heads share attn_v in the 70B model, so it is 8x
             // smaller than attn_q: more bits cost almost nothing.
-            if (new_type == c.GGML_TYPE_Q3_K or new_type == c.GGML_TYPE_Q4_K) new_type = c.GGML_TYPE_Q5_K;
+            if (new_type == mod.impl.c.GGML_TYPE_Q3_K or new_type == mod.impl.c.GGML_TYPE_Q4_K) new_type = mod.impl.c.GGML_TYPE_Q5_K;
         }
         if (hp.n_expert == 8) {
             // For the 8-expert model, Q8_0 trades just ~128MB.
-            new_type = c.GGML_TYPE_Q8_0;
+            new_type = mod.impl.c.GGML_TYPE_Q8_0;
         }
         qs.i_attention_wv += 1;
     } else if (category == .attention_k) {
         if (hp.n_expert == 8) {
-            new_type = c.GGML_TYPE_Q8_0;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XS) {
-            new_type = c.GGML_TYPE_IQ3_XXS;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
-            new_type = c.GGML_TYPE_IQ2_S;
+            new_type = mod.impl.c.GGML_TYPE_Q8_0;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS) {
+            new_type = mod.impl.c.GGML_TYPE_IQ3_XXS;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
+            new_type = mod.impl.c.GGML_TYPE_IQ2_S;
         }
     } else if (category == .attention_q) {
-        if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XS) {
-            new_type = c.GGML_TYPE_IQ3_XXS;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
-            new_type = c.GGML_TYPE_IQ2_S;
+        if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS) {
+            new_type = mod.impl.c.GGML_TYPE_IQ3_XXS;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
+            new_type = mod.impl.c.GGML_TYPE_IQ2_S;
         }
     } else if (category == .ffn_down) {
         const info = try layerInfo(n_expert, qs.i_ffn_down, qs.n_ffn_down, name, exc);
         const i_layer = info[0];
         const n_layer = info[1];
-        if (ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K) {
-            new_type = c.GGML_TYPE_Q3_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K_S) {
-            if (i_layer < @divTrunc(n_layer, 8)) new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS and !qs.has_imatrix) {
-            new_type = if (i_layer < @divTrunc(n_layer, 8)) c.GGML_TYPE_Q4_K else c.GGML_TYPE_Q3_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
+        if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K) {
+            new_type = mod.impl.c.GGML_TYPE_Q3_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K_S) {
+            if (i_layer < @divTrunc(n_layer, 8)) new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS and !qs.has_imatrix) {
+            new_type = if (i_layer < @divTrunc(n_layer, 8)) mod.impl.c.GGML_TYPE_Q4_K else mod.impl.c.GGML_TYPE_Q3_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
             new_type = if (i_layer < @divTrunc(n_layer, 16))
-                c.GGML_TYPE_Q5_K
+                mod.impl.c.GGML_TYPE_Q5_K
             else if (a != .falcon or useMoreBits(i_layer, n_layer))
-                c.GGML_TYPE_Q4_K
+                mod.impl.c.GGML_TYPE_Q4_K
             else
-                c.GGML_TYPE_Q3_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_M and (i_layer < @divTrunc(n_layer, 8) or
+                mod.impl.c.GGML_TYPE_Q3_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M and (i_layer < @divTrunc(n_layer, 8) or
             (hp.n_expert == 8 and useMoreBits(i_layer, n_layer))))
         {
-            new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
-            new_type = if (a == .falcon) c.GGML_TYPE_Q4_K else c.GGML_TYPE_Q5_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q4_K_M) {
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
+            new_type = if (a == .falcon) mod.impl.c.GGML_TYPE_Q4_K else mod.impl.c.GGML_TYPE_Q5_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M) {
             if (a == .falcon) {
                 new_type = if (i_layer < @divTrunc(n_layer, 16))
-                    c.GGML_TYPE_Q6_K
+                    mod.impl.c.GGML_TYPE_Q6_K
                 else if (useMoreBits(i_layer, n_layer))
-                    c.GGML_TYPE_Q5_K
+                    mod.impl.c.GGML_TYPE_Q5_K
                 else
-                    c.GGML_TYPE_Q4_K;
+                    mod.impl.c.GGML_TYPE_Q4_K;
             } else {
-                if (useMoreBits(i_layer, n_layer)) new_type = c.GGML_TYPE_Q6_K;
+                if (useMoreBits(i_layer, n_layer)) new_type = mod.impl.c.GGML_TYPE_Q6_K;
             }
         } else if (i_layer < @divTrunc(n_layer, 8) and
-            (ftype == c.LLAMA_FTYPE_MOSTLY_IQ4_NL or ftype == c.LLAMA_FTYPE_MOSTLY_IQ4_XS) and !qs.has_imatrix)
+            (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS) and !qs.has_imatrix)
         {
-            new_type = c.GGML_TYPE_Q5_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q5_K_M and useMoreBits(i_layer, n_layer)) {
-            new_type = c.GGML_TYPE_Q6_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q4_K_S and a != .falcon and i_layer < @divTrunc(n_layer, 8)) {
-            new_type = c.GGML_TYPE_Q5_K;
-        } else if ((ftype == c.LLAMA_FTYPE_MOSTLY_Q4_0 or ftype == c.LLAMA_FTYPE_MOSTLY_Q5_0) and
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M and useMoreBits(i_layer, n_layer)) {
+            new_type = mod.impl.c.GGML_TYPE_Q6_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_S and a != .falcon and i_layer < @divTrunc(n_layer, 8)) {
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
+        } else if ((ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_0 or ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_0) and
             qs.has_imatrix and i_layer < @divTrunc(n_layer, 8))
         {
             // Guard the first ffn_down layers, only with an imatrix.
-            new_type = if (ftype == c.LLAMA_FTYPE_MOSTLY_Q4_0) c.GGML_TYPE_Q4_1 else c.GGML_TYPE_Q5_1;
+            new_type = if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_0) mod.impl.c.GGML_TYPE_Q4_1 else mod.impl.c.GGML_TYPE_Q5_1;
         }
         qs.i_ffn_down += 1;
     } else if (category == .attention_output) {
         if (a != .falcon) {
             if (hp.n_expert == 8) {
                 if (F.in(ftype, .{
-                    c.LLAMA_FTYPE_MOSTLY_Q2_K,   c.LLAMA_FTYPE_MOSTLY_IQ3_XS, c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
-                    c.LLAMA_FTYPE_MOSTLY_Q3_K_S, c.LLAMA_FTYPE_MOSTLY_Q3_K_M, c.LLAMA_FTYPE_MOSTLY_IQ4_NL,
-                    c.LLAMA_FTYPE_MOSTLY_Q4_K_S, c.LLAMA_FTYPE_MOSTLY_Q4_K_M, c.LLAMA_FTYPE_MOSTLY_IQ3_S,
-                    c.LLAMA_FTYPE_MOSTLY_IQ3_M,  c.LLAMA_FTYPE_MOSTLY_IQ4_XS,
+                    mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K,   mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS,
+                    mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL,
+                    mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_S,
+                    mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M,  mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS,
                 })) {
-                    new_type = c.GGML_TYPE_Q5_K;
+                    new_type = mod.impl.c.GGML_TYPE_Q5_K;
                 }
             } else {
-                if (ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K) {
-                    new_type = c.GGML_TYPE_Q3_K;
-                } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
-                    new_type = c.GGML_TYPE_IQ3_S;
-                } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
-                    new_type = c.GGML_TYPE_Q4_K;
-                } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
-                    new_type = c.GGML_TYPE_Q5_K;
-                } else if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_M) {
-                    new_type = c.GGML_TYPE_Q4_K;
+                if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K) {
+                    new_type = mod.impl.c.GGML_TYPE_Q3_K;
+                } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS) {
+                    new_type = mod.impl.c.GGML_TYPE_IQ3_S;
+                } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M) {
+                    new_type = mod.impl.c.GGML_TYPE_Q4_K;
+                } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L) {
+                    new_type = mod.impl.c.GGML_TYPE_Q5_K;
+                } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M) {
+                    new_type = mod.impl.c.GGML_TYPE_Q4_K;
                 }
             }
         } else {
-            if (ftype == c.LLAMA_FTYPE_MOSTLY_Q3_K_L) new_type = c.GGML_TYPE_Q4_K;
+            if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L) new_type = mod.impl.c.GGML_TYPE_Q4_K;
         }
     } else if (category == .attention_qkv) {
-        if (F.in(ftype, .{ c.LLAMA_FTYPE_MOSTLY_Q3_K_M, c.LLAMA_FTYPE_MOSTLY_Q3_K_L, c.LLAMA_FTYPE_MOSTLY_IQ3_M })) {
-            new_type = c.GGML_TYPE_Q4_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q4_K_M) {
-            new_type = c.GGML_TYPE_Q5_K;
-        } else if (ftype == c.LLAMA_FTYPE_MOSTLY_Q5_K_M) {
-            new_type = c.GGML_TYPE_Q6_K;
+        if (F.in(ftype, .{ mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M })) {
+            new_type = mod.impl.c.GGML_TYPE_Q4_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M) {
+            new_type = mod.impl.c.GGML_TYPE_Q5_K;
+        } else if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M) {
+            new_type = mod.impl.c.GGML_TYPE_Q6_K;
         }
     } else if (category == .ffn_gate) {
         const info = try layerInfo(n_expert, qs.i_ffn_gate, qs.n_ffn_gate, name, exc);
         const i_layer = info[0];
         const n_layer = info[1];
-        if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XS and (i_layer >= @divTrunc(n_layer, 8) and i_layer < @divTrunc(7 * n_layer, 8))) {
-            new_type = c.GGML_TYPE_IQ3_XXS;
+        if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS and (i_layer >= @divTrunc(n_layer, 8) and i_layer < @divTrunc(7 * n_layer, 8))) {
+            new_type = mod.impl.c.GGML_TYPE_IQ3_XXS;
         }
         qs.i_ffn_gate += 1;
     } else if (category == .ffn_up) {
         const info = try layerInfo(n_expert, qs.i_ffn_up, qs.n_ffn_up, name, exc);
         const i_layer = info[0];
         const n_layer = info[1];
-        if (ftype == c.LLAMA_FTYPE_MOSTLY_IQ3_XS and (i_layer >= @divTrunc(n_layer, 8) and i_layer < @divTrunc(7 * n_layer, 8))) {
-            new_type = c.GGML_TYPE_IQ3_XXS;
+        if (ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS and (i_layer >= @divTrunc(n_layer, 8) and i_layer < @divTrunc(7 * n_layer, 8))) {
+            new_type = mod.impl.c.GGML_TYPE_IQ3_XXS;
         }
         qs.i_ffn_up += 1;
     }
@@ -873,9 +858,9 @@ fn getTypeImpl(qs: *State, new_type_in: GgmlType, tensor: *const Tensor, ftype: 
 /// Ports `llama_tensor_get_type` (llama-quant.cpp:786 @b1b770d90): the type
 /// a tensor is written as -- the user's overrides, else the mixture, then
 /// the fallback for its shape.
-fn getType(qs: *State, params: *const c.llama_model_quantize_params, tensor: *const Tensor, default_type: GgmlType, category: Category, exc: *Exception) Thrown!GgmlType {
+fn getType(qs: *State, params: *const mod.impl.c.llama_model_quantize_params, tensor: *const mod.impl.c.ggml_tensor, default_type: mod.impl.c.enum_ggml_type, category: Category, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.enum_ggml_type {
     if (!tensorAllowsQuantization(params, qs.model.arch, tensor)) return tensor.type;
-    if (params.token_embedding_type < c.GGML_TYPE_COUNT and category == .token_embd) {
+    if (params.token_embedding_type < mod.impl.c.GGML_TYPE_COUNT and category == .token_embd) {
         // `per_layer_token_embd` follows `--token-embedding-type` by default,
         // but it is a large separate table, so an explicit `--tensor-type`
         // may name it.
@@ -883,9 +868,9 @@ fn getType(qs: *State, params: *const c.llama_model_quantize_params, tensor: *co
         if (std.mem.eql(u8, nameOf(tensor), "per_layer_token_embd.weight")) {
             const tensor_name = nameOf(tensor);
             for (qs.tensor_type_patterns.items) |*p| {
-                var m = regex.Match.init();
+                var m = mod.regex.Match.init();
                 defer m.deinit();
-                const hit = p.re.trySearch(tensor_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)});
+                const hit = p.re.trySearch(tensor_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)});
                 if (hit) {
                     named = true;
                     break;
@@ -894,22 +879,22 @@ fn getType(qs: *State, params: *const c.llama_model_quantize_params, tensor: *co
         }
         if (!named) return params.token_embedding_type;
     }
-    if (params.output_tensor_type < c.GGML_TYPE_COUNT and category == .output) return params.output_tensor_type;
+    if (params.output_tensor_type < mod.impl.c.GGML_TYPE_COUNT and category == .output) return params.output_tensor_type;
 
     var new_type = default_type;
 
-    if (c.ggml_is_quantized(default_type)) {
+    if (mod.impl.c.ggml_is_quantized(default_type)) {
         // The user's tensor types come first.
         var manual = false;
         if (qs.tensor_type_patterns.items.len != 0) {
             const tensor_name = nameOf(tensor);
             for (qs.tensor_type_patterns.items) |*p| {
-                var m = regex.Match.init();
+                var m = mod.regex.Match.init();
                 defer m.deinit();
-                const hit = p.re.trySearch(tensor_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{regex.errorText(e)});
+                const hit = p.re.trySearch(tensor_name, &m) catch |e| return exc.throw(.runtime_error, "{s}", .{mod.regex.errorText(e)});
                 if (hit) {
                     if (p.type != new_type) {
-                        impl.logWarn("%s: %-36s - applying manual override: %s -> %s\n", .{
+                        mod.impl.logWarn("%s: %-36s - applying manual override: %s -> %s\n", .{
                             "llama_tensor_get_type", tensor_name.ptr, typeName(new_type), typeName(p.type),
                         });
                         new_type = p.type;
@@ -938,7 +923,7 @@ const QuantizeJob = struct {
     counter: std.atomic.Value(i64) = .init(0),
     new_size: std.atomic.Value(usize) = .init(0),
     valid: std.atomic.Value(bool) = .init(true),
-    new_type: GgmlType,
+    new_type: mod.impl.c.enum_ggml_type,
     f32_data: [*]const f32,
     new_data: [*]u8,
     chunk_size: i64,
@@ -981,11 +966,11 @@ const QuantizeJob = struct {
             const row_global = job.first_row + row;
 
             const this_data = job.new_data + @as(usize, @intCast(row)) * job.row_size;
-            const this_size = c.ggml_quantize_chunk(job.new_type, job.f32_data + @as(usize, @intCast(row * job.n_per_row)), this_data, 0, this_nrow, job.n_per_row, imatrixForRow(job.imatrix, row_global, job.nrows_per_expert, job.n_per_row));
+            const this_size = mod.impl.c.ggml_quantize_chunk(job.new_type, job.f32_data + @as(usize, @intCast(row * job.n_per_row)), this_data, 0, this_nrow, job.n_per_row, imatrixForRow(job.imatrix, row_global, job.nrows_per_expert, job.n_per_row));
             local_size += this_size;
 
             // Validate the quantized data.
-            if (!c.ggml_validate_row_data(job.new_type, this_data, this_size)) {
+            if (!mod.impl.c.ggml_validate_row_data(job.new_type, this_data, this_size)) {
                 job.valid.store(false, .seq_cst);
                 break;
             }
@@ -1005,8 +990,8 @@ const QuantizeJob = struct {
 /// - `nrows_per_expert`: the rows of one expert's matrix, `ne[1]`.
 ///
 /// Return: the size written, or `error.Thrown` when validation fails.
-fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chunk_size: i64, first_row: i64, nrows: i64, nrows_per_expert: i64, n_per_row: i64, imatrix: ?[*]const f32, nthread: i64, exc: *Exception) Thrown!usize {
-    const row_size = c.ggml_row_size(new_type, n_per_row);
+fn quantizeRows(new_type: mod.impl.c.enum_ggml_type, f32_data: [*]const f32, new_data: [*]u8, chunk_size: i64, first_row: i64, nrows: i64, nrows_per_expert: i64, n_per_row: i64, imatrix: ?[*]const f32, nthread: i64, exc: *mod.impl.Exception) mod.impl.Thrown!usize {
+    const row_size = mod.impl.c.ggml_row_size(new_type, n_per_row);
 
     if (nthread < 2) {
         var new_size: usize = 0;
@@ -1015,8 +1000,8 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
             const row_global = first_row + row;
             const this_nrow = @min(nrows - row, nrows_per_expert - @rem(row_global, nrows_per_expert));
             const this_data = new_data + @as(usize, @intCast(row)) * row_size;
-            const this_size = c.ggml_quantize_chunk(new_type, f32_data + @as(usize, @intCast(row * n_per_row)), this_data, 0, this_nrow, n_per_row, QuantizeJob.imatrixForRow(imatrix, row_global, nrows_per_expert, n_per_row));
-            if (!c.ggml_validate_row_data(new_type, this_data, this_size)) {
+            const this_size = mod.impl.c.ggml_quantize_chunk(new_type, f32_data + @as(usize, @intCast(row * n_per_row)), this_data, 0, this_nrow, n_per_row, QuantizeJob.imatrixForRow(imatrix, row_global, nrows_per_expert, n_per_row));
+            if (!mod.impl.c.ggml_validate_row_data(new_type, this_data, this_size)) {
                 return exc.throw(.runtime_error, "quantized data validation failed", .{});
             }
             new_size += this_size;
@@ -1037,8 +1022,8 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
         .row_size = row_size,
         .imatrix = imatrix,
     };
-    const workers = allocator.alloc(std.Thread, @intCast(nthread - 1)) catch oom();
-    defer allocator.free(workers);
+    const workers = std.heap.c_allocator.alloc(std.Thread, @intCast(nthread - 1)) catch oom();
+    defer std.heap.c_allocator.free(workers);
     for (workers) |*w| w.* = std.Thread.spawn(.{}, QuantizeJob.run, .{&job}) catch oom();
     job.run();
     for (workers) |w| w.join();
@@ -1049,18 +1034,18 @@ fn quantizeRows(new_type: GgmlType, f32_data: [*]const f32, new_data: [*]u8, chu
 }
 
 /// Ports `tensor_requires_imatrix` (llama-quant.cpp:925 @b1b770d90).
-fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bool {
+fn requiresImatrix(tensor_name: []const u8, dst_type: mod.impl.c.enum_ggml_type, ftype: mod.impl.c.enum_llama_ftype) bool {
     if (nameMatchTokenEmbd(tensor_name) or nameMatchOutputWeight(tensor_name)) return false;
     return switch (dst_type) {
-        c.GGML_TYPE_IQ3_XXS,
-        c.GGML_TYPE_IQ2_XXS,
-        c.GGML_TYPE_IQ2_XS,
-        c.GGML_TYPE_IQ2_S,
-        c.GGML_TYPE_IQ1_M,
-        c.GGML_TYPE_IQ1_S,
+        mod.impl.c.GGML_TYPE_IQ3_XXS,
+        mod.impl.c.GGML_TYPE_IQ2_XXS,
+        mod.impl.c.GGML_TYPE_IQ2_XS,
+        mod.impl.c.GGML_TYPE_IQ2_S,
+        mod.impl.c.GGML_TYPE_IQ1_M,
+        mod.impl.c.GGML_TYPE_IQ1_S,
         => true,
         // Only Q2_K tensors in a Q2_K_S file need one.
-        c.GGML_TYPE_Q2_K => ftype == c.LLAMA_FTYPE_MOSTLY_Q2_K_S,
+        mod.impl.c.GGML_TYPE_Q2_K => ftype == mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K_S,
         else => false,
     };
 }
@@ -1071,42 +1056,42 @@ fn requiresImatrix(tensor_name: []const u8, dst_type: GgmlType, ftype: Ftype) bo
 /// - `ftype`: the file type.
 ///
 /// Return: its default tensor type, `GGML_TYPE_COUNT` when there is none.
-pub fn ftypeGetDefaultType(ftype: Ftype) GgmlType {
+pub fn ftypeGetDefaultType(ftype: mod.impl.c.enum_llama_ftype) mod.impl.c.enum_ggml_type {
     return switch (ftype) {
-        c.LLAMA_FTYPE_MOSTLY_Q4_0 => c.GGML_TYPE_Q4_0,
-        c.LLAMA_FTYPE_MOSTLY_Q4_1 => c.GGML_TYPE_Q4_1,
-        c.LLAMA_FTYPE_MOSTLY_Q5_0 => c.GGML_TYPE_Q5_0,
-        c.LLAMA_FTYPE_MOSTLY_Q5_1 => c.GGML_TYPE_Q5_1,
-        c.LLAMA_FTYPE_MOSTLY_Q8_0 => c.GGML_TYPE_Q8_0,
-        c.LLAMA_FTYPE_MOSTLY_F16 => c.GGML_TYPE_F16,
-        c.LLAMA_FTYPE_MOSTLY_BF16 => c.GGML_TYPE_BF16,
-        c.LLAMA_FTYPE_ALL_F32 => c.GGML_TYPE_F32,
-        c.LLAMA_FTYPE_MOSTLY_Q1_0 => c.GGML_TYPE_Q1_0,
-        c.LLAMA_FTYPE_MOSTLY_Q2_0 => c.GGML_TYPE_Q2_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_0 => mod.impl.c.GGML_TYPE_Q4_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_1 => mod.impl.c.GGML_TYPE_Q4_1,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_0 => mod.impl.c.GGML_TYPE_Q5_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_1 => mod.impl.c.GGML_TYPE_Q5_1,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q8_0 => mod.impl.c.GGML_TYPE_Q8_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_F16 => mod.impl.c.GGML_TYPE_F16,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_BF16 => mod.impl.c.GGML_TYPE_BF16,
+        mod.impl.c.LLAMA_FTYPE_ALL_F32 => mod.impl.c.GGML_TYPE_F32,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q1_0 => mod.impl.c.GGML_TYPE_Q1_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_0 => mod.impl.c.GGML_TYPE_Q2_0,
 
-        c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE => c.GGML_TYPE_MXFP4,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_MXFP4_MOE => mod.impl.c.GGML_TYPE_MXFP4,
 
         // K-quants
-        c.LLAMA_FTYPE_MOSTLY_Q2_K_S, c.LLAMA_FTYPE_MOSTLY_Q2_K => c.GGML_TYPE_Q2_K,
-        c.LLAMA_FTYPE_MOSTLY_IQ3_XS => c.GGML_TYPE_IQ3_S,
-        c.LLAMA_FTYPE_MOSTLY_Q3_K_S, c.LLAMA_FTYPE_MOSTLY_Q3_K_M, c.LLAMA_FTYPE_MOSTLY_Q3_K_L => c.GGML_TYPE_Q3_K,
-        c.LLAMA_FTYPE_MOSTLY_Q4_K_S, c.LLAMA_FTYPE_MOSTLY_Q4_K_M => c.GGML_TYPE_Q4_K,
-        c.LLAMA_FTYPE_MOSTLY_Q5_K_S, c.LLAMA_FTYPE_MOSTLY_Q5_K_M => c.GGML_TYPE_Q5_K,
-        c.LLAMA_FTYPE_MOSTLY_Q6_K => c.GGML_TYPE_Q6_K,
-        c.LLAMA_FTYPE_MOSTLY_TQ1_0 => c.GGML_TYPE_TQ1_0,
-        c.LLAMA_FTYPE_MOSTLY_TQ2_0 => c.GGML_TYPE_TQ2_0,
-        c.LLAMA_FTYPE_MOSTLY_IQ2_XXS => c.GGML_TYPE_IQ2_XXS,
-        c.LLAMA_FTYPE_MOSTLY_IQ2_XS => c.GGML_TYPE_IQ2_XS,
-        c.LLAMA_FTYPE_MOSTLY_IQ2_S => c.GGML_TYPE_IQ2_XS,
-        c.LLAMA_FTYPE_MOSTLY_IQ2_M => c.GGML_TYPE_IQ2_S,
-        c.LLAMA_FTYPE_MOSTLY_IQ3_XXS => c.GGML_TYPE_IQ3_XXS,
-        c.LLAMA_FTYPE_MOSTLY_IQ1_S => c.GGML_TYPE_IQ1_S,
-        c.LLAMA_FTYPE_MOSTLY_IQ1_M => c.GGML_TYPE_IQ1_M,
-        c.LLAMA_FTYPE_MOSTLY_IQ4_NL => c.GGML_TYPE_IQ4_NL,
-        c.LLAMA_FTYPE_MOSTLY_IQ4_XS => c.GGML_TYPE_IQ4_XS,
-        c.LLAMA_FTYPE_MOSTLY_IQ3_S, c.LLAMA_FTYPE_MOSTLY_IQ3_M => c.GGML_TYPE_IQ3_S,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q2_K => mod.impl.c.GGML_TYPE_Q2_K,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XS => mod.impl.c.GGML_TYPE_IQ3_S,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_M, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q3_K_L => mod.impl.c.GGML_TYPE_Q3_K,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q4_K_M => mod.impl.c.GGML_TYPE_Q4_K,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_Q5_K_M => mod.impl.c.GGML_TYPE_Q5_K,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_Q6_K => mod.impl.c.GGML_TYPE_Q6_K,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ1_0 => mod.impl.c.GGML_TYPE_TQ1_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_TQ2_0 => mod.impl.c.GGML_TYPE_TQ2_0,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XXS => mod.impl.c.GGML_TYPE_IQ2_XXS,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_XS => mod.impl.c.GGML_TYPE_IQ2_XS,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S => mod.impl.c.GGML_TYPE_IQ2_XS,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_M => mod.impl.c.GGML_TYPE_IQ2_S,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_XXS => mod.impl.c.GGML_TYPE_IQ3_XXS,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_S => mod.impl.c.GGML_TYPE_IQ1_S,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ1_M => mod.impl.c.GGML_TYPE_IQ1_M,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_NL => mod.impl.c.GGML_TYPE_IQ4_NL,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ4_XS => mod.impl.c.GGML_TYPE_IQ4_XS,
+        mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_S, mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ3_M => mod.impl.c.GGML_TYPE_IQ3_S,
 
-        else => c.GGML_TYPE_COUNT,
+        else => mod.impl.c.GGML_TYPE_COUNT,
     };
 }
 
@@ -1125,11 +1110,11 @@ fn initCounters(qs: *State, names: []const []const u8, categories: []Category) v
 }
 
 /// Ports `llama_format_tensor_shape` for a tensor (llama-impl.cpp:142 @b1b770d90).
-fn formatTensorShape(t: *const Tensor, buf: *[256]u8) [*:0]const u8 {
-    var len: usize = @intCast(c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
+fn formatTensorShape(t: *const mod.impl.c.ggml_tensor, buf: *[256]u8) [*:0]const u8 {
+    var len: usize = @intCast(mod.impl.c.snprintf(buf, buf.len, "%6lld", @as(c_longlong, t.ne[0])));
     var i: usize = 1;
-    while (i < c.GGML_MAX_DIMS) : (i += 1) {
-        len += @intCast(c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
+    while (i < mod.impl.c.GGML_MAX_DIMS) : (i += 1) {
+        len += @intCast(mod.impl.c.snprintf(buf[len..].ptr, buf.len - len, ", %6lld", @as(c_longlong, t.ne[i])));
     }
     return @ptrCast(buf);
 }
@@ -1141,10 +1126,10 @@ fn formatTensorShape(t: *const Tensor, buf: *[256]u8) [*:0]const u8 {
 /// `exceptions(failbit)` set: a file that cannot be opened throws libc++'s
 /// `ios_base::failure` the moment the mask is set.
 const OutFile = struct {
-    fp: ?*c.FILE = null,
+    fp: ?*mod.impl.c.FILE = null,
 
-    fn open(path: [*:0]const u8, exc: *Exception) Thrown!OutFile {
-        const fp = c.fopen(path, "wb") orelse
+    fn open(path: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!OutFile {
+        const fp = mod.impl.c.fopen(path, "wb") orelse
             return exc.throw(.runtime_error, "ios_base::clear: unspecified iostream_category error", .{});
         return .{ .fp = fp };
     }
@@ -1154,7 +1139,7 @@ const OutFile = struct {
     }
 
     fn write(self: *OutFile, data: [*]const u8, n: usize) void {
-        if (n != 0) _ = c.fwrite(data, 1, n, self.fp);
+        if (n != 0) _ = mod.impl.c.fwrite(data, 1, n, self.fp);
     }
 
     /// Ports `zeros` (llama-quant.cpp:46 @b1b770d90).
@@ -1169,11 +1154,11 @@ const OutFile = struct {
     }
 
     fn seekStart(self: *OutFile) void {
-        _ = c.fseek(self.fp, 0, c.SEEK_SET);
+        _ = mod.impl.c.fseek(self.fp, 0, mod.impl.c.SEEK_SET);
     }
 
     fn close(self: *OutFile) void {
-        if (self.fp) |fp| _ = c.fclose(fp);
+        if (self.fp) |fp| _ = mod.impl.c.fclose(fp);
         self.fp = null;
     }
 };
@@ -1184,8 +1169,8 @@ const OutFile = struct {
 /// The `load_range` lambda of `llama_model_quantize_impl`
 /// (llama-quant.cpp:1016 @b1b770d90): a byte range of the current tensor,
 /// read into `read_data` without mmap.
-fn loadRange(ml: *const loader.Loader, weight: *const loader.Weight, read_data: *std.ArrayList(u8), offs: usize, size: usize, exc: *Exception) Thrown!?*const anyopaque {
-    if (!ml.use_mmap and read_data.items.len < size) read_data.resize(allocator, size) catch oom();
+fn loadRange(ml: *const mod.loader.Loader, weight: *const mod.loader.Weight, read_data: *std.ArrayList(u8), offs: usize, size: usize, exc: *mod.impl.Exception) mod.impl.Thrown!?*const anyopaque {
+    if (!ml.use_mmap and read_data.items.len < size) read_data.resize(std.heap.c_allocator, size) catch oom();
     // `std::vector::data()` of an empty vector is null.
     const buf: ?*anyopaque = if (read_data.capacity == 0) null else @ptrCast(read_data.items.ptr);
     return ml.loadDataRange(weight, offs, size, buf, exc);
@@ -1205,31 +1190,31 @@ fn mib(n: usize) f64 {
 /// - `exc`: receives what is thrown.
 ///
 /// Return: nothing, or `error.Thrown`.
-pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const c.llama_model_quantize_params, exc: *Exception) Thrown!void {
-    var ftype: Ftype = params.ftype;
+pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const mod.impl.c.llama_model_quantize_params, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+    var ftype: mod.impl.c.enum_llama_ftype = params.ftype;
 
     var nthread: c_int = params.nthread;
     if (nthread <= 0) nthread = @intCast(stdlib.thread.hardwareConcurrency());
 
     const default_type = ftypeGetDefaultType(ftype);
-    if (default_type == c.GGML_TYPE_COUNT) {
+    if (default_type == mod.impl.c.GGML_TYPE_COUNT) {
         return exc.throw(.runtime_error, "invalid output file type {d}\n", .{@as(c_int, @bitCast(ftype))});
     }
 
     // mmap consistently increases speed on Linux, and also on Windows with a
     // hot cache; it may cause a slowdown on macOS.
-    const load_mode = if (builtin.os.tag == .linux or builtin.os.tag == .windows) c.LLAMA_LOAD_MODE_MMAP else c.LLAMA_LOAD_MODE_NONE;
+    const load_mode = if (builtin.os.tag == .linux or builtin.os.tag == .windows) mod.impl.c.LLAMA_LOAD_MODE_MMAP else mod.impl.c.LLAMA_LOAD_MODE_NONE;
 
     var splits: std.ArrayList([:0]const u8) = .empty;
     defer {
-        for (splits.items) |s| allocator.free(s);
-        splits.deinit(allocator);
+        for (splits.items) |s| std.heap.c_allocator.free(s);
+        splits.deinit(std.heap.c_allocator);
     }
-    var ml = try loader.Loader.init(.{ .path = fname_inp }, &splits, load_mode, true, false, true, params.kv_overrides, exc);
+    var ml = try mod.loader.Loader.init(.{ .path = fname_inp }, &splits, load_mode, true, false, true, params.kv_overrides, exc);
     defer ml.deinit();
     try ml.initMappings(false, null, exc);
 
-    var model = try Model.create(&ml, model_mod.defaultParams(), exc);
+    var model = try mod.model.Model.create(&ml, mod.model.defaultParams(), exc);
     defer model.deinit();
 
     model.loadHparams(&ml, exc) catch |e| switch (e) {
@@ -1245,7 +1230,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
 
     // `std::unordered_map<std::string, std::vector<float>>`, iterated in
     // libc++'s order by the finiteness check.
-    var i_data = libcxx.StringMap([]const f32).init(allocator) catch oom();
+    var i_data = stdlib.libcxx.StringMap([]const f32).init(std.heap.c_allocator) catch oom();
     defer i_data.deinit();
     var have_imatrix = false;
     if (params.imatrix != null) {
@@ -1255,60 +1240,60 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             _ = i_data.getOrPut(std.mem.span(p[0].name), data) catch oom();
         }
         have_imatrix = true;
-        impl.logInfo("\n%s: have importance matrix data with %d entries\n", .{ "llama_model_quantize_impl", @as(c_int, @intCast(i_data.count())) });
+        mod.impl.logInfo("\n%s: have importance matrix data with %d entries\n", .{ "llama_model_quantize_impl", @as(c_int, @intCast(i_data.count())) });
         qs.has_imatrix = true;
         var it = i_data.iterator();
         while (it.next()) |kv| {
             for (kv.value.*) |f| {
                 if (!std.math.isFinite(f)) {
                     var buf: [64]u8 = undefined;
-                    _ = c.snprintf(&buf, buf.len, "%f", @as(f64, f));
+                    _ = mod.impl.c.snprintf(&buf, buf.len, "%f", @as(f64, f));
                     return exc.throw(.runtime_error, "imatrix contains non-finite value {s}\n", .{std.mem.sliceTo(&buf, 0)});
                 }
             }
         }
     }
 
-    const alignment: usize = c.GGUF_DEFAULT_ALIGNMENT;
-    const ctx_out = c.gguf_init_empty().?;
+    const alignment: usize = mod.impl.c.GGUF_DEFAULT_ALIGNMENT;
+    const ctx_out = mod.impl.c.gguf_init_empty().?;
     var ctx_out_owned = true;
-    defer if (ctx_out_owned) c.gguf_free(ctx_out);
+    defer if (ctx_out_owned) mod.impl.c.gguf_free(ctx_out);
 
     var prune_list: std.ArrayList(c_int) = .empty;
-    defer prune_list.deinit(allocator);
+    defer prune_list.deinit(std.heap.c_allocator);
     if (params.prune_layers != null) {
         var p = params.prune_layers;
-        while (p[0] != -1) : (p += 1) prune_list.append(allocator, p[0]) catch oom();
+        while (p[0] != -1) : (p += 1) prune_list.append(std.heap.c_allocator, p[0]) catch oom();
     }
 
     const a = ml.meta.arch;
 
     // The input's key-value pairs.
-    c.gguf_set_kv(ctx_out, ml.meta.ctx);
-    c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .general_quantization_version).ptr(), c.GGML_QNT_VERSION);
-    c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .general_file_type).ptr(), ftype);
+    mod.impl.c.gguf_set_kv(ctx_out, ml.meta.ctx);
+    mod.impl.c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .general_quantization_version).ptr(), mod.impl.c.GGML_QNT_VERSION);
+    mod.impl.c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .general_file_type).ptr(), ftype);
 
     // No split metadata.
-    _ = c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_no).ptr());
-    _ = c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_count).ptr());
-    _ = c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_tensors_count).ptr());
+    _ = mod.impl.c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_no).ptr());
+    _ = mod.impl.c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_count).ptr());
+    _ = mod.impl.c.gguf_remove_key(ctx_out, KeyZ.init(a, .split_tensors_count).ptr());
 
     if (params.kv_overrides != null) {
         var o = params.kv_overrides;
         while (o[0].key[0] != 0) : (o += 1) {
             const key: [*:0]const u8 = @ptrCast(&o[0].key);
             switch (o[0].tag) {
-                c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => c.gguf_set_val_f32(ctx_out, key, @floatCast(o[0].unnamed_0.val_f64)),
+                mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_FLOAT => mod.impl.c.gguf_set_val_f32(ctx_out, key, @floatCast(o[0].unnamed_0.val_f64)),
                 // Written as UINT32 (llama.cpp#14182).
-                c.LLAMA_KV_OVERRIDE_TYPE_INT => c.gguf_set_val_u32(ctx_out, key, @truncate(@abs(o[0].unnamed_0.val_i64))),
-                c.LLAMA_KV_OVERRIDE_TYPE_BOOL => c.gguf_set_val_bool(ctx_out, key, o[0].unnamed_0.val_bool),
-                c.LLAMA_KV_OVERRIDE_TYPE_STR => c.gguf_set_val_str(ctx_out, key, @ptrCast(&o[0].unnamed_0.val_str)),
-                else => impl.logWarn("%s: unknown KV override type for key %s\n", .{ "llama_model_quantize_impl", key }),
+                mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_INT => mod.impl.c.gguf_set_val_u32(ctx_out, key, @truncate(@abs(o[0].unnamed_0.val_i64))),
+                mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_BOOL => mod.impl.c.gguf_set_val_bool(ctx_out, key, o[0].unnamed_0.val_bool),
+                mod.impl.c.LLAMA_KV_OVERRIDE_TYPE_STR => mod.impl.c.gguf_set_val_str(ctx_out, key, @ptrCast(&o[0].unnamed_0.val_str)),
+                else => mod.impl.logWarn("%s: unknown KV override type for key %s\n", .{ "llama_model_quantize_impl", key }),
             }
         }
     }
 
-    var re_blk = regex.Regex.compile(blk_pattern) catch unreachable;
+    var re_blk = mod.regex.Regex.compile(blk_pattern) catch unreachable;
     defer re_blk.deinit();
 
     var mapped: LayerMap = .{};
@@ -1316,34 +1301,34 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     var blk_id: c_int = 0;
 
     // The list of weights.
-    var tensors: std.ArrayList(*loader.Weight) = .empty;
-    defer tensors.deinit(allocator);
-    tensors.ensureTotalCapacity(allocator, ml.weights.items.len) catch oom();
+    var tensors: std.ArrayList(*mod.loader.Weight) = .empty;
+    defer tensors.deinit(std.heap.c_allocator);
+    tensors.ensureTotalCapacity(std.heap.c_allocator, ml.weights.items.len) catch oom();
     for (ml.weights.items) |*w| {
-        const orig = allocator.dupeSentinel(u8, nameOf(w.tensor), 0) catch oom();
-        defer allocator.free(orig);
+        const orig = std.heap.c_allocator.dupeSentinel(u8, nameOf(w.tensor), 0) catch oom();
+        defer std.heap.c_allocator.free(orig);
         const remapped = try remapLayer(&re_blk, orig, prune_list.items, &mapped, &blk_id, exc);
-        defer allocator.free(remapped);
+        defer std.heap.c_allocator.free(remapped);
         if (remapped.len == 0) {
-            impl.logDebug("%s: pruning tensor %s\n", .{ "llama_model_quantize_impl", orig.ptr });
+            mod.impl.logDebug("%s: pruning tensor %s\n", .{ "llama_model_quantize_impl", orig.ptr });
             continue;
         }
         if (!std.mem.eql(u8, remapped, orig)) {
-            const z = allocator.dupeSentinel(u8, remapped, 0) catch oom();
-            defer allocator.free(z);
-            _ = c.ggml_set_name(w.tensor, z.ptr);
-            impl.logDebug("%s: tensor %s remapped to %s\n", .{ "llama_model_quantize_impl", orig.ptr, c.ggml_get_name(w.tensor) });
+            const z = std.heap.c_allocator.dupeSentinel(u8, remapped, 0) catch oom();
+            defer std.heap.c_allocator.free(z);
+            _ = mod.impl.c.ggml_set_name(w.tensor, z.ptr);
+            mod.impl.logDebug("%s: tensor %s remapped to %s\n", .{ "llama_model_quantize_impl", orig.ptr, mod.impl.c.ggml_get_name(w.tensor) });
         }
         tensors.appendAssumeCapacity(w);
     }
     if (prune_list.items.len != 0) {
-        c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .block_count).ptr(), @bitCast(blk_id));
+        mod.impl.c.gguf_set_val_u32(ctx_out, KeyZ.init(a, .block_count).ptr(), @bitCast(blk_id));
     }
 
     // keep_split needs the weights in split order.
     if (params.keep_split) {
-        libcxx.sort(*loader.Weight, tensors.items, {}, struct {
-            fn lt(_: void, x: *loader.Weight, y: *loader.Weight) bool {
+        stdlib.libcxx.sort(*mod.loader.Weight, tensors.items, {}, struct {
+            fn lt(_: void, x: *mod.loader.Weight, y: *mod.loader.Weight) bool {
                 if (x.idx == y.idx) return x.offs < y.offs;
                 return x.idx < y.idx;
             }
@@ -1351,18 +1336,18 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     }
 
     // Each tensor's metadata, computed once.
-    const metadata = allocator.alloc(Metadata, tensors.items.len) catch oom();
+    const metadata = std.heap.c_allocator.alloc(Metadata, tensors.items.len) catch oom();
     for (metadata) |*m| m.* = .{};
     defer {
         for (metadata) |*m| m.deinit();
-        allocator.free(metadata);
+        std.heap.c_allocator.free(metadata);
     }
-    const names = allocator.alloc([]const u8, tensors.items.len) catch oom();
-    defer allocator.free(names);
-    const categories = allocator.alloc(Category, tensors.items.len) catch oom();
-    defer allocator.free(categories);
+    const names = std.heap.c_allocator.alloc([]const u8, tensors.items.len) catch oom();
+    defer std.heap.c_allocator.free(names);
+    const categories = std.heap.c_allocator.alloc(Category, tensors.items.len) catch oom();
+    defer std.heap.c_allocator.free(categories);
     for (tensors.items, metadata, names) |w, *m, *n| {
-        m.name = allocator.dupeSentinel(u8, nameOf(w.tensor), 0) catch oom();
+        m.name = std.heap.c_allocator.dupeSentinel(u8, nameOf(w.tensor), 0) catch oom();
         n.* = m.name;
     }
 
@@ -1376,11 +1361,11 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     if (params.keep_split) {
         for (tensors.items) |w| n_split = @max(w.idx +% 1, n_split);
     }
-    const ctx_outs = allocator.alloc(?*c.gguf_context, n_split) catch oom();
+    const ctx_outs = std.heap.c_allocator.alloc(?*mod.impl.c.gguf_context, n_split) catch oom();
     for (ctx_outs) |*x| x.* = null;
     defer {
-        for (ctx_outs) |x| if (x) |ctx| c.gguf_free(ctx);
-        allocator.free(ctx_outs);
+        for (ctx_outs) |x| if (x) |ctx| mod.impl.c.gguf_free(ctx);
+        std.heap.c_allocator.free(ctx_outs);
     }
     ctx_outs[0] = ctx_out;
     ctx_out_owned = false;
@@ -1393,8 +1378,8 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         const tensor = w.tensor;
 
         const i_split: u16 = if (params.keep_split) w.idx else 0;
-        if (ctx_outs[i_split] == null) ctx_outs[i_split] = c.gguf_init_empty();
-        c.gguf_add_tensor(ctx_outs[i_split], tensor);
+        if (ctx_outs[i_split] == null) ctx_outs[i_split] = mod.impl.c.gguf_init_empty();
+        mod.impl.c.gguf_add_tensor(ctx_outs[i_split], tensor);
 
         m.allows_quantization = tensorAllowsQuantization(params, model.arch, tensor);
 
@@ -1412,7 +1397,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             if (params.dry_run) {
                 will_require_imatrix = true;
             } else {
-                impl.logError("\n============================================================================\n" ++
+                mod.impl.logError("\n============================================================================\n" ++
                     " ERROR: this quantization requires an importance matrix!\n" ++
                     "        - offending tensor: %s\n" ++
                     "        - target type: %s\n" ++
@@ -1425,9 +1410,9 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     // Split info.
     if (n_split > 1) {
         for (ctx_outs, 0..) |ctx, i| {
-            c.gguf_set_val_u16(ctx, KeyZ.init(a, .split_no).ptr(), @intCast(i));
-            c.gguf_set_val_u16(ctx, KeyZ.init(a, .split_count).ptr(), n_split);
-            c.gguf_set_val_i32(ctx, KeyZ.init(a, .split_tensors_count).ptr(), @intCast(tensors.items.len));
+            mod.impl.c.gguf_set_val_u16(ctx, KeyZ.init(a, .split_no).ptr(), @intCast(i));
+            mod.impl.c.gguf_set_val_u16(ctx, KeyZ.init(a, .split_count).ptr(), n_split);
+            mod.impl.c.gguf_set_val_i32(ctx, KeyZ.init(a, .split_tensors_count).ptr(), @intCast(tensors.items.len));
         }
     }
 
@@ -1435,11 +1420,11 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     var total_size_new: usize = 0;
 
     var read_data: std.ArrayList(u8) = .empty;
-    defer read_data.deinit(allocator);
+    defer read_data.deinit(std.heap.c_allocator);
     var work: std.ArrayList(u8) = .empty;
-    defer work.deinit(allocator);
+    defer work.deinit(std.heap.c_allocator);
     var f32_conv_buf: std.ArrayList(f32) = .empty;
-    defer f32_conv_buf.deinit(allocator);
+    defer f32_conv_buf.deinit(std.heap.c_allocator);
 
     const max_buf_size: usize = if (params.max_buf_size != 0) params.max_buf_size else max_buf_size_default;
 
@@ -1450,33 +1435,33 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     const Files = struct {
         /// The `close_ofstream` lambda: the metadata goes in front, now
         /// that every tensor's offset is known.
-        fn close(f: *OutFile, ctxs: []?*c.gguf_context, cur: c_int) void {
+        fn close(f: *OutFile, ctxs: []?*mod.impl.c.gguf_context, cur: c_int) void {
             if (!f.isOpen()) return;
             f.seekStart();
             const ctx = ctxs[@intCast(cur)];
-            const data = allocator.alloc(u8, c.gguf_get_meta_size(ctx)) catch oom();
-            defer allocator.free(data);
-            c.gguf_get_meta_data(ctx, data.ptr);
+            const data = std.heap.c_allocator.alloc(u8, mod.impl.c.gguf_get_meta_size(ctx)) catch oom();
+            defer std.heap.c_allocator.free(data);
+            mod.impl.c.gguf_get_meta_data(ctx, data.ptr);
             f.write(data.ptr, data.len);
             f.close();
         }
 
         /// The `new_ofstream` lambda.
-        fn open(f: *OutFile, ctxs: []?*c.gguf_context, cur: *c_int, index: c_int, out: [:0]const u8, keep_split: bool, n: u16, exc_: *Exception) Thrown!void {
+        fn open(f: *OutFile, ctxs: []?*mod.impl.c.gguf_context, cur: *c_int, index: c_int, out: [:0]const u8, keep_split: bool, n: u16, exc_: *mod.impl.Exception) mod.impl.Thrown!void {
             cur.* = index;
-            impl.assert(ctxs[@intCast(index)] != null, "llama-quant.cpp", 1252, "ctx_outs[cur_split] && \"Find uninitialized gguf_context\"");
+            mod.impl.assert(ctxs[@intCast(index)] != null, "llama-quant.cpp", 1252, "ctx_outs[cur_split] && \"Find uninitialized gguf_context\"");
             var path_buf: ?[]u8 = null;
-            defer if (path_buf) |b| allocator.free(b);
+            defer if (path_buf) |b| std.heap.c_allocator.free(b);
             var fname: [*:0]const u8 = out.ptr;
             if (keep_split) {
-                const b = allocator.alloc(u8, mmap.pathMax()) catch oom();
+                const b = std.heap.c_allocator.alloc(u8, mod.mmap.pathMax()) catch oom();
                 @memset(b, 0);
                 path_buf = b;
-                _ = c.llama_split_path(b.ptr, b.len, out.ptr, index, n);
+                _ = mod.api.llama.llama_split_path(b.ptr, b.len, out.ptr, index, n);
                 fname = @ptrCast(b.ptr);
             }
             f.* = try OutFile.open(fname, exc_);
-            const meta_size = c.gguf_get_meta_size(ctxs[@intCast(index)]);
+            const meta_size = mod.impl.c.gguf_get_meta_size(ctxs[@intCast(index)]);
             // A placeholder for the metadata.
             f.zeros(meta_size);
         }
@@ -1494,12 +1479,12 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
             try Files.open(&fout, ctx_outs, &cur_split, weight.idx, fname_out, params.keep_split, n_split, exc);
         }
 
-        const tensor_size = c.ggml_nbytes(tensor);
+        const tensor_size = mod.impl.c.ggml_nbytes(tensor);
 
         idx += 1;
         var shape: [256]u8 = undefined;
-        impl.logInfo("[%4d/%4d] %-36s - [%s], type = %6s, ", .{
-            idx, ml.n_tensors, c.ggml_get_name(tensor), formatTensorShape(tensor, &shape), typeName(tensor.type),
+        mod.impl.logInfo("[%4d/%4d] %-36s - [%s], type = %6s, ", .{
+            idx, ml.n_tensors, mod.impl.c.ggml_get_name(tensor), formatTensorShape(tensor, &shape), typeName(tensor.type),
         });
 
         const cur_type = tensor.type;
@@ -1513,12 +1498,12 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
         if (params.dry_run) {
             // The size the quantization would have, without quantizing.
             if (do_quantize) {
-                new_size = @as(usize, @intCast(c.ggml_nrows(tensor))) * c.ggml_row_size(new_type, tensor.ne[0]);
-                impl.logInfo("size = %8.2f MiB -> %8.2f MiB (%s)\n", .{ mib(tensor_size), mib(new_size), typeName(new_type) });
+                new_size = @as(usize, @intCast(mod.impl.c.ggml_nrows(tensor))) * mod.impl.c.ggml_row_size(new_type, tensor.ne[0]);
+                mod.impl.logInfo("size = %8.2f MiB -> %8.2f MiB (%s)\n", .{ mib(tensor_size), mib(new_size), typeName(new_type) });
                 if (!will_require_imatrix and tm.requires_imatrix) will_require_imatrix = true;
             } else {
                 new_size = tensor_size;
-                impl.logInfo("size = %8.3f MiB\n", .{mib(new_size)});
+                mod.impl.logInfo("size = %8.3f MiB\n", .{mib(new_size)});
             }
             total_size_org += tensor_size;
             total_size_new += new_size;
@@ -1527,10 +1512,10 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
 
         if (!do_quantize) {
             new_size = tensor_size;
-            impl.logInfo("size = %8.3f MiB\n", .{mib(tensor_size)});
+            mod.impl.logInfo("size = %8.3f MiB\n", .{mib(tensor_size)});
 
             // Copy in slabs of whole rows, so that each slab can be validated.
-            const row_size = c.ggml_row_size(tensor.type, tensor.ne[0]);
+            const row_size = mod.impl.c.ggml_row_size(tensor.type, tensor.ne[0]);
             const slab_size = @max(row_size, (max_buf_size / row_size) * row_size);
 
             var offs: usize = 0;
@@ -1546,8 +1531,8 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
                     if (entry.*.len == want) {
                         imatrix = entry.*.ptr;
                     } else {
-                        impl.logInfo("\n====== %s: imatrix size %d is different from tensor size %d for %s\n", .{
-                            "llama_model_quantize_impl", @as(c_int, @truncate(@as(i64, @intCast(entry.*.len)))), @as(c_int, @truncate(tensor.ne[0] * tensor.ne[2] * tensor.ne[3])), c.ggml_get_name(tensor),
+                        mod.impl.logInfo("\n====== %s: imatrix size %d is different from tensor size %d for %s\n", .{
+                            "llama_model_quantize_impl", @as(c_int, @truncate(@as(i64, @intCast(entry.*.len)))), @as(c_int, @truncate(tensor.ne[0] * tensor.ne[2] * tensor.ne[3])), mod.impl.c.ggml_get_name(tensor),
                         });
                         // An old split Mixtral with a new imatrix lands
                         // here; tok_embd always does, and is let through.
@@ -1558,36 +1543,36 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
                         }
                     }
                 } else {
-                    impl.logInfo("\n====== %s: did not find weights for %s\n", .{ "llama_model_quantize_impl", c.ggml_get_name(tensor) });
+                    mod.impl.logInfo("\n====== %s: did not find weights for %s\n", .{ "llama_model_quantize_impl", mod.impl.c.ggml_get_name(tensor) });
                 }
             }
             if (imatrix == null and tm.requires_imatrix) {
-                impl.logError("\n\n============================================================\n", .{});
-                impl.logError("Missing importance matrix for tensor %s in a very low-bit quantization\n", .{c.ggml_get_name(tensor)});
-                impl.logError("The result will be garbage, so bailing out\n", .{});
-                impl.logError("============================================================\n\n", .{});
+                mod.impl.logError("\n\n============================================================\n", .{});
+                mod.impl.logError("Missing importance matrix for tensor %s in a very low-bit quantization\n", .{mod.impl.c.ggml_get_name(tensor)});
+                mod.impl.logError("The result will be garbage, so bailing out\n", .{});
+                mod.impl.logError("============================================================\n\n", .{});
                 return exc.throw(.runtime_error, "Missing importance matrix for tensor {s} in a very low-bit quantization", .{nameOf(tensor)});
             }
 
-            if (c.ggml_is_quantized(tensor.type) and !params.allow_requantize) {
+            if (mod.impl.c.ggml_is_quantized(tensor.type) and !params.allow_requantize) {
                 return exc.throw(.runtime_error, "requantizing from type {s} is disabled", .{typeName(tensor.type)});
             }
 
-            impl.logInfo("converting to %s .. ", .{typeName(new_type)});
-            _ = c.fflush(impl.cStdout());
+            mod.impl.logInfo("converting to %s .. ", .{typeName(new_type)});
+            _ = mod.impl.c.fflush(mod.impl.cStdout());
             // and what a tool wrote through `stdlib.stdio`
             @import("stdlib").stdio.stdout().flush();
 
             const n_per_row = tensor.ne[0];
             const nrows_per_expert = tensor.ne[1];
-            const nrows_total = c.ggml_nrows(tensor);
+            const nrows_total = mod.impl.c.ggml_nrows(tensor);
 
-            const row_size_src = c.ggml_row_size(tensor.type, n_per_row);
-            const row_size_dst = c.ggml_row_size(new_type, n_per_row);
+            const row_size_src = mod.impl.c.ggml_row_size(tensor.type, n_per_row);
+            const row_size_dst = mod.impl.c.ggml_row_size(new_type, n_per_row);
 
             // The rows go in slabs, so that the buffers stay below
             // `max_buf_size`.
-            const bytes_per_row = row_size_src + row_size_dst + (if (tensor.type == c.GGML_TYPE_F32) 0 else @as(usize, @intCast(n_per_row)) * @sizeOf(f32));
+            const bytes_per_row = row_size_src + row_size_dst + (if (tensor.type == mod.impl.c.GGML_TYPE_F32) 0 else @as(usize, @intCast(n_per_row)) * @sizeOf(f32));
             const nrows_slab: i64 = @max(1, @min(nrows_total, @as(i64, @bitCast(max_buf_size / bytes_per_row))));
 
             const min_chunk_size: i64 = 32 * 512;
@@ -1604,15 +1589,15 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
                 const src = try loadRange(&ml, weight, &read_data, @as(usize, @intCast(ir)) * row_size_src, nrows_cur_u * row_size_src, exc);
 
                 var f32_data: [*]const f32 = undefined;
-                if (tensor.type == c.GGML_TYPE_F32) {
+                if (tensor.type == mod.impl.c.GGML_TYPE_F32) {
                     f32_data = @ptrCast(@alignCast(src));
                 } else {
-                    if (f32_conv_buf.items.len < @as(usize, @intCast(nelements_cur))) f32_conv_buf.resize(allocator, @intCast(nelements_cur)) catch oom();
+                    if (f32_conv_buf.items.len < @as(usize, @intCast(nelements_cur))) f32_conv_buf.resize(std.heap.c_allocator, @intCast(nelements_cur)) catch oom();
                     try dequantize(tensor.type, src.?, f32_conv_buf.items.ptr, @intCast(nelements_cur), nthread, exc);
                     f32_data = f32_conv_buf.items.ptr;
                 }
 
-                if (work.items.len < nrows_cur_u * row_size_dst) work.resize(allocator, nrows_cur_u * row_size_dst) catch oom();
+                if (work.items.len < nrows_cur_u * row_size_dst) work.resize(std.heap.c_allocator, nrows_cur_u * row_size_dst) catch oom();
 
                 const nchunk = @divTrunc(nelements_cur + chunk_size - 1, chunk_size);
                 const nthread_use: i64 = if (nthread > 1) @max(1, @min(@as(i64, nthread), nchunk)) else 1;
@@ -1622,15 +1607,15 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
                 fout.write(work.items.ptr, size_cur);
                 new_size += size_cur;
             }
-            impl.logInfo("size = %8.2f MiB -> %8.2f MiB\n", .{ mib(tensor_size), mib(new_size) });
+            mod.impl.logInfo("size = %8.2f MiB -> %8.2f MiB\n", .{ mib(tensor_size), mib(new_size) });
         }
         total_size_org += tensor_size;
         total_size_new += new_size;
 
         // The metadata, as we go.
         const ctx = ctx_outs[@intCast(cur_split)];
-        c.gguf_set_tensor_type(ctx, tm.name.ptr, new_type);
-        impl.assert(c.gguf_get_tensor_size(ctx, c.gguf_find_tensor(ctx, tm.name.ptr)) == new_size, "llama-quant.cpp", 1434, "gguf_get_tensor_size(ctx_outs[cur_split].get(), gguf_find_tensor(ctx_outs[cur_split].get(), metadata[i].name.c_str())) == new_size");
+        mod.impl.c.gguf_set_tensor_type(ctx, tm.name.ptr, new_type);
+        mod.impl.assert(mod.impl.c.gguf_get_tensor_size(ctx, mod.impl.c.gguf_find_tensor(ctx, tm.name.ptr)) == new_size, "llama-quant.cpp", 1434, "gguf_get_tensor_size(ctx_outs[cur_split].get(), gguf_find_tensor(ctx_outs[cur_split].get(), metadata[i].name.c_str())) == new_size");
 
         // The data is already written; add the padding.
         fout.zeros(std.mem.alignForward(usize, new_size, alignment) - new_size);
@@ -1642,27 +1627,27 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     if (!params.dry_run) Files.close(&fout, ctx_outs, cur_split);
 
     const n_elements: f64 = @floatFromInt(ml.n_elements);
-    impl.logInfo("%s: model size  = %8.2f MiB (%.2f BPW)\n", .{ "llama_model_quantize_impl", mib(total_size_org), @as(f64, @floatFromInt(total_size_org)) * 8.0 / n_elements });
-    impl.logInfo("%s: quant size  = %8.2f MiB (%.2f BPW)\n", .{ "llama_model_quantize_impl", mib(total_size_new), @as(f64, @floatFromInt(total_size_new)) * 8.0 / n_elements });
+    mod.impl.logInfo("%s: model size  = %8.2f MiB (%.2f BPW)\n", .{ "llama_model_quantize_impl", mib(total_size_org), @as(f64, @floatFromInt(total_size_org)) * 8.0 / n_elements });
+    mod.impl.logInfo("%s: quant size  = %8.2f MiB (%.2f BPW)\n", .{ "llama_model_quantize_impl", mib(total_size_new), @as(f64, @floatFromInt(total_size_new)) * 8.0 / n_elements });
 
     if (params.imatrix == null and params.dry_run and will_require_imatrix) {
-        impl.logWarn("%s: WARNING: dry run completed successfully, but actually completing this quantization will require an imatrix!\n", .{"llama_model_quantize_impl"});
+        mod.impl.logWarn("%s: WARNING: dry run completed successfully, but actually completing this quantization will require an imatrix!\n", .{"llama_model_quantize_impl"});
     }
 
     if (qs.n_fallback > 0) {
-        impl.logWarn("%s: WARNING: %d of %d tensor(s) required fallback quantization\n", .{ "llama_model_quantize_impl", qs.n_fallback, ml.n_tensors });
+        mod.impl.logWarn("%s: WARNING: %d of %d tensor(s) required fallback quantization\n", .{ "llama_model_quantize_impl", qs.n_fallback, ml.n_tensors });
     }
 }
 
 /// Ports `llama_model_quantize_default_params` (llama-quant.cpp:1468 @b1b770d90).
 ///
 /// Return: the default parameters.
-pub fn defaultParams() c.llama_model_quantize_params {
+pub fn defaultParams() mod.impl.c.llama_model_quantize_params {
     return .{
         .nthread = 0,
-        .ftype = c.LLAMA_FTYPE_MOSTLY_Q8_0,
-        .output_tensor_type = c.GGML_TYPE_COUNT,
-        .token_embedding_type = c.GGML_TYPE_COUNT,
+        .ftype = mod.impl.c.LLAMA_FTYPE_MOSTLY_Q8_0,
+        .output_tensor_type = mod.impl.c.GGML_TYPE_COUNT,
+        .token_embedding_type = mod.impl.c.GGML_TYPE_COUNT,
         .allow_requantize = false,
         .quantize_output_tensor = true,
         .only_copy = false,
@@ -1701,9 +1686,9 @@ pub const ModelDesc = extern struct {
 /// - `exc`: receives a pattern's `regex_error`.
 ///
 /// Return: the state, owned by the caller; free it with `quantFree`.
-pub fn quantInit(model: *const Model, params: *const c.llama_model_quantize_params, exc: *Exception) Thrown!*State {
-    const qs = allocator.create(State) catch oom();
-    errdefer allocator.destroy(qs);
+pub fn quantInit(model: *const mod.model.Model, params: *const mod.impl.c.llama_model_quantize_params, exc: *mod.impl.Exception) mod.impl.Thrown!*State {
+    const qs = std.heap.c_allocator.create(State) catch oom();
+    errdefer std.heap.c_allocator.destroy(qs);
     qs.* = try State.init(model, params, exc);
     return qs;
 }
@@ -1713,7 +1698,7 @@ pub fn quantInit(model: *const Model, params: *const c.llama_model_quantize_para
 /// Return: nothing.
 pub fn quantFree(qs: *State) void {
     qs.deinit();
-    allocator.destroy(qs);
+    std.heap.c_allocator.destroy(qs);
 }
 
 /// Ports `llama_quant_model_from_metadata` (llama-quant.cpp:1518 @b1b770d90):
@@ -1725,11 +1710,11 @@ pub fn quantFree(qs: *State) void {
 ///
 /// Return: the model, owned by the caller; free it with `deinit` and
 /// `allocator.destroy`.
-pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model {
-    const a = arch.archFromString(std.mem.span(desc.architecture));
-    const m = allocator.create(Model) catch oom();
-    errdefer allocator.destroy(m);
-    m.* = try Model.createArch(a, model_mod.defaultParams(), exc);
+pub fn modelFromMetadata(desc: *const ModelDesc, exc: *mod.impl.Exception) mod.impl.Thrown!*mod.model.Model {
+    const a = mod.arch.archFromString(std.mem.span(desc.architecture));
+    const m = std.heap.c_allocator.create(mod.model.Model) catch oom();
+    errdefer std.heap.c_allocator.destroy(m);
+    m.* = try mod.model.Model.createArch(a, mod.model.defaultParams(), exc);
     m.arch = a;
 
     // Only LLM_TYPE_70B matters to the rules.
@@ -1740,7 +1725,7 @@ pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model 
     hp.n_embd_head_k_full = desc.n_embd_head_k;
     hp.n_embd_head_v_full = desc.n_embd_head_v;
     hp.n_layer_all = desc.n_layer;
-    impl.assert(desc.n_layer > 0 and desc.n_layer <= 512, "llama-quant.cpp", 1533, "desc->n_layer > 0 && desc->n_layer <= LLAMA_MAX_LAYERS");
+    mod.impl.assert(desc.n_layer > 0 and desc.n_layer <= 512, "llama-quant.cpp", 1533, "desc->n_layer > 0 && desc->n_layer <= LLAMA_MAX_LAYERS");
     hp.n_expert = desc.n_expert;
 
     for (0..desc.n_layer) |i| {
@@ -1755,7 +1740,7 @@ pub fn modelFromMetadata(desc: *const ModelDesc, exc: *Exception) Thrown!*Model 
 /// @b1b770d90).
 ///
 /// Return: whether `tensor` may be quantized under `qs`'s parameters.
-pub fn quantTensorAllowsQuantization(qs: *const State, tensor: *const Tensor) bool {
+pub fn quantTensorAllowsQuantization(qs: *const State, tensor: *const mod.impl.c.ggml_tensor) bool {
     return tensorAllowsQuantization(qs.params, qs.model.arch, tensor);
 }
 
@@ -1770,7 +1755,7 @@ pub fn quantTensorAllowsQuantization(qs: *const State, tensor: *const Tensor) bo
 /// - `exc`: receives what type selection throws.
 ///
 /// Return: nothing, or `error.Thrown`.
-pub fn quantComputeTypes(qs: *State, ftype: Ftype, tensors: []const *Tensor, result_types: []GgmlType, exc: *Exception) Thrown!void {
+pub fn quantComputeTypes(qs: *State, ftype: mod.impl.c.enum_llama_ftype, tensors: []const *mod.impl.c.ggml_tensor, result_types: []mod.impl.c.enum_ggml_type, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     qs.n_attention_wv = 0;
     qs.n_ffn_down = 0;
     qs.n_ffn_gate = 0;
@@ -1783,10 +1768,10 @@ pub fn quantComputeTypes(qs: *State, ftype: Ftype, tensors: []const *Tensor, res
     qs.has_imatrix = false;
     qs.has_tied_embeddings = true;
 
-    const names = allocator.alloc([]const u8, tensors.len) catch oom();
-    defer allocator.free(names);
-    const categories = allocator.alloc(Category, tensors.len) catch oom();
-    defer allocator.free(categories);
+    const names = std.heap.c_allocator.alloc([]const u8, tensors.len) catch oom();
+    defer std.heap.c_allocator.free(names);
+    const categories = std.heap.c_allocator.alloc(Category, tensors.len) catch oom();
+    defer std.heap.c_allocator.free(categories);
     for (tensors, names) |t, *n| n.* = nameOf(t);
 
     initCounters(qs, names, categories);
@@ -1829,6 +1814,6 @@ test "use_more_bits truncates as C does" {
 }
 
 test "default types" {
-    try std.testing.expectEqual(@as(GgmlType, c.GGML_TYPE_IQ2_XS), ftypeGetDefaultType(c.LLAMA_FTYPE_MOSTLY_IQ2_S));
-    try std.testing.expectEqual(@as(GgmlType, c.GGML_TYPE_COUNT), ftypeGetDefaultType(c.LLAMA_FTYPE_MOSTLY_NVFP4));
+    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_IQ2_XS), ftypeGetDefaultType(mod.impl.c.LLAMA_FTYPE_MOSTLY_IQ2_S));
+    try std.testing.expectEqual(@as(mod.impl.c.enum_ggml_type, mod.impl.c.GGML_TYPE_COUNT), ftypeGetDefaultType(mod.impl.c.LLAMA_FTYPE_MOSTLY_NVFP4));
 }

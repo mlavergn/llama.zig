@@ -9,18 +9,10 @@
 //! `llama_model_bert`'s, in `bert.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const bert = @import("bert.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_jina_bert_v3`'s `load_arch_hparams` (models/jina-bert-v3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
 
@@ -32,13 +24,13 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_jina_bert_v3`'s `load_arch_tensors` (models/jina-bert-v3.cpp:13 @b1b770d90):
 /// BERT's body without positions or classifier.
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
-    return bert.loadBertTensors(self, .{ .pos_cls = false, .moe = false, .gate = false }, exc);
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    return llama.models.bert.loadBertTensors(self, .{ .pos_cls = false, .moe = false, .gate = false }, exc);
 }
 
 /// Ports `llama_model_jina_bert_v3`'s `build_arch_graph` (models/jina-bert-v3.cpp:46 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    bert.buildGraph(model, b);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.models.bert.buildGraph(model, b);
 }
 
 // -----------------------------------------------------------------------------

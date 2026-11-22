@@ -8,13 +8,7 @@
 //! `llama.cpp/ggml/src/ggml-cuda/top-k-mask.cuh` at v1.0.0 (`b1b770d90`).
 //! The kernel, `top_k_mask_kernel`, stays CUDA.
 
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `CUDA_TOP_K_MASK_BLOCK_SIZE` (top-k-mask.cu:4 @b1b770d90).
 const block_size = 512;
 
@@ -23,29 +17,29 @@ const sizeof_int4 = 16;
 
 /// A byte stride in elements, into an `int64_t` parameter; zero for a
 /// source the op does not have, as the C's `score ? score->nb[0]/sf : 0`.
-fn s(t: ?*const Tensor, comptime i: usize, comptime size: usize) i64 {
+fn s(t: ?*const ggml.impl.c.ggml_tensor, comptime i: usize, comptime size: usize) i64 {
     return if (t) |x| @bitCast(x.nb[i] / size) else 0;
 }
 
 /// `t ? (const T *) t->data : nullptr`.
-fn data(t: ?*const Tensor) ?*const anyopaque {
+fn data(t: ?*const ggml.impl.c.ggml_tensor) ?*const anyopaque {
     return if (t) |x| x.data else null;
 }
 
 /// Ports `top_k_mask_cuda` (top-k-mask.cu:86 @b1b770d90), its element type
 /// `T` comptime: `f32` or `kernels.half`.
-fn topKMaskCuda(comptime T: type, ctx: *common.Context, dst: *Tensor) void {
-    const mask = impl.one(Tensor, dst.src[0]);
-    const top_k = impl.one(Tensor, dst.src[1]);
-    const score: ?*const Tensor = dst.src[2];
-    const blocks: ?*const Tensor = dst.src[3];
-    const extra: ?*const Tensor = dst.src[4];
+fn topKMaskCuda(comptime T: type, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const mask = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const top_k = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const score: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
+    const blocks: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const extra: ?*const ggml.impl.c.ggml_tensor = dst.src[4];
 
     const n_kv = mask.ne[0];
     const ts = @sizeOf(T);
 
-    impl.assert(dst.nb[0] == ts and mask.nb[0] == ts, "dst->nb[0] == sizeof(T) && mask->nb[0] == sizeof(T)");
-    impl.assert(dst.nb[1] % ts == 0 and mask.nb[1] % ts == 0, "dst->nb[1] % sizeof(T) == 0 && mask->nb[1] % sizeof(T) == 0");
+    ggml.impl.assert(dst.nb[0] == ts and mask.nb[0] == ts, "dst->nb[0] == sizeof(T) && mask->nb[0] == sizeof(T)");
+    ggml.impl.assert(dst.nb[1] % ts == 0 and mask.nb[1] % ts == 0, "dst->nb[1] % sizeof(T) == 0 && mask->nb[1] % sizeof(T) == 0");
 
     // 16-byte stores need every dst row aligned
     const vec = (@as(u64, @bitCast(n_kv)) *% ts) % sizeof_int4 == 0 and
@@ -57,8 +51,8 @@ fn topKMaskCuda(comptime T: type, ctx: *common.Context, dst: *Tensor) void {
     const si = @sizeOf(i32);
     const sf = @sizeOf(f32);
 
-    kernels.launchPdl(kernels.get("top-k-mask", kernels.tmpl("top_k_mask_kernel", &.{kernels.typeName(T)})), .{
-        .grid = .{ .x = @truncate(@as(u64, @bitCast(c.ggml_nrows(dst)))) },
+    ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("top-k-mask", ggml.cuda.kernels.tmpl("top_k_mask_kernel", &.{ggml.cuda.kernels.typeName(T)})), .{
+        .grid = .{ .x = @truncate(@as(u64, @bitCast(ggml.impl.c.ggml_nrows(dst)))) },
         .block = .{ .x = block_size },
         .shmem = 0,
         .stream = ctx.stream(),
@@ -104,10 +98,10 @@ fn topKMaskCuda(comptime T: type, ctx: *common.Context, dst: *Tensor) void {
 }
 
 /// Ports `ggml_cuda_op_top_k_mask` (top-k-mask.cu:130 @b1b770d90).
-pub fn opTopKMask(ctx: *common.Context, dst: *Tensor) void {
+pub fn opTopKMask(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     switch (dst.type) {
-        c.GGML_TYPE_F16 => topKMaskCuda(kernels.half, ctx, dst),
-        c.GGML_TYPE_F32 => topKMaskCuda(f32, ctx, dst),
-        else => impl.abort("unsupported type"),
+        ggml.impl.c.GGML_TYPE_F16 => topKMaskCuda(ggml.cuda.kernels.half, ctx, dst),
+        ggml.impl.c.GGML_TYPE_F32 => topKMaskCuda(f32, ctx, dst),
+        else => ggml.impl.abort("unsupported type"),
     }
 }

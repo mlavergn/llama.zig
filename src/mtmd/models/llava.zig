@@ -8,15 +8,10 @@
 //! Ports `llama.cpp/tools/mtmd/models/llava.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const c = impl.c;
-const T = graph.T;
-const ne = graph.ne;
+const mtmd = @import("../module.zig");
 
 /// Ports `build` (llava.cpp:5 @b1b770d90), a member of `mtmd_graph_llava`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -25,7 +20,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const batch_size: c_int = 1;
     const n_pos: c_int = g.n_patches + @as(c_int, if (model.class_embedding != null) 1 else 0);
 
-    impl.ggmlAssert(g.n_patches_x == g.n_patches_y, "llava.cpp", 9, "n_patches_x == n_patches_y && \"only square images supported\"");
+    mtmd.impl.ggmlAssert(g.n_patches_x == g.n_patches_y, "llava.cpp", 9, "n_patches_x == n_patches_y && \"only square images supported\"");
 
     // Calculate the deepest feature layer based on hparams and projector type
     var max_feature_layer: c_int = g.n_layer;
@@ -47,13 +42,13 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     var inp = g.buildInp();
 
     // concat class_embeddings and patch_embeddings
-    if (model.class_embedding != null) inp = c.ggml_concat(ctx0, inp, model.class_embedding, 1);
+    if (model.class_embedding != null) inp = mtmd.impl.c.ggml_concat(ctx0, inp, model.class_embedding, 1);
 
-    const positions = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, n_pos);
-    _ = c.ggml_set_name(positions, "positions");
-    c.ggml_set_input(positions);
+    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_pos);
+    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
+    mtmd.impl.c.ggml_set_input(positions);
 
-    inp = c.ggml_add(ctx0, inp, c.ggml_get_rows(ctx0, model.position_embeddings, positions));
+    inp = mtmd.impl.c.ggml_add(ctx0, inp, mtmd.impl.c.ggml_get_rows(ctx0, model.position_embeddings, positions));
 
     var inpL = inp;
 
@@ -63,8 +58,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(inpL, "pre_ln", -1);
     }
 
-    var embedding_stack: std.ArrayList(T) = .empty;
-    defer embedding_stack.deinit(impl.gpa);
+    var embedding_stack: std.ArrayList(mtmd.graph.T) = .empty;
+    defer embedding_stack.deinit(std.heap.c_allocator);
 
     // loop over layers
     var il: c_int = 0;
@@ -74,7 +69,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
         // If this is an embedding feature layer, save the output.
         // NOTE: 0 index here refers to the input to the encoder.
-        if (hparams.isFeatureLayer(il)) try embedding_stack.append(impl.gpa, cur);
+        if (hparams.isFeatureLayer(il)) try embedding_stack.append(std.heap.c_allocator, cur);
 
         // layernorm1
         cur = g.buildNorm(cur, layer.ln_1_w, layer.ln_1_b, .normal, eps, il);
@@ -83,17 +78,17 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         // self-attention
         {
             var Qcur = g.buildMm(layer.q_w, cur);
-            if (layer.q_b != null) Qcur = c.ggml_add(ctx0, Qcur, layer.q_b);
+            if (layer.q_b != null) Qcur = mtmd.impl.c.ggml_add(ctx0, Qcur, layer.q_b);
 
             var Kcur = g.buildMm(layer.k_w, cur);
-            if (layer.k_b != null) Kcur = c.ggml_add(ctx0, Kcur, layer.k_b);
+            if (layer.k_b != null) Kcur = mtmd.impl.c.ggml_add(ctx0, Kcur, layer.k_b);
 
             var Vcur = g.buildMm(layer.v_w, cur);
-            if (layer.v_b != null) Vcur = c.ggml_add(ctx0, Vcur, layer.v_b);
+            if (layer.v_b != null) Vcur = mtmd.impl.c.ggml_add(ctx0, Vcur, layer.v_b);
 
-            Qcur = c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
-            Kcur = c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
-            Vcur = c.ggml_reshape_3d(ctx0, Vcur, g.d_head, g.n_head, n_pos);
+            Qcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Qcur, g.d_head, g.n_head, n_pos);
+            Kcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Kcur, g.d_head, g.n_head, n_pos);
+            Vcur = mtmd.impl.c.ggml_reshape_3d(ctx0, Vcur, g.d_head, g.n_head, n_pos);
 
             g.cb(Qcur, "Qcur", il);
             g.cb(Kcur, "Kcur", il);
@@ -104,7 +99,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         }
 
         // re-add the layer input, e.g., residual
-        cur = c.ggml_add(ctx0, cur, inpL);
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, inpL);
 
         inpL = cur; // inpL = residual, cur = hidden_states
 
@@ -120,7 +115,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(cur, "ffn_out", il);
 
         // residual 2
-        cur = c.ggml_add(ctx0, inpL, cur);
+        cur = mtmd.impl.c.ggml_add(ctx0, inpL, cur);
         g.cb(cur, "layer_out", il);
 
         inpL = cur;
@@ -134,202 +129,202 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // process vision feature layers (used by granite)
     {
         // final layer is a vision feature layer
-        if (hparams.isFeatureLayer(max_feature_layer)) try embedding_stack.append(impl.gpa, inpL);
+        if (hparams.isFeatureLayer(max_feature_layer)) try embedding_stack.append(std.heap.c_allocator, inpL);
 
         // If feature layers are explicitly set, stack them (if we have multiple)
         if (embedding_stack.items.len != 0) {
             embeddings = embedding_stack.items[0];
-            for (embedding_stack.items[1..]) |e| embeddings = c.ggml_concat(ctx0, embeddings, e, 0);
+            for (embedding_stack.items[1..]) |e| embeddings = mtmd.impl.c.ggml_concat(ctx0, embeddings, e, 0);
         }
     }
 
     // llava projector (also used by granite)
     if (hparams.has_llava_projector) {
-        embeddings = c.ggml_reshape_2d(ctx0, embeddings, ne(embeddings, 0), ne(embeddings, 1));
+        embeddings = mtmd.impl.c.ggml_reshape_2d(ctx0, embeddings, mtmd.graph.ne(embeddings, 0), mtmd.graph.ne(embeddings, 1));
 
-        const patches = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, g.n_patches);
-        _ = c.ggml_set_name(patches, "patches");
-        c.ggml_set_input(patches);
+        const patches = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches);
+        _ = mtmd.impl.c.ggml_set_name(patches, "patches");
+        mtmd.impl.c.ggml_set_input(patches);
 
         // shape [1, 576, 1024]
         // ne is whcn, ne = [1024, 576, 1, 1]
-        embeddings = c.ggml_get_rows(ctx0, embeddings, patches);
+        embeddings = mtmd.impl.c.ggml_get_rows(ctx0, embeddings, patches);
 
         // llava projector
         if (g.proj_type == .mlp) {
             embeddings = g.buildMm(model.mm_0_w, embeddings);
-            embeddings = c.ggml_add(ctx0, embeddings, model.mm_0_b);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, embeddings, model.mm_0_b);
 
-            embeddings = c.ggml_gelu(ctx0, embeddings);
+            embeddings = mtmd.impl.c.ggml_gelu(ctx0, embeddings);
             embeddings = g.buildMm(model.mm_2_w, embeddings);
-            embeddings = c.ggml_add(ctx0, embeddings, model.mm_2_b);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, embeddings, model.mm_2_b);
         } else if (g.proj_type == .mlp_norm) {
             embeddings = g.buildMm(model.mm_0_w, embeddings);
-            embeddings = c.ggml_add(ctx0, embeddings, model.mm_0_b);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, embeddings, model.mm_0_b);
             // First LayerNorm
-            embeddings = c.ggml_norm(ctx0, embeddings, eps);
-            embeddings = c.ggml_add(ctx0, c.ggml_mul(ctx0, embeddings, model.mm_1_w), model.mm_1_b);
+            embeddings = mtmd.impl.c.ggml_norm(ctx0, embeddings, eps);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, embeddings, model.mm_1_w), model.mm_1_b);
 
             // GELU activation
-            embeddings = c.ggml_gelu(ctx0, embeddings);
+            embeddings = mtmd.impl.c.ggml_gelu(ctx0, embeddings);
 
             // Second linear layer
             embeddings = g.buildMm(model.mm_3_w, embeddings);
-            embeddings = c.ggml_add(ctx0, embeddings, model.mm_3_b);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, embeddings, model.mm_3_b);
 
             // Second LayerNorm
-            embeddings = c.ggml_norm(ctx0, embeddings, eps);
-            embeddings = c.ggml_add(ctx0, c.ggml_mul(ctx0, embeddings, model.mm_4_w), model.mm_4_b);
+            embeddings = mtmd.impl.c.ggml_norm(ctx0, embeddings, eps);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, embeddings, model.mm_4_w), model.mm_4_b);
         } else if (g.proj_type == .ldp) {
             // MobileVLM projector
             const n_patch: c_int = 24;
             var mlp_1 = g.buildMm(model.mm_model_mlp_1_w, embeddings);
-            mlp_1 = c.ggml_add(ctx0, mlp_1, model.mm_model_mlp_1_b);
-            mlp_1 = c.ggml_gelu(ctx0, mlp_1);
+            mlp_1 = mtmd.impl.c.ggml_add(ctx0, mlp_1, model.mm_model_mlp_1_b);
+            mlp_1 = mtmd.impl.c.ggml_gelu(ctx0, mlp_1);
             var mlp_3 = g.buildMm(model.mm_model_mlp_3_w, mlp_1);
-            mlp_3 = c.ggml_add(ctx0, mlp_3, model.mm_model_mlp_3_b);
+            mlp_3 = mtmd.impl.c.ggml_add(ctx0, mlp_3, model.mm_model_mlp_3_b);
             // mlp_3 shape = [1, 576, 2048], ne = [2048, 576, 1, 1]
 
             // block 1
-            var block_1: T = null;
+            var block_1: mtmd.graph.T = null;
             {
                 // transpose from [1, 576, 2048] --> [1, 2048, 576] --> [1, 2048, 24, 24]
-                mlp_3 = c.ggml_permute(ctx0, mlp_3, 1, 0, 2, 3);
-                mlp_3 = c.ggml_cont_4d(ctx0, mlp_3, n_patch, n_patch, ne(mlp_3, 1), ne(mlp_3, 2));
+                mlp_3 = mtmd.impl.c.ggml_permute(ctx0, mlp_3, 1, 0, 2, 3);
+                mlp_3 = mtmd.impl.c.ggml_cont_4d(ctx0, mlp_3, n_patch, n_patch, mtmd.graph.ne(mlp_3, 1), mtmd.graph.ne(mlp_3, 2));
                 // stride = 1, padding = 1, bias is nullptr
-                block_1 = c.ggml_conv_2d_dw(ctx0, model.mm_model_block_1_block_0_0_w, mlp_3, 1, 1, 1, 1, 1, 1);
+                block_1 = mtmd.impl.c.ggml_conv_2d_dw(ctx0, model.mm_model_block_1_block_0_0_w, mlp_3, 1, 1, 1, 1, 1, 1);
 
                 // layer norm
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 1, 2, 0, 3));
-                block_1 = c.ggml_norm(ctx0, block_1, eps);
-                block_1 = c.ggml_add(ctx0, c.ggml_mul(ctx0, block_1, model.mm_model_block_1_block_0_1_w), model.mm_model_block_1_block_0_1_b);
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 1, 2, 0, 3));
+                block_1 = mtmd.impl.c.ggml_norm(ctx0, block_1, eps);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, block_1, model.mm_model_block_1_block_0_1_w), model.mm_model_block_1_block_0_1_b);
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
 
                 // hardswish
-                const block_1_hw = c.ggml_hardswish(ctx0, block_1);
+                const block_1_hw = mtmd.impl.c.ggml_hardswish(ctx0, block_1);
 
-                block_1 = c.ggml_pool_2d(ctx0, block_1_hw, c.GGML_OP_POOL_AVG, @intCast(ne(block_1_hw, 0)), @intCast(ne(block_1_hw, 1)), @intCast(ne(block_1_hw, 0)), @intCast(ne(block_1_hw, 1)), 0, 0);
+                block_1 = mtmd.impl.c.ggml_pool_2d(ctx0, block_1_hw, mtmd.impl.c.GGML_OP_POOL_AVG, @intCast(mtmd.graph.ne(block_1_hw, 0)), @intCast(mtmd.graph.ne(block_1_hw, 1)), @intCast(mtmd.graph.ne(block_1_hw, 0)), @intCast(mtmd.graph.ne(block_1_hw, 1)), 0, 0);
                 // pointwise conv
-                block_1 = c.ggml_reshape_2d(ctx0, block_1, ne(block_1, 0) * ne(block_1, 1) * ne(block_1, 2), ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_reshape_2d(ctx0, block_1, mtmd.graph.ne(block_1, 0) * mtmd.graph.ne(block_1, 1) * mtmd.graph.ne(block_1, 2), mtmd.graph.ne(block_1, 3));
                 block_1 = g.buildMm(model.mm_model_block_1_block_1_fc1_w, block_1);
-                block_1 = c.ggml_add(ctx0, block_1, model.mm_model_block_1_block_1_fc1_b);
-                block_1 = c.ggml_relu(ctx0, block_1);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, block_1, model.mm_model_block_1_block_1_fc1_b);
+                block_1 = mtmd.impl.c.ggml_relu(ctx0, block_1);
                 block_1 = g.buildMm(model.mm_model_block_1_block_1_fc2_w, block_1);
-                block_1 = c.ggml_add(ctx0, block_1, model.mm_model_block_1_block_1_fc2_b);
-                block_1 = c.ggml_hardsigmoid(ctx0, block_1);
-                block_1 = c.ggml_reshape_4d(ctx0, block_1, 1, 1, ne(block_1, 0), ne(block_1, 1));
-                block_1 = c.ggml_mul(ctx0, block_1_hw, block_1);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, block_1, model.mm_model_block_1_block_1_fc2_b);
+                block_1 = mtmd.impl.c.ggml_hardsigmoid(ctx0, block_1);
+                block_1 = mtmd.impl.c.ggml_reshape_4d(ctx0, block_1, 1, 1, mtmd.graph.ne(block_1, 0), mtmd.graph.ne(block_1, 1));
+                block_1 = mtmd.impl.c.ggml_mul(ctx0, block_1_hw, block_1);
 
-                const w: c_int = @truncate(ne(block_1, 0));
-                const h: c_int = @truncate(ne(block_1, 1));
-                block_1 = c.ggml_reshape_3d(ctx0, block_1, w * h, ne(block_1, 2), ne(block_1, 3));
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 1, 0, 2, 3));
+                const w: c_int = @truncate(mtmd.graph.ne(block_1, 0));
+                const h: c_int = @truncate(mtmd.graph.ne(block_1, 1));
+                block_1 = mtmd.impl.c.ggml_reshape_3d(ctx0, block_1, w * h, mtmd.graph.ne(block_1, 2), mtmd.graph.ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 1, 0, 2, 3));
 
                 block_1 = g.buildMm(model.mm_model_block_1_block_2_0_w, block_1);
-                block_1 = c.ggml_reshape_4d(ctx0, block_1, ne(block_1, 0), w, h, ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_reshape_4d(ctx0, block_1, mtmd.graph.ne(block_1, 0), w, h, mtmd.graph.ne(block_1, 3));
 
-                block_1 = c.ggml_norm(ctx0, block_1, eps);
-                block_1 = c.ggml_add(ctx0, c.ggml_mul(ctx0, block_1, model.mm_model_block_1_block_2_1_w), model.mm_model_block_1_block_2_1_b);
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
+                block_1 = mtmd.impl.c.ggml_norm(ctx0, block_1, eps);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, block_1, model.mm_model_block_1_block_2_1_w), model.mm_model_block_1_block_2_1_b);
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
                 // residual
-                block_1 = c.ggml_add(ctx0, mlp_3, block_1);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, mlp_3, block_1);
             }
 
             // block_2
             {
                 // stride = 2
-                block_1 = c.ggml_conv_2d_dw(ctx0, model.mm_model_block_2_block_0_0_w, block_1, 2, 2, 1, 1, 1, 1);
+                block_1 = mtmd.impl.c.ggml_conv_2d_dw(ctx0, model.mm_model_block_2_block_0_0_w, block_1, 2, 2, 1, 1, 1, 1);
 
                 // layer norm
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 1, 2, 0, 3));
-                block_1 = c.ggml_norm(ctx0, block_1, eps);
-                block_1 = c.ggml_add(ctx0, c.ggml_mul(ctx0, block_1, model.mm_model_block_2_block_0_1_w), model.mm_model_block_2_block_0_1_b);
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 1, 2, 0, 3));
+                block_1 = mtmd.impl.c.ggml_norm(ctx0, block_1, eps);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, block_1, model.mm_model_block_2_block_0_1_w), model.mm_model_block_2_block_0_1_b);
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 2, 0, 1, 3));
                 // hardswish
-                const block_1_hw = c.ggml_hardswish(ctx0, block_1);
+                const block_1_hw = mtmd.impl.c.ggml_hardswish(ctx0, block_1);
 
                 // not sure the parameters is right for globalAvgPooling
-                block_1 = c.ggml_pool_2d(ctx0, block_1_hw, c.GGML_OP_POOL_AVG, @intCast(ne(block_1_hw, 0)), @intCast(ne(block_1_hw, 1)), @intCast(ne(block_1_hw, 0)), @intCast(ne(block_1_hw, 1)), 0, 0);
+                block_1 = mtmd.impl.c.ggml_pool_2d(ctx0, block_1_hw, mtmd.impl.c.GGML_OP_POOL_AVG, @intCast(mtmd.graph.ne(block_1_hw, 0)), @intCast(mtmd.graph.ne(block_1_hw, 1)), @intCast(mtmd.graph.ne(block_1_hw, 0)), @intCast(mtmd.graph.ne(block_1_hw, 1)), 0, 0);
                 // pointwise conv
-                block_1 = c.ggml_reshape_2d(ctx0, block_1, ne(block_1, 0) * ne(block_1, 1) * ne(block_1, 2), ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_reshape_2d(ctx0, block_1, mtmd.graph.ne(block_1, 0) * mtmd.graph.ne(block_1, 1) * mtmd.graph.ne(block_1, 2), mtmd.graph.ne(block_1, 3));
                 block_1 = g.buildMm(model.mm_model_block_2_block_1_fc1_w, block_1);
-                block_1 = c.ggml_add(ctx0, block_1, model.mm_model_block_2_block_1_fc1_b);
-                block_1 = c.ggml_relu(ctx0, block_1);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, block_1, model.mm_model_block_2_block_1_fc1_b);
+                block_1 = mtmd.impl.c.ggml_relu(ctx0, block_1);
                 block_1 = g.buildMm(model.mm_model_block_2_block_1_fc2_w, block_1);
-                block_1 = c.ggml_add(ctx0, block_1, model.mm_model_block_2_block_1_fc2_b);
-                block_1 = c.ggml_hardsigmoid(ctx0, block_1);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, block_1, model.mm_model_block_2_block_1_fc2_b);
+                block_1 = mtmd.impl.c.ggml_hardsigmoid(ctx0, block_1);
 
-                block_1 = c.ggml_reshape_4d(ctx0, block_1, 1, 1, ne(block_1, 0), ne(block_1, 1));
-                block_1 = c.ggml_mul(ctx0, block_1_hw, block_1);
+                block_1 = mtmd.impl.c.ggml_reshape_4d(ctx0, block_1, 1, 1, mtmd.graph.ne(block_1, 0), mtmd.graph.ne(block_1, 1));
+                block_1 = mtmd.impl.c.ggml_mul(ctx0, block_1_hw, block_1);
 
-                const w: c_int = @truncate(ne(block_1, 0));
-                const h: c_int = @truncate(ne(block_1, 1));
-                block_1 = c.ggml_reshape_3d(ctx0, block_1, w * h, ne(block_1, 2), ne(block_1, 3));
-                block_1 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, block_1, 1, 0, 2, 3));
+                const w: c_int = @truncate(mtmd.graph.ne(block_1, 0));
+                const h: c_int = @truncate(mtmd.graph.ne(block_1, 1));
+                block_1 = mtmd.impl.c.ggml_reshape_3d(ctx0, block_1, w * h, mtmd.graph.ne(block_1, 2), mtmd.graph.ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, block_1, 1, 0, 2, 3));
                 block_1 = g.buildMm(model.mm_model_block_2_block_2_0_w, block_1);
-                block_1 = c.ggml_reshape_4d(ctx0, block_1, ne(block_1, 0), w, h, ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_reshape_4d(ctx0, block_1, mtmd.graph.ne(block_1, 0), w, h, mtmd.graph.ne(block_1, 3));
 
-                block_1 = c.ggml_norm(ctx0, block_1, eps);
-                block_1 = c.ggml_add(ctx0, c.ggml_mul(ctx0, block_1, model.mm_model_block_2_block_2_1_w), model.mm_model_block_2_block_2_1_b);
-                block_1 = c.ggml_reshape_3d(ctx0, block_1, ne(block_1, 0), ne(block_1, 1) * ne(block_1, 2), ne(block_1, 3));
+                block_1 = mtmd.impl.c.ggml_norm(ctx0, block_1, eps);
+                block_1 = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, block_1, model.mm_model_block_2_block_2_1_w), model.mm_model_block_2_block_2_1_b);
+                block_1 = mtmd.impl.c.ggml_reshape_3d(ctx0, block_1, mtmd.graph.ne(block_1, 0), mtmd.graph.ne(block_1, 1) * mtmd.graph.ne(block_1, 2), mtmd.graph.ne(block_1, 3));
             }
             embeddings = block_1;
         } else if (g.proj_type == .ldpv2) {
             const n_patch: c_int = 24;
             var mlp_0 = g.buildMm(model.mm_model_mlp_0_w, embeddings);
-            mlp_0 = c.ggml_add(ctx0, mlp_0, model.mm_model_mlp_0_b);
-            mlp_0 = c.ggml_gelu(ctx0, mlp_0);
+            mlp_0 = mtmd.impl.c.ggml_add(ctx0, mlp_0, model.mm_model_mlp_0_b);
+            mlp_0 = mtmd.impl.c.ggml_gelu(ctx0, mlp_0);
             var mlp_2 = g.buildMm(model.mm_model_mlp_2_w, mlp_0);
-            mlp_2 = c.ggml_add(ctx0, mlp_2, model.mm_model_mlp_2_b);
+            mlp_2 = mtmd.impl.c.ggml_add(ctx0, mlp_2, model.mm_model_mlp_2_b);
             // AVG Pool Layer 2*2, strides = 2
-            mlp_2 = c.ggml_permute(ctx0, mlp_2, 1, 0, 2, 3);
-            mlp_2 = c.ggml_cont_4d(ctx0, mlp_2, n_patch, n_patch, ne(mlp_2, 1), ne(mlp_2, 2));
-            mlp_2 = c.ggml_pool_2d(ctx0, mlp_2, c.GGML_OP_POOL_AVG, 2, 2, 2, 2, 0, 0);
-            var peg_0 = c.ggml_conv_2d_dw(ctx0, model.mm_model_peg_0_w, mlp_2, 1, 1, 1, 1, 1, 1);
-            peg_0 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, peg_0, 1, 2, 0, 3));
-            peg_0 = c.ggml_add(ctx0, peg_0, model.mm_model_peg_0_b);
-            mlp_2 = c.ggml_cont(ctx0, c.ggml_permute(ctx0, mlp_2, 1, 2, 0, 3));
-            peg_0 = c.ggml_add(ctx0, peg_0, mlp_2);
-            peg_0 = c.ggml_reshape_3d(ctx0, peg_0, ne(peg_0, 0), ne(peg_0, 1) * ne(peg_0, 2), ne(peg_0, 3));
+            mlp_2 = mtmd.impl.c.ggml_permute(ctx0, mlp_2, 1, 0, 2, 3);
+            mlp_2 = mtmd.impl.c.ggml_cont_4d(ctx0, mlp_2, n_patch, n_patch, mtmd.graph.ne(mlp_2, 1), mtmd.graph.ne(mlp_2, 2));
+            mlp_2 = mtmd.impl.c.ggml_pool_2d(ctx0, mlp_2, mtmd.impl.c.GGML_OP_POOL_AVG, 2, 2, 2, 2, 0, 0);
+            var peg_0 = mtmd.impl.c.ggml_conv_2d_dw(ctx0, model.mm_model_peg_0_w, mlp_2, 1, 1, 1, 1, 1, 1);
+            peg_0 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, peg_0, 1, 2, 0, 3));
+            peg_0 = mtmd.impl.c.ggml_add(ctx0, peg_0, model.mm_model_peg_0_b);
+            mlp_2 = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, mlp_2, 1, 2, 0, 3));
+            peg_0 = mtmd.impl.c.ggml_add(ctx0, peg_0, mlp_2);
+            peg_0 = mtmd.impl.c.ggml_reshape_3d(ctx0, peg_0, mtmd.graph.ne(peg_0, 0), mtmd.graph.ne(peg_0, 1) * mtmd.graph.ne(peg_0, 2), mtmd.graph.ne(peg_0, 3));
             embeddings = peg_0;
         } else {
-            impl.abort("llava.cpp", 329, "fatal error");
+            mtmd.impl.abort("llava.cpp", 329, "fatal error");
         }
     }
 
     // glm projector
     else if (g.proj_type == .glm_edge) {
-        const gridsz: usize = @intFromFloat(@sqrt(@as(f64, @floatFromInt(ne(embeddings, 1)))));
-        embeddings = c.ggml_permute(ctx0, embeddings, 1, 0, 2, 3);
-        embeddings = c.ggml_cont_3d(ctx0, embeddings, @intCast(gridsz), @intCast(gridsz), ne(embeddings, 1));
-        embeddings = c.ggml_conv_2d(ctx0, model.mm_model_adapter_conv_w, embeddings, 2, 2, 0, 0, 1, 1);
-        embeddings = c.ggml_reshape_3d(ctx0, embeddings, ne(embeddings, 0) * ne(embeddings, 1), ne(embeddings, 2), batch_size);
-        embeddings = c.ggml_cont(ctx0, c.ggml_permute(ctx0, embeddings, 1, 0, 2, 3));
-        embeddings = c.ggml_add(ctx0, embeddings, model.mm_model_adapter_conv_b);
+        const gridsz: usize = @intFromFloat(@sqrt(@as(f64, @floatFromInt(mtmd.graph.ne(embeddings, 1)))));
+        embeddings = mtmd.impl.c.ggml_permute(ctx0, embeddings, 1, 0, 2, 3);
+        embeddings = mtmd.impl.c.ggml_cont_3d(ctx0, embeddings, @intCast(gridsz), @intCast(gridsz), mtmd.graph.ne(embeddings, 1));
+        embeddings = mtmd.impl.c.ggml_conv_2d(ctx0, model.mm_model_adapter_conv_w, embeddings, 2, 2, 0, 0, 1, 1);
+        embeddings = mtmd.impl.c.ggml_reshape_3d(ctx0, embeddings, mtmd.graph.ne(embeddings, 0) * mtmd.graph.ne(embeddings, 1), mtmd.graph.ne(embeddings, 2), batch_size);
+        embeddings = mtmd.impl.c.ggml_cont(ctx0, mtmd.impl.c.ggml_permute(ctx0, embeddings, 1, 0, 2, 3));
+        embeddings = mtmd.impl.c.ggml_add(ctx0, embeddings, model.mm_model_adapter_conv_b);
         // GLU
         {
             embeddings = g.buildMm(model.mm_model_mlp_0_w, embeddings);
-            embeddings = c.ggml_norm(ctx0, embeddings, eps);
-            embeddings = c.ggml_add(ctx0, c.ggml_mul(ctx0, embeddings, model.mm_model_ln_q_w), model.mm_model_ln_q_b);
-            embeddings = c.ggml_gelu_inplace(ctx0, embeddings);
+            embeddings = mtmd.impl.c.ggml_norm(ctx0, embeddings, eps);
+            embeddings = mtmd.impl.c.ggml_add(ctx0, mtmd.impl.c.ggml_mul(ctx0, embeddings, model.mm_model_ln_q_w), model.mm_model_ln_q_b);
+            embeddings = mtmd.impl.c.ggml_gelu_inplace(ctx0, embeddings);
             var x = embeddings;
             embeddings = g.buildMm(model.mm_model_mlp_2_w, embeddings);
             x = g.buildMm(model.mm_model_mlp_1_w, x);
-            embeddings = c.ggml_swiglu_split(ctx0, embeddings, x);
+            embeddings = mtmd.impl.c.ggml_swiglu_split(ctx0, embeddings, x);
             embeddings = g.buildMm(model.mm_model_mlp_3_w, embeddings);
         }
         // arrangement of BOI/EOI token embeddings
         // note: these embeddings are not present in text model, hence we cannot process them as text tokens
         {
-            embeddings = c.ggml_concat(ctx0, model.mm_boi, embeddings, 1); // BOI
-            embeddings = c.ggml_concat(ctx0, embeddings, model.mm_eoi, 1); // EOI
+            embeddings = mtmd.impl.c.ggml_concat(ctx0, model.mm_boi, embeddings, 1); // BOI
+            embeddings = mtmd.impl.c.ggml_concat(ctx0, embeddings, model.mm_eoi, 1); // EOI
         }
     } else {
-        impl.abort("llava.cpp", 364, "llava: unknown projector type");
+        mtmd.impl.abort("llava.cpp", 364, "llava: unknown projector type");
     }
 
     // build the graph
-    c.ggml_build_forward_expand(g.gf, embeddings);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, embeddings);
 
     return g.gf;
 }

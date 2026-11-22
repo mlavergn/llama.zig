@@ -33,42 +33,14 @@
 //! succeeded, and a partial success still falls through to recompute the lot.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("../impl.zig");
-const types = @import("../types.zig");
-const defs = @import("defs.zig");
-const traits = @import("traits.zig");
-const features = @import("features.zig");
-const convert = @import("convert.zig");
-const threading = @import("threading.zig");
-const tiled = @import("tiled.zig");
-const c = impl.c;
 
-const Tensor = defs.Tensor;
-const ComputeParams = defs.ComputeParams;
-
-/// The op kernels this file falls back to, still C++ in `ggml-cpu/ops.cpp`.
-extern fn ggml_compute_forward_fwht(params: *const ComputeParams, dst: *Tensor) void;
-
-/// `ggml-cpu/llamafile/sgemm.cpp`, still C++.
+/// The op kernel this file falls back to, `ops/sort.zig`'s.
+/// `ggml-cpu/llamafile/sgemm.cpp`'s entry point, `ops/sgemm.zig`'s.
 ///
 /// Returns false when it has no kernel for the shape or type combination, in
 /// which case the caller must compute the product itself.
-extern fn llamafile_sgemm(
-    params: *const ComputeParams,
-    m: i64,
-    n: i64,
-    k: i64,
-    a: ?*const anyopaque,
-    lda: i64,
-    b: ?*const anyopaque,
-    ldb: i64,
-    cc: ?*anyopaque,
-    ldc: i64,
-    atype: c_int,
-    btype: c_int,
-    ctype: c_int,
-) bool;
 
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat
@@ -87,24 +59,24 @@ extern fn llamafile_sgemm(
 /// - `ir0_start`, `ir0_end`: row range within `dst`'s first dimension.
 /// - `ir1_start`, `ir1_end`: flattened range over `dst`'s other dimensions.
 fn oneChunk(
-    params: *const ComputeParams,
-    dst: *Tensor,
-    @"type": c.enum_ggml_type,
+    params: *const ggml.cpu.defs.ComputeParams,
+    dst: *ggml.impl.c.ggml_tensor,
+    @"type": ggml.impl.c.enum_ggml_type,
     num_rows_per_vec_dot: i64,
     ir0_start: i64,
     ir0_end: i64,
     ir1_start: i64,
     ir1_end: i64,
 ) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
-    const l = defs.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-    const src1_cont = types.ggml_is_contiguous(src1);
+    const src1_cont = ggml.types.ggml_is_contiguous(src1);
 
-    const vec_dot = traits.table[@intCast(@"type")].vec_dot.?;
-    const vec_dot_type = traits.table[@intCast(@"type")].vec_dot_type;
+    const vec_dot = ggml.cpu.traits.table[@intCast(@"type")].vec_dot.?;
+    const vec_dot_type = ggml.cpu.traits.table[@intCast(@"type")].vec_dot_type;
 
     // Broadcast factors.
     const r2 = @divTrunc(l.ne12, l.ne02);
@@ -117,7 +89,7 @@ fn oneChunk(
         @ptrCast(src1.data.?)
     else
         @ptrCast(params.wdata.?);
-    const row_size = types.ggml_row_size(vec_dot_type, l.ne10);
+    const row_size = ggml.types.ggml_row_size(vec_dot_type, l.ne10);
 
     std.debug.assert(@rem(l.ne12, l.ne02) == 0);
     std.debug.assert(@rem(l.ne13, l.ne03) == 0);
@@ -199,70 +171,70 @@ fn oneChunk(
 /// - `params`: this thread's index, count, and work buffer.
 /// - `dst`: the result; `src[0]` is the weight matrix and `src[1]` the
 ///   activations.
-pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+pub export fn ggml_compute_forward_mul_mat(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
     // A Hadamard-structured src0 has a fast transform that beats the general
     // product outright, unless the caller asked for the reference path.
-    const hint = impl.getOpParamsI32(dst, 1);
-    if (hint == c.GGML_HINT_SRC0_IS_HADAMARD and !params.use_ref) {
-        ggml_compute_forward_fwht(params, dst);
+    const hint = ggml.impl.getOpParamsI32(dst, 1);
+    if (hint == ggml.impl.c.GGML_HINT_SRC0_IS_HADAMARD and !params.use_ref) {
+        ggml.cpu.ops.sort.ggml_compute_forward_fwht(params, dst);
         return;
     }
 
     // If tiled is supported, it will execute the full op here and we return
-    if (tiled.ggml_compute_forward_mul_mat_tiled(params, dst)) {
+    if (ggml.cpu.tiled.ggml_compute_forward_mul_mat_tiled(params, dst)) {
         return;
     }
 
-    const l = defs.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const ith = params.ith;
     const nth = params.nth;
 
-    const vec_dot_type = traits.table[@intCast(src0.type)].vec_dot_type;
-    const from_float = traits.table[@intCast(vec_dot_type)].from_float;
-    const vec_dot_num_rows = traits.table[@intCast(src0.type)].nrows;
+    const vec_dot_type = ggml.cpu.traits.table[@intCast(src0.type)].vec_dot_type;
+    const from_float = ggml.cpu.traits.table[@intCast(vec_dot_type)].from_float;
+    const vec_dot_num_rows = ggml.cpu.traits.table[@intCast(src0.type)].nrows;
 
-    impl.assert(l.ne0 == l.ne01, "ne0 == ne01");
-    impl.assert(l.ne1 == l.ne11, "ne1 == ne11");
-    impl.assert(l.ne2 == l.ne12, "ne2 == ne12");
-    impl.assert(l.ne3 == l.ne13, "ne3 == ne13");
+    ggml.impl.assert(l.ne0 == l.ne01, "ne0 == ne01");
+    ggml.impl.assert(l.ne1 == l.ne11, "ne1 == ne11");
+    ggml.impl.assert(l.ne2 == l.ne12, "ne2 == ne12");
+    ggml.impl.assert(l.ne3 == l.ne13, "ne3 == ne13");
 
     // Permuted src0 or src1 is not supported.
-    impl.assert(l.nb00 == types.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
-    impl.assert(l.nb10 == types.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
+    ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(src0.type), "nb00 == ggml_type_size(src0->type)");
+    ggml.impl.assert(l.nb10 == ggml.types.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
 
     // dst cannot be transposed or permuted.
-    impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
-    impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
-    impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
-    impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
+    ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
+    ggml.impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
+    ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
+    ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
     const r2 = @divTrunc(l.ne12, l.ne02);
     const r3 = @divTrunc(l.ne13, l.ne03);
-    const src1_cont = types.ggml_is_contiguous(src1);
+    const src1_cont = ggml.types.ggml_is_contiguous(src1);
 
     // First llamafile attempt: src1 is already contiguous and already the
     // type the kernel wants, so nothing needs staging.
-    if (features.use_llamafile and !params.use_ref and src1_cont) {
+    if (ggml.cpu.features.use_llamafile and !params.use_ref and src1_cont) {
         var ok = true;
         outer: for (0..@intCast(l.ne13)) |j13| {
             for (0..@intCast(l.ne12)) |j12| {
-                if (!llamafile_sgemm(
+                if (!ggml.cpu.ops.sgemm.llamafile_sgemm(
                     params,
                     l.ne01,
                     l.ne11,
-                    @divTrunc(l.ne00, types.ggml_blck_size(src0.type)),
+                    @divTrunc(l.ne00, ggml.types.ggml_blck_size(src0.type)),
                     @as([*]const u8, @ptrCast(src0.data.?)) +
                         @as(usize, j12) / @as(usize, @intCast(r2)) * l.nb02 +
                         @as(usize, j13) / @as(usize, @intCast(r3)) * l.nb03,
-                    @intCast(l.nb01 / types.ggml_type_size(src0.type)),
+                    @intCast(l.nb01 / ggml.types.ggml_type_size(src0.type)),
                     @as([*]const u8, @ptrCast(src1.data.?)) + j12 * l.nb12 + j13 * l.nb13,
-                    @intCast(l.nb11 / types.ggml_type_size(src1.type)),
+                    @intCast(l.nb11 / ggml.types.ggml_type_size(src1.type)),
                     @as([*]u8, @ptrCast(dst.data.?)) + j12 * l.nb2 + j13 * l.nb3,
-                    @intCast(l.nb1 / types.ggml_type_size(dst.type)),
+                    @intCast(l.nb1 / ggml.types.ggml_type_size(dst.type)),
                     @intCast(src0.type),
                     @intCast(src1.type),
                     @intCast(dst.type),
@@ -278,23 +250,23 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
     if (src1.type != vec_dot_type) {
         const wdata: [*]u8 = @ptrCast(params.wdata.?);
 
-        const nbw0 = types.ggml_type_size(vec_dot_type);
-        const nbw1 = types.ggml_row_size(vec_dot_type, l.ne10);
+        const nbw0 = ggml.types.ggml_type_size(vec_dot_type);
+        const nbw1 = ggml.types.ggml_row_size(vec_dot_type, l.ne10);
         const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
         const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
         std.debug.assert(params.wsize >= @as(usize, @intCast(l.ne13)) * nbw3);
         // src1 is either packed from F32 into vec_dot_type, or widened from F16 or BF16 into the F32 work buffer
-        const widen = src1.type != c.GGML_TYPE_F32;
+        const widen = src1.type != ggml.impl.c.GGML_TYPE_F32;
 
-        impl.assert(!widen or vec_dot_type == c.GGML_TYPE_F32, "!widen || vec_dot_type == GGML_TYPE_F32");
-        impl.assert(!widen or src1.type == c.GGML_TYPE_F16 or src1.type == c.GGML_TYPE_BF16, "!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
+        ggml.impl.assert(!widen or vec_dot_type == ggml.impl.c.GGML_TYPE_F32, "!widen || vec_dot_type == GGML_TYPE_F32");
+        ggml.impl.assert(!widen or src1.type == ggml.impl.c.GGML_TYPE_F16 or src1.type == ggml.impl.c.GGML_TYPE_BF16, "!widen || src1->type == GGML_TYPE_F16 || src1->type == GGML_TYPE_BF16");
 
         // Every thread walks every row and converts its own slice of the
         // columns, rather than taking whole rows round-robin. Block-quantised
         // types have to split on a block boundary, which the row-per-thread
         // form cannot express.
-        const bs = types.ggml_blck_size(vec_dot_type);
+        const bs = ggml.types.ggml_blck_size(vec_dot_type);
         const block_start = @divTrunc(@as(i64, ith) * @divTrunc(l.ne10, bs), nth);
         const block_end = @divTrunc((@as(i64, ith) + 1) * @divTrunc(l.ne10, bs), nth);
 
@@ -308,10 +280,10 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
                         @as(usize, @intCast(block_start)) * nbw0;
                     const n_block = (block_end - block_start) * bs;
 
-                    if (src1.type == c.GGML_TYPE_F16) {
-                        convert.ggml_cpu_fp16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
-                    } else if (src1.type == c.GGML_TYPE_BF16) {
-                        convert.ggml_cpu_bf16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
+                    if (src1.type == ggml.impl.c.GGML_TYPE_F16) {
+                        ggml.cpu.convert.ggml_cpu_fp16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
+                    } else if (src1.type == ggml.impl.c.GGML_TYPE_BF16) {
+                        ggml.cpu.convert.ggml_cpu_bf16_to_fp32(@ptrCast(@alignCast(src)), @ptrCast(@alignCast(dstw)), n_block);
                     } else {
                         from_float.?(@ptrCast(@alignCast(src)), dstw, n_block);
                     }
@@ -326,31 +298,31 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
         params.threadpool.?.current_chunk.store(nth, .monotonic);
     }
 
-    threading.ggml_barrier(params.threadpool.?);
+    ggml.cpu.threading.ggml_barrier(params.threadpool.?);
 
     // Second llamafile attempt, now that src1 has been staged into `wdata` in
     // the kernel's own type.
-    if (features.use_llamafile and !params.use_ref and src1.type != vec_dot_type) {
+    if (ggml.cpu.features.use_llamafile and !params.use_ref and src1.type != vec_dot_type) {
         const wdata: [*]const u8 = @ptrCast(params.wdata.?);
-        const row_size = types.ggml_row_size(vec_dot_type, l.ne10);
+        const row_size = ggml.types.ggml_row_size(vec_dot_type, l.ne10);
 
         var ok = true;
         outer: for (0..@intCast(l.ne13)) |j13| {
             for (0..@intCast(l.ne12)) |j12| {
-                if (!llamafile_sgemm(
+                if (!ggml.cpu.ops.sgemm.llamafile_sgemm(
                     params,
                     l.ne01,
                     l.ne11,
-                    @divTrunc(l.ne00, types.ggml_blck_size(src0.type)),
+                    @divTrunc(l.ne00, ggml.types.ggml_blck_size(src0.type)),
                     @as([*]const u8, @ptrCast(src0.data.?)) +
                         @as(usize, j12) / @as(usize, @intCast(r2)) * l.nb02 +
                         @as(usize, j13) / @as(usize, @intCast(r3)) * l.nb03,
-                    @intCast(l.nb01 / types.ggml_type_size(src0.type)),
+                    @intCast(l.nb01 / ggml.types.ggml_type_size(src0.type)),
                     wdata + (j12 * @as(usize, @intCast(l.ne11)) +
                         j13 * @as(usize, @intCast(l.ne12 * l.ne11))) * row_size,
-                    @intCast(row_size / types.ggml_type_size(vec_dot_type)),
+                    @intCast(row_size / ggml.types.ggml_type_size(vec_dot_type)),
                     @as([*]u8, @ptrCast(dst.data.?)) + j12 * l.nb2 + j13 * l.nb3,
-                    @intCast(l.nb1 / types.ggml_type_size(dst.type)),
+                    @intCast(l.nb1 / ggml.types.ggml_type_size(dst.type)),
                     @intCast(src0.type),
                     @intCast(vec_dot_type),
                     @intCast(dst.type),
@@ -380,7 +352,7 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
     // If that chunking is poor for the thread count, scrap it and chunk by
     // thread instead. Chunking by thread also measured better on NUMA -- see
     // ggml-org/llama.cpp#6915 -- which is why NUMA forces this branch.
-    if (nchunk0 * nchunk1 < @as(i64, nth) * 4 or threading.ggml_is_numa()) {
+    if (nchunk0 * nchunk1 < @as(i64, nth) * 4 or ggml.cpu.threading.ggml_is_numa()) {
         nchunk0 = if (nr0 > nr1) nth else 1; // parallelise by src0 rows
         nchunk1 = if (nr0 > nr1) 1 else nth; // parallelise by src1 rows
     }
@@ -431,7 +403,7 @@ pub const RowMapping = extern struct {
 };
 
 /// Ports the `MMID_MATRIX_ROW` macro (ggml-cpu.c:1488 @b1b770d90).
-inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const Tensor, row_id: i64, idx1: i64) *RowMapping {
+inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const ggml.impl.c.ggml_tensor, row_id: i64, idx1: i64) *RowMapping {
     return &matrix_rows[@intCast(row_id * ids.ne[0] * ids.ne[1] + idx1)];
 }
 
@@ -470,10 +442,10 @@ fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
 /// - `src1_cont`: whether `src1` is one contiguous block.
 /// - `wdata`: where the staged `src1` lives.
 fn idOneChunk(
-    dst: *Tensor,
-    src0: *const Tensor,
-    src1: *const Tensor,
-    ids: *const Tensor,
+    dst: *ggml.impl.c.ggml_tensor,
+    src0: *const ggml.impl.c.ggml_tensor,
+    src1: *const ggml.impl.c.ggml_tensor,
+    ids: *const ggml.impl.c.ggml_tensor,
     cur_a: i64,
     ir0_start: i64,
     ir0_end: i64,
@@ -485,12 +457,12 @@ fn idOneChunk(
     src1_cont: bool,
     wdata: [*]const u8,
 ) void {
-    const l = defs.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const @"type" = src0.type;
 
-    const vec_dot = traits.table[@intCast(@"type")].vec_dot.?;
-    const vec_dot_type = traits.table[@intCast(@"type")].vec_dot_type;
+    const vec_dot = ggml.cpu.traits.table[@intCast(@"type")].vec_dot.?;
+    const vec_dot_type = ggml.cpu.traits.table[@intCast(@"type")].vec_dot_type;
 
     const blck_0: i64 = 16;
     const blck_1: i64 = 16;
@@ -549,32 +521,32 @@ fn idOneChunk(
 /// - `params`: this thread's index, count, and work buffer.
 /// - `dst`: the result; `src[0]` is the stack of experts, `src[1]` the
 ///   activations, `src[2]` the routing table.
-pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
-    const ids = impl.one(Tensor, dst.src[2]);
+pub fn computeForwardMulMatId(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const ids = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
 
-    const l = defs.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
     const ith = params.ith;
     const nth = params.nth;
 
     const @"type" = src0.type;
 
-    const src1_cont = types.ggml_is_contiguous(src1);
+    const src1_cont = ggml.types.ggml_is_contiguous(src1);
 
-    const vec_dot_type = traits.table[@intCast(@"type")].vec_dot_type;
-    const from_float = traits.table[@intCast(vec_dot_type)].from_float;
+    const vec_dot_type = ggml.cpu.traits.table[@intCast(@"type")].vec_dot_type;
+    const from_float = ggml.cpu.traits.table[@intCast(vec_dot_type)].from_float;
 
     // Permuted src0 or src1 is not supported.
-    impl.assert(l.nb00 == types.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
-    impl.assert(l.nb10 == types.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
+    ggml.impl.assert(l.nb00 == ggml.types.ggml_type_size(@"type"), "nb00 == ggml_type_size(type)");
+    ggml.impl.assert(l.nb10 == ggml.types.ggml_type_size(src1.type), "nb10 == ggml_type_size(src1->type)");
 
     // dst cannot be transposed or permuted.
-    impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
-    impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
-    impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
-    impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
+    ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
+    ggml.impl.assert(l.nb0 <= l.nb1, "nb0 <= nb1");
+    ggml.impl.assert(l.nb1 <= l.nb2, "nb1 <= nb2");
+    ggml.impl.assert(l.nb2 <= l.nb3, "nb2 <= nb3");
 
     const n_ids = ids.ne[0]; // experts used per token
     const n_as = l.ne02; // experts available
@@ -589,7 +561,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
     if (src1.type != vec_dot_type) {
         _ = incrPtrAligned(
             &wdata_cur,
-            types.ggml_row_size(vec_dot_type, types.ggml_nelements(src1)),
+            ggml.types.ggml_row_size(vec_dot_type, ggml.types.ggml_nelements(src1)),
             @sizeOf(i64),
         );
     }
@@ -608,15 +580,15 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
 
     const atomic_current_chunk = incrPtrAligned(
         &wdata_cur,
-        defs.cache_line_size * @as(usize, @intCast(n_as)),
-        defs.cache_line_size,
+        ggml.cpu.defs.cache_line_size * @as(usize, @intCast(n_as)),
+        ggml.cpu.defs.cache_line_size,
     );
 
     // Tiled matmul (see tiled.h); per-thread work buffers, 0 bytes when disabled. The
     // reservation is unconditional, the per expert eligibility is decided at dispatch time
-    const tiled_scratch = incrPtrAligned(&wdata_cur, tiled.ggml_tiled_wdata_size(nth, dst), 64);
+    const tiled_scratch = incrPtrAligned(&wdata_cur, ggml.cpu.tiled.ggml_tiled_wdata_size(nth, dst), 64);
 
-    impl.assert(
+    ggml.impl.assert(
         params.wsize >= @intFromPtr(wdata_cur) - @intFromPtr(params.wdata.?),
         "params->wsize >= (size_t)((char *) wdata_cur - (char *) params->wdata)",
     );
@@ -624,15 +596,15 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
     if (src1.type != vec_dot_type) {
         const wdata: [*]u8 = @ptrCast(params.wdata.?);
 
-        const nbw0 = types.ggml_type_size(vec_dot_type);
-        const nbw1 = types.ggml_row_size(vec_dot_type, l.ne10);
+        const nbw0 = ggml.types.ggml_type_size(vec_dot_type);
+        const nbw1 = ggml.types.ggml_row_size(vec_dot_type, l.ne10);
         const nbw2 = nbw1 * @as(usize, @intCast(l.ne11));
         const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
         std.debug.assert(params.wsize >= @as(usize, @intCast(l.ne13)) * nbw3);
-        impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+        ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
 
-        const bs = types.ggml_blck_size(vec_dot_type);
+        const bs = ggml.types.ggml_blck_size(vec_dot_type);
         const block_start = @divTrunc(@as(i64, ith) * @divTrunc(l.ne10, bs), nth);
         const block_end = @divTrunc((@as(i64, ith) + 1) * @divTrunc(l.ne10, bs), nth);
 
@@ -690,7 +662,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         }
     }
 
-    threading.ggml_barrier(params.threadpool.?);
+    ggml.cpu.threading.ggml_barrier(params.threadpool.?);
 
     var cur_a: i64 = 0;
     while (cur_a < n_as) : (cur_a += 1) {
@@ -698,7 +670,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         if (cne1 == 0) continue;
 
         // tiled takes over if profitable for this expert (see tiled.h)
-        if (tiled.ggml_compute_forward_mul_mat_id_tiled(
+        if (ggml.cpu.tiled.ggml_compute_forward_mul_mat_id_tiled(
             params,
             dst,
             cur_a,
@@ -715,7 +687,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
             @ptrCast(src1.data.?)
         else
             @ptrCast(params.wdata.?);
-        const row_size = types.ggml_row_size(vec_dot_type, l.ne10);
+        const row_size = ggml.types.ggml_row_size(vec_dot_type, l.ne10);
 
         const nr0 = l.ne01;
         const nr1 = cne1;
@@ -723,7 +695,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
         var chunk_size: i64 = 16;
         if (nr0 == 1 or nr1 == 1) chunk_size = 64;
 
-        const disable_chunking = threading.ggml_is_numa();
+        const disable_chunking = ggml.cpu.threading.ggml_is_numa();
 
         var nchunk0 = @divTrunc(nr0 + chunk_size - 1, chunk_size);
         var nchunk1 = @divTrunc(nr1 + chunk_size - 1, chunk_size);
@@ -776,7 +748,7 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
 /// The chunk counter for one expert, one cache line into the block reserved
 /// for them.
 inline fn chunkCounter(base: [*]u8, cur_a: i64) *std.atomic.Value(c_int) {
-    return @ptrCast(@alignCast(base + @as(usize, @intCast(cur_a)) * defs.cache_line_size));
+    return @ptrCast(@alignCast(base + @as(usize, @intCast(cur_a)) * ggml.cpu.defs.cache_line_size));
 }
 
 // -----------------------------------------------------------------------------
@@ -790,7 +762,7 @@ test "the routing table is addressed as the C's macro addresses it" {
     // `MMID_MATRIX_ROW(row_id, i1)` indexes by `ids->ne[0]*ids->ne[1]`, not by
     // the number of rows actually routed. Getting that wrong overlaps two
     // experts' rows, which shows up as a wrong answer rather than a crash.
-    var ids: Tensor = std.mem.zeroes(Tensor);
+    var ids: ggml.impl.c.ggml_tensor = std.mem.zeroes(ggml.impl.c.ggml_tensor);
     ids.ne = .{ 2, 5, 1, 1 };
 
     var rows: [64]RowMapping = @splat(.{ .i1 = 0, .i2 = 0 });
@@ -811,18 +783,18 @@ test "incrPtrAligned advances past each block and honours alignment" {
     const b = incrPtrAligned(&p, 4, 8);
     try std.testing.expectEqual(@intFromPtr(&buf) + 16, @intFromPtr(b));
 
-    const line = incrPtrAligned(&p, 64, defs.cache_line_size);
-    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(line) % defs.cache_line_size);
+    const line = incrPtrAligned(&p, 64, ggml.cpu.defs.cache_line_size);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(line) % ggml.cpu.defs.cache_line_size);
     try std.testing.expectEqual(@intFromPtr(line) + 64, @intFromPtr(p));
 }
 
 test "each expert's chunk counter gets its own cache line" {
-    var buf: [4 * defs.cache_line_size]u8 align(64) = @splat(0);
+    var buf: [4 * ggml.cpu.defs.cache_line_size]u8 align(64) = @splat(0);
 
     const a = chunkCounter(&buf, 0);
     const b = chunkCounter(&buf, 1);
 
-    try std.testing.expectEqual(defs.cache_line_size, @intFromPtr(b) - @intFromPtr(a));
+    try std.testing.expectEqual(ggml.cpu.defs.cache_line_size, @intFromPtr(b) - @intFromPtr(a));
 
     a.store(7, .monotonic);
     b.store(9, .monotonic);

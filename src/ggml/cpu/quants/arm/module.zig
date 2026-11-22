@@ -33,13 +33,25 @@
 
 const std = @import("std");
 
+pub const rows = @import("rows.zig");
+pub const legacy = @import("legacy.zig");
+pub const ternary = @import("ternary.zig");
+pub const k = @import("k.zig");
+pub const mmla = @import("mmla.zig");
+pub const iq = @import("iq.zig");
+pub const neon = @import("neon.zig");
+
+pub const golden_generic = @import("golden_generic.zig");
+
+pub const golden = @import("golden.zig");
+
 comptime {
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("ternary.zig");
-    _ = @import("k.zig");
-    _ = @import("mmla.zig");
-    _ = @import("iq.zig");
+    _ = rows;
+    _ = legacy;
+    _ = ternary;
+    _ = k;
+    _ = mmla;
+    _ = iq;
 }
 
 // -----------------------------------------------------------------------------
@@ -47,11 +59,5 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("neon.zig");
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("ternary.zig");
-    _ = @import("k.zig");
-    _ = @import("mmla.zig");
-    _ = @import("iq.zig");
+    _ = neon;
 }

@@ -11,25 +11,11 @@
 //! `llm_graph_input_la` input that file defines for the decays.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-const batch = @import("../batch.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Hparams = hparams_mod.Hparams;
-const Ubatch = batch.Ubatch;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_minimax_01`'s `load_arch_hparams` (models/minimax-01.cpp:4 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -44,7 +30,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         if (try meta.getKey(u32, .full_attention_interval, false, exc)) |v| full_attn_interval = v;
         var i: u32 = 0;
         while (i < hp.n_layer_all) : (i += 1) {
-            hp.is_recr_impl[i] = @intFromBool(i < hp.nLayer() and model_mod.remU32(i + 1, full_attn_interval) != 0);
+            hp.is_recr_impl[i] = @intFromBool(i < hp.nLayer() and llama.model.remU32(i + 1, full_attn_interval) != 0);
         }
     }
 
@@ -55,10 +41,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_minimax_01`'s `load_arch_tensors` (models/minimax-01.cpp:26 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -68,7 +54,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -96,7 +82,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_minimax_01`'s `build_arch_graph` (models/minimax-01.cpp:63 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
@@ -107,20 +93,20 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 pub const InpLa = struct {
     /// A copy, as the C++ holds it: the input may outlive the
     /// graph that built it.
-    hparams: Hparams,
+    hparams: llama.hparams.Hparams,
 
     /// F32 `[n_head]`.
-    inp_slopes: ?*Tensor = null,
+    inp_slopes: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[1, n_head, n_batch]`.
-    inp_q_decay: ?*Tensor = null,
+    inp_q_decay: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[1, n_head, n_batch]`.
-    inp_k_decay: ?*Tensor = null,
+    inp_k_decay: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[n_batch, n_batch, n_head]`.
-    inp_diag_decay: ?*Tensor = null,
+    inp_diag_decay: ?*llama.impl.c.ggml_tensor = null,
 
     /// Ports `llm_graph_input_la`'s `set_input` (models/minimax-01.cpp:71
     /// @b1b770d90). It assumes an equal ubatch split.
-    pub fn setInput(self: *InpLa, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpLa, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         const n_head: i64 = self.hparams.nHead(0);
         const n_seqs: i32 = @intCast(ubatch.n_seqs);
@@ -128,8 +114,8 @@ pub const InpLa = struct {
         const n_tokens: i32 = @intCast(ubatch.n_tokens);
         const n_seq_tokens: i32 = @intCast(ubatch.n_seq_tokens);
 
-        const p0 = allocator.alloc(i32, @intCast(n_seqs_unq)) catch impl.abort("models/minimax-01.cpp", 80, "out of memory");
-        defer allocator.free(p0);
+        const p0 = std.heap.c_allocator.alloc(i32, @intCast(n_seqs_unq)) catch llama.impl.abort("models/minimax-01.cpp", 80, "out of memory");
+        defer std.heap.c_allocator.free(p0);
         @memset(p0, std.math.maxInt(i32));
 
         // The lowest token position in the ubatch for each stream.
@@ -142,21 +128,21 @@ pub const InpLa = struct {
         }
 
         if (self.inp_slopes) |inp_slopes| {
-            impl.assert(c.ggml_backend_buffer_is_host(inp_slopes.buffer), "models/minimax-01.cpp", 94, "ggml_backend_buffer_is_host(inp_slopes->buffer)");
+            llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(inp_slopes.buffer), "models/minimax-01.cpp", 94, "ggml_backend_buffer_is_host(inp_slopes->buffer)");
 
             const data: [*]f32 = @ptrCast(@alignCast(inp_slopes.data));
 
-            const start: f32 = libm.powf(2, -libm.powf(2, -(libm.log2fInt(n_head) - 3)));
+            const start: f32 = stdlib.libm.powf(2, -stdlib.libm.powf(2, -(stdlib.libm.log2fInt(n_head) - 3)));
             const ratio = start;
 
             var h: i64 = 0;
             while (h < n_head) : (h += 1) {
-                data[@intCast(h)] = start * libm.powf(ratio, @floatFromInt(h));
+                data[@intCast(h)] = start * stdlib.libm.powf(ratio, @floatFromInt(h));
             }
         }
 
         if (self.inp_q_decay) |inp_q_decay| {
-            impl.assert(c.ggml_backend_buffer_is_host(inp_q_decay.buffer), "models/minimax-01.cpp", 107, "ggml_backend_buffer_is_host(inp_q_decay->buffer)");
+            llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(inp_q_decay.buffer), "models/minimax-01.cpp", 107, "ggml_backend_buffer_is_host(inp_q_decay->buffer)");
 
             const slopes: [*]const f32 = @ptrCast(@alignCast(self.inp_slopes.?.data));
             const data: [*]f32 = @ptrCast(@alignCast(inp_q_decay.data));
@@ -180,7 +166,7 @@ pub const InpLa = struct {
         }
 
         if (self.inp_k_decay) |inp_k_decay| {
-            impl.assert(c.ggml_backend_buffer_is_host(inp_k_decay.buffer), "models/minimax-01.cpp", 127, "ggml_backend_buffer_is_host(inp_k_decay->buffer)");
+            llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(inp_k_decay.buffer), "models/minimax-01.cpp", 127, "ggml_backend_buffer_is_host(inp_k_decay->buffer)");
 
             const slopes: [*]const f32 = @ptrCast(@alignCast(self.inp_slopes.?.data));
             const data: [*]f32 = @ptrCast(@alignCast(inp_k_decay.data));
@@ -204,7 +190,7 @@ pub const InpLa = struct {
         }
 
         if (self.inp_diag_decay) |inp_diag_decay| {
-            impl.assert(c.ggml_backend_buffer_is_host(inp_diag_decay.buffer), "models/minimax-01.cpp", 147, "ggml_backend_buffer_is_host(inp_diag_decay->buffer)");
+            llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(inp_diag_decay.buffer), "models/minimax-01.cpp", 147, "ggml_backend_buffer_is_host(inp_diag_decay->buffer)");
 
             const slopes: [*]const f32 = @ptrCast(@alignCast(self.inp_slopes.?.data));
             const data: [*]f32 = @ptrCast(@alignCast(inp_diag_decay.data));
@@ -239,7 +225,7 @@ pub const InpLa = struct {
 
     /// Ports `llm_graph_input_la`'s `can_reuse` (models/minimax-01.cpp:174
     /// @b1b770d90): the decays' token counts are checked.
-    pub fn canReuse(self: *InpLa, params: *const graph.Params) bool {
+    pub fn canReuse(self: *InpLa, params: *const llama.graph.Params) bool {
         var res = true;
 
         const n_seq_tokens: i64 = params.ubatch.n_seq_tokens;
@@ -253,21 +239,21 @@ pub const InpLa = struct {
 
 /// Ports the constructor of `llama_model_minimax_01`'s `graph`
 /// (models/minimax-01.cpp:192 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-01.cpp", 195, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/minimax-01.cpp", 195, "n_embd_head == hparams.n_embd_head_k()");
     // The C++ does not assert n_embd_head == n_rot: MiniMax's head_dim is
     // 128 and n_rot 64.
 
     const n_seqs: i64 = b.ubatch.n_seqs;
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
 
-    impl.assert(n_seqs != 0, "models/minimax-01.cpp", 201, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/minimax-01.cpp", 202, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/minimax-01.cpp", 203, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    llama.impl.assert(n_seqs != 0, "models/minimax-01.cpp", 201, "n_seqs != 0");
+    llama.impl.assert(b.ubatch.equalSeqs(), "models/minimax-01.cpp", 202, "ubatch.equal_seqs()");
+    llama.impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/minimax-01.cpp", 203, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
     const n_head = b.n_head;
 
@@ -279,23 +265,23 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
 
-    const inp = allocator.create(InpLa) catch impl.abort("models/minimax-01.cpp", 218, "out of memory");
+    const inp = std.heap.c_allocator.create(InpLa) catch llama.impl.abort("models/minimax-01.cpp", 218, "out of memory");
     inp.* = .{ .hparams = hp.* };
 
-    inp.inp_slopes = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, n_head);
-    c.ggml_set_input(inp.inp_slopes);
+    inp.inp_slopes = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, n_head);
+    llama.impl.c.ggml_set_input(inp.inp_slopes);
     b.cb(inp.inp_slopes.?, "slopes", -1);
 
-    inp.inp_q_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
-    c.ggml_set_input(inp.inp_q_decay);
+    inp.inp_q_decay = llama.impl.c.ggml_new_tensor_4d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
+    llama.impl.c.ggml_set_input(inp.inp_q_decay);
     b.cb(inp.inp_q_decay.?, "q_decay_exp", -1);
 
-    inp.inp_k_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
-    c.ggml_set_input(inp.inp_k_decay);
+    inp.inp_k_decay = llama.impl.c.ggml_new_tensor_4d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_head, n_seq_tokens, n_seqs);
+    llama.impl.c.ggml_set_input(inp.inp_k_decay);
     b.cb(inp.inp_k_decay.?, "k_decay_exp", -1);
 
-    inp.inp_diag_decay = c.ggml_new_tensor_4d(ctx, c.GGML_TYPE_F32, n_seq_tokens, n_seq_tokens, n_head, n_seqs);
-    c.ggml_set_input(inp.inp_diag_decay);
+    inp.inp_diag_decay = llama.impl.c.ggml_new_tensor_4d(ctx, llama.impl.c.GGML_TYPE_F32, n_seq_tokens, n_seq_tokens, n_head, n_seqs);
+    llama.impl.c.ggml_set_input(inp.inp_diag_decay);
     b.cb(inp.inp_diag_decay.?, "diag_decay_exp", -1);
 
     const la = b.res.addInput(InpLa, inp);
@@ -330,7 +316,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         } else {
             // A lightning attention layer.
             const mctx_cur = inp_rs.mctx;
@@ -340,28 +326,28 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             // recurrent memory has no way to make them optional.
             const conv_states_all = mctx_cur.getRL(il);
             const conv_state_all = b.buildRs(inp_rs, conv_states_all, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
-            c.ggml_build_forward_expand(b.gf, conv_state_all);
+            llama.impl.c.ggml_build_forward_expand(b.gf, conv_state_all);
 
             const n_layer_f: f64 = @floatFromInt(b.n_layer - 1);
             const slope_scale: f32 = @floatCast(1.0 - 1.0 * @as(f64, @floatFromInt(il)) / n_layer_f + 1e-5);
-            const slope_rate: *Tensor = c.ggml_scale(ctx, slopes, slope_scale);
+            const slope_rate: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, slopes, slope_scale);
             b.cb(slope_rate, "slope_rate", il);
 
-            cur = c.ggml_reshape_4d(ctx, cur, cur.ne[0], n_seq_tokens, 1, n_seqs);
+            cur = llama.impl.c.ggml_reshape_4d(ctx, cur, cur.ne[0], n_seq_tokens, 1, n_seqs);
 
             var QKVcur = b.buildLoraMm(layer.wqkv.?, cur, null);
             b.cb(QKVcur, "QKVcur", il);
 
-            QKVcur = c.ggml_silu(ctx, QKVcur);
+            QKVcur = llama.impl.c.ggml_silu(ctx, QKVcur);
             b.cb(QKVcur, "QKVcur_silu", il);
 
-            QKVcur = c.ggml_reshape_4d(ctx, QKVcur, n_embd_head * 3, n_head, n_seq_tokens, n_seqs);
+            QKVcur = llama.impl.c.ggml_reshape_4d(ctx, QKVcur, n_embd_head * 3, n_head, n_seq_tokens, n_seqs);
 
-            const es = c.ggml_element_size(QKVcur);
+            const es = llama.impl.c.ggml_element_size(QKVcur);
             const head_bytes: usize = @intCast(n_embd_head);
-            const Qcur: *Tensor = c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 0 * es * head_bytes);
-            const Kcur: *Tensor = c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 1 * es * head_bytes);
-            const Vcur: *Tensor = c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 2 * es * head_bytes);
+            const Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 0 * es * head_bytes);
+            const Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 1 * es * head_bytes);
+            const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_4d(ctx, QKVcur, n_embd_head, n_head, n_seq_tokens, n_seqs, QKVcur.nb[1], QKVcur.nb[2], QKVcur.nb[3], 2 * es * head_bytes);
 
             b.cb(Qcur, "Qcur", il);
             b.cb(Kcur, "Kcur", il);
@@ -372,11 +358,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const n_embd_s: usize = hp.nEmbdS();
             const state = b.buildRs(inp_rs, la_states_all, @intCast(n_embd_s), @intCast(n_seqs), null);
 
-            const kv_old: *Tensor = c.ggml_reshape_4d(ctx, state, n_embd_head, n_embd_head, n_head, n_seqs);
+            const kv_old: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_4d(ctx, state, n_embd_head, n_embd_head, n_head, n_seqs);
             b.cb(kv_old, "kv_old", il);
 
-            var qkv: ?*Tensor = null;
-            var kv_new: ?*Tensor = null;
+            var qkv: ?*llama.impl.c.ggml_tensor = null;
+            var kv_new: ?*llama.impl.c.ggml_tensor = null;
 
             {
                 // Lightning attention.
@@ -384,77 +370,77 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 const k_decay_exp = la.inp_k_decay;
                 const diag_decay_exp = la.inp_diag_decay;
 
-                const q_decay: *Tensor = c.ggml_exp(ctx, c.ggml_scale(ctx, q_decay_exp, slope_scale));
+                const q_decay: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_exp(ctx, llama.impl.c.ggml_scale(ctx, q_decay_exp, slope_scale));
                 b.cb(q_decay, "q_decay", il);
-                const k_decay: *Tensor = c.ggml_exp(ctx, c.ggml_scale(ctx, k_decay_exp, slope_scale));
+                const k_decay: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_exp(ctx, llama.impl.c.ggml_scale(ctx, k_decay_exp, slope_scale));
                 b.cb(k_decay, "k_decay", il);
-                const diag_decay: *Tensor = c.ggml_exp(ctx, c.ggml_scale(ctx, diag_decay_exp, slope_scale));
+                const diag_decay: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_exp(ctx, llama.impl.c.ggml_scale(ctx, diag_decay_exp, slope_scale));
                 b.cb(diag_decay, "diag_decay", il);
 
-                const q_s: *Tensor = c.ggml_mul(ctx, Qcur, q_decay);
+                const q_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, Qcur, q_decay);
                 b.cb(q_s, "q_s", il);
 
-                const q_s_trans: *Tensor = c.ggml_permute(ctx, q_s, 0, 2, 1, 3);
+                const q_s_trans: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, q_s, 0, 2, 1, 3);
                 b.cb(q_s_trans, "q_s_trans", il);
 
-                const qkv_none_diag: *Tensor = c.ggml_mul_mat(ctx, kv_old, q_s_trans);
+                const qkv_none_diag: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, kv_old, q_s_trans);
                 b.cb(qkv_none_diag, "qkv_none_diag", il);
 
-                const q_trans: *Tensor = c.ggml_permute(ctx, Qcur, 0, 2, 1, 3);
+                const q_trans: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, Qcur, 0, 2, 1, 3);
                 b.cb(q_trans, "q_trans", il);
 
-                const k_trans: *Tensor = c.ggml_permute(ctx, Kcur, 0, 2, 1, 3);
+                const k_trans: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_permute(ctx, Kcur, 0, 2, 1, 3);
                 b.cb(k_trans, "k_trans", il);
 
-                var qk: *Tensor = c.ggml_mul_mat(ctx, k_trans, q_trans);
+                var qk: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, k_trans, q_trans);
                 b.cb(qk, "qk", il);
 
-                qk = c.ggml_mul(ctx, qk, diag_decay);
+                qk = llama.impl.c.ggml_mul(ctx, qk, diag_decay);
                 b.cb(qk, "qk_s", il);
 
-                const v_trans: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, Vcur, 1, 2, 0, 3));
+                const v_trans: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, Vcur, 1, 2, 0, 3));
                 b.cb(v_trans, "v_trans", il);
 
-                const qkv_diag: *Tensor = c.ggml_mul_mat(ctx, v_trans, qk);
+                const qkv_diag: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, v_trans, qk);
                 b.cb(qkv_diag, "qkv_diag", il);
 
-                qkv = c.ggml_add(ctx, qkv_none_diag, qkv_diag);
+                qkv = llama.impl.c.ggml_add(ctx, qkv_none_diag, qkv_diag);
                 b.cb(qkv.?, "qkv", il);
 
-                c.ggml_build_forward_expand(b.gf, qkv);
+                llama.impl.c.ggml_build_forward_expand(b.gf, qkv);
 
-                const slopes_neg: *Tensor = c.ggml_scale(ctx, slope_rate, @floatCast(-1.0 * @as(f64, @floatFromInt(n_seq_tokens))));
+                const slopes_neg: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, slope_rate, @floatCast(-1.0 * @as(f64, @floatFromInt(n_seq_tokens))));
                 b.cb(slopes_neg, "slopes_neg", il);
 
-                const block_decay: *Tensor = c.ggml_exp(ctx, slopes_neg);
+                const block_decay: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_exp(ctx, slopes_neg);
                 b.cb(block_decay, "block_decay", il);
 
-                const block_decay_3d: *Tensor = c.ggml_reshape_3d(ctx, block_decay, 1, 1, n_head);
+                const block_decay_3d: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, block_decay, 1, 1, n_head);
                 b.cb(block_decay_3d, "block_decay_3d", il);
 
-                const kv_old_s: *Tensor = c.ggml_mul(ctx, kv_old, block_decay_3d);
+                const kv_old_s: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, kv_old, block_decay_3d);
                 b.cb(kv_old_s, "kv_old_s", il);
 
-                const k_after_decay: *Tensor = c.ggml_mul(ctx, Kcur, k_decay);
+                const k_after_decay: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, Kcur, k_decay);
                 b.cb(k_after_decay, "k_after_decay", il);
 
-                const k_after_decay_trans: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, k_after_decay, 1, 2, 0, 3));
+                const k_after_decay_trans: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, k_after_decay, 1, 2, 0, 3));
                 b.cb(k_after_decay_trans, "k_after_decay_trans", il);
 
-                const kv_cur: *Tensor = c.ggml_mul_mat(ctx, k_after_decay_trans, v_trans);
+                const kv_cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, k_after_decay_trans, v_trans);
                 b.cb(kv_cur, "kv_cur", il);
 
-                kv_new = c.ggml_add(ctx, kv_old_s, kv_cur);
+                kv_new = llama.impl.c.ggml_add(ctx, kv_old_s, kv_cur);
                 b.cb(kv_new.?, "kv_new", il);
             }
 
             // Store the new KV.
-            c.ggml_build_forward_expand(b.gf, c.ggml_cpy(ctx, kv_new, c.ggml_view_1d(ctx, la_states_all, @as(i64, @intCast(n_embd_s)) * n_seqs, kv_head * n_embd_s * c.ggml_element_size(la_states_all))));
+            llama.impl.c.ggml_build_forward_expand(b.gf, llama.impl.c.ggml_cpy(ctx, kv_new, llama.impl.c.ggml_view_1d(ctx, la_states_all, @as(i64, @intCast(n_embd_s)) * n_seqs, kv_head * n_embd_s * llama.impl.c.ggml_element_size(la_states_all))));
 
-            var qkv_p: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, qkv, 0, 2, 1, 3));
+            var qkv_p: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, qkv, 0, 2, 1, 3));
             b.cb(qkv_p, "qkv_permuted", il);
 
-            qkv_p = c.ggml_reshape_4d(ctx, qkv_p, qkv_p.ne[0] * qkv_p.ne[1], qkv_p.ne[2], 1, qkv_p.ne[3]);
+            qkv_p = llama.impl.c.ggml_reshape_4d(ctx, qkv_p, qkv_p.ne[0] * qkv_p.ne[1], qkv_p.ne[2], 1, qkv_p.ne[3]);
 
             // Norm.
             const qkv_norm = b.buildNorm(qkv_p, layer.attn_norm_2, null, .rms, il);
@@ -463,28 +449,28 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var g = b.buildLoraMm(layer.wg.?, cur, null);
             b.cb(g, "g", il);
 
-            g = c.ggml_sigmoid(ctx, g);
+            g = llama.impl.c.ggml_sigmoid(ctx, g);
             b.cb(g, "g_sigm", il);
 
-            cur = c.ggml_mul(ctx, g, qkv_norm);
+            cur = llama.impl.c.ggml_mul(ctx, g, qkv_norm);
 
             cur = b.buildLoraMm(layer.wo.?, cur, null);
             b.cb(cur, "attn_out", il);
 
-            cur = c.ggml_reshape_2d(ctx, cur, cur.ne[0], n_seq_tokens * n_seqs);
+            cur = llama.impl.c.ggml_reshape_2d(ctx, cur, cur.ne[0], n_seq_tokens * n_seqs);
             b.cb(cur, "attn_out", il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
-            residual = c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
 
-        residual = c.ggml_scale(ctx, residual, hp.f_residual_scale);
+        residual = llama.impl.c.ggml_scale(ctx, residual, hp.f_residual_scale);
         b.cb(residual, "residual_scaled_attn", il);
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, residual);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The MoE branch.
@@ -508,10 +494,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }, il);
         b.cb(cur, "ffn_moe_out", il);
 
-        residual = c.ggml_scale(ctx, residual, hp.f_residual_scale);
+        residual = llama.impl.c.ggml_scale(ctx, residual, hp.f_residual_scale);
         b.cb(residual, "residual_scaled_ffn", il);
 
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);

@@ -4,9 +4,12 @@
 //! # Provenance
 //!
 //! **Not a port.** Upstream calls libm; the port calls the same functions,
-//! by the same symbols, so the bits are the C library's. Zig's `@sqrt`,
-//! `@exp` and friends are std's and round differently in places, so a
-//! ported call that the C makes through libm comes here.
+//! by the same symbols, so the bits are the C library's. Zig's `@exp`,
+//! `@log`, `@sin` and friends may lower to compiler_rt's versions, which
+//! round differently in places, so a ported call that the C makes through
+//! libm comes here. The exact operations -- `sqrt`, `floor`, `ceil`,
+//! `trunc`, `round`, `fabs` -- are one correctly rounded result in every
+//! libm and are Zig's builtins at the call site instead.
 //!
 //! # What clang does to them
 //!
@@ -20,8 +23,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub extern "c" fn sqrtf(x: f32) f32;
-pub extern "c" fn sqrt(x: f64) f64;
 pub extern "c" fn expf(x: f32) f32;
 pub extern "c" fn exp(x: f64) f64;
 pub extern "c" fn exp2f(x: f32) f32;
@@ -40,24 +41,19 @@ pub extern "c" fn cosf(x: f32) f32;
 pub extern "c" fn cos(x: f64) f64;
 pub extern "c" fn tanhf(x: f32) f32;
 pub extern "c" fn erff(x: f32) f32;
-pub extern "c" fn floorf(x: f32) f32;
-pub extern "c" fn floor(x: f64) f64;
-pub extern "c" fn ceilf(x: f32) f32;
-pub extern "c" fn roundf(x: f32) f32;
-pub extern "c" fn truncf(x: f32) f32;
 pub extern "c" fn nearbyintf(x: f32) f32;
 pub extern "c" fn nearbyint(x: f64) f64;
 pub extern "c" fn lround(x: f64) c_long;
-pub extern "c" fn fabsf(x: f32) f32;
 pub extern "c" fn fmaxf(x: f32, y: f32) f32;
 pub extern "c" fn fmax(x: f64, y: f64) f64;
 pub extern "c" fn fminf(x: f32, y: f32) f32;
 pub extern "c" fn fmin(x: f64, y: f64) f64;
 pub extern "c" fn ldexpf(x: f32, e: c_int) f32;
 /// `sqrtf(n)` on an integer, which C converts to `float` first: rounded to
-/// nearest, as `@floatFromInt` rounds.
+/// nearest, as `@floatFromInt` rounds. `@sqrt` is the correctly rounded
+/// square root every libm's `sqrtf` returns.
 pub inline fn sqrtfInt(n: anytype) f32 {
-    return sqrtf(@floatFromInt(n));
+    return @sqrt(@as(f32, @floatFromInt(n)));
 }
 
 /// `log2f(n)` on an integer, converted as `sqrtfInt` converts it.

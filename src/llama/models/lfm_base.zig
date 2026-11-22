@@ -9,14 +9,7 @@
 //! builder.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const memory_recurrent = @import("../memory_recurrent.zig");
-
-const c = impl.c;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llm_build_lfm_base`'s `build_lfm_shortconv` (lfm-base.cpp:7
 /// @b1b770d90), the overload over a recurrent state: a gated depthwise
@@ -32,61 +25,61 @@ const Tensor = c.ggml_tensor;
 /// - `il`: the layer.
 ///
 /// Return: `[n_embd, n_tokens]`.
-pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr: *const memory_recurrent.RecurrentContext, inp_recr: *const graph.InpRs, cur_: *Tensor, il: c_int) *Tensor {
+pub fn buildLfmShortconv(model: *const llama.model.Model, b: *const llama.graph.Builder, mctx_recr: *const llama.memory_recurrent.RecurrentContext, inp_recr: *const llama.graph.InpRs, cur_: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
     const n_seq_tokens: i64 = b.ubatch.n_seq_tokens;
     const n_seqs: i64 = b.ubatch.n_seqs;
-    impl.assert(n_seqs != 0, "models/lfm-base.cpp", 13, "n_seqs != 0");
-    impl.assert(b.ubatch.equalSeqs(), "models/lfm-base.cpp", 14, "ubatch.equal_seqs()");
-    impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/lfm-base.cpp", 15, "ubatch.n_tokens == n_seq_tokens * n_seqs");
+    llama.impl.assert(n_seqs != 0, "models/lfm-base.cpp", 13, "n_seqs != 0");
+    llama.impl.assert(b.ubatch.equalSeqs(), "models/lfm-base.cpp", 14, "ubatch.equal_seqs()");
+    llama.impl.assert(b.ubatch.n_tokens == n_seq_tokens * n_seqs, "models/lfm-base.cpp", 15, "ubatch.n_tokens == n_seq_tokens * n_seqs");
 
-    impl.assert(hp.n_shortconv_l_cache > 1, "models/lfm-base.cpp", 17, "hparams.n_shortconv_l_cache > 1");
+    llama.impl.assert(hp.n_shortconv_l_cache > 1, "models/lfm-base.cpp", 17, "hparams.n_shortconv_l_cache > 1");
     const d_conv: u32 = hp.n_shortconv_l_cache - 1;
     const n_embd: i64 = hp.n_embd;
 
     var bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur_, null);
     b.cb(bcx, "model.layers.{}.conv.in_proj", il);
     // {3*n_embd, n_tokens} => {3*n_embd, n_seq_tokens, n_seqs}
-    bcx = c.ggml_reshape_3d(ctx, bcx, bcx.ne[0], n_seq_tokens, n_seqs);
+    bcx = llama.impl.c.ggml_reshape_3d(ctx, bcx, bcx.ne[0], n_seq_tokens, n_seqs);
 
     const n_chunks = 3;
-    impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 27, "bcx->ne[0] % n_chunks == 0");
+    llama.impl.assert(@rem(bcx.ne[0], n_chunks) == 0, "models/lfm-base.cpp", 27, "bcx->ne[0] % n_chunks == 0");
     const chunk_size = @divTrunc(bcx.ne[0], n_chunks);
-    const es = c.ggml_element_size(bcx);
+    const es = llama.impl.c.ggml_element_size(bcx);
     const chunk_bytes: usize = @intCast(chunk_size);
-    const bv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 0 * chunk_bytes * es);
-    const cv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 1 * chunk_bytes * es);
-    const xv: *Tensor = c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 2 * chunk_bytes * es);
+    const bv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 0 * chunk_bytes * es);
+    const cv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 1 * chunk_bytes * es);
+    const xv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, bcx, chunk_size, bcx.ne[1], bcx.ne[2], bcx.nb[1], bcx.nb[2], 2 * chunk_bytes * es);
 
-    var bx: *Tensor = c.ggml_transpose(ctx, c.ggml_mul(ctx, bv, xv));
+    var bx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_transpose(ctx, llama.impl.c.ggml_mul(ctx, bv, xv));
 
     // Read the conv state.
     const conv_state = mctx_recr.getRL(il);
     const conv_rs = b.buildRs(inp_recr, conv_state, @intCast(hp.nEmbdR()), @intCast(n_seqs), null);
-    const conv: *Tensor = c.ggml_reshape_3d(ctx, conv_rs, d_conv, n_embd, n_seqs);
+    const conv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_reshape_3d(ctx, conv_rs, d_conv, n_embd, n_seqs);
 
     // Causal prepends the state; non-causal pads symmetrically for a
     // centered window.
     if (hp.causal_attn) {
-        bx = c.ggml_concat(ctx, conv, bx, 0);
+        bx = llama.impl.c.ggml_concat(ctx, conv, bx, 0);
     } else {
         const pad: i64 = @divTrunc(@as(i64, hp.n_shortconv_l_cache) - 1, 2);
-        const left: *Tensor = c.ggml_cont(ctx, c.ggml_view_3d(ctx, conv, pad, n_embd, n_seqs, conv.nb[1], conv.nb[2], @as(usize, @intCast(@as(i64, d_conv) - pad)) * conv.nb[0]));
-        bx = c.ggml_pad_ext(ctx, c.ggml_concat(ctx, left, bx, 0), 0, @intCast(pad), 0, 0, 0, 0, 0, 0);
+        const left: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_3d(ctx, conv, pad, n_embd, n_seqs, conv.nb[1], conv.nb[2], @as(usize, @intCast(@as(i64, d_conv) - pad)) * conv.nb[0]));
+        bx = llama.impl.c.ggml_pad_ext(ctx, llama.impl.c.ggml_concat(ctx, left, bx, 0), 0, @intCast(pad), 0, 0, 0, 0, 0, 0);
     }
-    impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 52, "bx->ne[0] > conv->ne[0]");
+    llama.impl.assert(bx.ne[0] > conv.ne[0], "models/lfm-base.cpp", 52, "bx->ne[0] > conv->ne[0]");
 
     b.buildConvStateStore(inp_recr, conv_state, bx, d_conv, 0);
 
     const conv_kernel = layer.shortconv.conv;
-    const conv_out: *Tensor = c.ggml_ssm_conv(ctx, bx, conv_kernel);
+    const conv_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_ssm_conv(ctx, bx, conv_kernel);
     b.cb(conv_out, "model.layers.{}.conv.conv", il);
 
-    var y: *Tensor = c.ggml_mul(ctx, cv, conv_out);
+    var y: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, cv, conv_out);
     // {n_embd, n_seq_tokens, n_seqs} => {n_embd, n_tokens}
-    y = c.ggml_reshape_2d(ctx, y, y.ne[0], n_seq_tokens * n_seqs);
+    y = llama.impl.c.ggml_reshape_2d(ctx, y, y.ne[0], n_seq_tokens * n_seqs);
     y = b.buildLoraMm(layer.shortconv.out_proj.?, y, null);
     b.cb(y, "model.layers.{}.conv.out_proj", il);
 
@@ -104,7 +97,7 @@ pub fn buildLfmShortconv(model: *const Model, b: *const graph.Builder, mctx_recr
 /// - `il`: the layer.
 ///
 /// Return: `[n_embd, n_tokens]`.
-pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
+pub fn buildLfmShortconvNoState(model: *const llama.model.Model, b: *const llama.graph.Builder, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const layer = &model.layers[@intCast(il)];
     const d_conv: i64 = @as(i64, b.hparams.n_shortconv_l_cache) - 1;
@@ -113,20 +106,20 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
     b.cb(bcx, "model.layers.{}.conv.in_proj", il);
 
     const chunk_size = @divTrunc(bcx.ne[0], 3);
-    const es = c.ggml_element_size(bcx);
+    const es = llama.impl.c.ggml_element_size(bcx);
     const chunk_bytes: usize = @intCast(chunk_size);
-    const bv: *Tensor = c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 0 * chunk_bytes * es);
-    const cv: *Tensor = c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 1 * chunk_bytes * es);
-    const xv: *Tensor = c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 2 * chunk_bytes * es);
+    const bv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 0 * chunk_bytes * es);
+    const cv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 1 * chunk_bytes * es);
+    const xv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, chunk_size, bcx.ne[1], bcx.nb[1], 2 * chunk_bytes * es);
 
     // Causal from a zero state.
-    var bx: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, c.ggml_mul(ctx, bv, xv)));
-    bx = c.ggml_pad_ext(ctx, bx, @intCast(d_conv), 0, 0, 0, 0, 0, 0, 0);
+    var bx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, llama.impl.c.ggml_mul(ctx, bv, xv)));
+    bx = llama.impl.c.ggml_pad_ext(ctx, bx, @intCast(d_conv), 0, 0, 0, 0, 0, 0, 0);
 
-    const conv_out: *Tensor = c.ggml_ssm_conv(ctx, bx, layer.shortconv.conv);
+    const conv_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_ssm_conv(ctx, bx, layer.shortconv.conv);
     b.cb(conv_out, "model.layers.{}.conv.conv", il);
 
-    var y: *Tensor = c.ggml_mul(ctx, cv, c.ggml_reshape_2d(ctx, conv_out, chunk_size, b.n_tokens));
+    var y: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, cv, llama.impl.c.ggml_reshape_2d(ctx, conv_out, chunk_size, b.n_tokens));
     y = b.buildLoraMm(layer.shortconv.out_proj.?, y, null);
     b.cb(y, "model.layers.{}.conv.out_proj", il);
 
@@ -143,11 +136,11 @@ pub fn buildLfmShortconvNoState(model: *const Model, b: *const graph.Builder, cu
 /// - `il`: the layer.
 ///
 /// Return: the feed-forward's output.
-pub fn buildLfmDenseFfn(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
+pub fn buildLfmDenseFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 97, "!model.layers[il].ffn_up_b");
-    impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 98, "!model.layers[il].ffn_gate_b");
-    impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 99, "!model.layers[il].ffn_down_b");
+    llama.impl.assert(layer.ffn_up_b == null, "models/lfm-base.cpp", 97, "!model.layers[il].ffn_up_b");
+    llama.impl.assert(layer.ffn_gate_b == null, "models/lfm-base.cpp", 98, "!model.layers[il].ffn_gate_b");
+    llama.impl.assert(layer.ffn_down_b == null, "models/lfm-base.cpp", 99, "!model.layers[il].ffn_down_b");
     return b.buildFfn(cur, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 }
 
@@ -161,7 +154,7 @@ pub fn buildLfmDenseFfn(model: *const Model, b: *const graph.Builder, cur: *Tens
 /// - `il`: the layer.
 ///
 /// Return: the experts' output.
-pub fn buildLfmMoeFfn(model: *const Model, b: *const graph.Builder, cur: *Tensor, il: c_int) *Tensor {
+pub fn buildLfmMoeFfn(model: *const llama.model.Model, b: *const llama.graph.Builder, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
     const layer = &model.layers[@intCast(il)];
     const hp = b.hparams;
     return b.buildMoeFfn(cur, .{

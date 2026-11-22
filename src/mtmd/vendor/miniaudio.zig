@@ -29,14 +29,12 @@
 //! called is part of the output.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const audio_io = @import("audio_io.zig");
-const dr_wav = @import("dr_wav.zig");
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 /// The FLAC backend, public for the gate.
 pub const dr_flac = @import("dr_flac.zig");
 /// The MP3 backend, public for the gate's kernel diff.
 pub const dr_mp3 = @import("dr_mp3.zig");
-const Io = audio_io.Io;
 
 /// Whether the last decode read memory the C leaves unspecified (see
 /// `dr_mp3.read_indeterminate`); its samples are then not comparable.
@@ -100,7 +98,7 @@ const pi_d: f64 = 3.14159265358979323846264;
 
 /// The decoding backend `ma_decoder` settled on.
 pub const Backend = union(enum) {
-    wav: dr_wav.Wav,
+    wav: mod.dr_wav.Wav,
     flac: *dr_flac.Flac,
     mp3: *dr_mp3.Mp3,
 
@@ -183,8 +181,8 @@ pub const Decoder = struct {
         return null;
     }
 
-    fn initBackend(gpa: std.mem.Allocator, buf: []const u8, wav_mode: Io.Mode, flac_mode: Io.Mode, mp3_mode: Io.Mode) ?Backend {
-        if (dr_wav.Wav.init(.{ .data = buf, .mode = wav_mode })) |w| return .{ .wav = w };
+    fn initBackend(gpa: std.mem.Allocator, buf: []const u8, wav_mode: mod.audio_io.Io.Mode, flac_mode: mod.audio_io.Io.Mode, mp3_mode: mod.audio_io.Io.Mode) ?Backend {
+        if (mod.dr_wav.Wav.init(.{ .data = buf, .mode = wav_mode })) |w| return .{ .wav = w };
         if (dr_flac.Flac.open(gpa, .{ .data = buf, .mode = flac_mode })) |f| return .{ .flac = f };
         if (dr_mp3.Mp3.init(gpa, .{ .data = buf, .mode = mp3_mode })) |m| return .{ .mp3 = m };
         return null;
@@ -398,7 +396,7 @@ const Biquad = struct {
     /// (miniaudio.h:47959, 47494 @b1b770d90).
     fn lpf2(sample_rate: u32, cutoff: f64, q: f64) Biquad {
         const w = 2 * pi_d * cutoff / @as(f64, @floatFromInt(sample_rate));
-        const s = libm.sin(w);
+        const s = stdlib.libm.sin(w);
         const c = cosd(w);
         const a = s / (2 * q);
         const b0 = (1 - c) / 2;
@@ -432,7 +430,7 @@ const Biquad = struct {
 
 /// Ports `ma_cosd` (miniaudio.h:12472 @b1b770d90): `libm.sin(pi/2 - x)`.
 fn cosd(x: f64) f64 {
-    return libm.sin((pi_d * 0.5) - x);
+    return stdlib.libm.sin((pi_d * 0.5) - x);
 }
 
 /// The decoder's resampler: `MA_DEFAULT_RESAMPLER_LPF_ORDER`.

@@ -39,8 +39,7 @@
 //! buffer's earlier contents are never read. It starts zeroed here anyway.
 
 const std = @import("std");
-const Io = @import("audio_io.zig").Io;
-const Origin = @import("audio_io.zig").Origin;
+const mod = @import("module.zig");
 
 /// Set when a conversion shifted a sample by 32 or more, which the C
 /// leaves undefined (`u32 << 32`); the samples are then not comparable.
@@ -97,7 +96,7 @@ const PageHeader = struct {
 /// What the bit stream reads from: `onRead`/`onSeek` over the memory stream,
 /// or `ma_dr_flac__on_read_ogg`/`ma_dr_flac__on_seek_ogg` over the Ogg layer.
 const Stream = struct {
-    io: Io,
+    io: mod.audio_io.Io,
     ogg: ?*OggBs = null,
 
     fn read(s: *Stream, buf: []u8) usize {
@@ -105,7 +104,7 @@ const Stream = struct {
         return s.io.read(buf);
     }
 
-    fn seek(s: *Stream, offset: i32, origin: Origin) bool {
+    fn seek(s: *Stream, offset: i32, origin: mod.audio_io.Origin) bool {
         if (s.ogg) |o| return onSeekOgg(s, o, offset, origin);
         return s.io.seek(offset, origin);
     }
@@ -125,7 +124,7 @@ fn crc32Byte(crc: u32, data: u8) u32 {
 }
 
 /// Ports `ma_dr_flac_ogg__read_page_header_after_capture_pattern` (miniaudio.h:89944 @b1b770d90).
-fn readPageHeaderAfterCapture(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
+fn readPageHeaderAfterCapture(io: *mod.audio_io.Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
     var data: [23]u8 = undefined;
     if (io.read(&data) != 23) return false;
     bytes_read.* += 23;
@@ -143,7 +142,7 @@ fn readPageHeaderAfterCapture(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u
 
 /// Ports `ma_dr_flac_ogg__read_page_header` (miniaudio.h:89980 @b1b770d90):
 /// scan byte by byte for the capture pattern.
-fn readPageHeader(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
+fn readPageHeader(io: *mod.audio_io.Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
     var id: [4]u8 = undefined;
     bytes_read.* = 0;
     if (io.read(&id) != 4) return false;
@@ -162,7 +161,7 @@ fn readPageHeader(io: *Io, h: *PageHeader, bytes_read: *u32, crc: *u32) bool {
 }
 
 /// Ports `ma_dr_flac_oggbs__seek_physical` (miniaudio.h:90034 @b1b770d90).
-fn seekPhysical(s: *Stream, o: *OggBs, offset_in: u64, origin: Origin) bool {
+fn seekPhysical(s: *Stream, o: *OggBs, offset_in: u64, origin: mod.audio_io.Origin) bool {
     var offset = offset_in;
     if (origin == .set) {
         if (offset <= 0x7FFFFFFF) {
@@ -237,7 +236,7 @@ fn onReadOgg(s: *Stream, o: *OggBs, buf: []u8) usize {
 }
 
 /// Ports `ma_dr_flac__on_seek_ogg` (miniaudio.h:90193 @b1b770d90).
-fn onSeekOgg(s: *Stream, o: *OggBs, offset: i32, origin: Origin) bool {
+fn onSeekOgg(s: *Stream, o: *OggBs, offset: i32, origin: mod.audio_io.Origin) bool {
     switch (origin) {
         .set => {
             // `(int)oggbs->firstBytePos`, widened back to `ma_uint64`
@@ -1076,7 +1075,7 @@ pub const Flac = struct {
     ///
     /// Return: the decoder, owned by the caller (`deinit`), or null where
     /// the C returns NULL.
-    pub fn open(gpa: std.mem.Allocator, io: Io) ?*Flac {
+    pub fn open(gpa: std.mem.Allocator, io: mod.audio_io.Io) ?*Flac {
         if (io.data.len == 0) return null;
         const f = gpa.create(Flac) catch return null;
         f.* = .{ .gpa = gpa, .stream = .{ .io = io }, .bs = undefined };
@@ -1224,7 +1223,7 @@ pub const Flac = struct {
 
     /// Ports `ma_dr_flac__read_streaminfo` (miniaudio.h:89187 @b1b770d90):
     /// the four reads, each of which must be whole.
-    fn readStreaminfo(f: *Flac, io: *Io) bool {
+    fn readStreaminfo(f: *Flac, io: *mod.audio_io.Io) bool {
         var block_sizes: [4]u8 = undefined;
         var frame_sizes: [6]u8 = undefined;
         var props: [8]u8 = undefined;
@@ -1631,7 +1630,7 @@ pub fn claims(buf: []const u8) bool {
     return claimsOver(.{ .data = buf, .mode = .dr_flac }) or claimsOver(.{ .data = buf, .mode = .decoder });
 }
 
-fn claimsOver(io_in: Io) bool {
+fn claimsOver(io_in: mod.audio_io.Io) bool {
     var io = io_in;
     var id: [4]u8 = undefined;
     while (true) {

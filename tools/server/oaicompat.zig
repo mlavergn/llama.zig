@@ -23,24 +23,13 @@
 //! HTTP only, as the reference has no SSL.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const tc = @import("tools_common");
 const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
-const common = @import("common.zig");
-const tokens_mod = @import("tokens.zig");
-const download = @import("download.zig");
-const httplib = @import("httplib/module.zig");
 
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Error = common.Error;
-const Obj = common.Obj;
-const throw = common.throw;
-const jsonValue = common.jsonValue;
-const jsonValueJson = common.jsonValueJson;
-const c = common.c;
 
 /// `DIRECTORY_SEPARATOR` (common/common.h:31 @b1b770d90).
 const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' else '/';
@@ -52,26 +41,26 @@ const directory_separator: u8 = if (@import("builtin").os.tag == .windows) '\\' 
 /// an OpenAI `/completions` body as llama.cpp's own parameters.
 ///
 /// Return: owned by `a`.
-pub fn oaicompatCompletionParamsParse(a: Allocator, body: *const Value) Error!Value {
-    var llama_params: Value = .null;
+pub fn oaicompatCompletionParamsParse(a: Allocator, body: *const json.Value) mod.common.Error!json.Value {
+    var llama_params: json.Value = .null;
     errdefer llama_params.deinit(a);
 
     if (!body.contains("prompt")) {
-        return throw(error.RuntimeError, "\"prompt\" is required", .{});
+        return mod.common.throw(error.RuntimeError, "\"prompt\" is required", .{});
     }
 
     try handleStop(a, &llama_params, body);
 
     // Handle "echo" field
-    if (jsonValue(body, "echo", bool, false)) {
-        return throw(error.RuntimeError, "Only no echo is supported", .{});
+    if (mod.common.jsonValue(body, "echo", bool, false)) {
+        return mod.common.throw(error.RuntimeError, "Only no echo is supported", .{});
     }
 
     // Params supported by OAI but unsupported by llama.cpp
     const unsupported_params = [_][]const u8{ "best_of", "suffix" };
     for (unsupported_params) |param| {
         if (body.contains(param)) {
-            return throw(error.RuntimeError, "Unsupported param: {s}", .{param});
+            return mod.common.throw(error.RuntimeError, "Unsupported param: {s}", .{param});
         }
     }
 
@@ -82,21 +71,21 @@ pub fn oaicompatCompletionParamsParse(a: Allocator, body: *const Value) Error!Va
 
 /// The "stop" field both conversions share: a string becomes a one-element
 /// array.
-fn handleStop(a: Allocator, llama_params: *Value, body: *const Value) Error!void {
+fn handleStop(a: Allocator, llama_params: *json.Value, body: *const json.Value) mod.common.Error!void {
     // Handle "stop" field
     if (body.contains("stop") and (try body.at("stop")).isString()) {
-        var arr = Value.emptyArray();
+        var arr = json.Value.emptyArray();
         errdefer arr.deinit(a);
-        try arr.pushBack(a, try Value.initString(a, try (try body.at("stop")).get([]const u8)));
+        try arr.pushBack(a, try json.Value.initString(a, try (try body.at("stop")).get([]const u8)));
         try llama_params.set(a, "stop", arr);
     } else {
-        try llama_params.set(a, "stop", try jsonValueJson(a, body, "stop", Value.emptyArray()));
+        try llama_params.set(a, "stop", try mod.common.jsonValueJson(a, body, "stop", json.Value.emptyArray()));
     }
 }
 
 /// Copies the remaining properties: every member not already set, and
 /// `n_predict` whatever was set before ("max_tokens" may have).
-fn copyRemaining(a: Allocator, llama_params: *Value, body: *const Value) Error!void {
+fn copyRemaining(a: Allocator, llama_params: *json.Value, body: *const json.Value) mod.common.Error!void {
     var it = @constCast(body).items();
     while (it.next()) |item| {
         // Exception: if "n_predict" is present, we overwrite the value specified earlier by "max_tokens"
@@ -211,10 +200,10 @@ pub fn serverAddrIsPublic(addr: []const u8) bool {
     zbuf[n] = 0;
     const z: [*:0]const u8 = zbuf[0..n :0];
     var b: [16]u8 = undefined;
-    if (libc.inet_pton(AF_INET, z, &b) == 1) {
+    if (stdlib.libc.inet_pton(AF_INET, z, &b) == 1) {
         return ipv4IsPublic(&b);
     }
-    if (libc.inet_pton(AF_INET6, z, &b) != 1) {
+    if (stdlib.libc.inet_pton(AF_INET6, z, &b) != 1) {
         return false; // e.g. scoped address "fe80::1%eth0"
     }
     const v4_mapped = [12]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
@@ -235,15 +224,15 @@ pub fn serverAddrIsPublic(addr: []const u8) bool {
 /// `allow_private`).
 ///
 /// Return: the first address, owned by `a`.
-pub fn serverResolvePublicAddr(a: Allocator, host: []const u8, allow_private: bool) Error![]const u8 {
+pub fn serverResolvePublicAddr(a: Allocator, host: []const u8, allow_private: bool) mod.common.Error![]const u8 {
     var addrs: std.ArrayList([]const u8) = .empty;
-    try httplib.hostedAt(a, host, &addrs);
+    try mod.httplib.hostedAt(a, host, &addrs);
     if (addrs.items.len == 0) {
-        return throw(error.InvalidArgument, "cannot resolve host: {s}", .{host});
+        return mod.common.throw(error.InvalidArgument, "cannot resolve host: {s}", .{host});
     }
     for (addrs.items) |addr| {
         if (!allow_private and !serverAddrIsPublic(addr)) {
-            return throw(error.InvalidArgument, "host is not a public address: {s}", .{host});
+            return mod.common.throw(error.InvalidArgument, "host is not a public address: {s}", .{host});
         }
     }
     return addrs.items[0];
@@ -251,7 +240,7 @@ pub fn serverResolvePublicAddr(a: Allocator, host: []const u8, allow_private: bo
 
 /// Ports `resolve_host` (server-common.cpp:1280 @b1b770d90), the lambda
 /// handle_media sets; `ctx` is the `allow_private_urls` it captured.
-fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) Error![]const u8 {
+fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) mod.common.Error![]const u8 {
     const allow_private: *const bool = @ptrCast(ctx.?);
     return serverResolvePublicAddr(a, host, allow_private.*);
 }
@@ -263,7 +252,7 @@ fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) E
 ///
 /// Parameters:
 /// - `out_files`: grows; each file owned by `a`.
-pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8, allow_private_urls: bool) Error!void {
+pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8, allow_private_urls: bool) mod.common.Error!void {
     if (media_path.len != 0) {
         // should already be enforced by arg.cpp, but checking just in case
         tc.ggml.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1271, "media_path.back() == DIRECTORY_SEPARATOR");
@@ -271,39 +260,39 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
 
     if (std.mem.startsWith(u8, url, "http")) {
         // download remote image
-        const u = common.dupZ(url);
-        defer common.freeZ(u);
-        common.srv(.inf, "handle_media", "downloading image from '%s'\n", .{u});
+        const u = mod.common.dupZ(url);
+        defer mod.common.freeZ(u);
+        mod.common.srv(.inf, "handle_media", "downloading image from '%s'\n", .{u});
         // TODO @ngxson : maybe make these params configurable
-        const params: download.RemoteParams = .{
+        const params: mod.download.RemoteParams = .{
             .max_size = 1024 * 1024 * 10, // 10MB
             .timeout = 10, // seconds
             .resolve_host = .{ .ctx = &allow_private_urls, .call = resolveHostForMedia },
         };
-        const res = try download.remoteGetContent(a, url, &params);
+        const res = try mod.download.remoteGetContent(a, url, &params);
         if (200 <= res.status and res.status < 300) {
-            common.srv(.inf, "handle_media", "downloaded %zu bytes\n", .{res.body.len});
+            mod.common.srv(.inf, "handle_media", "downloaded %zu bytes\n", .{res.body.len});
             try out_files.append(a, res.body);
         } else {
-            return throw(error.RuntimeError, "Failed to download image", .{});
+            return mod.common.throw(error.RuntimeError, "Failed to download image", .{});
         }
     } else if (std.mem.startsWith(u8, url, "file://")) {
         if (media_path.len == 0) {
-            return throw(error.InvalidArgument, "file:// URLs are not allowed unless --media-path is specified", .{});
+            return mod.common.throw(error.InvalidArgument, "file:// URLs are not allowed unless --media-path is specified", .{});
         }
         // load local image file
         const file_path = url[7..]; // remove "file://"
         if (!fsValidateFilename(file_path, true)) {
-            return throw(error.InvalidArgument, "file path is not allowed: {s}", .{file_path});
+            return mod.common.throw(error.InvalidArgument, "file path is not allowed: {s}", .{file_path});
         }
         const full = try std.mem.concat(a, u8, &.{ media_path, file_path });
         defer a.free(full);
-        const fz = common.dupZ(full);
-        defer common.freeZ(fz);
-        common.srv(.inf, "handle_media", "loading image from local file '%s'\n", .{fz});
+        const fz = mod.common.dupZ(full);
+        defer mod.common.freeZ(fz);
+        mod.common.srv(.inf, "handle_media", "loading image from local file '%s'\n", .{fz});
         // `std::ifstream(full, std::ios::binary)`, read whole
         const data = try stdlib.file.readStream(stdlib.file.defaultIo(), a, full) orelse
-            return throw(error.InvalidArgument, "file does not exist or cannot be opened: {s}", .{file_path});
+            return mod.common.throw(error.InvalidArgument, "file does not exist or cannot be opened: {s}", .{file_path});
         out_files.append(a, data) catch |e| {
             a.free(data);
             return e;
@@ -312,7 +301,7 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         // try to decode base64 image, video, or audio
         const n_parts = std.mem.count(u8, url, ",") + 1;
         if (n_parts != 2) {
-            return throw(error.InvalidArgument, "Invalid uri-encoded base64 value", .{});
+            return mod.common.throw(error.InvalidArgument, "Invalid uri-encoded base64 value", .{});
         }
         const comma = std.mem.indexOfScalar(u8, url, ',').?;
         const part0 = url[0..comma];
@@ -321,11 +310,11 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
             !std.mem.startsWith(u8, part0, "data:video/") and
             !std.mem.startsWith(u8, part0, "data:audio/"))
         {
-            return throw(error.InvalidArgument, "Invalid uri format: {s}", .{part0});
+            return mod.common.throw(error.InvalidArgument, "Invalid uri format: {s}", .{part0});
         } else if (!std.mem.endsWith(u8, part0, "base64")) {
-            return throw(error.InvalidArgument, "uri must be base64 encoded", .{});
+            return mod.common.throw(error.InvalidArgument, "uri must be base64 encoded", .{});
         } else {
-            const decoded_data = try tokens_mod.base64Decode(a, part1);
+            const decoded_data = try mod.tokens.base64Decode(a, part1);
             out_files.append(a, decoded_data) catch |e| {
                 a.free(decoded_data);
                 return e;
@@ -333,10 +322,10 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         }
     } else {
         // try as raw base64 string
-        const decoded_data = try tokens_mod.base64Decode(a, url);
+        const decoded_data = try mod.tokens.base64Decode(a, url);
         if (decoded_data.len == 0) {
             a.free(decoded_data);
-            return throw(error.RuntimeError, "Invalid base64 value", .{});
+            return mod.common.throw(error.RuntimeError, "Invalid base64 value", .{});
         }
         out_files.append(a, decoded_data) catch |e| {
             a.free(decoded_data);
@@ -360,7 +349,7 @@ pub const KwMap = struct {
     entries: std.ArrayList(Entry) = .empty,
 
     /// `map[key] = value`.
-    pub fn put(self: *KwMap, a: Allocator, key: []const u8, value: []const u8) Error!void {
+    pub fn put(self: *KwMap, a: Allocator, key: []const u8, value: []const u8) mod.common.Error!void {
         const v = try a.dupe(u8, value);
         errdefer a.free(v);
         var i: usize = 0;
@@ -398,7 +387,7 @@ pub const KwMap = struct {
     }
 
     /// A copy owned by `a`.
-    pub fn clone(self: *const KwMap, a: Allocator) Error!KwMap {
+    pub fn clone(self: *const KwMap, a: Allocator) mod.common.Error!KwMap {
         var out: KwMap = .{};
         errdefer out.deinit(a);
         for (self.entries.items) |e| try out.put(a, e.key, e.value);
@@ -408,7 +397,7 @@ pub const KwMap = struct {
     /// The entries as `templates.zig` takes them, borrowed from the map.
     ///
     /// Return: owned by `a`.
-    pub fn kwArgs(self: *const KwMap, a: Allocator) Error![]const chat.templates.KwArg {
+    pub fn kwArgs(self: *const KwMap, a: Allocator) mod.common.Error![]const chat.templates.KwArg {
         const out = try a.alloc(chat.templates.KwArg, self.entries.items.len);
         for (self.entries.items, out) |e, *o| o.* = .{ .key = e.key, .value = e.value };
         return out;
@@ -454,9 +443,9 @@ pub const ChatParams = chat.params.ChatParams;
 /// into the data layer's `what()`.
 ///
 /// Return: owned by `a`.
-pub fn schemaToGrammar(a: Allocator, schema: *const Value) Error![]u8 {
+pub fn schemaToGrammar(a: Allocator, schema: *const json.Value) mod.common.Error![]u8 {
     return json.schema_to_grammar.jsonSchemaToGrammar(a, schema, false) catch |e| switch (e) {
-        error.InvalidArgument, error.RuntimeError => throw(e, "{s}", .{json.schema.what()}),
+        error.InvalidArgument, error.RuntimeError => mod.common.throw(e, "{s}", .{json.schema.what()}),
         error.JsonError => error.JsonError,
         error.OutOfMemory => error.OutOfMemory,
     };
@@ -468,7 +457,7 @@ pub fn schemaToGrammar(a: Allocator, schema: *const Value) Error![]u8 {
 /// template families (`--no-jinja`), both `templates.zig`'s.
 ///
 /// Return: owned by `a`, which must be an arena.
-pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const ChatTemplatesInputs) Error!ChatParams {
+pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const ChatTemplatesInputs) mod.common.Error!ChatParams {
     const in = try chatTemplatesInputs(a, inputs);
     return chat.templates.apply(a, tmpls, &in);
 }
@@ -476,7 +465,7 @@ pub fn chatTemplatesApply(a: Allocator, tmpls: *const Templates, inputs: *const 
 /// `common_chat_templates_inputs` as `templates.zig` takes it.
 ///
 /// Return: borrows `inputs`; the kwargs are `a`'s.
-fn chatTemplatesInputs(a: Allocator, inputs: *const ChatTemplatesInputs) Error!chat.templates.TemplatesInputs {
+fn chatTemplatesInputs(a: Allocator, inputs: *const ChatTemplatesInputs) mod.common.Error!chat.templates.TemplatesInputs {
     return .{
         .messages = inputs.messages.items,
         .grammar = inputs.grammar,
@@ -539,77 +528,77 @@ pub const ServerChatParams = struct {
 /// Return: owned by `a`.
 /// - `out_session`: replaced by the request's session, owned by the
 ///   session's allocator; the caller deinits it.
-pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body: *Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8), out_session: *chat.session.Session) Error!Value {
+pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const mod.common.c.llama_vocab, body: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8), out_session: *chat.session.Session) mod.common.Error!json.Value {
     var arena_state = std.heap.ArenaAllocator.init(a);
     defer arena_state.deinit();
     const ar = arena_state.allocator();
 
-    var llama_params: Value = .null;
+    var llama_params: json.Value = .null;
     errdefer llama_params.deinit(a);
 
-    var tools_v = try jsonValueJson(ar, body, "tools", .null);
+    var tools_v = try mod.common.jsonValueJson(ar, body, "tools", .null);
     const has_tools = tools_v.isArray() and !tools_v.empty();
-    const stream = jsonValue(body, "stream", bool, false);
-    const tool_choice = jsonValue(body, "tool_choice", []const u8, "auto");
+    const stream = mod.common.jsonValue(body, "stream", bool, false);
+    const tool_choice = mod.common.jsonValue(body, "tool_choice", []const u8, "auto");
 
     if (!opt.use_jinja) {
         if (has_tools) {
-            return throw(error.RuntimeError, "tools param requires --jinja flag", .{});
+            return mod.common.throw(error.RuntimeError, "tools param requires --jinja flag", .{});
         }
         if (!std.mem.eql(u8, tool_choice, "auto")) {
-            return throw(error.RuntimeError, "tool_choice param requires --jinja flag", .{});
+            return mod.common.throw(error.RuntimeError, "tool_choice param requires --jinja flag", .{});
         }
     }
 
     try handleStop(a, &llama_params, body);
 
-    var json_schema = try jsonValueJson(ar, body, "json_schema", .null);
-    const grammar = jsonValue(body, "grammar", []const u8, "");
+    var json_schema = try mod.common.jsonValueJson(ar, body, "json_schema", .null);
+    const grammar = mod.common.jsonValue(body, "grammar", []const u8, "");
     if (!json_schema.isNull() and grammar.len != 0) {
-        return throw(error.RuntimeError, "Cannot use both json_schema and grammar", .{});
+        return mod.common.throw(error.RuntimeError, "Cannot use both json_schema and grammar", .{});
     }
 
     // Handle "response_format" field
     if (body.contains("response_format")) {
-        const response_format = try jsonValueJson(ar, body, "response_format", Value.emptyObject());
-        const response_type = jsonValue(&response_format, "type", []const u8, "");
+        const response_format = try mod.common.jsonValueJson(ar, body, "response_format", json.Value.emptyObject());
+        const response_type = mod.common.jsonValue(&response_format, "type", []const u8, "");
         if (std.mem.eql(u8, response_type, "json_object")) {
             if (response_format.contains("schema") or json_schema.empty()) {
-                json_schema = try jsonValueJson(ar, &response_format, "schema", Value.emptyObject());
+                json_schema = try mod.common.jsonValueJson(ar, &response_format, "schema", json.Value.emptyObject());
             }
         } else if (std.mem.eql(u8, response_type, "json_schema")) {
             if (response_format.contains("json_schema")) {
-                const schema_wrapper = try jsonValueJson(ar, &response_format, "json_schema", Value.emptyObject());
-                json_schema = try jsonValueJson(ar, &schema_wrapper, "schema", Value.emptyObject());
+                const schema_wrapper = try mod.common.jsonValueJson(ar, &response_format, "json_schema", json.Value.emptyObject());
+                json_schema = try mod.common.jsonValueJson(ar, &schema_wrapper, "schema", json.Value.emptyObject());
             } else {
-                json_schema = try jsonValueJson(ar, &response_format, "schema", Value.emptyObject());
+                json_schema = try mod.common.jsonValueJson(ar, &response_format, "schema", json.Value.emptyObject());
             }
         } else if (response_type.len != 0 and !std.mem.eql(u8, response_type, "text")) {
-            return throw(error.InvalidArgument, "response_format type must be one of \"text\", \"json_object\" or \"json_schema\", but got: {s}", .{response_type});
+            return mod.common.throw(error.InvalidArgument, "response_format type must be one of \"text\", \"json_object\" or \"json_schema\", but got: {s}", .{response_type});
         }
     }
 
     // an absent or empty schema means any object
     if (json_schema.isObject() and json_schema.empty()) {
-        try json_schema.set(ar, "type", try Value.initString(ar, "object"));
+        try json_schema.set(ar, "type", try json.Value.initString(ar, "object"));
     }
 
     // get input files
     if (!body.contains("messages")) {
-        return throw(error.InvalidArgument, "'messages' is required", .{});
+        return mod.common.throw(error.InvalidArgument, "'messages' is required", .{});
     }
     const messages = try body.at("messages");
     if (!messages.isArray()) {
-        return throw(error.InvalidArgument, "Expected 'messages' to be an array", .{});
+        return mod.common.throw(error.InvalidArgument, "Expected 'messages' to be an array", .{});
     }
     for (messages.array.items) |*msg| {
-        const role = jsonValue(msg, "role", []const u8, "");
+        const role = mod.common.jsonValue(msg, "role", []const u8, "");
         if (!std.mem.eql(u8, role, "assistant") and !msg.contains("content")) {
-            return throw(error.InvalidArgument, "All non-assistant messages must contain 'content'", .{});
+            return mod.common.throw(error.InvalidArgument, "All non-assistant messages must contain 'content'", .{});
         }
         if (std.mem.eql(u8, role, "assistant")) {
             if (!msg.contains("content") and !msg.contains("tool_calls")) {
-                return throw(error.InvalidArgument, "Assistant message must contain either 'content' or 'tool_calls'!", .{});
+                return mod.common.throw(error.InvalidArgument, "Assistant message must contain either 'content' or 'tool_calls'!", .{});
             }
             if (!msg.contains("content")) {
                 continue; // avoid errors with no content
@@ -621,7 +610,7 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
         }
 
         if (!content.isArray()) {
-            return throw(error.InvalidArgument, "Expected 'content' to be a string or an array", .{});
+            return mod.common.throw(error.InvalidArgument, "Expected 'content' to be a string or an array", .{});
         }
 
         try oaicompatContentLoadMedia(a, ar, content, opt, out_files);
@@ -636,8 +625,8 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
     inputs.json_schema = if (json_schema.isNull()) "" else try json.dump(ar, &json_schema, -1);
     inputs.grammar = grammar;
     inputs.use_jinja = opt.use_jinja;
-    inputs.parallel_tool_calls = jsonValue(body, "parallel_tool_calls", bool, caps_parallel);
-    inputs.add_generation_prompt = jsonValue(body, "add_generation_prompt", bool, true);
+    inputs.parallel_tool_calls = mod.common.jsonValue(body, "parallel_tool_calls", bool, caps_parallel);
+    inputs.add_generation_prompt = mod.common.jsonValue(body, "add_generation_prompt", bool, true);
     inputs.continue_final_message = if (body.contains("continue_final_message"))
         try chat.msg.continuationParse(try body.at("continue_final_message"))
     else
@@ -647,20 +636,20 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
         msgs.len != 0 and std.mem.eql(u8, msgs[msgs.len - 1].role, "assistant"))
     {
         if (msgs.len >= 2 and std.mem.eql(u8, msgs[msgs.len - 2].role, "assistant")) {
-            return throw(error.InvalidArgument, "Cannot have 2 or more assistant messages at the end of the list.", .{});
+            return mod.common.throw(error.InvalidArgument, "Cannot have 2 or more assistant messages at the end of the list.", .{});
         }
         inputs.continue_final_message = .auto;
         inputs.add_generation_prompt = false;
     }
     if (inputs.continue_final_message != .none and inputs.add_generation_prompt) {
-        return throw(error.InvalidArgument, "Cannot set both add_generation_prompt and continue_final_message to true.", .{});
+        return mod.common.throw(error.InvalidArgument, "Cannot set both add_generation_prompt and continue_final_message to true.", .{});
     }
     if (inputs.continue_final_message != .none and
         msgs.len != 0 and
         std.mem.eql(u8, msgs[msgs.len - 1].role, "assistant") and
         msgs[msgs.len - 1].tool_calls.items.len != 0)
     {
-        return throw(error.InvalidArgument, "Cannot continue an assistant message that contains tool calls.", .{});
+        return mod.common.throw(error.InvalidArgument, "Cannot continue an assistant message that contains tool calls.", .{});
     }
     inputs.reasoning_format = opt.reasoning_format;
     if (body.contains("reasoning_format")) {
@@ -669,12 +658,12 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
     inputs.enable_thinking = opt.enable_thinking;
     if (inputs.tools.items.len != 0 and inputs.tool_choice != .none) {
         if (body.contains("grammar")) {
-            return throw(error.InvalidArgument, "Cannot use custom grammar constraints with tools.", .{});
+            return mod.common.throw(error.InvalidArgument, "Cannot use custom grammar constraints with tools.", .{});
         }
     }
 
     // merge the template args provided from command line with the args provided in the user request
-    var chat_template_kwargs_object = try jsonValueJson(ar, body, "chat_template_kwargs", Value.emptyObject());
+    var chat_template_kwargs_object = try mod.common.jsonValueJson(ar, body, "chat_template_kwargs", json.Value.emptyObject());
     inputs.chat_template_kwargs = try opt.chat_template_kwargs.clone(ar);
     var kit = chat_template_kwargs_object.items();
     while (kit.next()) |item| {
@@ -688,17 +677,17 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
     } else if (std.mem.eql(u8, enable_thinking_kwarg, "false")) {
         inputs.enable_thinking = false;
     } else if (enable_thinking_kwarg.len != 0 and enable_thinking_kwarg[0] == '"') {
-        return throw(error.InvalidArgument, "invalid type for \"enable_thinking\" (expected boolean, got string)", .{});
+        return mod.common.throw(error.InvalidArgument, "invalid type for \"enable_thinking\" (expected boolean, got string)", .{});
     }
 
     // Parse the OAI "reasoning_effort" field; "none" disables reasoning.
     if (body.contains("reasoning_effort")) {
-        const reasoning_effort = jsonValue(body, "reasoning_effort", []const u8, "");
+        const reasoning_effort = mod.common.jsonValue(body, "reasoning_effort", []const u8, "");
         if (std.mem.eql(u8, reasoning_effort, "none")) {
             inputs.enable_thinking = false;
             inputs.chat_template_kwargs.erase(ar, "reasoning_effort");
         } else if (reasoning_effort.len != 0) {
-            var s: Value = .{ .string = @constCast(reasoning_effort) };
+            var s: json.Value = .{ .string = @constCast(reasoning_effort) };
             try inputs.chat_template_kwargs.put(ar, "reasoning_effort", try json.dump(ar, &s, -1));
         }
     }
@@ -708,39 +697,39 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
     // Apply chat template to the list of messages
     {
         const in = try chatTemplatesInputs(ar, &inputs);
-        const session = try chat.session.Session.init(out_session.gpa, opt.tmpls, vocab, &in, .{ .echo = jsonValue(body, "echo", bool, false) });
+        const session = try chat.session.Session.init(out_session.gpa, opt.tmpls, vocab, &in, .{ .echo = mod.common.jsonValue(body, "echo", bool, false) });
         out_session.deinit();
         out_session.* = session;
     }
 
-    try llama_params.set(a, "prompt", try Value.initString(a, try out_session.prompt().str(ar)));
+    try llama_params.set(a, "prompt", try json.Value.initString(a, try out_session.prompt().str(ar)));
 
     // Reasoning budget: pass parameters through to sampling layer
     {
-        const thinking = jsonValue(body, "thinking_budget_tokens", c_int, -1);
-        var reasoning_budget = jsonValue(body, "reasoning_budget_tokens", c_int, thinking);
+        const thinking = mod.common.jsonValue(body, "thinking_budget_tokens", c_int, -1);
+        var reasoning_budget = mod.common.jsonValue(body, "reasoning_budget_tokens", c_int, thinking);
         if (reasoning_budget == -1) {
             reasoning_budget = opt.reasoning_budget;
         }
 
         if (out_session.thinkingEndTags().len != 0) {
-            try llama_params.set(a, "reasoning_budget_tokens", try Value.from(a, reasoning_budget));
-            try llama_params.set(a, "reasoning_budget_start_tag", try Value.initString(a, out_session.thinkingStartTag()));
-            try llama_params.set(a, "reasoning_budget_end_tags", try common.from(a, out_session.thinkingEndTags()));
-            try llama_params.set(a, "reasoning_budget_message", try Value.initString(a, jsonValue(body, "reasoning_budget_message", []const u8, opt.reasoning_budget_message)));
-            try llama_params.set(a, "reasoning_control", .{ .boolean = jsonValue(body, "reasoning_control", bool, false) });
+            try llama_params.set(a, "reasoning_budget_tokens", try json.Value.from(a, reasoning_budget));
+            try llama_params.set(a, "reasoning_budget_start_tag", try json.Value.initString(a, out_session.thinkingStartTag()));
+            try llama_params.set(a, "reasoning_budget_end_tags", try mod.common.from(a, out_session.thinkingEndTags()));
+            try llama_params.set(a, "reasoning_budget_message", try json.Value.initString(a, mod.common.jsonValue(body, "reasoning_budget_message", []const u8, opt.reasoning_budget_message)));
+            try llama_params.set(a, "reasoning_control", .{ .boolean = mod.common.jsonValue(body, "reasoning_control", bool, false) });
         }
     }
 
     // Handle "logprobs" field
     // TODO: The response format of this option is not yet OAI-compatible, but seems like no one really using it; We may need to fix it in the future
-    if (jsonValue(body, "logprobs", bool, false)) {
+    if (mod.common.jsonValue(body, "logprobs", bool, false)) {
         if (has_tools and stream) {
-            return throw(error.InvalidArgument, "logprobs is not supported with tools + stream", .{});
+            return mod.common.throw(error.InvalidArgument, "logprobs is not supported with tools + stream", .{});
         }
-        try llama_params.set(a, "n_probs", try Value.from(a, jsonValue(body, "top_logprobs", c_int, 20)));
+        try llama_params.set(a, "n_probs", try json.Value.from(a, mod.common.jsonValue(body, "top_logprobs", c_int, 20)));
     } else if (body.contains("top_logprobs") and !(try body.at("top_logprobs")).isNull()) {
-        return throw(error.InvalidArgument, "top_logprobs requires logprobs to be set to true", .{});
+        return mod.common.throw(error.InvalidArgument, "top_logprobs requires logprobs to be set to true", .{});
     }
 
     // Copy remaining properties to llama_params
@@ -768,44 +757,44 @@ pub fn oaicompatChatParamsParse(a: Allocator, vocab: ?*const c.llama_vocab, body
 /// - `content`: an array, owned by `a`; rewritten in place.
 /// - `ar`: scratch for the parts' sub-objects.
 /// - `out_files`: grows; each file owned by `a`.
-fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8)) Error!void {
+fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *json.Value, opt: *const ServerChatParams, out_files: *std.ArrayList([]u8)) mod.common.Error!void {
     for (content.array.items) |*p| {
-        const ty = jsonValue(p, "type", []const u8, "");
+        const ty = mod.common.jsonValue(p, "type", []const u8, "");
         if (std.mem.eql(u8, ty, "image_url")) {
             if (!opt.allow_image) {
-                return throw(error.RuntimeError, "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return mod.common.throw(error.RuntimeError, "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
-            const image_url = try jsonValueJson(ar, p, "image_url", Value.emptyObject());
-            const url = jsonValue(&image_url, "url", []const u8, "");
+            const image_url = try mod.common.jsonValueJson(ar, p, "image_url", json.Value.emptyObject());
+            const url = mod.common.jsonValue(&image_url, "url", []const u8, "");
             try handleMedia(a, out_files, url, opt.media_path, opt.media_allow_private_urls);
 
             try setMediaMarker(a, p, "image_url");
         } else if (std.mem.eql(u8, ty, "input_audio")) {
             if (!opt.allow_audio) {
-                return throw(error.RuntimeError, "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return mod.common.throw(error.RuntimeError, "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
             // note: don't need to validate "format", it's redundant
-            const input_audio = try jsonValueJson(ar, p, "input_audio", Value.emptyObject());
-            const url = jsonValue(&input_audio, "data", []const u8, jsonValue(&input_audio, "url", []const u8, ""));
+            const input_audio = try mod.common.jsonValueJson(ar, p, "input_audio", json.Value.emptyObject());
+            const url = mod.common.jsonValue(&input_audio, "data", []const u8, mod.common.jsonValue(&input_audio, "url", []const u8, ""));
             try handleMedia(a, out_files, url, opt.media_path, opt.media_allow_private_urls);
 
             try setMediaMarker(a, p, "input_audio");
         } else if (std.mem.eql(u8, ty, "input_video") or std.mem.eql(u8, ty, "video_url")) {
             if (!opt.allow_video) {
-                return throw(error.RuntimeError, "video input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
+                return mod.common.throw(error.RuntimeError, "video input is not supported - hint: if this is unexpected, you may need to provide the mmproj", .{});
             }
 
             // accept the OpenAI-style "video_url" key as an alias of "input_video"
-            const input_video = try jsonValueJson(ar, p, ty, Value.emptyObject());
-            const url = jsonValue(&input_video, "data", []const u8, jsonValue(&input_video, "url", []const u8, ""));
+            const input_video = try mod.common.jsonValueJson(ar, p, ty, json.Value.emptyObject());
+            const url = mod.common.jsonValue(&input_video, "data", []const u8, mod.common.jsonValue(&input_video, "url", []const u8, ""));
             try handleMedia(a, out_files, url, opt.media_path, opt.media_allow_private_urls);
 
             try setMediaMarker(a, p, "input_video");
             try p.erase(a, "video_url");
         } else if (!std.mem.eql(u8, ty, "text") and !std.mem.eql(u8, ty, "tool_reference")) {
-            return throw(error.InvalidArgument, "unsupported content[].type", .{});
+            return mod.common.throw(error.InvalidArgument, "unsupported content[].type", .{});
         }
     }
 }
@@ -818,16 +807,16 @@ fn oaicompatContentLoadMedia(a: Allocator, ar: Allocator, content: *Value, opt: 
 /// Return: owned by `gpa`.
 pub fn tokenizeOaiContentArray(
     gpa: Allocator,
-    vocab: ?*const common.c.llama_vocab,
-    mctx: ?*common.c.mtmd_context,
+    vocab: ?*const mod.common.c.llama_vocab,
+    mctx: ?*mod.common.c.mtmd_context,
     opt: *const ServerChatParams,
-    content_in: *const Value,
+    content_in: *const json.Value,
     add_special: bool,
     parse_special: bool,
-    init_opt: common.c.mtmd_helper_init_opt,
-) Error!tokens_mod.ServerTokens {
+    init_opt: mod.common.c.mtmd_helper_init_opt,
+) mod.common.Error!mod.tokens.ServerTokens {
     if (!content_in.isArray()) {
-        return throw(error.InvalidArgument, "\"content\" must be an array", .{});
+        return mod.common.throw(error.InvalidArgument, "\"content\" must be an array", .{});
     }
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -840,21 +829,21 @@ pub fn tokenizeOaiContentArray(
 
     var prompt: std.ArrayList(u8) = .empty;
     for (content.array.items) |*p| {
-        try prompt.appendSlice(ar, jsonValue(p, "text", []const u8, ""));
+        try prompt.appendSlice(ar, mod.common.jsonValue(p, "text", []const u8, ""));
     }
 
     if (files.items.len == 0) {
-        const toks = try common.tokenize(ar, vocab, prompt.items, add_special, parse_special);
-        return tokens_mod.ServerTokens.fromTokens(gpa, toks, false);
+        const toks = try mod.common.tokenize(ar, vocab, prompt.items, add_special, parse_special);
+        return mod.tokens.ServerTokens.fromTokens(gpa, toks, false);
     }
     const fs: []const []const u8 = @ptrCast(files.items);
-    return tokens_mod.processMtmdPrompt(gpa, mctx, prompt.items, fs, init_opt, false);
+    return mod.tokens.processMtmdPrompt(gpa, mctx, prompt.items, fs, init_opt, false);
 }
 
 /// `p["type"] = "media_marker"; p["text"] = get_media_marker(); p.erase(key);`
-fn setMediaMarker(a: Allocator, p: *Value, key: []const u8) Error!void {
-    try p.set(a, "type", try Value.initString(a, "media_marker"));
-    try p.set(a, "text", try Value.initString(a, common.getMediaMarker()));
+fn setMediaMarker(a: Allocator, p: *json.Value, key: []const u8) mod.common.Error!void {
+    try p.set(a, "type", try json.Value.initString(a, "media_marker"));
+    try p.set(a, "text", try json.Value.initString(a, mod.common.getMediaMarker()));
     try p.erase(a, key);
 }
 
@@ -865,7 +854,7 @@ fn setMediaMarker(a: Allocator, p: *Value, key: []const u8) Error!void {
 /// standard alphabet, padded.
 ///
 /// Return: owned by `a`.
-pub fn base64Encode(a: Allocator, data: []const u8) Error![]u8 {
+pub fn base64Encode(a: Allocator, data: []const u8) mod.common.Error![]u8 {
     const enc = std.base64.standard.Encoder;
     const out = try a.alloc(u8, enc.calcSize(data.len));
     _ = enc.encode(out, data);
@@ -875,19 +864,19 @@ pub fn base64Encode(a: Allocator, data: []const u8) Error![]u8 {
 /// Ports `format_embeddings_response_oaicompat` (server-common.cpp:1636 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const Value, model_name: []const u8, embeddings: *Value, use_base64: bool) Error!Value {
-    var data = Value.emptyArray();
+pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const json.Value, model_name: []const u8, embeddings: *json.Value, use_base64: bool) mod.common.Error!json.Value {
+    var data = json.Value.emptyArray();
     errdefer data.deinit(a);
     var n_tokens: i32 = 0;
     var i: c_int = 0;
     var it = embeddings.items();
     while (it.next()) |entry| {
         const elem = entry.value;
-        var embedding_obj = Obj.init(a);
+        var embedding_obj = mod.common.Obj.init(a);
         errdefer embedding_obj.deinit();
 
         if (use_base64) {
-            var emb = try jsonValueJson(a, elem, "embedding", Value.emptyArray());
+            var emb = try mod.common.jsonValueJson(a, elem, "embedding", json.Value.emptyArray());
             defer emb.deinit(a);
             const vec = try emb.getSlice(a, f32);
             defer a.free(vec);
@@ -899,21 +888,21 @@ pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const Value, mo
             try embedding_obj.put("object", "embedding");
             try embedding_obj.put("encoding_format", "base64");
         } else {
-            try embedding_obj.put("embedding", try jsonValueJson(a, elem, "embedding", Value.emptyArray()));
+            try embedding_obj.put("embedding", try mod.common.jsonValueJson(a, elem, "embedding", json.Value.emptyArray()));
             try embedding_obj.put("index", i);
             i += 1;
             try embedding_obj.put("object", "embedding");
         }
         try data.pushBack(a, embedding_obj.done());
 
-        n_tokens +%= jsonValue(elem, "tokens_evaluated", c_int, 0);
+        n_tokens +%= mod.common.jsonValue(elem, "tokens_evaluated", c_int, 0);
     }
 
-    var res = Obj.init(a);
+    var res = mod.common.Obj.init(a);
     errdefer res.deinit();
-    try res.put("model", jsonValue(request, "model", []const u8, model_name));
+    try res.put("model", mod.common.jsonValue(request, "model", []const u8, model_name));
     try res.put("object", "list");
-    var usage = Obj.init(a);
+    var usage = mod.common.Obj.init(a);
     errdefer usage.deinit();
     try usage.put("prompt_tokens", n_tokens);
     try usage.put("total_tokens", n_tokens);
@@ -926,8 +915,8 @@ pub fn formatEmbeddingsResponseOaicompat(a: Allocator, request: *const Value, mo
 
 const ScoreCtx = struct { label: []const u8 };
 
-fn scoreGreater(ctx: ScoreCtx, x: Value, y: Value) bool {
-    return jsonValue(&x, ctx.label, f64, 0.0) > jsonValue(&y, ctx.label, f64, 0.0);
+fn scoreGreater(ctx: ScoreCtx, x: json.Value, y: json.Value) bool {
+    return mod.common.jsonValue(&x, ctx.label, f64, 0.0) > mod.common.jsonValue(&y, ctx.label, f64, 0.0);
 }
 
 /// Ports `format_response_rerank` (server-common.cpp:1682 @b1b770d90): the
@@ -941,16 +930,16 @@ fn scoreGreater(ctx: ScoreCtx, x: Value, y: Value) bool {
 /// Return: owned by `a`.
 pub fn formatResponseRerank(
     a: Allocator,
-    request: *const Value,
+    request: *const json.Value,
     model_name: []const u8,
-    ranks: *Value,
+    ranks: *json.Value,
     is_tei_format: bool,
     texts: [][]const u8,
     top_n: c_int,
-) Error!Value {
+) mod.common.Error!json.Value {
     var n_tokens: i32 = 0;
-    const return_text = is_tei_format and jsonValue(request, "return_text", bool, false);
-    var elements: std.ArrayList(Value) = .empty; // Temporary vector to hold unsorted elements
+    const return_text = is_tei_format and mod.common.jsonValue(request, "return_text", bool, false);
+    var elements: std.ArrayList(json.Value) = .empty; // Temporary vector to hold unsorted elements
     defer {
         for (elements.items) |*e| e.deinit(a);
         elements.deinit(a);
@@ -959,12 +948,12 @@ pub fn formatResponseRerank(
     var it = ranks.items();
     while (it.next()) |entry| {
         const rank = entry.value;
-        const index = jsonValue(rank, "index", c_int, 0);
-        var elem = Obj.init(a);
+        const index = mod.common.jsonValue(rank, "index", c_int, 0);
+        var elem = mod.common.Obj.init(a);
         errdefer elem.deinit();
         try elem.put("index", index);
-        try elem.put(score_label, jsonValue(rank, "score", f64, 0.0));
-        n_tokens +%= jsonValue(rank, "tokens_evaluated", c_int, 0);
+        try elem.put(score_label, mod.common.jsonValue(rank, "score", f64, 0.0));
+        n_tokens +%= mod.common.jsonValue(rank, "tokens_evaluated", c_int, 0);
         if (return_text) {
             const ui: usize = @intCast(index);
             try elem.put("text", texts[ui]);
@@ -973,23 +962,23 @@ pub fn formatResponseRerank(
         try elements.append(a, elem.done());
     }
 
-    @import("stdlib").libcxx.sort(Value, elements.items, ScoreCtx{ .label = score_label }, scoreGreater);
+    @import("stdlib").libcxx.sort(json.Value, elements.items, ScoreCtx{ .label = score_label }, scoreGreater);
 
     const keep = @min(@as(usize, @intCast(top_n)), elements.items.len);
     for (elements.items[keep..]) |*e| e.deinit(a);
     elements.shrinkRetainingCapacity(keep);
-    var results = Value.emptyArray();
+    var results = json.Value.emptyArray();
     errdefer results.deinit(a);
     for (elements.items) |e| try results.pushBack(a, e);
     elements.clearRetainingCapacity();
 
     if (is_tei_format) return results;
 
-    var res = Obj.init(a);
+    var res = mod.common.Obj.init(a);
     errdefer res.deinit();
-    try res.put("model", jsonValue(request, "model", []const u8, model_name));
+    try res.put("model", mod.common.jsonValue(request, "model", []const u8, model_name));
     try res.put("object", "list");
-    var usage = Obj.init(a);
+    var usage = mod.common.Obj.init(a);
     errdefer usage.deinit();
     try usage.put("prompt_tokens", n_tokens);
     try usage.put("total_tokens", n_tokens);

@@ -11,38 +11,36 @@
 //! cited where it is defined.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("exception.zig");
-
-const Error = exception.Error;
 
 /// A `cli/peg` error as a chat one, its `what()` carried over.
 /// `std`'s `out_of_range` is a `std`'s `logic_error` that no caller here tells
 /// apart from a `std`'s `runtime_error` -- the server's `ex_wrapper` answers
 /// 500 for both -- so it becomes one, its text kept.
-pub fn fromPeg(e: peg.Error) Error {
+pub fn fromPeg(e: peg.Error) mod.exception.Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => error.JsonError,
-        error.InvalidArgument => exception.throw(error.InvalidArgument, "{s}", .{peg.what(e)}),
-        error.RuntimeError, error.OutOfRange => exception.throw(error.RuntimeError, "{s}", .{peg.what(e)}),
+        error.InvalidArgument => mod.exception.throw(error.InvalidArgument, "{s}", .{peg.what(e)}),
+        error.RuntimeError, error.OutOfRange => mod.exception.throw(error.RuntimeError, "{s}", .{peg.what(e)}),
     };
 }
 
 /// A chat error as a `cli/peg` one, for a builder callback that called
 /// back into chat code, its `what()` carried over.
-pub fn toPeg(e: Error) peg.Error {
+pub fn toPeg(e: mod.exception.Error) peg.Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => error.JsonError,
-        error.InvalidArgument => peg.errors.raise(error.InvalidArgument, &.{exception.what(e)}),
-        error.RuntimeError => peg.errors.raise(error.RuntimeError, &.{exception.what(e)}),
+        error.InvalidArgument => peg.errors.raise(error.InvalidArgument, &.{mod.exception.what(e)}),
+        error.RuntimeError => peg.errors.raise(error.RuntimeError, &.{mod.exception.what(e)}),
     };
 }
 
 /// A `cli/json` error as a chat one.
-pub fn fromJson(e: json.Error) Error {
+pub fn fromJson(e: json.Error) mod.exception.Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => error.JsonError,
@@ -50,23 +48,23 @@ pub fn fromJson(e: json.Error) Error {
 }
 
 /// A `cli/json/schema.zig` error as a chat one, its `what()` carried over.
-pub fn fromSchema(e: json.schema.Error) Error {
+pub fn fromSchema(e: json.schema.Error) mod.exception.Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
         error.JsonError => error.JsonError,
-        error.RuntimeError, error.InvalidArgument => |x| exception.throw(x, "{s}", .{json.schema.what()}),
+        error.RuntimeError, error.InvalidArgument => |x| mod.exception.throw(x, "{s}", .{json.schema.what()}),
     };
 }
 
 /// `std::string::substr(pos, n)`: `std`'s `out_of_range` ("basic_string")
 /// past the end, the count clamped.
-pub fn substr(s: []const u8, pos: usize, n: usize) Error![]const u8 {
-    if (pos > s.len) return exception.throw(error.RuntimeError, "basic_string", .{});
+pub fn substr(s: []const u8, pos: usize, n: usize) mod.exception.Error![]const u8 {
+    if (pos > s.len) return mod.exception.throw(error.RuntimeError, "basic_string", .{});
     return s[pos..][0..@min(n, s.len - pos)];
 }
 
 /// `std::string::substr(pos)`.
-pub fn substrFrom(s: []const u8, pos: usize) Error![]const u8 {
+pub fn substrFrom(s: []const u8, pos: usize) mod.exception.Error![]const u8 {
     return substr(s, pos, std.math.maxInt(usize));
 }
 

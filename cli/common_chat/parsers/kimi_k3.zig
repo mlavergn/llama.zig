@@ -9,23 +9,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const msg_mod = @import("../msg.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 const sep = "<|sep|>";
 const msg_start = "<|open|>message role=\"assistant\"<|sep|>";
@@ -44,13 +32,13 @@ const eom_token = "<|end_of_msg|>";
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     extract_reasoning: bool,
-    cb: *ChatBuilder = undefined,
-    tool_choices: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    tool_choices: peg.ParserId = undefined,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const end = try b.end();
@@ -83,7 +71,7 @@ const Build = struct {
         }
 
         self.tool_choices = try b.choiceEmpty();
-        parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+        common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
 
         // all calls go inside one tools section, then the message is closed. the
         // message closer is part of the trigger rule, or else the lazy grammar
@@ -99,17 +87,17 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(try b.plus(start, reasoning), response), tools), trailer), end);
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        const name = try parsers.functionName(t);
-        const schema = try msg_mod.toolParameters(self.a, function);
-        const call = self.buildTool(tool_index, name, &schema) catch |e| return util.fromPeg(e);
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        const name = try common_chat.parsers.functionName(t);
+        const schema = try common_chat.msg.toolParameters(self.a, function);
+        const call = self.buildTool(tool_index, name, &schema) catch |e| return common_chat.util.fromPeg(e);
         const b = &self.cb.b;
-        const rule = b.rule(try parsers.indexName(self.a, "kimi-k3-tool-", tool_index, ""), call, false) catch |e| return util.fromPeg(e);
-        b.orAssign(&self.tool_choices, rule) catch |e| return util.fromPeg(e);
+        const rule = b.rule(try common_chat.parsers.indexName(self.a, "kimi-k3-tool-", tool_index, ""), call, false) catch |e| return common_chat.util.fromPeg(e);
+        b.orAssign(&self.tool_choices, rule) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const json.Value) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
 
@@ -169,11 +157,11 @@ const Build = struct {
 /// Ports `common_chat_params_init_kimi_k3` (parsers/kimi-k3.cpp:8 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, null, null, null);
     data.format = .peg_native;
     data.supports_thinking = true;
 
@@ -192,7 +180,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     try data.message_delimiters.add(a, .tool, "<|open|>message role=\"tool\"");
     try data.message_delimiters.add(a, .system, "<|open|>message role=\"system\"");
 
-    const has_tools = parsers.hasTools(&inputs.tools);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_tools and inputs.tool_choice != .none;
 
@@ -210,12 +198,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     }
 
     var build: Build = .{ .a = a, .inputs = inputs, .has_tools = has_tools, .extract_reasoning = extract_reasoning };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = inputs.tool_choice != .required;
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, tools_start);
     }
 
@@ -233,9 +221,9 @@ test "Kimi K3 builds a tool parser" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var t = try template.Template.init(std.testing.allocator, "{% for m in messages %}<|open|>message role=\"{{ m.role }}\"<|sep|>{{ m.content }}<|close|>message<|sep|><|end_of_msg|>{% endfor %}", "", "");
+    var t = try common_chat.template.Template.init(std.testing.allocator, "{% for m in messages %}<|open|>message role=\"{{ m.role }}\"<|sep|>{{ m.content }}<|close|>message<|sep|><|end_of_msg|>{% endfor %}", "", "");
     defer t.deinit();
-    var p: GenerationParams = .{};
+    var p: common_chat.template.GenerationParams = .{};
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"integer\"},\"y\":{}}}}}]");
     const data = try init(a, &t, &p);

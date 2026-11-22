@@ -11,18 +11,11 @@
 //! contraction is in play.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const libcxx = @import("stdlib").libcxx;
-const unicode = @import("../unicode.zig");
-const vm = @import("module.zig");
-
-const allocator = impl.allocator;
-const Vocab = vm.Vocab;
-const Token = vm.Token;
-const Trie = vm.trie.Trie;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 /// Ports `llm_tokenizer_ugm` (llama-vocab.cpp:988 @b1b770d90).
@@ -36,8 +29,8 @@ pub const Tokenizer = struct {
     /// The XCDA entries, also borrowed from it.
     xcda: []const u8 = &.{},
 
-    user_defined_token_matcher: Trie,
-    token_matcher: Trie,
+    user_defined_token_matcher: llama.vocab.trie.Trie,
+    token_matcher: llama.vocab.trie.Trie,
 
     min_score: f32 = std.math.floatMax(f32),
     max_score: f32 = -std.math.floatMax(f32),
@@ -48,8 +41,8 @@ pub const Tokenizer = struct {
     /// Ports the constructor of `llm_tokenizer_ugm`.
     ///
     /// Return: the tokenizer; it borrows `vocab`'s charsmap.
-    pub fn init(vocab: *const Vocab) Tokenizer {
-        var t: Tokenizer = .{ .user_defined_token_matcher = Trie.init(), .token_matcher = Trie.init() };
+    pub fn init(vocab: *const llama.vocab.Vocab) Tokenizer {
+        var t: Tokenizer = .{ .user_defined_token_matcher = llama.vocab.trie.Trie.init(), .token_matcher = llama.vocab.trie.Trie.init() };
         const charsmap = vocab.precompiled_charsmap.items;
         if (charsmap.len > 0) {
             // First four bytes of precompiled_charsmap contains length of binary
@@ -63,11 +56,11 @@ pub const Tokenizer = struct {
         const n: u32 = vocab.nTokens();
         var id: u32 = 0;
         while (id < n) : (id += 1) {
-            const tid: Token = @intCast(id);
+            const tid: llama.vocab.Token = @intCast(id);
             const d = vocab.id_to_token.items[id];
             if (vocab.isNormal(tid)) {
-                t.min_score = libcxx.min(f32, t.min_score, d.score);
-                t.max_score = libcxx.max(f32, t.max_score, d.score);
+                t.min_score = stdlib.libcxx.min(f32, t.min_score, d.score);
+                t.max_score = stdlib.libcxx.max(f32, t.max_score, d.score);
             }
             if (vocab.isNormal(tid) or vocab.isUserDefined(tid) or vocab.isUnused(tid)) {
                 t.token_matcher.insert(vocab.text(tid), tid);
@@ -96,27 +89,27 @@ pub const Tokenizer = struct {
 const XcdaView = struct {
     xcda: []const u8,
 
-    fn getNode(self: XcdaView, index: usize, exc: *impl.Exception) impl.Thrown!u32 {
+    fn getNode(self: XcdaView, index: usize, exc: *llama.impl.Exception) llama.impl.Thrown!u32 {
         if (index >= self.xcda.len / 4) return exc.throw(.runtime_error, "Index out of array bounds in XCDA array!", .{});
         return std.mem.readInt(u32, self.xcda[index * 4 ..][0..4], .little);
     }
 
-    fn getBase(self: XcdaView, index: usize, exc: *impl.Exception) impl.Thrown!u32 {
+    fn getBase(self: XcdaView, index: usize, exc: *llama.impl.Exception) llama.impl.Thrown!u32 {
         const packed_node = try self.getNode(index, exc);
         return (packed_node >> 10) << @intCast((packed_node & (1 << 9)) >> 6);
     }
 
-    fn getLcheck(self: XcdaView, index: usize, exc: *impl.Exception) impl.Thrown!u32 {
+    fn getLcheck(self: XcdaView, index: usize, exc: *llama.impl.Exception) llama.impl.Thrown!u32 {
         const packed_node = try self.getNode(index, exc);
         return packed_node & ((1 << 31) | 0xff);
     }
 
-    fn getLeaf(self: XcdaView, index: usize, exc: *impl.Exception) impl.Thrown!bool {
+    fn getLeaf(self: XcdaView, index: usize, exc: *llama.impl.Exception) llama.impl.Thrown!bool {
         const packed_node = try self.getNode(index, exc);
         return ((packed_node >> 8) & 1) != 0;
     }
 
-    fn getValue(self: XcdaView, index: usize, exc: *impl.Exception) impl.Thrown!u32 {
+    fn getValue(self: XcdaView, index: usize, exc: *llama.impl.Exception) llama.impl.Thrown!u32 {
         const packed_node = try self.getNode(index, exc);
         return packed_node & ((1 << 31) - 1);
     }
@@ -124,7 +117,7 @@ const XcdaView = struct {
 
 /// Ports `best_tokenization`.
 const BestTokenization = struct {
-    token_id: Token,
+    token_id: llama.vocab.Token,
     input_offset: usize,
     score_sum: f64,
 };
@@ -153,22 +146,22 @@ const NormalizationResult = struct {
 /// - `exc`: receives what is thrown.
 ///
 /// Return: nothing, or `error.Thrown` from a malformed charsmap.
-pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+pub fn tokenize(vocab: *const llama.vocab.Vocab, tokenizer: *const Tokenizer, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
     // get current size of output (for reversal later)
     const output_size = output.items.len;
 
     // normalize the input first
     var normalized: std.ArrayList(u8) = .empty;
-    defer normalized.deinit(allocator);
+    defer normalized.deinit(std.heap.c_allocator);
     if (vocab.normalizer_opts.nfc) {
-        const cpts = unicode.cptsFromUtf8(text);
-        defer allocator.free(cpts);
-        const nfc = unicode.cptsNormalizeNfc(cpts);
-        defer allocator.free(nfc);
+        const cpts = llama.unicode.cptsFromUtf8(text);
+        defer std.heap.c_allocator.free(cpts);
+        const nfc = llama.unicode.cptsNormalizeNfc(cpts);
+        defer std.heap.c_allocator.free(nfc);
         var canonical: std.ArrayList(u8) = .empty;
-        defer canonical.deinit(allocator);
+        defer canonical.deinit(std.heap.c_allocator);
         const encoded = for (nfc) |cpt| {
-            unicode.appendCptUtf8(&canonical, cpt) catch break false;
+            llama.unicode.appendCptUtf8(&canonical, cpt) catch break false;
         } else true;
         if (encoded) {
             try normalize(vocab, tokenizer, canonical.items, &normalized, exc);
@@ -191,8 +184,8 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
     }.f;
 
     const unk = vocab.special_unk_id;
-    const results = allocator.alloc(BestTokenization, input_len + 1) catch oom();
-    defer allocator.free(results);
+    const results = std.heap.c_allocator.alloc(BestTokenization, input_len + 1) catch oom();
+    defer std.heap.c_allocator.free(results);
     @memset(results, .{ .token_id = unk, .input_offset = 0, .score_sum = -std.math.floatMax(f64) });
     // at the beginning tokenization score is zero
     results[0] = .{ .token_id = unk, .input_offset = 0, .score_sum = 0 };
@@ -201,12 +194,12 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
     while (input_offset < input_len) {
         var prefix_offset = input_offset;
         // how many code units are in the currently processed UTF code point
-        const n_utf8_code_units = @min(unicode.lenUtf8(norm[input_offset]), input_len - input_offset);
+        const n_utf8_code_units = @min(llama.unicode.lenUtf8(norm[input_offset]), input_len - input_offset);
 
         // traverse the token matcher trie to find a matching token
         var single_codepoint_token_found = false;
         const current_best = results[input_offset];
-        var node = tokenizer.token_matcher.traverse(Trie.root, at(norm, prefix_offset));
+        var node = tokenizer.token_matcher.traverse(llama.vocab.trie.Trie.root, at(norm, prefix_offset));
         prefix_offset += 1;
 
         while (prefix_offset <= input_len) {
@@ -216,7 +209,7 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
             if (value.has_value) {
                 // check if it corresponds to the whole UTF code point
                 if (prefix_offset - input_offset == n_utf8_code_units) single_codepoint_token_found = true;
-                const token_id: Token = value.value;
+                const token_id: llama.vocab.Token = value.value;
                 const token_data = try vocab.getTokenData(token_id, exc);
 
                 // user-defined tokens score 0, to make them more likely to be
@@ -253,21 +246,21 @@ pub fn tokenize(vocab: *const Vocab, tokenizer: *const Tokenizer, text: []const 
     var tokenization = results[input_len];
     while (true) {
         const is_unknown = tokenization.token_id == unk;
-        if (!(is_prev_unknown and is_unknown)) output.append(allocator, tokenization.token_id) catch oom();
+        if (!(is_prev_unknown and is_unknown)) output.append(std.heap.c_allocator, tokenization.token_id) catch oom();
         if (tokenization.input_offset == 0) break;
         is_prev_unknown = is_unknown;
         tokenization = results[tokenization.input_offset];
     }
 
     // reverse the output since we added tokens starting from the end of the input
-    std.mem.reverse(Token, output.items[output_size..]);
+    std.mem.reverse(llama.vocab.Token, output.items[output_size..]);
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize` (llama-vocab.cpp:1176
 /// @b1b770d90).
-fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8, normalized: *std.ArrayList(u8), exc: *impl.Exception) impl.Thrown!void {
+fn normalize(vocab: *const llama.vocab.Vocab, tokenizer: *const Tokenizer, input: []const u8, normalized: *std.ArrayList(u8), exc: *llama.impl.Exception) llama.impl.Thrown!void {
     normalized.clearRetainingCapacity();
-    normalized.ensureTotalCapacity(allocator, input.len * 3) catch oom();
+    normalized.ensureTotalCapacity(std.heap.c_allocator, input.len * 3) catch oom();
 
     const space: []const u8 = if (vocab.escape_whitespaces) Tokenizer.escaped_space else " ";
 
@@ -286,27 +279,27 @@ fn normalize(vocab: *const Vocab, tokenizer: *const Tokenizer, input: []const u8
                 if (!processing_non_ws) {
                     processing_non_ws = true;
                     if ((shall_prepend_space and !is_space_prepended) or shall_merge_spaces) {
-                        normalized.appendSlice(allocator, space) catch oom();
+                        normalized.appendSlice(std.heap.c_allocator, space) catch oom();
                         is_space_prepended = true;
                     }
                 }
-                normalized.append(allocator, ch) catch oom();
+                normalized.append(std.heap.c_allocator, ch) catch oom();
             } else {
                 if (processing_non_ws) processing_non_ws = false;
-                if (!shall_merge_spaces) normalized.appendSlice(allocator, space) catch oom();
+                if (!shall_merge_spaces) normalized.appendSlice(std.heap.c_allocator, space) catch oom();
             }
         }
         input_offset += norm_res.consumed_input;
     }
 
-    if (shall_append_space) normalized.appendSlice(allocator, space) catch oom();
+    if (shall_append_space) normalized.appendSlice(std.heap.c_allocator, space) catch oom();
 }
 
 /// Ports `llm_tokenizer_ugm_session`'s `normalize_prefix` (llama-vocab.cpp:1269
 /// @b1b770d90): a user-defined token passes through whole; else the
 /// longest XCDA match is replaced; else one code point passes through, or
 /// an invalid byte becomes U+FFFD.
-fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset: usize, exc: *impl.Exception) impl.Thrown!NormalizationResult {
+fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset: usize, exc: *llama.impl.Exception) llama.impl.Thrown!NormalizationResult {
     if (input_offset == input.len) return .{ .normalized = input[input_offset..input_offset], .consumed_input = 0 };
 
     // if input prefix matches some user-defined token return this token as normalization result
@@ -354,7 +347,7 @@ fn normalizePrefix(tokenizer: *const Tokenizer, input: []const u8, input_offset:
 
     // a valid UTF-8 sequence passes through unmodified
     var prefix_offset = input_offset;
-    if (unicode.cptFromUtf8(input, &prefix_offset)) |_| {
+    if (llama.unicode.cptFromUtf8(input, &prefix_offset)) |_| {
         return .{ .normalized = input[input_offset..prefix_offset], .consumed_input = prefix_offset - input_offset };
     } else |_| {
         // consume 1 byte and return U+FFFD - REPLACEMENT CHARACTER

@@ -10,21 +10,11 @@
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_glm4_moe`'s `load_arch_hparams` (models/glm4-moe.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -40,8 +30,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // The expert gating function; GLM-4.5 uses a sigmoid.
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
     }
 
     self.type = switch (hp.nLayer()) {
@@ -53,18 +43,18 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_glm4_moe`'s `load_arch_tensors` (models/glm4-moe.cpp:28 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     const nf = self.nextnFlags(ml, .attn_norm);
     const trunk_flags = nf.trunk;
     const mtp_flags = nf.mtp;
 
-    impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 36, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
-    impl.assert(hp.nExpertUsed(0) > 0, "models/glm4-moe.cpp", 37, "hparams.n_expert_used() > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
+    llama.impl.assert(hp.n_expert > 0, "models/glm4-moe.cpp", 36, "hparams.n_expert > 0 && \"n_expert must be > 0 for GLM4_MOE MoE layers\"");
+    llama.impl.assert(hp.nExpertUsed(0) > 0, "models/glm4-moe.cpp", 37, "hparams.n_expert_used() > 0 && \"n_expert_used must be > 0 for GLM4_MOE MoE layers\"");
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -73,7 +63,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -144,46 +134,46 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 /// Ports `llama_model_glm4_moe`'s `build_arch_graph` (models/glm4-moe.cpp:119
 /// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph_mtp`
 /// (models/glm4-moe.cpp:126 @b1b770d90).
-fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 128, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
-    impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 129, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
+    llama.impl.assert(hp.n_layer_nextn > 0, "models/glm4-moe.cpp", 128, "hparams.n_layer_nextn > 0 && \"GLM4_MOE MTP requires n_layer_nextn > 0\"");
+    llama.impl.assert(hp.n_layer_nextn == 1, "models/glm4-moe.cpp", 129, "hparams.n_layer_nextn == 1 && \"GLM4_MOE MTP currently only supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 132, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 132, "n_embd_head == hparams.n_embd_head_k()");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 137, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    llama.impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/glm4-moe.cpp", 137, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 141, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 142, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 143, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
-    impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 144, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
+    llama.impl.assert(layer.nextn.eh_proj != null, "models/glm4-moe.cpp", 141, "layer.nextn.eh_proj && \"MTP block missing nextn.eh_proj\"");
+    llama.impl.assert(layer.nextn.enorm != null, "models/glm4-moe.cpp", 142, "layer.nextn.enorm   && \"MTP block missing nextn.enorm\"");
+    llama.impl.assert(layer.nextn.hnorm != null, "models/glm4-moe.cpp", 143, "layer.nextn.hnorm   && \"MTP block missing nextn.hnorm\"");
+    llama.impl.assert(layer.ffn_gate_inp != null, "models/glm4-moe.cpp", 144, "layer.ffn_gate_inp  && \"MTP block missing ffn_gate_inp\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/glm4-moe.cpp", 146, "out of memory");
+    const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/glm4-moe.cpp", 146, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.tokens);
 
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.embd);
 
-    var tok_embd: *Tensor = undefined;
+    var tok_embd: *llama.impl.c.ggml_tensor = undefined;
     b.ubatch.assertEmbdOrToken("models/glm4-moe.cpp", 155);
     if (b.ubatch.token != null) {
         const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
-        tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
+        tok_embd = llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
     } else {
         tok_embd = inp.embd.?;
     }
@@ -193,7 +183,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const h_embd = inp.h.?;
 
-    _ = b.res.addInput(graph.InpEmbdH, inp);
+    _ = b.res.addInput(llama.graph.InpEmbdH, inp);
 
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
@@ -206,7 +196,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat = c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -238,10 +228,10 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Kcur, "mtp_Kcur", il);
     b.cb(Vcur, "mtp_Vcur", il);
 
-    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
     b.cb(cur, "mtp_attn_out", il);
 
-    const ffn_inp = c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "mtp_ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.attn_post_norm, null, .rms, il);
@@ -265,25 +255,25 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const shared_out = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
     b.cb(shared_out, "mtp_ffn_shexp_out", il);
 
-    cur = c.ggml_add(ctx, routed_out, shared_out);
+    cur = llama.impl.c.ggml_add(ctx, routed_out, shared_out);
     b.cb(cur, "mtp_ffn_out", il);
 
-    cur = c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_post_ffn", il);
 
     const head_norm_w = layer.nextn.shared_head_norm orelse model.output_norm;
-    impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 253, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
+    llama.impl.assert(head_norm_w != null, "models/glm4-moe.cpp", 253, "head_norm_w && \"GLM4_MOE MTP: missing both nextn.shared_head_norm and output_norm\"");
 
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
-    cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/glm4-moe.cpp", 270, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
+    llama.impl.assert(head_w != null, "models/glm4-moe.cpp", 270, "head_w && \"GLM4_MOE MTP: missing LM head (nextn.shared_head_head or model.output)\"");
 
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
@@ -293,19 +283,19 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
 /// Ports the constructor of `llama_model_glm4_moe`'s `graph`
 /// (models/glm4-moe.cpp:278 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 281, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/glm4-moe.cpp", 281, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     const use_mrope = hp.useMrope();
     if (b.ubatch.embd != null and !use_mrope) {
         // Stopped here rather than give wrong results.
-        impl.abort("models/glm4-moe.cpp", 291, "This GGUF does not support multimodal. Please reconvert it.");
+        llama.impl.abort("models/glm4-moe.cpp", 291, "This GGUF does not support multimodal. Please reconvert it.");
     }
 
     // The positions.
@@ -350,13 +340,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids)) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The post-attention norm.
@@ -389,10 +379,10 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(shared_out, "ffn_shexp_out", il);
 
             // The routed output plus the shared one.
-            cur = c.ggml_add(ctx, routed_out, shared_out);
+            cur = llama.impl.c.ggml_add(ctx, routed_out, shared_out);
             b.cb(cur, "ffn_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -407,7 +397,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     b.cb(cur, "result_norm", -1);

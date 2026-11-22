@@ -20,11 +20,9 @@
 //! those are upstream's.
 
 const std = @import("std");
-const exception = @import("exception.zig");
-const util = @import("util.zig");
+const mod = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Error = exception.Error;
 
 /// `LLAMA_TOKEN_NULL`.
 pub const token_null: i32 = -1;
@@ -46,7 +44,7 @@ pub const Input = struct {
     /// from text: plain text, with no tokens.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn fromText(gpa: Allocator, text: []const u8) Error!Input {
+    pub fn fromText(gpa: Allocator, text: []const u8) mod.exception.Error!Input {
         var self: Input = .init(gpa);
         errdefer self.deinit();
         try self.text.appendSlice(gpa, text);
@@ -63,7 +61,7 @@ pub const Input = struct {
     /// The C++ copy.
     ///
     /// Return: owned by `gpa`.
-    pub fn clone(self: *const Input, gpa: Allocator) Error!Input {
+    pub fn clone(self: *const Input, gpa: Allocator) mod.exception.Error!Input {
         var out: Input = .init(gpa);
         errdefer out.deinit();
         try out.text.appendSlice(gpa, self.text.items);
@@ -84,7 +82,7 @@ pub const Input = struct {
     /// Ports `append` (chat.cpp:1745 @b1b770d90), the overload taking a
     /// piece and its token: the token on the piece's first byte, null on
     /// the rest. An empty piece adds nothing, not even its token.
-    pub fn append(self: *Input, piece: []const u8, token: i32) Error!void {
+    pub fn append(self: *Input, piece: []const u8, token: i32) mod.exception.Error!void {
         if (piece.len == 0) return;
         try self.tokens.append(self.gpa, token);
         try self.tokens.appendNTimes(self.gpa, token_null, piece.len - 1);
@@ -93,7 +91,7 @@ pub const Input = struct {
 
     /// Ports `append` (chat.cpp:1754 @b1b770d90), the overload taking a
     /// chunk.
-    pub fn appendInput(self: *Input, chunk: *const Input) Error!void {
+    pub fn appendInput(self: *Input, chunk: *const Input) mod.exception.Error!void {
         try self.tokens.appendSlice(self.gpa, chunk.tokens.items);
         try self.text.appendSlice(self.gpa, chunk.text.items);
     }
@@ -113,8 +111,8 @@ pub const Input = struct {
     /// - `n`: `std::string::npos` (`util.npos`) for the rest.
     ///
     /// Return: owned by `gpa`.
-    pub fn substr(self: *const Input, gpa: Allocator, pos: usize, n: usize) Error!Input {
-        const text = try util.substr(self.text.items, pos, n);
+    pub fn substr(self: *const Input, gpa: Allocator, pos: usize, n: usize) mod.exception.Error!Input {
+        const text = try mod.util.substr(self.text.items, pos, n);
         var out: Input = .init(gpa);
         errdefer out.deinit();
         try out.text.appendSlice(gpa, text);
@@ -124,7 +122,7 @@ pub const Input = struct {
 
     /// Ports `prepend` (chat.cpp:1773 @b1b770d90), the overload taking
     /// text: no tokens for it.
-    pub fn prepend(self: *Input, prefix: []const u8) Error!void {
+    pub fn prepend(self: *Input, prefix: []const u8) mod.exception.Error!void {
         try self.tokens.ensureUnusedCapacity(self.gpa, prefix.len);
         const old = self.tokens.items.len;
         self.tokens.items.len += prefix.len;
@@ -135,7 +133,7 @@ pub const Input = struct {
 
     /// Ports `prepend` (chat.cpp:1778 @b1b770d90), the overload taking a
     /// chunk.
-    pub fn prependInput(self: *Input, prefix: *const Input) Error!void {
+    pub fn prependInput(self: *Input, prefix: *const Input) mod.exception.Error!void {
         try self.tokens.insertSlice(self.gpa, 0, prefix.tokens.items);
         try self.text.insertSlice(self.gpa, 0, prefix.text.items);
     }
@@ -158,7 +156,7 @@ const VocabPtr = @typeInfo(@TypeOf(@import("llama").api.vocab.llama_tokenize)).@
 /// Return: owned by `gpa`. `error.RuntimeError` when the count overflows
 /// `int32_t`, or when libllama throws (a vocabulary with no byte token for a
 /// byte of the text), with its `what()`.
-pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8, add_special: bool, parse_special: bool) Error![]i32 {
+pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8, add_special: bool, parse_special: bool) mod.exception.Error![]i32 {
     const api = @import("llama").api;
     const v = vocabPtr(vocab);
     // upper limit for the number of tokens
@@ -169,14 +167,14 @@ pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8,
     // does; `llama_tokenize` itself would terminate.
     var exc: @import("llama").impl.Exception = .{};
     n_tokens = api.vocab.tokenize(v, text, result, add_special, parse_special, &exc) catch
-        return exception.throw(error.RuntimeError, "{s}", .{exc.what()});
+        return mod.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_tokens == std.math.minInt(i32)) {
-        return exception.throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
+        return mod.exception.throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
     }
     if (n_tokens < 0) {
         result = try gpa.realloc(result, @intCast(-n_tokens));
         const check = api.vocab.tokenize(v, text, result, add_special, parse_special, &exc) catch
-            return exception.throw(error.RuntimeError, "{s}", .{exc.what()});
+            return mod.exception.throw(error.RuntimeError, "{s}", .{exc.what()});
         @import("llama").impl.assert(check == -n_tokens, "common/common.cpp", 1881, "check == -n_tokens");
         return result;
     }
@@ -194,7 +192,7 @@ pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8,
 ///   has; only passed through to libllama's port.
 ///
 /// Return: owned by `gpa`.
-pub fn tokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8) Error!Input {
+pub fn tokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8) mod.exception.Error!Input {
     const api = @import("llama").api;
     const v = vocabPtr(vocab);
 

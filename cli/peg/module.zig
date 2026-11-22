@@ -59,7 +59,6 @@ pub const SharedDoc = arena.SharedDoc;
 pub const Arena = arena.Arena;
 pub const Builder = builder.Builder;
 pub const buildPegParser = builder.buildPegParser;
-pub const GrammarBuilder = gbnf.GrammarBuilder;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

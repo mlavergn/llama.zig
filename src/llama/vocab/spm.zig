@@ -11,18 +11,11 @@
 //! `push_heap` and `pop_heap`. `libcxx.PriorityQueue` is those two.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const libcxx = @import("stdlib").libcxx;
-const unicode = @import("../unicode.zig");
-const vm = @import("module.zig");
-
-const allocator = impl.allocator;
-const Vocab = vm.Vocab;
-const Token = vm.Token;
-const token_null = vm.vocab.token_null;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 /// Ports `llm_symbol` (llama-vocab.cpp:75 @b1b770d90), with the text as an
@@ -49,20 +42,20 @@ fn bigramLess(_: void, l: Bigram, r: Bigram) bool {
 
 /// Ports `llm_tokenizer_spm_session` (llama-vocab.cpp:109 @b1b770d90).
 const Session = struct {
-    vocab: *const Vocab,
+    vocab: *const llama.vocab.Vocab,
     text: []const u8,
     symbols: std.ArrayList(Symbol) = .empty,
-    work_queue: libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
+    work_queue: stdlib.libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
     /// `rev_merge`: each pair's text to the symbols it last merged.
     rev_merge: std.StringHashMapUnmanaged([2]i32) = .empty,
     keys: std.ArrayList([]u8) = .empty,
 
     fn deinit(self: *Session) void {
-        self.symbols.deinit(allocator);
-        self.work_queue.deinit(allocator);
-        self.rev_merge.deinit(allocator);
-        for (self.keys.items) |k| allocator.free(k);
-        self.keys.deinit(allocator);
+        self.symbols.deinit(std.heap.c_allocator);
+        self.work_queue.deinit(std.heap.c_allocator);
+        self.rev_merge.deinit(std.heap.c_allocator);
+        for (self.keys.items) |k| std.heap.c_allocator.free(k);
+        self.keys.deinit(std.heap.c_allocator);
     }
 
     fn symText(self: *const Session, s: Symbol) []const u8 {
@@ -70,22 +63,22 @@ const Session = struct {
     }
 
     /// Ports `llm_tokenizer_spm_session`'s `try_add_bigram`.
-    fn tryAddBigram(self: *Session, left: i32, right: i32, exc: *impl.Exception) impl.Thrown!void {
+    fn tryAddBigram(self: *Session, left: i32, right: i32, exc: *llama.impl.Exception) llama.impl.Thrown!void {
         if (left == -1 or right == -1) return;
         const l = self.symbols.items[@intCast(left)];
         const r = self.symbols.items[@intCast(right)];
         const t = self.text[l.off..][0 .. l.n + r.n];
         const token = self.vocab.textToToken(t);
-        if (token == token_null) return;
+        if (token == llama.vocab.vocab.token_null) return;
         if (@as(u32, @bitCast(token)) >= self.vocab.nTokens()) return;
 
         const tok_data = try self.vocab.getTokenData(token, exc);
-        self.work_queue.push(allocator, .{ .left = left, .right = right, .score = tok_data.score, .size = t.len }) catch oom();
+        self.work_queue.push(std.heap.c_allocator, .{ .left = left, .right = right, .score = tok_data.score, .size = t.len }) catch oom();
 
-        const g = self.rev_merge.getOrPut(allocator, t) catch oom();
+        const g = self.rev_merge.getOrPut(std.heap.c_allocator, t) catch oom();
         if (!g.found_existing) {
-            const key = allocator.dupe(u8, t) catch oom();
-            self.keys.append(allocator, key) catch oom();
+            const key = std.heap.c_allocator.dupe(u8, t) catch oom();
+            self.keys.append(std.heap.c_allocator, key) catch oom();
             g.key_ptr.* = key;
         }
         g.value_ptr.* = .{ left, right };
@@ -93,25 +86,25 @@ const Session = struct {
 
     /// Ports `llm_tokenizer_spm_session`'s `resegment` (llama-vocab.cpp:172
     /// @b1b770d90). No recursion: the merges of a long token can be deep.
-    fn resegment(self: *Session, symbol: Symbol, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    fn resegment(self: *Session, symbol: Symbol, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         var todo: std.ArrayList(Symbol) = .empty;
-        defer todo.deinit(allocator);
-        todo.append(allocator, symbol) catch oom();
+        defer todo.deinit(std.heap.c_allocator);
+        todo.append(std.heap.c_allocator, symbol) catch oom();
         while (todo.pop()) |cur| {
             const t = self.symText(cur);
             const token = self.vocab.textToToken(t);
-            if (token != token_null) {
-                output.append(allocator, token) catch oom();
+            if (token != llama.vocab.vocab.token_null) {
+                output.append(std.heap.c_allocator, token) catch oom();
                 continue;
             }
             const p = self.rev_merge.get(t) orelse {
                 // output any symbols that did not form tokens as bytes.
-                output.ensureUnusedCapacity(allocator, cur.n) catch oom();
-                for (t) |ch| output.append(allocator, try self.vocab.byteToToken(ch, exc)) catch oom();
+                output.ensureUnusedCapacity(std.heap.c_allocator, cur.n) catch oom();
+                for (t) |ch| output.append(std.heap.c_allocator, try self.vocab.byteToToken(ch, exc)) catch oom();
                 continue;
             };
-            todo.append(allocator, self.symbols.items[@intCast(p[1])]) catch oom();
-            todo.append(allocator, self.symbols.items[@intCast(p[0])]) catch oom();
+            todo.append(std.heap.c_allocator, self.symbols.items[@intCast(p[1])]) catch oom();
+            todo.append(std.heap.c_allocator, self.symbols.items[@intCast(p[0])]) catch oom();
         }
     }
 };
@@ -126,7 +119,7 @@ const Session = struct {
 /// - `exc`: receives what is thrown.
 ///
 /// Return: nothing, or `error.Thrown` -- a byte with no token.
-pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+pub fn tokenize(vocab: *const llama.vocab.Vocab, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
     var s: Session = .{ .vocab = vocab, .text = text };
     defer s.deinit();
 
@@ -134,12 +127,12 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
     var index: i32 = 0;
     var offs: usize = 0;
     while (offs < text.len) {
-        const len = unicode.lenUtf8(text[offs]);
+        const len = llama.unicode.lenUtf8(text[offs]);
         const n = @min(len, text.len - offs);
         const sym: Symbol = .{ .off = offs, .n = n, .prev = index - 1, .next = if (offs + n == text.len) -1 else index + 1 };
         offs += n;
         index += 1;
-        s.symbols.append(allocator, sym) catch oom();
+        s.symbols.append(std.heap.c_allocator, sym) catch oom();
     }
 
     // seed the work queue with all possible 2-character tokens.

@@ -24,14 +24,9 @@
 //! variable can be Zig's rather than `pthread_t`-shaped.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const win32 = @import("../win32.zig");
-const sync = @import("stdlib").sync;
-const c = impl.c;
-
-pub const Tensor = c.ggml_tensor;
-pub const CGraph = impl.CGraph;
 
 /// Ports `CACHE_LINE_SIZE` (ops.h:17 @b1b770d90), the non-POWER, non-s390x arm.
 pub const cache_line_size = 64;
@@ -67,15 +62,6 @@ pub const ComputeParams = extern struct {
     use_ref: bool,
 };
 
-/// Ports `struct ggml_threadpool` (ggml-cpu.c:490 @b1b770d90).
-///
-/// Ports `ggml_cond_t`, `ggml_mutex_t`, `ggml_cond_t`, `ggml_mutex_t`
-/// (ggml-cpu.c:439, 440, 459, 460 @b1b770d90): the C's SRW lock and condition
-/// variable on Windows and pthreads elsewhere are the port's futex `Mutex` and
-/// `Condition` on every target. `threading.zig` holds the macros that drive them.
-pub const Mutex = sync.Mutex;
-pub const Cond = sync.Condition;
-
 /// Opaque to everything outside this translation unit — `ggml.h` only forward
 /// declares it — so this is a plain Zig struct rather than an `extern` one,
 /// and the synchronisation primitives are `std.Thread`'s.
@@ -85,11 +71,11 @@ pub const Cond = sync.Condition;
 /// hammered by every thread, and sharing a cache line between them costs more
 /// than the padding does.
 pub const Threadpool = struct {
-    mutex: Mutex,
-    cond: Cond,
+    mutex: stdlib.sync.Mutex,
+    cond: stdlib.sync.Condition,
 
-    cgraph: ?*const CGraph,
-    cplan: ?*const c.ggml_cplan,
+    cgraph: ?*const ggml.impl.CGraph,
+    cplan: ?*const ggml.impl.c.ggml_cplan,
 
     /// Holds both the graph counter and the active thread count: the low
     /// `n_threads_bits` are the thread count, the rest a monotonic graph id.
@@ -110,7 +96,7 @@ pub const Threadpool = struct {
     prio: i32,
     poll: u32,
 
-    ec: c.enum_ggml_status,
+    ec: ggml.impl.c.enum_ggml_status,
 };
 
 /// Ports `struct ggml_compute_state` (ggml-cpu.c:517 @b1b770d90), the per-thread half of
@@ -120,7 +106,7 @@ pub const ComputeState = struct {
     last_graph: c_int,
     pending: bool,
 
-    cpumask: [c.GGML_MAX_N_THREADS]bool,
+    cpumask: [ggml.impl.c.GGML_MAX_N_THREADS]bool,
     threadpool: *Threadpool,
     ith: c_int,
 };
@@ -169,7 +155,7 @@ pub const UnaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the sixteen locals, by value.
-    pub fn of(src0: *const Tensor, dst: *const Tensor) UnaryLocals {
+    pub fn of(src0: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) UnaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],
@@ -236,7 +222,7 @@ pub const TernaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the thirty-two locals, by value.
-    pub fn of(src0: *const Tensor, src1: *const Tensor, src2: *const Tensor, dst: *const Tensor) TernaryLocals {
+    pub fn of(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, src2: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) TernaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],
@@ -315,7 +301,7 @@ pub const BinaryLocals = struct {
     /// - `dst`: the result, supplying the unsuffixed names.
     ///
     /// Return: the twenty-four locals, by value.
-    pub fn of(src0: *const Tensor, src1: *const Tensor, dst: *const Tensor) BinaryLocals {
+    pub fn of(src0: *const ggml.impl.c.ggml_tensor, src1: *const ggml.impl.c.ggml_tensor, dst: *const ggml.impl.c.ggml_tensor) BinaryLocals {
         return .{
             .ne00 = src0.ne[0],
             .ne01 = src0.ne[1],
@@ -355,8 +341,9 @@ test {
 }
 
 test "compute params match the C layout" {
-    // `ops.cpp` and `sgemm.cpp` are still C++ and read this struct directly,
-    // so a mismatch here is a wrong answer rather than a link error.
+    // Exported kernels take this struct across the C ABI (upstream's own
+    // callers in the gates among them), so a mismatch is a wrong answer
+    // rather than a link error.
     try std.testing.expectEqual(@as(usize, 0), @offsetOf(ComputeParams, "ith"));
     try std.testing.expectEqual(@as(usize, 4), @offsetOf(ComputeParams, "nth"));
     try std.testing.expectEqual(@as(usize, 8), @offsetOf(ComputeParams, "wsize"));

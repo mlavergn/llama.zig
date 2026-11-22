@@ -57,19 +57,10 @@
 //! after touching either.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const golden = if (@import("features.zig").golden_generic) @import("vec_golden_generic.zig") else @import("vec_golden.zig");
-const c = impl.c;
+const ggml = @import("../module.zig");
+const golden = if (ggml.cpu.features.golden_generic) ggml.cpu.vec_golden_generic else ggml.cpu.vec_golden;
 
-/// The three kernels, by their C names. Resolved at link time from whoever
-/// provides them — `vec.cpp` until the swap, `src/ggml/cpu/vec.zig` now.
-/// That is the point: the same test covered both sides of it.
-extern fn ggml_vec_dot_f32(n: c_int, s: *f32, bs: usize, x: [*]const f32, bx: usize, y: [*]const f32, by: usize, nrc: c_int) void;
-extern fn ggml_vec_dot_f16(n: c_int, s: *f32, bs: usize, x: [*]c.ggml_fp16_t, bx: usize, y: [*]c.ggml_fp16_t, by: usize, nrc: c_int) void;
-extern fn ggml_vec_dot_bf16(n: c_int, s: *f32, bs: usize, x: [*]c.ggml_bf16_t, bx: usize, y: [*]c.ggml_bf16_t, by: usize, nrc: c_int) void;
-
-extern fn ggml_cpu_init() void;
-
+/// The three kernels, by their C names.
 /// Mirrors the `pattern` enum of `harness/vec_golden.c`.
 const Pattern = enum { random, zeros, signs, opposed, lopsided, ties, skewed };
 
@@ -168,28 +159,28 @@ fn checkKernel(
 
         var s: f32 = 0;
         switch (which) {
-            .f32_ => ggml_vec_dot_f32(@intCast(n), &s, 0, xf.ptr, 0, yf.ptr, 0, 1),
+            .f32_ => ggml.cpu.vec.ggml_vec_dot_f32(@intCast(n), &s, 0, xf.ptr, 0, yf.ptr, 0, 1),
             .f16_ => {
-                const xh = try alloc.alloc(c.ggml_fp16_t, n);
+                const xh = try alloc.alloc(ggml.impl.c.ggml_fp16_t, n);
                 defer alloc.free(xh);
-                const yh = try alloc.alloc(c.ggml_fp16_t, n);
+                const yh = try alloc.alloc(ggml.impl.c.ggml_fp16_t, n);
                 defer alloc.free(yh);
                 for (0..n) |i| {
-                    xh[i] = impl.fp32ToFp16(xf[i]);
-                    yh[i] = impl.fp32ToFp16(yf[i]);
+                    xh[i] = ggml.impl.fp32ToFp16(xf[i]);
+                    yh[i] = ggml.impl.fp32ToFp16(yf[i]);
                 }
-                ggml_vec_dot_f16(@intCast(n), &s, 0, xh.ptr, 0, yh.ptr, 0, 1);
+                ggml.cpu.vec.ggml_vec_dot_f16(@intCast(n), &s, 0, xh.ptr, 0, yh.ptr, 0, 1);
             },
             .bf16_ => {
-                const xb = try alloc.alloc(c.ggml_bf16_t, n);
+                const xb = try alloc.alloc(ggml.impl.c.ggml_bf16_t, n);
                 defer alloc.free(xb);
-                const yb = try alloc.alloc(c.ggml_bf16_t, n);
+                const yb = try alloc.alloc(ggml.impl.c.ggml_bf16_t, n);
                 defer alloc.free(yb);
                 for (0..n) |i| {
-                    xb[i] = .{ .bits = impl.fp32ToBf16(xf[i]) };
-                    yb[i] = .{ .bits = impl.fp32ToBf16(yf[i]) };
+                    xb[i] = .{ .bits = ggml.impl.fp32ToBf16(xf[i]) };
+                    yb[i] = .{ .bits = ggml.impl.fp32ToBf16(yf[i]) };
                 }
-                ggml_vec_dot_bf16(@intCast(n), &s, 0, xb.ptr, 0, yb.ptr, 0, 1);
+                ggml.cpu.vec.ggml_vec_dot_bf16(@intCast(n), &s, 0, xb.ptr, 0, yb.ptr, 0, 1);
             },
         }
 
@@ -220,7 +211,7 @@ test "the float dot products match the C, bit for bit" {
     // `ggml_vec_dot_f16` reads the f16 conversion tables, which are empty
     // until this runs. The quant goldens were silently all-zero for exactly
     // this reason before it was added there.
-    ggml_cpu_init();
+    ggml.cpu.features.ggml_cpu_init();
 
     try checkKernel(.f32_, golden.nelem, golden.dot_f32);
     try checkKernel(.f16_, golden.nelem, golden.dot_f16);
@@ -233,7 +224,7 @@ test "the float dot products match the C on a length with a scalar tail" {
     // for the f32 kernel, double for the other two. A port that gets the
     // vector body right and the tail wrong passes the test above and fails
     // this one.
-    ggml_cpu_init();
+    ggml.cpu.features.ggml_cpu_init();
 
     try checkKernel(.f32_, golden.nelem_tail, golden.dot_f32_tail);
     try checkKernel(.f16_, golden.nelem_tail, golden.dot_f16_tail);
@@ -246,7 +237,7 @@ test "the float dot products match the C on short lengths" {
     // only the last `t % 4`. `nelem_tail`'s seven-element tail cannot tell
     // fused, unfused and split apart -- measured -- so these lengths exist
     // to. See `simd.strictDot`.
-    ggml_cpu_init();
+    ggml.cpu.features.ggml_cpu_init();
 
     inline for (golden.short_lens) |n| {
         const suf = std.fmt.comptimePrint("_n{d}", .{n});

@@ -9,10 +9,8 @@
 //! path upstream's own `#if` takes: `hardware_concurrency` halved.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const file = @import("stdlib").file;
 
 // `std.c` declares no `fgets`.
 
@@ -28,8 +26,8 @@ pub fn numPhysicalCores() i32 {
         while (cpu < std.math.maxInt(u32)) : (cpu += 1) {
             var path_buf: [96]u8 = undefined;
             const path = std.fmt.bufPrintSentinel(&path_buf, "/sys/devices/system/cpu/cpu{d}/topology/thread_siblings", .{cpu}, 0) catch break;
-            const std_io = file.defaultIo();
-            const f = file.openIn(std_io, path) catch break; // no more cpus
+            const std_io = stdlib.file.defaultIo();
+            const f = stdlib.file.openIn(std_io, path) catch break; // no more cpus
             defer f.close(std_io);
             // `std::getline`'s first line, as `fgets` into 256 bytes reads it
             var line: [255]u8 = undefined;
@@ -52,8 +50,8 @@ pub fn numPhysicalCores() i32 {
     } else if (comptime builtin.os.tag.isDarwin()) {
         var num_physical_cores: i32 = 0;
         var len: usize = @sizeOf(i32);
-        if (libc.sysctlbyname("hw.perflevel0.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
-        if (libc.sysctlbyname("hw.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
+        if (stdlib.libc.sysctlbyname("hw.perflevel0.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
+        if (stdlib.libc.sysctlbyname("hw.physicalcpu", &num_physical_cores, &len, null, 0) == 0) return num_physical_cores;
     }
     const n_threads = stdlib.thread.hardwareConcurrency();
     return @intCast(if (n_threads > 0) (if (n_threads <= 4) n_threads else n_threads / 2) else 4);
@@ -93,7 +91,7 @@ const CpuSet = [128]u8;
 fn pinCpu(cpu: usize) c_int {
     var mask: CpuSet = @splat(0);
     mask[cpu / 8] |= @as(u8, 1) << @intCast(cpu % 8);
-    return libc.pthread_setaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &mask);
+    return stdlib.thread.setAffinity(@sizeOf(CpuSet), &mask);
 }
 
 /// Ports `cpu_count_math_cpus` (common/common.cpp:186 @b1b770d90).
@@ -118,9 +116,9 @@ pub fn numMath() i32 {
         if (n_cpu < 1) return numPhysicalCores();
         if (isHybridCpu()) {
             var affinity: CpuSet = undefined;
-            if (libc.pthread_getaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &affinity) == 0) {
+            if (stdlib.thread.getAffinity(@sizeOf(CpuSet), &affinity) == 0) {
                 const result = countMathCpus(n_cpu);
-                _ = libc.pthread_setaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &affinity);
+                _ = stdlib.thread.setAffinity(@sizeOf(CpuSet), &affinity);
                 if (result > 0) return result;
             }
         }

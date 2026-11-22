@@ -15,9 +15,11 @@
 //! `libllama.a` here and compiles no C or C++ into it: `exports.zig` exports
 //! every function of `llama.h`, and the sampler exports its own.
 //!
-//! The in-process harnesses compile the same files through `harness_root.zig`,
-//! which exports nothing, and link upstream's C++ as `libllama-ref.a`
-//! beside them.
+//! This file is the barrel and exports nothing by itself: the C API is
+//! `lib.zig`, forced here only when libllama is the compilation root. A file
+//! anywhere in the port can therefore reach this barrel, and the in-process
+//! harnesses, which compile the port beside upstream's C++ (`libllama-ref.a`),
+//! never pull an export in.
 
 const std = @import("std");
 
@@ -27,19 +29,58 @@ const std = @import("std");
 pub const api = @import("api/module.zig");
 pub const impl = @import("impl.zig");
 pub const context = @import("context.zig");
-/// libc++'s containers and algorithms as the reference links them, for the
-/// tools under `tools/` that port code reading their order.
-pub const libcxx = @import("stdlib").libcxx;
 /// `std::regex` as libc++ implements it, for `cli/json/schema_to_grammar.zig`
 /// and the chat parsers over it.
 pub const regex = @import("regex.zig");
 
+pub const sampler = @import("sampler/module.zig");
+/// The C API: every file that exports a symbol. Forced below only when
+/// libllama is the compilation root or under test; see `lib.zig`.
+pub const lib = @import("lib.zig");
+pub const unicode = @import("unicode.zig");
+pub const arch = @import("arch.zig");
+pub const gguf_meta = @import("gguf_meta.zig");
+pub const hparams = @import("hparams.zig");
+pub const mmap = @import("mmap.zig");
+pub const loader = @import("loader.zig");
+pub const model = @import("model.zig");
+pub const models = @import("models/module.zig");
+pub const chat = @import("chat.zig");
+pub const batch = @import("batch.zig");
+pub const io = @import("io.zig");
+pub const memory = @import("memory.zig");
+pub const cparams = @import("cparams.zig");
+pub const adapter = @import("adapter.zig");
+pub const kv_cells = @import("kv_cells.zig");
+pub const kv_cache = @import("kv_cache.zig");
+pub const kv_cache_dsv4 = @import("kv_cache_dsv4.zig");
+pub const memory_recurrent = @import("memory_recurrent.zig");
+pub const memory_hybrid = @import("memory_hybrid.zig");
+pub const memory_hybrid_iswa = @import("memory_hybrid_iswa.zig");
+pub const memory_hybrid_idx = @import("memory_hybrid_idx.zig");
+pub const graph = @import("graph.zig");
+pub const moe_cache = @import("moe_cache.zig");
+pub const context_state = @import("context_state.zig");
+pub const meta_split = @import("meta_split.zig");
+pub const vocab = @import("vocab/module.zig");
+pub const grammar = @import("grammar/module.zig");
+
+pub const context_opt = @import("context_opt.zig");
+pub const kv_cache_msa = @import("kv_cache_msa.zig");
+pub const log = @import("log.zig");
+pub const model_saver = @import("model_saver.zig");
+pub const quant = @import("quant.zig");
+
+pub const arch_table = @import("arch_table.zig");
+pub const kv_cache_dsa = @import("kv_cache_dsa.zig");
+pub const kv_cache_dsa_iswa = @import("kv_cache_dsa_iswa.zig");
+pub const kv_cache_iswa = @import("kv_cache_iswa.zig");
+pub const model_table = @import("model_table.zig");
+pub const unicode_data = @import("unicode_data.zig");
+pub const win32 = @import("win32.zig");
+
 comptime {
-    // llama-sampler.cpp, split across src/llama/sampler/; it reaches
-    // llama-grammar.cpp (src/llama/grammar/) and std::regex (regex.zig).
-    _ = @import("sampler/module.zig");
-    // Every other llama.h entry point, from api/.
-    _ = @import("exports.zig");
+    if (@import("root") == @This() or @import("builtin").is_test) _ = lib;
 }
 
 // -----------------------------------------------------------------------------
@@ -47,36 +88,35 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("regex.zig");
-    _ = @import("unicode.zig");
-    _ = @import("arch.zig");
-    _ = @import("gguf_meta.zig");
-    _ = @import("hparams.zig");
-    _ = @import("mmap.zig");
-    _ = @import("loader.zig");
-    _ = @import("model.zig");
-    _ = @import("models/module.zig");
-    _ = @import("chat.zig");
-    _ = @import("batch.zig");
-    _ = @import("io.zig");
-    _ = @import("memory.zig");
-    _ = @import("cparams.zig");
-    _ = @import("adapter.zig");
-    _ = @import("kv_cells.zig");
-    _ = @import("kv_cache.zig");
-    _ = @import("kv_cache_dsv4.zig");
-    _ = @import("memory_recurrent.zig");
-    _ = @import("memory_hybrid.zig");
-    _ = @import("memory_hybrid_iswa.zig");
-    _ = @import("memory_hybrid_idx.zig");
-    _ = @import("graph.zig");
-    _ = @import("context.zig");
-    _ = @import("moe_cache.zig");
-    _ = @import("context_state.zig");
-    _ = @import("meta_split.zig");
-    _ = @import("api/module.zig");
-    _ = @import("vocab/module.zig");
-    _ = @import("grammar/parser.zig");
-    _ = @import("grammar/grammar.zig");
-    _ = @import("impl.zig");
+    _ = regex;
+    _ = unicode;
+    _ = arch;
+    _ = gguf_meta;
+    _ = hparams;
+    _ = mmap;
+    _ = loader;
+    _ = model;
+    _ = models;
+    _ = chat;
+    _ = batch;
+    _ = io;
+    _ = memory;
+    _ = cparams;
+    _ = adapter;
+    _ = kv_cells;
+    _ = kv_cache;
+    _ = kv_cache_dsv4;
+    _ = memory_recurrent;
+    _ = memory_hybrid;
+    _ = memory_hybrid_iswa;
+    _ = memory_hybrid_idx;
+    _ = graph;
+    _ = context;
+    _ = moe_cache;
+    _ = context_state;
+    _ = meta_split;
+    _ = api;
+    _ = vocab;
+    _ = grammar;
+    _ = impl;
 }

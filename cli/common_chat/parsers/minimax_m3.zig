@@ -9,25 +9,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const msg_mod = @import("../msg.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
-const Node = json.schema.Node;
-const mm3 = chat_peg.Mapper;
 
 // M3 prefixes every tool tag with the namespace token "]<]minimax[>[";
 // params use the parameter name as the tag (<file_path>...</file_path>).
@@ -40,16 +26,16 @@ const invoke_end = ns ++ "</invoke>";
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     gen_prompt: []const u8,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
-    cb: *ChatBuilder = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    tool_choice: peg.ParserId = undefined,
     doc: *peg.SharedDoc = undefined,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const generation_prompt = try p.prefix(self.gen_prompt, think_start);
@@ -81,7 +67,7 @@ const Build = struct {
         }
 
         self.tool_choice = try b.choiceEmpty();
-        parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+        common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
 
         const require_tools = self.inputs.tool_choice == .required;
 
@@ -107,22 +93,22 @@ const Build = struct {
         return b.plus(try b.plus(try b.plus(try b.plus(generation_prompt, reasoning), content_before_tools), tool_calls), end);
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        const name = try parsers.functionName(t);
-        const params = try msg_mod.toolParameters(self.a, function);
-        self.doc = peg.SharedDoc.fromJson(self.a, &params) catch |e| return util.fromPeg(e);
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        const name = try common_chat.parsers.functionName(t);
+        const params = try common_chat.msg.toolParameters(self.a, function);
+        self.doc = peg.SharedDoc.fromJson(self.a, &params) catch |e| return common_chat.util.fromPeg(e);
         defer self.doc.release();
-        const rule = self.buildTool(tool_index, name) catch |e| return util.fromPeg(e);
-        self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return util.fromPeg(e);
+        const rule = self.buildTool(tool_index, name) catch |e| return common_chat.util.fromPeg(e);
+        self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, tool_index: usize, name: []const u8) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
         var invoke_body = try b.eps();
         switch (self.doc.doc.root.*) {
-            .object => |*o| invoke_body = try self.membersOf(o, try parsers.indexName(self.a, "tool-", tool_index, "-arg")),
+            .object => |*o| invoke_body = try self.membersOf(o, try common_chat.parsers.indexName(self.a, "tool-", tool_index, "-arg")),
             else => {},
         }
 
@@ -133,15 +119,15 @@ const Build = struct {
         func = try b.plus(func, try p.toolClose(try b.literal(invoke_end)));
         const func_parser = try p.tool(func);
 
-        return b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), func_parser, false);
+        return b.rule(try common_chat.parsers.indexName(self.a, "tool-", tool_index, ""), func_parser, false);
     }
 
-    fn cat(self: *Build, parts: []const []const u8) chat_peg.Error![]u8 {
+    fn cat(self: *Build, parts: []const []const u8) peg.Error![]u8 {
         return std.mem.concat(self.a, u8, parts);
     }
 
     /// `element_of`: one `<tag>value</tag>` element under `rule_name`.
-    fn elementOf(self: *Build, tag: []const u8, schema: *const Node, rule_name: []const u8) chat_peg.Error!ParserId {
+    fn elementOf(self: *Build, tag: []const u8, schema: *const json.schema.Node, rule_name: []const u8) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
         const close = try self.cat(&.{ ns, "</", tag, ">" });
@@ -152,7 +138,7 @@ const Build = struct {
     /// `value_of`: a value of `schema` up to its closing tag -- a string
     /// as raw text, a union by its alternatives, an object and an array
     /// expanded in XML, anything else as JSON.
-    fn valueOf(self: *Build, schema: *const Node, rule_name: []const u8, close: []const u8) chat_peg.Error!ParserId {
+    fn valueOf(self: *Build, schema: *const json.schema.Node, rule_name: []const u8, close: []const u8) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
         const close_tag = try p.toolArgClose(try b.literal(close));
@@ -164,7 +150,7 @@ const Build = struct {
 
         switch (schema.*) {
             .any_of => |children| {
-                var choices: std.ArrayList(ParserId) = .empty;
+                var choices: std.ArrayList(peg.ParserId) = .empty;
                 for (children, 0..) |alternative, index| {
                     const alt_name = try std.fmt.allocPrint(self.a, "{s}-{d}", .{ rule_name, index });
 
@@ -175,13 +161,13 @@ const Build = struct {
                 return b.choice(choices.items);
             },
             .object => |*object| if (object.properties.len != 0) {
-                return b.plus(try b.plus(try b.tag(mm3.TOOL_ARG_OBJECT, try self.membersOf(object, rule_name)), try b.space()), close_tag);
+                return b.plus(try b.plus(try b.tag(common_chat.chat_peg.Mapper.TOOL_ARG_OBJECT, try self.membersOf(object, rule_name)), try b.space()), close_tag);
             },
             .array => |*arr| {
                 const item_close = ns ++ "</item>";
                 const item_name = try self.cat(&.{ rule_name, "-item" });
-                const item = try b.rule(item_name, try b.tag(mm3.TOOL_ARG_ITEM, try b.plus(try b.literal(ns ++ "<item>"), try self.valueOf(arr.items, item_name, item_close))), false);
-                return b.plus(try b.plus(try b.tag(mm3.TOOL_ARG_ARRAY, try b.repeat(try b.plus(try b.space(), item), 0, -1)), try b.space()), close_tag);
+                const item = try b.rule(item_name, try b.tag(common_chat.chat_peg.Mapper.TOOL_ARG_ITEM, try b.plus(try b.literal(ns ++ "<item>"), try self.valueOf(arr.items, item_name, item_close))), false);
+                return b.plus(try b.plus(try b.tag(common_chat.chat_peg.Mapper.TOOL_ARG_ARRAY, try b.repeat(try b.plus(try b.space(), item), 0, -1)), try b.space()), close_tag);
             },
             else => {},
         }
@@ -191,10 +177,10 @@ const Build = struct {
 
     /// `members_of`: required properties in schema order, then any number
     /// of optional ones in any order.
-    fn membersOf(self: *Build, object: *const json.schema.Object, rule_prefix: []const u8) chat_peg.Error!ParserId {
+    fn membersOf(self: *Build, object: *const json.schema.Object, rule_prefix: []const u8) peg.Error!peg.ParserId {
         const b = &self.cb.b;
-        var required_elements: std.ArrayList(ParserId) = .empty;
-        var optional_elements: std.ArrayList(ParserId) = .empty;
+        var required_elements: std.ArrayList(peg.ParserId) = .empty;
+        var optional_elements: std.ArrayList(peg.ParserId) = .empty;
         for (object.properties, 0..) |prop, i| {
             const element = try self.elementOf(prop.name, prop.schema, try std.fmt.allocPrint(self.a, "{s}-{d}", .{ rule_prefix, i }));
             try (if (prop.required) &required_elements else &optional_elements).append(self.a, element);
@@ -219,11 +205,11 @@ const Build = struct {
 /// Ports `common_chat_params_init_minimax_m3` (parsers/minimax-m3.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, null, null, null);
     data.format = .peg_minimax_m3;
     data.supports_thinking = true;
     data.thinking_start_tag = think_start;
@@ -237,7 +223,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     try data.message_delimiters.add(a, .system, "]~b]developer");
     try data.message_delimiters.add(a, .system, "]~b]system");
 
-    const has_tools = parsers.hasTools(&inputs.tools);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
     const has_response_format = !inputs.json_schema.isNull() and inputs.json_schema.isObject();
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
@@ -266,12 +252,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or (has_tools and inputs.tool_choice == .required));
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, fc_start);
     }
 
@@ -289,9 +275,9 @@ test "MiniMax-M3 expands nested arguments" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var t = try template.Template.init(std.testing.allocator, "{% for m in messages %}]~b]{{ m.role }}\n{{ m.content }}{% endfor %}{% if add_generation_prompt %}]~b]ai\n{% endif %}", "", "");
+    var t = try common_chat.template.Template.init(std.testing.allocator, "{% for m in messages %}]~b]{{ m.role }}\n{{ m.content }}{% endfor %}{% if add_generation_prompt %}]~b]ai\n{% endif %}", "", "");
     defer t.deinit();
-    var p: GenerationParams = .{ .add_generation_prompt = true };
+    var p: common_chat.template.GenerationParams = .{ .add_generation_prompt = true };
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a,
         \\[{"type":"function","function":{"name":"f","parameters":{"type":"object","required":["o"],"properties":{

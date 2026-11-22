@@ -21,40 +21,32 @@
 //! line after normalising the row index, identical; written once here.
 
 const std = @import("std");
-const qblocks = @import("../../../quants/blocks.zig");
-const blocks = @import("../blocks.zig");
-const avx = @import("../../quants/x86/avx2.zig");
-const common = @import("common.zig");
-const wide = @import("wide.zig");
-
-const m256i = avx.m256i;
-const m128i = avx.m128i;
-const m256 = avx.m256;
+const ggml = @import("../../../module.zig");
 
 const QK_K = 256;
 
 /// The 2-bit field of sub-block `j` from the four raw registers of one
 /// column group: chunk `k` of eight weights.
-inline fn plane(raw: [4]m256i, comptime j: usize, comptime k: usize) m256i {
-    const m3b = avx.mm256_set1_epi8(3);
+inline fn plane(raw: [4]ggml.cpu.quants.arch.avx2.m256i, comptime j: usize, comptime k: usize) ggml.cpu.quants.arch.avx2.m256i {
+    const m3b = ggml.cpu.quants.arch.avx2.mm256_set1_epi8(3);
     const r = raw[(j % 2) * 2 + k];
     const shift = 2 * (j / 2);
-    return avx.mm256_and_si256(if (shift == 0) r else avx.mm256_srli_epi16(r, shift), m3b);
+    return ggml.cpu.quants.arch.avx2.mm256_and_si256(if (shift == 0) r else ggml.cpu.quants.arch.avx2.mm256_srli_epi16(r, shift), m3b);
 }
 
 /// The four scale-and-min registers of one `sb`, and the mins widened.
 const ScalesMins = struct {
-    scales: [4]m128i,
-    mins: [4]m256i,
+    scales: [4]ggml.cpu.quants.arch.avx2.m128i,
+    mins: [4]ggml.cpu.quants.arch.avx2.m256i,
 };
 
-inline fn scalesMins(b: *const blocks.block_q2_Kx8, sb: usize) ScalesMins {
-    const m4b_sse = avx.mm_set1_epi8(0xF);
+inline fn scalesMins(b: *const ggml.cpu.repack.blocks.block_q2_Kx8, sb: usize) ScalesMins {
+    const m4b_sse = ggml.cpu.quants.arch.avx2.mm_set1_epi8(0xF);
     var r: ScalesMins = undefined;
     inline for (0..4) |p| {
-        const mins_and_scales = avx.mm_loadu_si128(b.scales[16 * p + sb * 64 ..].ptr);
-        r.scales[p] = avx.mm_and_si128(mins_and_scales, m4b_sse);
-        r.mins[p] = avx.mm256_cvtepu8_epi16(avx.mm_and_si128(avx.mm_srli_epi16(mins_and_scales, 4), m4b_sse));
+        const mins_and_scales = ggml.cpu.quants.arch.avx2.mm_loadu_si128(b.scales[16 * p + sb * 64 ..].ptr);
+        r.scales[p] = ggml.cpu.quants.arch.avx2.mm_and_si128(mins_and_scales, m4b_sse);
+        r.mins[p] = ggml.cpu.quants.arch.avx2.mm256_cvtepu8_epi16(ggml.cpu.quants.arch.avx2.mm_and_si128(ggml.cpu.quants.arch.avx2.mm_srli_epi16(mins_and_scales, 4), m4b_sse));
     }
     return r;
 }
@@ -75,16 +67,16 @@ pub export fn ggml_gemv_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     std.debug.assert(@rem(nc, 8) == 0);
     _ = bs;
 
-    const deltamask = avx.mm_set_epi8(.{ 15, 14, 7, 6, 13, 12, 5, 4, 11, 10, 3, 2, 9, 8, 1, 0 });
-    const finalpermutemask = avx.mm256_set_epi32(.{ 7, 5, 3, 1, 6, 4, 2, 0 });
+    const deltamask = ggml.cpu.quants.arch.avx2.mm_set_epi8(.{ 15, 14, 7, 6, 13, 12, 5, 4, 11, 10, 3, 2, 9, 8, 1, 0 });
+    const finalpermutemask = ggml.cpu.quants.arch.avx2.mm256_set_epi32(.{ 7, 5, 3, 1, 6, 4, 2, 0 });
 
-    const scalemask1 = avx.mm_set_epi8(.{ 14, 14, 6, 6, 12, 12, 4, 4, 10, 10, 2, 2, 8, 8, 0, 0 });
-    const scalemask2 = avx.mm_set_epi8(.{ 15, 15, 7, 7, 13, 13, 5, 5, 11, 11, 3, 3, 9, 9, 1, 1 });
+    const scalemask1 = ggml.cpu.quants.arch.avx2.mm_set_epi8(.{ 14, 14, 6, 6, 12, 12, 4, 4, 10, 10, 2, 2, 8, 8, 0, 0 });
+    const scalemask2 = ggml.cpu.quants.arch.avx2.mm_set_epi8(.{ 15, 15, 7, 7, 13, 13, 5, 5, 11, 11, 3, 3, 9, 9, 1, 1 });
 
     const b_nb: usize = @intCast(@divTrunc(n, QK_K));
 
-    const b_ptr_start: [*]const blocks.block_q2_Kx8 = @ptrCast(@alignCast(vx));
-    const a_ptr_start: [*]const qblocks.Q8_K = @ptrCast(@alignCast(vy));
+    const b_ptr_start: [*]const ggml.cpu.repack.blocks.block_q2_Kx8 = @ptrCast(@alignCast(vx));
+    const a_ptr_start: [*]const ggml.quants.blocks.Q8_K = @ptrCast(@alignCast(vy));
 
     for (0..@intCast(nr)) |y| {
         const a_ptr = a_ptr_start + (y * nb);
@@ -92,66 +84,66 @@ pub export fn ggml_gemv_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
         for (0..@intCast(@divTrunc(nc, 8))) |x| {
             const b_ptr = b_ptr_start + (x * b_nb);
 
-            var acc_row = avx.mm256_setzero_ps();
-            var acc_min_rows = avx.mm256_setzero_ps();
+            var acc_row = ggml.cpu.quants.arch.avx2.mm256_setzero_ps();
+            var acc_min_rows = ggml.cpu.quants.arch.avx2.mm256_setzero_ps();
 
             for (0..nb) |b| {
-                const row_scale_f32 = avx.mm256_set1_ps(a_ptr[b].d);
-                const col_scale_f32 = common.f32cx8RearrangeLoad(&b_ptr[b].d, deltamask);
-                const col_dmin_f32 = common.f32cx8Load(&b_ptr[b].dmin);
+                const row_scale_f32 = ggml.cpu.quants.arch.avx2.mm256_set1_ps(a_ptr[b].d);
+                const col_scale_f32 = ggml.cpu.repack.arch.common.f32cx8RearrangeLoad(&b_ptr[b].d, deltamask);
+                const col_dmin_f32 = ggml.cpu.repack.arch.common.f32cx8Load(&b_ptr[b].dmin);
 
-                var iacc_b = avx.mm256_setzero_si256();
-                var iacc_min_b = avx.mm256_setzero_si256();
+                var iacc_b = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
+                var iacc_min_b = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
 
                 for (0..QK_K / 128) |sb| {
                     const qs = b_ptr[b].qs[sb * 256 ..].ptr;
-                    var raw0123: [4]m256i = undefined;
-                    var raw4567: [4]m256i = undefined;
+                    var raw0123: [4]ggml.cpu.quants.arch.avx2.m256i = undefined;
+                    var raw4567: [4]ggml.cpu.quants.arch.avx2.m256i = undefined;
                     inline for (0..4) |i| {
-                        raw0123[i] = avx.mm256_loadu_si256(qs + 64 * i);
-                        raw4567[i] = avx.mm256_loadu_si256(qs + 64 * i + 32);
+                        raw0123[i] = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(qs + 64 * i);
+                        raw4567[i] = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(qs + 64 * i + 32);
                     }
 
                     const sm = scalesMins(&b_ptr[b], sb);
 
-                    var iacc_j: [8]m256i = undefined;
+                    var iacc_j: [8]ggml.cpu.quants.arch.avx2.m256i = undefined;
                     inline for (0..8) |j| {
-                        const scales_j = avx.mm256_cvtepu8_epi16(avx.mm_shuffle_epi8(sm.scales[j / 2], if (j % 2 == 0) scalemask1 else scalemask2));
-                        const lhs_vec = common.repeat128(avx.mm_loadu_si128(a_ptr[b].qs[16 * j + sb * 128 ..].ptr));
-                        var iacc = avx.mm256_setzero_si256();
+                        const scales_j = ggml.cpu.quants.arch.avx2.mm256_cvtepu8_epi16(ggml.cpu.quants.arch.avx2.mm_shuffle_epi8(sm.scales[j / 2], if (j % 2 == 0) scalemask1 else scalemask2));
+                        const lhs_vec = ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(a_ptr[b].qs[16 * j + sb * 128 ..].ptr));
+                        var iacc = ggml.cpu.quants.arch.avx2.mm256_setzero_si256();
                         inline for (0..2) |k| {
                             const r0123 = plane(raw0123, j, k);
                             const r4567 = plane(raw4567, j, k);
                             const imm0: u8 = if (k == 0) 0 else 170;
                             const imm1: u8 = if (k == 0) 85 else 255;
-                            iacc = avx.mm256_add_epi16(iacc, avx.mm256_maddubs_epi16(avx.mm256_blend_epi32(r0123, avx.mm256_shuffle_epi32(r4567, 177), 170), avx.mm256_shuffle_epi32(lhs_vec, imm0)));
-                            iacc = avx.mm256_add_epi16(iacc, avx.mm256_maddubs_epi16(avx.mm256_blend_epi32(avx.mm256_shuffle_epi32(r0123, 177), r4567, 170), avx.mm256_shuffle_epi32(lhs_vec, imm1)));
+                            iacc = ggml.cpu.quants.arch.avx2.mm256_add_epi16(iacc, ggml.cpu.quants.arch.avx2.mm256_maddubs_epi16(ggml.cpu.quants.arch.avx2.mm256_blend_epi32(r0123, ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(r4567, 177), 170), ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(lhs_vec, imm0)));
+                            iacc = ggml.cpu.quants.arch.avx2.mm256_add_epi16(iacc, ggml.cpu.quants.arch.avx2.mm256_maddubs_epi16(ggml.cpu.quants.arch.avx2.mm256_blend_epi32(ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(r0123, 177), r4567, 170), ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(lhs_vec, imm1)));
                         }
-                        iacc_j[j] = avx.mm256_madd_epi16(iacc, scales_j);
+                        iacc_j[j] = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(iacc, scales_j);
                     }
 
-                    const iacc_sb = avx.mm256_add_epi32(
-                        avx.mm256_add_epi32(avx.mm256_add_epi32(iacc_j[0], iacc_j[1]), avx.mm256_add_epi32(iacc_j[2], iacc_j[3])),
-                        avx.mm256_add_epi32(avx.mm256_add_epi32(iacc_j[4], iacc_j[5]), avx.mm256_add_epi32(iacc_j[6], iacc_j[7])),
+                    const iacc_sb = ggml.cpu.quants.arch.avx2.mm256_add_epi32(
+                        ggml.cpu.quants.arch.avx2.mm256_add_epi32(ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_j[0], iacc_j[1]), ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_j[2], iacc_j[3])),
+                        ggml.cpu.quants.arch.avx2.mm256_add_epi32(ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_j[4], iacc_j[5]), ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_j[6], iacc_j[7])),
                     );
 
-                    const q8s = common.repeat128(avx.mm_loadu_si128(a_ptr[b].bsums[sb * 8 ..].ptr));
-                    const iacc_min_sb_01 = avx.mm256_madd_epi16(avx.mm256_shuffle_epi32(q8s, 0), sm.mins[0]);
-                    const iacc_min_sb_23 = avx.mm256_madd_epi16(avx.mm256_shuffle_epi32(q8s, 85), sm.mins[1]);
-                    const iacc_min_sb_45 = avx.mm256_madd_epi16(avx.mm256_shuffle_epi32(q8s, 170), sm.mins[2]);
-                    const iacc_min_sb_67 = avx.mm256_madd_epi16(avx.mm256_shuffle_epi32(q8s, 255), sm.mins[3]);
-                    const iacc_min_sb = avx.mm256_add_epi32(avx.mm256_add_epi32(iacc_min_sb_01, iacc_min_sb_23), avx.mm256_add_epi32(iacc_min_sb_45, iacc_min_sb_67));
+                    const q8s = ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(a_ptr[b].bsums[sb * 8 ..].ptr));
+                    const iacc_min_sb_01 = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(q8s, 0), sm.mins[0]);
+                    const iacc_min_sb_23 = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(q8s, 85), sm.mins[1]);
+                    const iacc_min_sb_45 = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(q8s, 170), sm.mins[2]);
+                    const iacc_min_sb_67 = ggml.cpu.quants.arch.avx2.mm256_madd_epi16(ggml.cpu.quants.arch.avx2.mm256_shuffle_epi32(q8s, 255), sm.mins[3]);
+                    const iacc_min_sb = ggml.cpu.quants.arch.avx2.mm256_add_epi32(ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_min_sb_01, iacc_min_sb_23), ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_min_sb_45, iacc_min_sb_67));
 
-                    iacc_b = avx.mm256_add_epi32(iacc_b, iacc_sb);
-                    iacc_min_b = avx.mm256_add_epi32(iacc_min_b, iacc_min_sb);
+                    iacc_b = ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_b, iacc_sb);
+                    iacc_min_b = ggml.cpu.quants.arch.avx2.mm256_add_epi32(iacc_min_b, iacc_min_sb);
                 }
 
-                acc_row = avx.mm256_fmadd_ps(avx.mm256_cvtepi32_ps(iacc_b), avx.mm256_mul_ps(col_scale_f32, row_scale_f32), acc_row);
-                acc_min_rows = avx.mm256_fmadd_ps(avx.mm256_cvtepi32_ps(iacc_min_b), avx.mm256_mul_ps(col_dmin_f32, row_scale_f32), acc_min_rows);
+                acc_row = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(ggml.cpu.quants.arch.avx2.mm256_cvtepi32_ps(iacc_b), ggml.cpu.quants.arch.avx2.mm256_mul_ps(col_scale_f32, row_scale_f32), acc_row);
+                acc_min_rows = ggml.cpu.quants.arch.avx2.mm256_fmadd_ps(ggml.cpu.quants.arch.avx2.mm256_cvtepi32_ps(iacc_min_b), ggml.cpu.quants.arch.avx2.mm256_mul_ps(col_dmin_f32, row_scale_f32), acc_min_rows);
             }
 
-            acc_row = avx.mm256_permutevar8x32_ps(acc_row, finalpermutemask);
-            avx.mm256_storeu_ps(s + (y * @as(usize, @intCast(nr)) + x * 8), avx.mm256_sub_ps(acc_row, acc_min_rows));
+            acc_row = ggml.cpu.quants.arch.avx2.mm256_permutevar8x32_ps(acc_row, finalpermutemask);
+            ggml.cpu.quants.arch.avx2.mm256_storeu_ps(s + (y * @as(usize, @intCast(nr)) + x * 8), ggml.cpu.quants.arch.avx2.mm256_sub_ps(acc_row, acc_min_rows));
         }
     }
 }
@@ -176,33 +168,33 @@ fn Rhs(comptime L: type) type {
 /// 2-bit planes in the formats `B0B1B4B5` and `B2B3B6B7`, every sub-block's
 /// scales widened to sixteen bits, and the mins.
 const RawRhs = struct {
-    raw0145: [4]m256i,
-    raw2367: [4]m256i,
-    scales: [8]m256i,
-    mins: [4]m256i,
+    raw0145: [4]ggml.cpu.quants.arch.avx2.m256i,
+    raw2367: [4]ggml.cpu.quants.arch.avx2.m256i,
+    scales: [8]ggml.cpu.quants.arch.avx2.m256i,
+    mins: [4]ggml.cpu.quants.arch.avx2.m256i,
 };
 
-fn rawRhs(b: *const blocks.block_q2_Kx8, sb: usize) RawRhs {
+fn rawRhs(b: *const ggml.cpu.repack.blocks.block_q2_Kx8, sb: usize) RawRhs {
     // The unrolled sub-block loops evaluate the intrinsics' comptime masks
     // at every call site.
     @setEvalBranchQuota(20000);
-    const requiredOrder = avx.mm256_set_epi32(.{ 3, 2, 1, 0, 7, 6, 5, 4 });
-    const scalesmask1_sse = avx.mm_set_epi8(.{ 14, 14, 12, 12, 10, 10, 8, 8, 6, 6, 4, 4, 2, 2, 0, 0 });
-    const scalesmask2_sse = avx.mm_set_epi8(.{ 15, 15, 13, 13, 11, 11, 9, 9, 7, 7, 5, 5, 3, 3, 1, 1 });
+    const requiredOrder = ggml.cpu.quants.arch.avx2.mm256_set_epi32(.{ 3, 2, 1, 0, 7, 6, 5, 4 });
+    const scalesmask1_sse = ggml.cpu.quants.arch.avx2.mm_set_epi8(.{ 14, 14, 12, 12, 10, 10, 8, 8, 6, 6, 4, 4, 2, 2, 0, 0 });
+    const scalesmask2_sse = ggml.cpu.quants.arch.avx2.mm_set_epi8(.{ 15, 15, 13, 13, 11, 11, 9, 9, 7, 7, 5, 5, 3, 3, 1, 1 });
 
     const qs = b.qs[sb * 256 ..].ptr;
     var r: RawRhs = undefined;
     inline for (0..4) |i| {
-        const raw0123 = avx.mm256_loadu_si256(qs + 64 * i);
-        const raw4567 = avx.mm256_loadu_si256(qs + 64 * i + 32);
-        r.raw0145[i] = avx.mm256_blend_epi32(raw0123, avx.mm256_permutevar8x32_epi32(raw4567, requiredOrder), 240);
-        r.raw2367[i] = avx.mm256_blend_epi32(avx.mm256_permutevar8x32_epi32(raw0123, requiredOrder), raw4567, 240);
+        const raw0123 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(qs + 64 * i);
+        const raw4567 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(qs + 64 * i + 32);
+        r.raw0145[i] = ggml.cpu.quants.arch.avx2.mm256_blend_epi32(raw0123, ggml.cpu.quants.arch.avx2.mm256_permutevar8x32_epi32(raw4567, requiredOrder), 240);
+        r.raw2367[i] = ggml.cpu.quants.arch.avx2.mm256_blend_epi32(ggml.cpu.quants.arch.avx2.mm256_permutevar8x32_epi32(raw0123, requiredOrder), raw4567, 240);
     }
 
     const sm = scalesMins(b, sb);
     r.mins = sm.mins;
     inline for (0..8) |j| {
-        r.scales[j] = avx.mm256_cvtepu8_epi16(avx.mm_shuffle_epi8(sm.scales[j / 2], if (j % 2 == 0) scalesmask1_sse else scalesmask2_sse));
+        r.scales[j] = ggml.cpu.quants.arch.avx2.mm256_cvtepu8_epi16(ggml.cpu.quants.arch.avx2.mm_shuffle_epi8(sm.scales[j / 2], if (j % 2 == 0) scalesmask1_sse else scalesmask2_sse));
     }
     return r;
 }
@@ -224,7 +216,7 @@ inline fn planeWide(comptime L: type, raw: [4]L.I, comptime j: usize, comptime k
 /// sub-block pair and widens with `_mm512_cvtepu8_epi16`; its `pshufb` works
 /// per 128-bit lane with the mask repeated. Per lane that is each block's
 /// AVX2 value, so the scales and mins are `join`s of `rawRhs`.
-fn prepareRhs(comptime L: type, b0: *const blocks.block_q2_Kx8, b1: *const blocks.block_q2_Kx8, sb: usize) Rhs(L) {
+fn prepareRhs(comptime L: type, b0: *const ggml.cpu.repack.blocks.block_q2_Kx8, b1: *const ggml.cpu.repack.blocks.block_q2_Kx8, sb: usize) Rhs(L) {
     @setEvalBranchQuota(20000);
     const r0 = rawRhs(b0, sb);
     const r1 = if (L.width == 512) rawRhs(b1, sb) else r0;
@@ -267,7 +259,7 @@ inline fn dot2(comptime L: type, rhs: [2]L.I, lhs: [2]L.I) L.I {
 /// @b1b770d90), either arm: one interleaved block of four activation rows
 /// against one prepared sb, into four row accumulators and four minima
 /// accumulators.
-fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, col_dmin_f32: L.F, a: *const blocks.block_q8_Kx4, sb: usize) void {
+fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs(L), col_scale_f32: L.F, col_dmin_f32: L.F, a: *const ggml.cpu.repack.blocks.block_q8_Kx4, sb: usize) void {
     // The unrolled sub-block loops evaluate the intrinsics' comptime masks
     // at every call site.
     @setEvalBranchQuota(40000);
@@ -280,9 +272,9 @@ fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs
         var lhs_01_sp2: [2]L.I = undefined;
         var lhs_23_sp2: [2]L.I = undefined;
         inline for (0..2) |k| {
-            const lhs_mat_0123 = avx.mm256_loadu_si256(qs + 64 * j + 32 * k);
-            const lhs_mat_01 = L.rep(avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 0));
-            const lhs_mat_23 = L.rep(avx.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 17));
+            const lhs_mat_0123 = ggml.cpu.quants.arch.avx2.mm256_loadu_si256(qs + 64 * j + 32 * k);
+            const lhs_mat_01 = L.rep(ggml.cpu.quants.arch.avx2.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 0));
+            const lhs_mat_23 = L.rep(ggml.cpu.quants.arch.avx2.mm256_permute2f128_si256(lhs_mat_0123, lhs_mat_0123, 17));
             lhs_01_sp1[k] = L.shuffle_epi32(lhs_mat_01, 160);
             lhs_23_sp1[k] = L.shuffle_epi32(lhs_mat_23, 160);
             lhs_01_sp2[k] = L.shuffle_epi32(lhs_mat_01, 245);
@@ -309,8 +301,8 @@ fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs
         L.blend_epi32(L.shuffle_epi32(iacc_mat[2], 78), iacc_mat[3], 204),
     };
 
-    const row_scale_f32_sse = avx.mm_load_ps(&a.d);
-    const row_scale_f32 = L.repF(avx.mm256_set_m128(row_scale_f32_sse, row_scale_f32_sse));
+    const row_scale_f32_sse = ggml.cpu.quants.arch.avx2.mm_load_ps(&a.d);
+    const row_scale_f32 = L.repF(ggml.cpu.quants.arch.avx2.mm256_set_m128(row_scale_f32_sse, row_scale_f32_sse));
 
     const lanes = [4]u8{ 0, 85, 170, 255 };
     inline for (0..4) |i| {
@@ -320,10 +312,10 @@ fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs
 
     // The four rows' bsums, as `[rows 0-1 | rows 2-3][sub-blocks 0-3 | 4-7]`
     const bs = a.bsums[32 * sb ..].ptr;
-    const lhs_bsums_01_0123 = L.rep(common.repeat128(avx.mm_loadu_si128(bs)));
-    const lhs_bsums_23_0123 = L.rep(common.repeat128(avx.mm_loadu_si128(bs + 8)));
-    const lhs_bsums_01_4567 = L.rep(common.repeat128(avx.mm_loadu_si128(bs + 16)));
-    const lhs_bsums_23_4567 = L.rep(common.repeat128(avx.mm_loadu_si128(bs + 24)));
+    const lhs_bsums_01_0123 = L.rep(ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(bs)));
+    const lhs_bsums_23_0123 = L.rep(ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(bs + 8)));
+    const lhs_bsums_01_4567 = L.rep(ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(bs + 16)));
+    const lhs_bsums_23_4567 = L.rep(ggml.cpu.repack.arch.common.repeat128(ggml.cpu.quants.arch.avx2.mm_loadu_si128(bs + 24)));
 
     // Row `i` takes lanes `0, 85` (even rows) or `170, 255` (odd rows) of its
     // pair's bsums, against mins 01 and 23, then 45 and 67.
@@ -345,18 +337,18 @@ fn accumulate4(comptime L: type, acc: *[4]L.F, acc_min: *[4]L.F, rhs: *const Rhs
 /// A column block's `d` or `dmin` as floats: `GGML_F32Cx8_LOAD`, or
 /// `GGML_F32Cx8x2_LOAD` over two blocks at 512 bits.
 inline fn colLoad(comptime L: type, d0: anytype, d1: anytype) L.F {
-    if (L.width == 256) return common.f32cx8Load(d0);
-    return L.joinF(common.f32cx8Load(d0), common.f32cx8Load(d1));
+    if (L.width == 256) return ggml.cpu.repack.arch.common.f32cx8Load(d0);
+    return L.joinF(ggml.cpu.repack.arch.common.f32cx8Load(d0), ggml.cpu.repack.arch.common.f32cx8Load(d1));
 }
 
 /// Both row loops of `ggml_gemm_q2_K_8x8_q8_K` at `L`'s width, over the
 /// eight-column blocks `x_begin..x_end`: sixteen rows a pass, then four.
-fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize, b_nb: usize, nr_u: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const blocks.block_q2_Kx8, a_ptr_start: [*]const blocks.block_q8_Kx4) void {
+fn rowLoops(comptime L: type, y: *usize, x_begin: usize, x_end: usize, nb: usize, b_nb: usize, nr_u: usize, s: [*]f32, bs: usize, b_ptr_start: [*]const ggml.cpu.repack.blocks.block_q2_Kx8, a_ptr_start: [*]const ggml.cpu.repack.blocks.block_q8_Kx4) void {
     const anr = nr_u - nr_u % 16; // Used to align nr with boundary of 16
     const xstep = L.cols / 8;
 
     while (y.* < anr / 4) : (y.* += 4) {
-        var a_ptrs: [4][*]const blocks.block_q8_Kx4 = undefined;
+        var a_ptrs: [4][*]const ggml.cpu.repack.blocks.block_q8_Kx4 = undefined;
 
         a_ptrs[0] = a_ptr_start + (y.* * nb);
         for (0..3) |i| a_ptrs[i + 1] = a_ptrs[i] + nb;
@@ -419,8 +411,8 @@ pub export fn ggml_gemm_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     std.debug.assert(@rem(nr, 4) == 0);
     std.debug.assert(@rem(nc, 8) == 0);
 
-    const b_ptr_start: [*]const blocks.block_q2_Kx8 = @ptrCast(@alignCast(vx));
-    const a_ptr_start: [*]const blocks.block_q8_Kx4 = @ptrCast(@alignCast(vy));
+    const b_ptr_start: [*]const ggml.cpu.repack.blocks.block_q2_Kx8 = @ptrCast(@alignCast(vx));
+    const a_ptr_start: [*]const ggml.cpu.repack.blocks.block_q8_Kx4 = @ptrCast(@alignCast(vy));
     const b_nb: usize = @intCast(@divTrunc(n, QK_K));
     var y: usize = 0;
 
@@ -428,16 +420,16 @@ pub export fn ggml_gemm_q2_K_8x8_q8_K(n: c_int, s: [*]f32, bs: usize, vx: *const
     const nr_u: usize = @intCast(nr);
     const nc_u: usize = @intCast(nc);
 
-    if (comptime wide.has_avx512bw_dq) {
+    if (comptime ggml.cpu.repack.arch.wide.has_avx512bw_dq) {
         const anc = nc_u - nc_u % 16; // Used to align nc with boundary of 16
-        rowLoops(wide.Wide(512), &y, 0, anc / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
+        rowLoops(ggml.cpu.repack.arch.wide.Wide(512), &y, 0, anc / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
         if (anc != nc_u) {
             xstart = anc / 8;
             y = 0;
         }
     }
 
-    rowLoops(wide.Wide(256), &y, xstart, nc_u / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
+    rowLoops(ggml.cpu.repack.arch.wide.Wide(256), &y, xstart, nc_u / 8, nb, b_nb, nr_u, s, bs, b_ptr_start, a_ptr_start);
 }
 
 // -----------------------------------------------------------------------------

@@ -9,22 +9,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 const GEN_PREFIX = "<|ifm|im_start|>assistant\n";
 const SECTION_START = "<ifm|tool_calls>";
@@ -42,33 +31,33 @@ const ARG_VAL_END = "</ifm|arg_value>";
 /// `foreach_function` and `foreach_parameter` callbacks share.
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
-    data: *const ChatParams,
+    inputs: *const common_chat.template.GenerationParams,
+    data: *const common_chat.params.ChatParams,
     think_start: []const u8,
     call_format: []const u8,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
 
-    cb: *ChatBuilder = undefined,
-    think_end: ParserId = undefined,
-    arg_close: ParserId = undefined,
-    arg_string: ParserId = undefined,
-    arg_type: ParserId = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    think_end: peg.ParserId = undefined,
+    arg_close: peg.ParserId = undefined,
+    arg_string: peg.ParserId = undefined,
+    arg_type: peg.ParserId = undefined,
+    tool_choice: peg.ParserId = undefined,
     // per tool, while its parameters are visited
     tool_index: usize = 0,
-    required_args: std.ArrayList(ParserId) = .empty,
-    optional_args: std.ArrayList(ParserId) = .empty,
+    required_args: std.ArrayList(peg.ParserId) = .empty,
+    optional_args: std.ArrayList(peg.ParserId) = .empty,
 
     /// `think_block`: `body` up to an end tag, after the start tag.
-    fn thinkBlock(self: *Build, body: ParserId) chat_peg.Error!ParserId {
+    fn thinkBlock(self: *Build, body: peg.ParserId) peg.Error!peg.ParserId {
         const b = &self.cb.b;
         const head = try b.litPlus(self.think_start, try b.space());
         return b.optional(try b.plus(head, try b.ac(try b.plus(body, self.think_end), self.data.thinking_end_tags.items)));
     }
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const generation_prompt = try b.literal(GEN_PREFIX);
@@ -104,7 +93,7 @@ const Build = struct {
             else
                 try b.eps();
 
-            parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+            common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
         }
 
         const required = self.inputs.tool_choice == .required;
@@ -126,22 +115,22 @@ const Build = struct {
         return b.plus(generation_prompt, try b.shl(try b.shl(reasoning, content), tool_calls));
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
         self.tool_index = tool_index;
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        const name = try parsers.functionName(t);
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        const name = try common_chat.parsers.functionName(t);
         self.required_args = .empty;
         self.optional_args = .empty;
 
-        try parsers.foreachParameter(self.a, function, self, param);
+        try common_chat.parsers.foreachParameter(self.a, function, self, param);
 
-        self.buildTool(name) catch |e| return util.fromPeg(e);
+        self.buildTool(name) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, name: []const u8) chat_peg.Error!void {
+    fn buildTool(self: *Build, name: []const u8) peg.Error!void {
         const p = self.cb;
         const b = &p.b;
-        var args = try p.permute(try parsers.indexName(self.a, "tool-", self.tool_index, "-args"), self.required_args.items);
+        var args = try p.permute(try common_chat.parsers.indexName(self.a, "tool-", self.tool_index, "-args"), self.required_args.items);
         if (self.optional_args.items.len != 0) {
             args = try b.plus(args, try b.zeroOrMore(try b.choice(self.optional_args.items)));
         }
@@ -149,18 +138,18 @@ const Build = struct {
         const open = try p.toolOpen(try b.plusLit(try b.litPlus(CALL_START, try p.toolName(try b.literal(name))), "\n"));
         const with_args = try b.plus(open, try p.toolArgs(args));
         const call = try p.tool(try b.shl(with_args, try p.toolClose(try b.literal(CALL_END))));
-        try b.orAssign(&self.tool_choice, try b.rule(try parsers.indexName(self.a, "tool-", self.tool_index, ""), call, false));
+        try b.orAssign(&self.tool_choice, try b.rule(try common_chat.parsers.indexName(self.a, "tool-", self.tool_index, ""), call, false));
     }
 
-    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) Error!void {
-        const r = self.buildParam(param_index, prm, doc) catch |e| return util.fromPeg(e);
+    fn param(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) common_chat.exception.Error!void {
+        const r = self.buildParam(param_index, prm, doc) catch |e| return common_chat.util.fromPeg(e);
         try (if (prm.required) &self.required_args else &self.optional_args).append(self.a, r);
     }
 
-    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) chat_peg.Error!ParserId {
+    fn buildParam(self: *Build, param_index: usize, prm: *const json.schema.Property, doc: *peg.SharedDoc) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
-        const rule_name = try parsers.argName(self.a, self.tool_index, param_index, "");
+        const rule_name = try common_chat.parsers.argName(self.a, self.tool_index, param_index, "");
         const types = prm.schema.valueTypes() catch |e| return peg.errors.fromSchema(e);
         var arg_value = self.arg_string;
         if (!types.has(.string)) {
@@ -202,30 +191,30 @@ const Build = struct {
 /// @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
     // The template requires a thinking field on every assistant message
     var messages = try inputs.messages.clone(a);
     var it = messages.items();
     while (it.next()) |item| {
         const msg = item.value;
-        if (std.mem.eql(u8, msg.value("role", []const u8, "") catch |e| return util.fromJson(e), "assistant") and !msg.contains("reasoning_content")) {
-            const slot = msg.index(a, "reasoning_content") catch |e| return util.fromJson(e);
-            slot.assign(a, try Value.from(a, ""));
+        if (std.mem.eql(u8, msg.value("role", []const u8, "") catch |e| return common_chat.util.fromJson(e), "assistant") and !msg.contains("reasoning_content")) {
+            const slot = msg.index(a, "reasoning_content") catch |e| return common_chat.util.fromJson(e);
+            slot.assign(a, try json.Value.from(a, ""));
         }
     }
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, &messages, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, &messages, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, &messages, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, &messages, null, null);
     data.format = .peg_native;
     data.supports_thinking = true;
 
-    const effort = inputs.extra_context.value("reasoning_effort", []const u8, "high") catch |e| return util.fromJson(e);
-    const call_format = inputs.extra_context.value("tool_call_format", []const u8, "xml") catch |e| return util.fromJson(e);
+    const effort = inputs.extra_context.value("reasoning_effort", []const u8, "high") catch |e| return common_chat.util.fromJson(e);
+    const call_format = inputs.extra_context.value("tool_call_format", []const u8, "xml") catch |e| return common_chat.util.fromJson(e);
 
     // Templates that handle enable_thinking disable it with an empty <ifm|think></ifm|think> block for every effort
-    const thinking_off = !inputs.enable_thinking and util.contains(tmpl.source(), "enable_thinking");
+    const thinking_off = !inputs.enable_thinking and common_chat.util.contains(tmpl.source(), "enable_thinking");
     const think: []const u8 = if (thinking_off)
         "ifm|think"
     else if (std.mem.eql(u8, effort, "medium"))
@@ -258,8 +247,8 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     try data.message_delimiters.add(a, .tool, "<|ifm|im_start|>tool");
     try data.message_delimiters.add(a, .system, "<|ifm|im_start|>system");
 
-    const has_tools = parsers.hasTools(&inputs.tools);
-    const has_response_format = parsers.hasResponseFormat(&inputs.json_schema);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
+    const has_response_format = common_chat.parsers.hasResponseFormat(&inputs.json_schema);
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
 
@@ -290,12 +279,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !(has_response_format or inputs.tool_choice == .required);
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
 
         if (data.grammar_lazy) {
             try data.addWordTrigger(a, SECTION_START);
@@ -316,9 +305,9 @@ test "K2 Horizon picks its think tags by effort and names tool rules by index" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var t = try template.Template.init(std.testing.allocator, "{% for m in messages %}<|ifm|im_start|>{{ m.role }}\n{{ m.content }}{% endfor %}{% if add_generation_prompt %}<|ifm|im_start|>assistant\n{% endif %}<ifm|tool_calls>", "", "");
+    var t = try common_chat.template.Template.init(std.testing.allocator, "{% for m in messages %}<|ifm|im_start|>{{ m.role }}\n{{ m.content }}{% endfor %}{% if add_generation_prompt %}<|ifm|im_start|>assistant\n{% endif %}<ifm|tool_calls>", "", "");
     defer t.deinit();
-    var p: GenerationParams = .{};
+    var p: common_chat.template.GenerationParams = .{};
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"f\",\"parameters\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":[\"integer\",\"string\"]}},\"required\":[\"x\"]}}}]");
     p.extra_context = try json.parse(a, "{\"reasoning_effort\":\"low\"}");

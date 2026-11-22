@@ -26,12 +26,8 @@
 //! text the C++ would have put in `e.what()`.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const json = @import("json");
-const exception = @import("exception.zig");
-
-const Error = exception.Error;
-const Value = json.Value;
-const throw = exception.throw;
 
 /// `LOG_WRN` and `LOG_ERR`, wherever the host sends them: the server sets
 /// this to its `common_log`. Null drops them.
@@ -223,9 +219,9 @@ pub const Msg = struct {
     /// content, or the text parts joined by `delimiter`.
     ///
     /// Return: owned by the caller.
-    pub fn renderContent(self: *const Msg, gpa: std.mem.Allocator, delimiter: []const u8) Error![]u8 {
+    pub fn renderContent(self: *const Msg, gpa: std.mem.Allocator, delimiter: []const u8) mod.exception.Error![]u8 {
         if (self.content.len != 0 and self.content_parts.items.len != 0) {
-            return throw(error.RuntimeError, "Cannot specify both content and content_parts", .{});
+            return mod.exception.throw(error.RuntimeError, "Cannot specify both content and content_parts", .{});
         }
         if (self.content.len != 0) return gpa.dupe(u8, self.content);
 
@@ -243,15 +239,15 @@ pub const Msg = struct {
     /// Ports `common_chat_msg`'s `to_json_oaicompat` (chat.cpp:157 @b1b770d90).
     ///
     /// Return: owned by the caller.
-    pub fn toJsonOaicompat(self: *const Msg, gpa: std.mem.Allocator, concat_typed_text: bool) Error!Value {
+    pub fn toJsonOaicompat(self: *const Msg, gpa: std.mem.Allocator, concat_typed_text: bool) mod.exception.Error!json.Value {
         if (self.content.len != 0 and self.content_parts.items.len != 0) {
-            return throw(error.RuntimeError, "Cannot specify both content and content_parts", .{});
+            return mod.exception.throw(error.RuntimeError, "Cannot specify both content and content_parts", .{});
         }
-        var jmsg = Value.emptyObject();
+        var jmsg = json.Value.emptyObject();
         errdefer jmsg.deinit(gpa);
-        try jmsg.set(gpa, "role", try Value.from(gpa, self.role));
+        try jmsg.set(gpa, "role", try json.Value.from(gpa, self.role));
         if (self.content.len != 0) {
-            try jmsg.set(gpa, "content", try Value.from(gpa, self.content));
+            try jmsg.set(gpa, "content", try json.Value.from(gpa, self.content));
         } else if (self.content_parts.items.len != 0) {
             if (concat_typed_text or self.containsMedia()) {
                 var text: std.ArrayList(u8) = .empty;
@@ -273,42 +269,42 @@ pub const Msg = struct {
                     if (add_new_line) try text.append(gpa, '\n');
                     try text.appendSlice(gpa, part.text);
                 }
-                try jmsg.set(gpa, "content", try Value.from(gpa, text.items));
+                try jmsg.set(gpa, "content", try json.Value.from(gpa, text.items));
             } else {
-                var parts = Value.emptyArray();
+                var parts = json.Value.emptyArray();
                 errdefer parts.deinit(gpa);
                 for (self.content_parts.items) |part| {
-                    var p = Value.emptyObject();
+                    var p = json.Value.emptyObject();
                     errdefer p.deinit(gpa);
-                    try p.set(gpa, "type", try Value.from(gpa, part.type));
+                    try p.set(gpa, "type", try json.Value.from(gpa, part.type));
                     if (std.mem.eql(u8, part.type, "tool_reference")) {
-                        try p.set(gpa, "name", try Value.from(gpa, part.name));
+                        try p.set(gpa, "name", try json.Value.from(gpa, part.name));
                     } else {
-                        try p.set(gpa, "text", try Value.from(gpa, part.text));
+                        try p.set(gpa, "text", try json.Value.from(gpa, part.text));
                     }
                     try parts.pushBack(gpa, p);
                 }
                 try jmsg.set(gpa, "content", parts);
             }
         } else {
-            try jmsg.set(gpa, "content", try Value.from(gpa, ""));
+            try jmsg.set(gpa, "content", try json.Value.from(gpa, ""));
         }
-        if (self.reasoning_content.len != 0) try jmsg.set(gpa, "reasoning_content", try Value.from(gpa, self.reasoning_content));
-        if (self.tool_name.len != 0) try jmsg.set(gpa, "name", try Value.from(gpa, self.tool_name));
-        if (self.tool_call_id.len != 0) try jmsg.set(gpa, "tool_call_id", try Value.from(gpa, self.tool_call_id));
+        if (self.reasoning_content.len != 0) try jmsg.set(gpa, "reasoning_content", try json.Value.from(gpa, self.reasoning_content));
+        if (self.tool_name.len != 0) try jmsg.set(gpa, "name", try json.Value.from(gpa, self.tool_name));
+        if (self.tool_call_id.len != 0) try jmsg.set(gpa, "tool_call_id", try json.Value.from(gpa, self.tool_call_id));
         if (self.tool_calls.items.len != 0) {
-            var jtool_calls = Value.emptyArray();
+            var jtool_calls = json.Value.emptyArray();
             errdefer jtool_calls.deinit(gpa);
             for (self.tool_calls.items) |tool_call| {
-                var func = Value.emptyObject();
+                var func = json.Value.emptyObject();
                 errdefer func.deinit(gpa);
-                try func.set(gpa, "name", try Value.from(gpa, tool_call.name));
-                try func.set(gpa, "arguments", try Value.from(gpa, tool_call.arguments));
-                var tc = Value.emptyObject();
+                try func.set(gpa, "name", try json.Value.from(gpa, tool_call.name));
+                try func.set(gpa, "arguments", try json.Value.from(gpa, tool_call.arguments));
+                var tc = json.Value.emptyObject();
                 errdefer tc.deinit(gpa);
-                try tc.set(gpa, "type", try Value.from(gpa, "function"));
+                try tc.set(gpa, "type", try json.Value.from(gpa, "function"));
                 try tc.set(gpa, "function", func);
-                if (tool_call.id.len != 0) try tc.set(gpa, "id", try Value.from(gpa, tool_call.id));
+                if (tool_call.id.len != 0) try tc.set(gpa, "id", try json.Value.from(gpa, tool_call.id));
                 try jtool_calls.pushBack(gpa, tc);
             }
             try jmsg.set(gpa, "tool_calls", jtool_calls);
@@ -321,7 +317,7 @@ pub const Msg = struct {
 /// `last`.
 ///
 /// Return: a slice of `current`.
-pub fn stringDiff(last: []const u8, current: []const u8) Error![]const u8 {
+pub fn stringDiff(last: []const u8, current: []const u8) mod.exception.Error![]const u8 {
     if (last.len == 0) return current;
     if (!std.mem.startsWith(u8, current, last)) {
         if (std.mem.startsWith(u8, last, current)) {
@@ -329,7 +325,7 @@ pub fn stringDiff(last: []const u8, current: []const u8) Error![]const u8 {
             // and the current ended on a stop word (erased).
             return "";
         }
-        return throw(error.RuntimeError, "Invalid diff: '{s}' not found at start of '{s}'", .{ last, current });
+        return mod.exception.throw(error.RuntimeError, "Invalid diff: '{s}' not found at start of '{s}'", .{ last, current });
     }
     return current[last.len..];
 }
@@ -357,7 +353,7 @@ pub const MsgDiff = struct {
 ///
 /// Return: owned by the caller (the list only; the strings are borrowed
 /// from `msg_prv` and `msg_new`).
-pub fn computeDiffs(gpa: std.mem.Allocator, msg_prv: *const Msg, msg_new: *const Msg) Error!std.ArrayList(MsgDiff) {
+pub fn computeDiffs(gpa: std.mem.Allocator, msg_prv: *const Msg, msg_new: *const Msg) mod.exception.Error!std.ArrayList(MsgDiff) {
     var diffs: std.ArrayList(MsgDiff) = .empty;
     errdefer diffs.deinit(gpa);
     const prv_calls = msg_prv.tool_calls.items;
@@ -380,7 +376,7 @@ pub fn computeDiffs(gpa: std.mem.Allocator, msg_prv: *const Msg, msg_new: *const
         try err.print(gpa, "  Current ({d}):\n", .{new_calls.len});
         for (new_calls) |tc| try err.print(gpa, "    - name: '{s}', args: '{s}'\n", .{ tc.name, tc.arguments });
         try err.print(gpa, "  Current msg text content:\n{s}\n", .{msg_new.content});
-        return throw(error.RuntimeError, "{s}", .{err.items});
+        return mod.exception.throw(error.RuntimeError, "{s}", .{err.items});
     }
 
     if (prv_calls.len != 0) {
@@ -395,7 +391,7 @@ pub fn computeDiffs(gpa: std.mem.Allocator, msg_prv: *const Msg, msg_new: *const
             const is_prefix = std.mem.startsWith(u8, newf.name, pref.name);
             if (!is_prefix) {
                 logf(.err, "Tool call mismatch: prev='{s}' new='{s}'\n", .{ pref.name, newf.name });
-                return throw(error.RuntimeError, "Invalid diff: tool call mismatch!", .{});
+                return mod.exception.throw(error.RuntimeError, "Invalid diff: tool call mismatch!", .{});
             }
         }
         const args_diff = try stringDiff(pref.arguments, newf.arguments);
@@ -595,11 +591,11 @@ pub const Tool = struct {
 pub const ToolChoice = enum(c_int) { auto, required, none };
 
 /// Ports `common_chat_tool_choice_parse_oaicompat` (chat.cpp:323 @b1b770d90).
-pub fn toolChoiceParseOaicompat(tool_choice: []const u8) Error!ToolChoice {
+pub fn toolChoiceParseOaicompat(tool_choice: []const u8) mod.exception.Error!ToolChoice {
     if (std.mem.eql(u8, tool_choice, "auto")) return .auto;
     if (std.mem.eql(u8, tool_choice, "none")) return .none;
     if (std.mem.eql(u8, tool_choice, "required")) return .required;
-    return throw(error.InvalidArgument, "Invalid tool_choice: {s}", .{tool_choice});
+    return mod.exception.throw(error.InvalidArgument, "Invalid tool_choice: {s}", .{tool_choice});
 }
 
 /// Ports `common_chat_format` (chat.h:241 @b1b770d90).
@@ -629,14 +625,14 @@ pub const Continuation = enum(c_int) { none, auto, reasoning, content };
 /// Ports `common_chat_continuation_parse` (chat.cpp:696 @b1b770d90): null
 /// and false are none, true is auto; anything but those and the two
 /// field names throws `invalid_argument`.
-pub fn continuationParse(value: *const Value) Error!Continuation {
+pub fn continuationParse(value: *const json.Value) mod.exception.Error!Continuation {
     if (value.* == .null) return .none;
     if (value.* == .boolean) return if (value.boolean) .auto else .none;
     if (value.* == .string) {
         if (std.mem.eql(u8, value.string, "reasoning_content")) return .reasoning;
         if (std.mem.eql(u8, value.string, "content")) return .content;
     }
-    return throw(error.InvalidArgument, "Invalid continue_final_message: expected a boolean, \"content\" or \"reasoning_content\"", .{});
+    return mod.exception.throw(error.InvalidArgument, "Invalid continue_final_message: expected a boolean, \"content\" or \"reasoning_content\"", .{});
 }
 
 /// Ports `common_reasoning_format` (common/common.h:440 @b1b770d90).
@@ -657,34 +653,34 @@ pub const ReasoningFormat = enum(c_int) {
     }
 
     /// Ports `common_reasoning_format_from_name` (chat.cpp:1058 @b1b770d90).
-    pub fn fromName(format: []const u8) Error!ReasoningFormat {
+    pub fn fromName(format: []const u8) mod.exception.Error!ReasoningFormat {
         if (std.mem.eql(u8, format, "none")) return .none;
         if (std.mem.eql(u8, format, "auto")) return .auto;
         if (std.mem.eql(u8, format, "deepseek")) return .deepseek;
         if (std.mem.eql(u8, format, "deepseek-legacy")) return .deepseek_legacy;
-        return throw(error.RuntimeError, "Unknown reasoning format: {s}", .{format});
+        return mod.exception.throw(error.RuntimeError, "Unknown reasoning format: {s}", .{format});
     }
 };
 
 /// `get<std::string>()` into a fresh copy.
-fn getString(gpa: std.mem.Allocator, v: *const Value) Error![]const u8 {
+fn getString(gpa: std.mem.Allocator, v: *const json.Value) mod.exception.Error![]const u8 {
     return gpa.dupe(u8, try v.get([]const u8));
 }
 
 /// `dump()` at the default indent, -1.
-fn dumpCompact(gpa: std.mem.Allocator, v: *const Value) Error![]u8 {
+fn dumpCompact(gpa: std.mem.Allocator, v: *const json.Value) mod.exception.Error![]u8 {
     return json.dump(gpa, v, -1);
 }
 
 /// `j == "s"`: `common_json`'s comparison with a string value.
-fn isString(v: *const Value, s: []const u8) bool {
+fn isString(v: *const json.Value, s: []const u8) bool {
     return v.* == .string and std.mem.eql(u8, v.string, s);
 }
 
 /// Ports `common_chat_msgs_parse_oaicompat` (chat.cpp:351 @b1b770d90).
 ///
 /// Return: owned by the caller; free each message with `deinit(gpa)`.
-pub fn msgsParseOaicompat(gpa: std.mem.Allocator, messages: *Value) Error!std.ArrayList(Msg) {
+pub fn msgsParseOaicompat(gpa: std.mem.Allocator, messages: *json.Value) mod.exception.Error!std.ArrayList(Msg) {
     var msgs: std.ArrayList(Msg) = .empty;
     errdefer {
         for (msgs.items) |*m| m.deinit(gpa);
@@ -692,16 +688,16 @@ pub fn msgsParseOaicompat(gpa: std.mem.Allocator, messages: *Value) Error!std.Ar
     }
     msgsParseInner(gpa, messages, &msgs) catch |e| {
         // @ngxson : disable otherwise it's bloating the API response
-        return exception.rethrow(error.RuntimeError, e, "Failed to parse messages: ", "");
+        return mod.exception.rethrow(error.RuntimeError, e, "Failed to parse messages: ", "");
     };
     return msgs;
 }
 
-fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList(Msg)) Error!void {
+fn msgsParseInner(gpa: std.mem.Allocator, messages: *json.Value, msgs: *std.ArrayList(Msg)) mod.exception.Error!void {
     if (!messages.isArray()) {
         const d = try dumpCompact(gpa, messages);
         defer gpa.free(d);
-        return throw(error.InvalidArgument, "Expected 'messages' to be an array, got {s}", .{d});
+        return mod.exception.throw(error.InvalidArgument, "Expected 'messages' to be an array, got {s}", .{d});
     }
 
     var it = messages.items();
@@ -710,7 +706,7 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
         if (!message.isObject()) {
             const d = try dumpCompact(gpa, message);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Expected 'message' to be an object, got {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Expected 'message' to be an object, got {s}", .{d});
         }
 
         var msg: Msg = .{};
@@ -718,7 +714,7 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
         if (!message.contains("role")) {
             const d = try dumpCompact(gpa, message);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Missing 'role' in message: {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Missing 'role' in message: {s}", .{d});
         }
         msg.role = try getString(gpa, try message.at("role"));
 
@@ -735,7 +731,7 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
                     if (!part.contains("type")) {
                         const d = try dumpCompact(gpa, part);
                         defer gpa.free(d);
-                        return throw(error.InvalidArgument, "Missing content part type: {s}", .{d});
+                        return mod.exception.throw(error.InvalidArgument, "Missing content part type: {s}", .{d});
                     }
                     const type_ = try part.at("type");
                     const t = try type_.get([]const u8);
@@ -747,13 +743,13 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
                     } else {
                         const d = try dumpCompact(gpa, type_);
                         defer gpa.free(d);
-                        return throw(error.InvalidArgument, "Unsupported content part type: {s}", .{d});
+                        return mod.exception.throw(error.InvalidArgument, "Unsupported content part type: {s}", .{d});
                     }
                 }
             } else if (!content.isNull()) {
                 const d = try dumpCompact(gpa, content);
                 defer gpa.free(d);
-                return throw(error.InvalidArgument, "Invalid 'content' type: expected string or array, got {s} (ref: https://github.com/ggml-org/llama.cpp/issues/8367)", .{d});
+                return mod.exception.throw(error.InvalidArgument, "Invalid 'content' type: expected string or array, got {s} (ref: https://github.com/ggml-org/llama.cpp/issues/8367)", .{d});
             }
         }
         if (has_tool_calls) {
@@ -763,24 +759,24 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
                 if (!tool_call.contains("type")) {
                     const d = try dumpCompact(gpa, tool_call);
                     defer gpa.free(d);
-                    return throw(error.InvalidArgument, "Missing tool call type: {s}", .{d});
+                    return mod.exception.throw(error.InvalidArgument, "Missing tool call type: {s}", .{d});
                 }
                 const type_ = try tool_call.at("type");
                 if (!isString(type_, "function")) {
                     const d = try dumpCompact(gpa, tool_call);
                     defer gpa.free(d);
-                    return throw(error.InvalidArgument, "Unsupported tool call type: {s}", .{d});
+                    return mod.exception.throw(error.InvalidArgument, "Unsupported tool call type: {s}", .{d});
                 }
                 if (!tool_call.contains("function")) {
                     const d = try dumpCompact(gpa, tool_call);
                     defer gpa.free(d);
-                    return throw(error.InvalidArgument, "Missing tool call function: {s}", .{d});
+                    return mod.exception.throw(error.InvalidArgument, "Missing tool call function: {s}", .{d});
                 }
                 const fc = try tool_call.at("function");
                 if (!fc.contains("name")) {
                     const d = try dumpCompact(gpa, tool_call);
                     defer gpa.free(d);
-                    return throw(error.InvalidArgument, "Missing tool call name: {s}", .{d});
+                    return mod.exception.throw(error.InvalidArgument, "Missing tool call name: {s}", .{d});
                 }
                 var tc: ToolCall = .{};
                 tc.name = try (try fc.at("name")).get([]const u8);
@@ -798,7 +794,7 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
             }
         }
         if (!has_content and !has_tool_calls) {
-            return throw(error.InvalidArgument, "Expected 'content' or 'tool_calls' (ref: https://github.com/ggml-org/llama.cpp/issues/8367 & https://github.com/ggml-org/llama.cpp/issues/12279)", .{});
+            return mod.exception.throw(error.InvalidArgument, "Expected 'content' or 'tool_calls' (ref: https://github.com/ggml-org/llama.cpp/issues/8367 & https://github.com/ggml-org/llama.cpp/issues/12279)", .{});
         }
         if (message.contains("reasoning_content")) try Msg.setField(gpa, &msg.reasoning_content, try (try message.at("reasoning_content")).get([]const u8));
         if (message.contains("name")) try Msg.setField(gpa, &msg.tool_name, try (try message.at("name")).get([]const u8));
@@ -812,8 +808,8 @@ fn msgsParseInner(gpa: std.mem.Allocator, messages: *Value, msgs: *std.ArrayList
 /// The block of `common_chat_msgs_parse_oaicompat` (chat.cpp:351 @b1b770d90)
 /// that keeps a message's keys beyond OpenAI's in `extra_json`, a tool call's
 /// beyond its own under `__tool_call_extras`.
-fn collectExtraJson(gpa: std.mem.Allocator, message: *Value, has_tool_calls: bool, msg: *Msg) Error!void {
-    var extra = Value.emptyObject();
+fn collectExtraJson(gpa: std.mem.Allocator, message: *json.Value, has_tool_calls: bool, msg: *Msg) mod.exception.Error!void {
+    var extra = json.Value.emptyObject();
     defer extra.deinit(gpa);
     var it = message.items();
     while (it.next()) |item| {
@@ -824,13 +820,13 @@ fn collectExtraJson(gpa: std.mem.Allocator, message: *Value, has_tool_calls: boo
     }
     if (has_tool_calls) {
         // per tool call: keys besides type/function/id, and function keys besides name/arguments
-        var tc_extra = Value.emptyArray();
+        var tc_extra = json.Value.emptyArray();
         defer tc_extra.deinit(gpa);
         var any = false;
         var tit = (try message.at("tool_calls")).items();
         while (tit.next()) |titem| {
             const tool_call = titem.value;
-            var e = Value.emptyObject();
+            var e = json.Value.emptyObject();
             errdefer e.deinit(gpa);
             var kit = tool_call.items();
             while (kit.next()) |kv| {
@@ -873,7 +869,7 @@ pub const ContentCaps = struct {
 };
 
 /// Ports `messages_inp_normalizer`'s `concat_content_parts` (chat.cpp:528 @b1b770d90).
-fn concatContentParts(gpa: std.mem.Allocator, parts: *Value) Error![]u8 {
+fn concatContentParts(gpa: std.mem.Allocator, parts: *json.Value) mod.exception.Error![]u8 {
     var text: std.ArrayList(u8) = .empty;
     errdefer text.deinit(gpa);
     var last_was_media_marker = false;
@@ -903,11 +899,11 @@ fn concatContentParts(gpa: std.mem.Allocator, parts: *Value) Error![]u8 {
 /// takes only one.
 ///
 /// Return: owned by the caller.
-pub fn normalizeMessages(gpa: std.mem.Allocator, caps: ContentCaps, messages: *const Value) Error!Value {
+pub fn normalizeMessages(gpa: std.mem.Allocator, caps: ContentCaps, messages: *const json.Value) mod.exception.Error!json.Value {
     const only_string = caps.supports_string_content and !caps.supports_typed_content;
     const only_typed = !caps.supports_string_content and caps.supports_typed_content;
     if ((!only_string and !only_typed) or !messages.isArray()) return messages.clone(gpa);
-    var normalized = Value.emptyArray();
+    var normalized = json.Value.emptyArray();
     errdefer normalized.deinit(gpa);
     for (messages.array.items) |*msg| {
         var copy = try msg.clone(gpa);
@@ -915,18 +911,18 @@ pub fn normalizeMessages(gpa: std.mem.Allocator, caps: ContentCaps, messages: *c
         if (copy.contains("content")) {
             const it = try copy.at("content");
             if (only_typed and it.isString()) {
-                var part = Value.emptyObject();
+                var part = json.Value.emptyObject();
                 errdefer part.deinit(gpa);
-                try part.set(gpa, "type", try Value.from(gpa, "text"));
-                try part.set(gpa, "text", try Value.from(gpa, it.string));
-                var arr = Value.emptyArray();
+                try part.set(gpa, "type", try json.Value.from(gpa, "text"));
+                try part.set(gpa, "text", try json.Value.from(gpa, it.string));
+                var arr = json.Value.emptyArray();
                 errdefer arr.deinit(gpa);
                 try arr.pushBack(gpa, part);
                 it.assign(gpa, arr);
             } else if (only_string and it.isArray()) {
                 const s = try concatContentParts(gpa, it);
                 defer gpa.free(s);
-                it.assign(gpa, try Value.from(gpa, s));
+                it.assign(gpa, try json.Value.from(gpa, s));
             }
         }
         try normalized.pushBack(gpa, copy);
@@ -937,11 +933,11 @@ pub fn normalizeMessages(gpa: std.mem.Allocator, caps: ContentCaps, messages: *c
 /// Ports `render_message_to_json` (chat.cpp:555 @b1b770d90).
 ///
 /// Return: owned by the caller.
-pub fn renderMessagesToJson(gpa: std.mem.Allocator, msgs: []const Msg, caps: ContentCaps) Error!Value {
+pub fn renderMessagesToJson(gpa: std.mem.Allocator, msgs: []const Msg, caps: ContentCaps) mod.exception.Error!json.Value {
     if (!caps.supports_string_content and !caps.supports_typed_content) {
         logf(.warn, "render_message_to_json: Neither string content nor typed content is supported by the template. This is unexpected and may lead to issues.\n", .{});
     }
-    var messages = Value.emptyArray();
+    var messages = json.Value.emptyArray();
     defer messages.deinit(gpa);
     for (msgs) |*m| try messages.pushBack(gpa, try m.toJsonOaicompat(gpa, false));
     return normalizeMessages(gpa, caps, &messages);
@@ -953,11 +949,11 @@ pub fn renderMessagesToJson(gpa: std.mem.Allocator, msgs: []const Msg, caps: Con
 /// extra keys are restored.
 ///
 /// Return: owned by the caller.
-pub fn renderMessagesToJsonDeepseekV41(gpa: std.mem.Allocator, msgs: []const Msg, caps: ContentCaps) Error!Value {
-    var messages = Value.emptyArray();
+pub fn renderMessagesToJsonDeepseekV41(gpa: std.mem.Allocator, msgs: []const Msg, caps: ContentCaps) mod.exception.Error!json.Value {
+    var messages = json.Value.emptyArray();
     defer messages.deinit(gpa);
     for (msgs) |*m| {
-        var jmsg: Value = undefined;
+        var jmsg: json.Value = undefined;
         if (m.containsMedia() and m.content.len == 0) {
             var typed = try m.clone(gpa);
             defer typed.deinit(gpa);
@@ -1008,29 +1004,29 @@ pub fn renderMessagesToJsonDeepseekV41(gpa: std.mem.Allocator, msgs: []const Msg
 /// Ports `common_chat_msgs_to_json_oaicompat` (chat.cpp:612 @b1b770d90).
 ///
 /// Return: owned by the caller.
-pub fn msgsToJsonOaicompat(gpa: std.mem.Allocator, msgs: []const Msg, concat_typed_text: bool) Error!Value {
+pub fn msgsToJsonOaicompat(gpa: std.mem.Allocator, msgs: []const Msg, concat_typed_text: bool) mod.exception.Error!json.Value {
     return renderMessagesToJson(gpa, msgs, .{ .supports_string_content = true, .supports_typed_content = !concat_typed_text });
 }
 
 /// Ports `common_chat_tools_to_json_oaicompat` (chat.cpp:619 @b1b770d90).
 ///
 /// Return: owned by the caller; null for no tools.
-pub fn toolsToJsonOaicompat(gpa: std.mem.Allocator, tools: []const Tool) Error!Value {
+pub fn toolsToJsonOaicompat(gpa: std.mem.Allocator, tools: []const Tool) mod.exception.Error!json.Value {
     if (tools.len == 0) return .null;
-    var result = Value.emptyArray();
+    var result = json.Value.emptyArray();
     errdefer result.deinit(gpa);
     for (tools) |tool| {
         var params = try json.parse(gpa, tool.parameters);
         errdefer params.deinit(gpa);
-        var func = Value.emptyObject();
+        var func = json.Value.emptyObject();
         errdefer func.deinit(gpa);
-        try func.set(gpa, "name", try Value.from(gpa, tool.name));
-        try func.set(gpa, "description", try Value.from(gpa, tool.description));
+        try func.set(gpa, "name", try json.Value.from(gpa, tool.name));
+        try func.set(gpa, "description", try json.Value.from(gpa, tool.description));
         try func.set(gpa, "parameters", params);
-        if (tool.defer_loading) try func.set(gpa, "defer_loading", try Value.from(gpa, true));
-        var t = Value.emptyObject();
+        if (tool.defer_loading) try func.set(gpa, "defer_loading", try json.Value.from(gpa, true));
+        var t = json.Value.emptyObject();
         errdefer t.deinit(gpa);
-        try t.set(gpa, "type", try Value.from(gpa, "function"));
+        try t.set(gpa, "type", try json.Value.from(gpa, "function"));
         try t.set(gpa, "function", func);
         try result.pushBack(gpa, t);
     }
@@ -1041,22 +1037,22 @@ pub fn toolsToJsonOaicompat(gpa: std.mem.Allocator, tools: []const Tool) Error!V
 /// function's parameters, or an empty object schema.
 ///
 /// Return: owned by the caller.
-pub fn toolParameters(gpa: std.mem.Allocator, function: *const Value) Error!Value {
+pub fn toolParameters(gpa: std.mem.Allocator, function: *const json.Value) mod.exception.Error!json.Value {
     if (function.contains("parameters")) {
         const params = try function.at("parameters");
         if (!params.isNull() and !(params.isObject() and params.empty())) return params.clone(gpa);
     }
-    var out = Value.emptyObject();
+    var out = json.Value.emptyObject();
     errdefer out.deinit(gpa);
-    try out.set(gpa, "type", try Value.from(gpa, "object"));
-    try out.set(gpa, "properties", Value.emptyObject());
+    try out.set(gpa, "type", try json.Value.from(gpa, "object"));
+    try out.set(gpa, "properties", json.Value.emptyObject());
     return out;
 }
 
 /// Ports `common_chat_tools_parse_oaicompat` (chat.cpp:652 @b1b770d90).
 ///
 /// Return: owned by the caller; free each tool with `deinit(gpa)`.
-pub fn toolsParseOaicompat(gpa: std.mem.Allocator, tools: *Value) Error!std.ArrayList(Tool) {
+pub fn toolsParseOaicompat(gpa: std.mem.Allocator, tools: *json.Value) mod.exception.Error!std.ArrayList(Tool) {
     var result: std.ArrayList(Tool) = .empty;
     errdefer {
         for (result.items) |*t| t.deinit(gpa);
@@ -1068,17 +1064,17 @@ pub fn toolsParseOaicompat(gpa: std.mem.Allocator, tools: *Value) Error!std.Arra
         defer gpa.free(d);
         const suffix = try std.fmt.allocPrint(gpa, "; tools = {s}", .{d});
         defer gpa.free(suffix);
-        return exception.rethrow(error.RuntimeError, e, "Failed to parse tools: ", suffix);
+        return mod.exception.rethrow(error.RuntimeError, e, "Failed to parse tools: ", suffix);
     };
     return result;
 }
 
-fn toolsParseInner(gpa: std.mem.Allocator, tools: *Value, result: *std.ArrayList(Tool)) Error!void {
+fn toolsParseInner(gpa: std.mem.Allocator, tools: *json.Value, result: *std.ArrayList(Tool)) mod.exception.Error!void {
     if (tools.isNull()) return;
     if (!tools.isArray()) {
         const d = try dumpCompact(gpa, tools);
         defer gpa.free(d);
-        return throw(error.InvalidArgument, "Expected 'tools' to be an array, got {s}", .{d});
+        return mod.exception.throw(error.InvalidArgument, "Expected 'tools' to be an array, got {s}", .{d});
     }
     var it = tools.items();
     while (it.next()) |item| {
@@ -1086,24 +1082,24 @@ fn toolsParseInner(gpa: std.mem.Allocator, tools: *Value, result: *std.ArrayList
         if (!tool.contains("type")) {
             const d = try dumpCompact(gpa, tool);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Missing tool type: {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Missing tool type: {s}", .{d});
         }
         const type_ = try tool.at("type");
         if (!isString(type_, "function")) {
             const d = try dumpCompact(gpa, tool);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Unsupported tool type: {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Unsupported tool type: {s}", .{d});
         }
         if (!tool.contains("function")) {
             const d = try dumpCompact(gpa, tool);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Missing tool function: {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Missing tool function: {s}", .{d});
         }
         const function = try tool.at("function");
 
         // "defer_loading" sits on the function, or on the tool next to "type"; the function wins
-        var defer_false: Value = .{ .boolean = false };
-        const defer_v: *const Value = if (function.contains("defer_loading"))
+        var defer_false: json.Value = .{ .boolean = false };
+        const defer_v: *const json.Value = if (function.contains("defer_loading"))
             try function.at("defer_loading")
         else if (tool.contains("defer_loading"))
             try tool.at("defer_loading")
@@ -1112,7 +1108,7 @@ fn toolsParseInner(gpa: std.mem.Allocator, tools: *Value, result: *std.ArrayList
         if (!defer_v.isBoolean()) {
             const d = try dumpCompact(gpa, defer_v);
             defer gpa.free(d);
-            return throw(error.InvalidArgument, "Expected 'defer_loading' to be a boolean, got {s}", .{d});
+            return mod.exception.throw(error.InvalidArgument, "Expected 'defer_loading' to be a boolean, got {s}", .{d});
         }
 
         var t: Tool = .{};
@@ -1166,7 +1162,7 @@ test "a bad message names itself in the error" {
     var doc = try json.parse(a, "[{\"content\":\"x\"}]");
     defer doc.deinit(a);
     try std.testing.expectError(error.RuntimeError, msgsParseOaicompat(a, &doc));
-    try std.testing.expectEqualStrings("Failed to parse messages: Missing 'role' in message: {\"content\":\"x\"}", exception.what(error.RuntimeError));
+    try std.testing.expectEqualStrings("Failed to parse messages: Missing 'role' in message: {\"content\":\"x\"}", mod.exception.what(error.RuntimeError));
 }
 
 test "diffs carry only what grew" {

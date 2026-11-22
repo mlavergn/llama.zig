@@ -10,27 +10,17 @@
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_mimo2`'s `load_arch_hparams` (models/mimo2.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
 
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, true, exc);
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
@@ -49,10 +39,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_mimo2`'s `load_arch_tensors` (models/mimo2.cpp:25 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     const nf = self.nextnFlags(ml, .attn_norm);
     const trunk_flags = nf.trunk;
@@ -109,18 +99,18 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
 /// Ports `llama_model_mimo2`'s `build_arch_graph` (models/mimo2.cpp:80 @b1b770d90):
 /// the MTP draft head for that graph type, the main model otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_mimo2`'s `graph`
 /// (models/mimo2.cpp:87 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
@@ -148,9 +138,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);
             b.cb(cur, "attn_norm", il);
 
-            var Qcur: *Tensor = undefined;
-            var Kcur: *Tensor = undefined;
-            var Vcur: *Tensor = undefined;
+            var Qcur: *llama.impl.c.ggml_tensor = undefined;
+            var Kcur: *llama.impl.c.ggml_tensor = undefined;
+            var Vcur: *llama.impl.c.ggml_tensor = undefined;
 
             if (layer.wqkv) |wqkv| {
                 // The fused qkv_proj: Q and K share head_dim_k, V has
@@ -158,15 +148,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 const qkv = b.buildLoraMm(wqkv, cur, null);
                 b.cb(qkv, "wqkv", il);
 
-                const row_k = c.ggml_row_size(qkv.type, b.n_embd_head_k);
-                const row_v = c.ggml_row_size(qkv.type, b.n_embd_head_v);
+                const row_k = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_k);
+                const row_v = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_v);
                 const row_full = qkv.nb[1];
                 const k_off = row_k * @as(usize, @intCast(n_head_l));
                 const v_off = k_off + row_k * @as(usize, @intCast(n_head_kv_l));
 
-                Qcur = c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
-                Kcur = c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
-                Vcur = c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
+                Qcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
+                Kcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
+                Vcur = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
             } else {
                 // The split path.
                 Qcur = b.buildLoraMm(layer.wq.?, cur, null);
@@ -178,9 +168,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 Vcur = b.buildLoraMm(layer.wv.?, cur, null);
                 b.cb(Vcur, "Vcur", il);
 
-                Qcur = c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
-                Kcur = c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
-                Vcur = c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
+                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, b.n_embd_head_k, n_head_l, b.n_tokens);
+                Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, b.n_embd_head_k, n_head_kv_l, b.n_tokens);
+                Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, b.n_embd_head_v, n_head_kv_l, b.n_tokens);
             }
 
             Qcur = b.buildRope(Qcur, inp_pos, il);
@@ -192,21 +182,21 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             const sinks = layer.attn_sinks;
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, sinks, null, 1.0 / libm.sqrtfInt(b.n_embd_head_k), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, sinks, null, 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k), il);
             b.cb(cur, "attn_out", il);
 
             if (v_scale != 0.0) {
-                cur = c.ggml_scale(ctx, cur, v_scale);
+                cur = llama.impl.c.ggml_scale(ctx, cur, v_scale);
                 b.cb(cur, "attn_out_scaled", il);
             }
         }
 
         if (il == b.n_layer - 1 and b.cropBeforeNextn(inp_out_ids) and !extract_final_inp) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -235,7 +225,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "ffn_moe_out", il);
         }
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -248,7 +238,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     if (extract_final_inp) {
         b.res.t_layer_inp[n_layer_u] = cur;
         if (b.cropBeforeNextn(inp_out_ids)) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
     }
 
@@ -257,7 +247,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
@@ -280,42 +270,42 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 /// norm to the next draft step, then apply the shared output norm and LM
 /// head. Converted checkpoints may store that shared norm as
 /// `layer_out_norm`, so it stays in the fallback chain.
-fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn > 0, "models/mimo2.cpp", 252, "hparams.n_layer_nextn > 0 && \"MIMO2 MTP requires n_layer_nextn > 0\"");
+    llama.impl.assert(hp.n_layer_nextn > 0, "models/mimo2.cpp", 252, "hparams.n_layer_nextn > 0 && \"MIMO2 MTP requires n_layer_nextn > 0\"");
 
     const il: c_int = @as(c_int, @intCast(hp.nLayer())) + b.cparams.nextn_layer_offset;
-    impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/mimo2.cpp", 257, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
+    llama.impl.assert(b.cparams.nextn_layer_offset >= 0 and b.cparams.nextn_layer_offset < @as(c_int, @intCast(hp.n_layer_nextn)), "models/mimo2.cpp", 257, "cparams.nextn_layer_offset >= 0 && cparams.nextn_layer_offset < (int) hparams.n_layer_nextn && \"nextn_layer_offset out of range [0, n_layer_nextn)\"");
 
     const layer = &model.layers[@intCast(il)];
-    impl.assert(layer.nextn.eh_proj != null, "models/mimo2.cpp", 260, "layer.nextn.eh_proj && \"MIMO2 MTP block missing nextn.eh_proj\"");
-    impl.assert(layer.nextn.enorm != null, "models/mimo2.cpp", 261, "layer.nextn.enorm   && \"MIMO2 MTP block missing nextn.enorm\"");
-    impl.assert(layer.nextn.hnorm != null, "models/mimo2.cpp", 262, "layer.nextn.hnorm   && \"MIMO2 MTP block missing nextn.hnorm\"");
-    impl.assert(layer.wqkv != null, "models/mimo2.cpp", 263, "layer.wqkv          && \"MIMO2 MTP requires fused attn_qkv\"");
+    llama.impl.assert(layer.nextn.eh_proj != null, "models/mimo2.cpp", 260, "layer.nextn.eh_proj && \"MIMO2 MTP block missing nextn.eh_proj\"");
+    llama.impl.assert(layer.nextn.enorm != null, "models/mimo2.cpp", 261, "layer.nextn.enorm   && \"MIMO2 MTP block missing nextn.enorm\"");
+    llama.impl.assert(layer.nextn.hnorm != null, "models/mimo2.cpp", 262, "layer.nextn.hnorm   && \"MIMO2 MTP block missing nextn.hnorm\"");
+    llama.impl.assert(layer.wqkv != null, "models/mimo2.cpp", 263, "layer.wqkv          && \"MIMO2 MTP requires fused attn_qkv\"");
 
     const n_head_l: i64 = hp.nHead(@intCast(il));
     const n_head_kv_l: i64 = hp.nHeadKv(@intCast(il));
 
     const v_scale = hp.f_attn_value_scale;
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/mimo2.cpp", 270, "out of memory");
+    const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/mimo2.cpp", 270, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.tokens);
 
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.embd);
 
     inp.h = b.buildInpEmbdState(inp, hp.n_embd);
 
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd.?;
     const h_input = inp.h.?;
-    const tok_embd: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
+    const tok_embd: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens) else inp.embd.?;
     b.cb(tok_embd, "mtp_tok_embd", il);
 
-    _ = b.res.addInput(graph.InpEmbdH, inp);
+    _ = b.res.addInput(llama.graph.InpEmbdH, inp);
 
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
@@ -327,7 +317,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat: *Tensor = c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -341,15 +331,15 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const qkv = b.buildLoraMm(layer.wqkv.?, cur, layer.wqkv_s);
     b.cb(qkv, "mtp_wqkv", il);
 
-    const row_k = c.ggml_row_size(qkv.type, b.n_embd_head_k);
-    const row_v = c.ggml_row_size(qkv.type, b.n_embd_head_v);
+    const row_k = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_k);
+    const row_v = llama.impl.c.ggml_row_size(qkv.type, b.n_embd_head_v);
     const row_full = qkv.nb[1];
     const k_off = row_k * @as(usize, @intCast(n_head_l));
     const v_off = k_off + row_k * @as(usize, @intCast(n_head_kv_l));
 
-    var Qcur: *Tensor = c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
-    var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
-    const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
+    var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_l, b.n_tokens, row_k, row_full, 0);
+    var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_k, n_head_kv_l, b.n_tokens, row_k, row_full, k_off);
+    const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, b.n_embd_head_v, n_head_kv_l, b.n_tokens, row_v, row_full, v_off);
 
     Qcur = b.buildRope(Qcur, inp_pos, il);
     Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -358,40 +348,40 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Kcur, "mtp_Kcur", il);
     b.cb(Vcur, "mtp_Vcur", il);
 
-    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, layer.attn_sinks, null, 1.0 / libm.sqrtfInt(b.n_embd_head_k), il);
+    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, layer.attn_sinks, null, 1.0 / stdlib.libm.sqrtfInt(b.n_embd_head_k), il);
     b.cb(cur, "mtp_attn_out", il);
 
     if (v_scale != 0.0) {
-        cur = c.ggml_scale(ctx, cur, v_scale);
+        cur = llama.impl.c.ggml_scale(ctx, cur, v_scale);
         b.cb(cur, "mtp_attn_out_scaled", il);
     }
 
-    const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+    const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
     b.cb(ffn_inp, "mtp_ffn_inp", il);
 
     cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
     b.cb(cur, "mtp_ffn_norm", il);
 
-    impl.assert(layer.ffn_gate != null and layer.ffn_down != null and layer.ffn_up != null, "models/mimo2.cpp", 345, "layer.ffn_gate && layer.ffn_down && layer.ffn_up && \"MIMO2 MTP requires dense FFN tensors\"");
+    llama.impl.assert(layer.ffn_gate != null and layer.ffn_down != null and layer.ffn_up != null, "models/mimo2.cpp", 345, "layer.ffn_gate && layer.ffn_down && layer.ffn_up && \"MIMO2 MTP requires dense FFN tensors\"");
     cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, layer.ffn_gate_b, null, layer.ffn_down, layer.ffn_down_b, null, null, .silu, .par, il);
     b.cb(cur, "mtp_ffn_out", il);
 
-    cur = c.ggml_add(ctx, cur, ffn_inp);
+    cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
     b.cb(cur, "mtp_post_ffn", il);
 
-    cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+    cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
 
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
     const head_norm_w = layer.nextn.shared_head_norm orelse (layer.layer_out_norm orelse model.output_norm);
-    impl.assert(head_norm_w != null, "models/mimo2.cpp", 365, "head_norm_w && \"MIMO2 MTP missing head norm fallback\"");
+    llama.impl.assert(head_norm_w != null, "models/mimo2.cpp", 365, "head_norm_w && \"MIMO2 MTP missing head norm fallback\"");
     cur = b.buildNorm(cur, head_norm_w, null, .rms, -1);
     b.cb(cur, "mtp_shared_head_norm", -1);
 
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/mimo2.cpp", 371, "head_w && \"MIMO2 MTP missing LM head fallback\"");
+    llama.impl.assert(head_w != null, "models/mimo2.cpp", 371, "head_w && \"MIMO2 MTP missing LM head fallback\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

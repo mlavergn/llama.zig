@@ -11,21 +11,11 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_muse_spark`'s `load_arch_hparams` (models/muse-spark.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -41,7 +31,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     hp.expert_weights_norm = (try meta.getKey(bool, .expert_weights_norm, true, exc)).?;
     _ = try meta.getKeyOrArr(u32, .expert_feed_forward_length, &hp.n_ff_exp_arr, hp.n_layer_all, false, exc);
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
     hp.rope_pattern = hp.is_swa_impl;
 
@@ -52,7 +42,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_muse_spark`'s `load_arch_tensors` (models/muse-spark.cpp:26 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -112,19 +102,19 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_muse_spark`'s `build_arch_graph` (models/muse-spark.cpp:223 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_muse_spark`'s `graph`
 /// (models/muse-spark.cpp:79 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/muse-spark.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/muse-spark.cpp", 82, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     inpL = b.buildNorm(inpL, null, null, .rms, -1);
     b.cb(inpL, "embd_norm", -1);
 
@@ -132,7 +122,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -170,14 +160,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "attn_out", il);
 
             // A weightless norm on the attention output, per head.
-            cur = c.ggml_reshape_3d(ctx, cur, n_embd_head, b.n_head, b.n_tokens);
-            cur = c.ggml_rms_norm(ctx, cur, hp.f_norm_rms_eps);
-            cur = c.ggml_reshape_2d(ctx, cur, n_embd_head * b.n_head, b.n_tokens);
+            cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, b.n_head, b.n_tokens);
+            cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_norm_rms_eps);
+            cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * b.n_head, b.n_tokens);
             b.cb(cur, "attn_o_norm", il);
 
-            gate = c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
             b.cb(gate, "attn_gate_sig", il);
-            cur = c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", il);
 
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -185,15 +175,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         // The post-attention norm holds no weight.
-        cur = c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
+        cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, c.ggml_mul(ctx, inpSA, layer.attn_resid_alpha), c.ggml_mul(ctx, cur, layer.attn_resid_beta));
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, inpSA, layer.attn_resid_alpha), llama.impl.c.ggml_mul(ctx, cur, layer.attn_resid_beta));
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -232,11 +222,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "ffn_latent_up", il);
 
         // The post-FFN norm scales the input, then normalizes.
-        cur = c.ggml_mul(ctx, cur, layer.ffn_post_norm);
-        cur = c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
+        cur = llama.impl.c.ggml_mul(ctx, cur, layer.ffn_post_norm);
+        cur = llama.impl.c.ggml_rms_norm(ctx, cur, hp.f_post_norm_eps);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_alpha), c.ggml_mul(ctx, cur, layer.ffn_resid_beta));
+        cur = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_alpha), llama.impl.c.ggml_mul(ctx, cur, layer.ffn_resid_beta));
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 
@@ -250,12 +240,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.res.t_embd = cur;
 
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
-    cur = c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = c.ggml_tanh(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_tanh(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

@@ -9,28 +9,18 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_spark2_5`'s `load_arch_hparams` (models/spark2-5.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
 
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
@@ -44,7 +34,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_spark2_5`'s `load_arch_tensors` (models/spark2-5.cpp:20 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -52,9 +42,9 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     // The output, or failing that the token embeddings (tied embeddings).
-    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
+    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_not_required, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -81,26 +71,26 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_spark2_5`'s `build_arch_graph` (models/spark2-5.cpp:52 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_spark2_5`'s `graph`
 /// (models/spark2-5.cpp:56 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/spark2-5.cpp", 59, "n_embd_head == hparams.n_embd_head_k()");
-    impl.assert(hp.swa_type == @backingInt(hparams_mod.SwaType.standard), "models/spark2-5.cpp", 60, "hparams.swa_type == LLAMA_SWA_TYPE_STANDARD");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/spark2-5.cpp", 59, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(hp.swa_type == @backingInt(llama.hparams.SwaType.standard), "models/spark2-5.cpp", 60, "hparams.swa_type == LLAMA_SWA_TYPE_STANDARD");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -128,15 +118,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "attn_out", il);
 
         // The head-wise gate, from the attention input.
-        var gate: *Tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
-        gate = c.ggml_sigmoid(ctx, gate);
+        var gate: *llama.impl.c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
+        gate = llama.impl.c.ggml_sigmoid(ctx, gate);
         b.cb(gate, "attn_gate", il);
 
         const n_tokens_i = cur.ne[1];
-        cur = c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_i, n_tokens_i);
-        gate = c.ggml_reshape_3d(ctx, gate, 1, n_head_i, n_tokens_i);
-        cur = c.ggml_mul(ctx, cur, gate);
-        cur = c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_i, n_tokens_i);
+        cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head_i, n_tokens_i);
+        gate = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_i, n_tokens_i);
+        cur = llama.impl.c.ggml_mul(ctx, cur, gate);
+        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head_i, n_tokens_i);
         b.cb(cur, "attn_gated", il);
 
         cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
@@ -144,11 +134,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         if (il == b.n_layer - 1) {
             // Skip computing the output of unused tokens.
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -157,7 +147,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .gelu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

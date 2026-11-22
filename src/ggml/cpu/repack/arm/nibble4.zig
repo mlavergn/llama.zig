@@ -26,51 +26,39 @@
 //! element — there is no vector form of that conversion.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const blocks = @import("../blocks.zig");
-const neon = @import("../../quants/arm/neon.zig");
+const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
 // without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
 // Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
-extern fn ggml_gemv_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemv_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_iq4_nl_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemm_mxfp4_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-
-const c = impl.c;
-const f32x4 = neon.f32x4;
-const i32x4 = neon.i32x4;
-const i8x16 = neon.i8x16;
-const u8x16 = neon.u8x16;
 
 const Fmt = enum { iq4_nl, mxfp4 };
 
-inline fn table(comptime fmt: Fmt) i8x16 {
+inline fn table(comptime fmt: Fmt) ggml.cpu.quants.arch.neon.i8x16 {
     return switch (fmt) {
-        .iq4_nl => @bitCast(@as(@Vector(16, i8), c.kvalues_iq4nl[0..16].*)),
-        .mxfp4 => @bitCast(@as(@Vector(16, i8), c.kvalues_mxfp4[0..16].*)),
+        .iq4_nl => @bitCast(@as(@Vector(16, i8), ggml.impl.c.kvalues_iq4nl[0..16].*)),
+        .mxfp4 => @bitCast(@as(@Vector(16, i8), ggml.impl.c.kvalues_mxfp4[0..16].*)),
     };
 }
 
-inline fn loadq(p: [*]const i8) i8x16 {
+inline fn loadq(p: [*]const i8) ggml.cpu.quants.arch.neon.i8x16 {
     return @bitCast(@as(@Vector(16, i8), p[0..16].*));
 }
 
-inline fn loadqu(p: [*]const u8) u8x16 {
+inline fn loadqu(p: [*]const u8) ggml.cpu.quants.arch.neon.u8x16 {
     return p[0..16].*;
 }
 
 /// The column scale: four `f16` deltas, or four `e8m0` exponents converted
 /// one at a time.
-inline fn colScales(comptime fmt: Fmt, bl: anytype) f32x4 {
+inline fn colScales(comptime fmt: Fmt, bl: anytype) ggml.cpu.quants.arch.neon.f32x4 {
     return switch (fmt) {
-        .iq4_nl => neon.cvt_f32_f16(neon.load_f16x4(@ptrCast(&bl.d))),
-        .mxfp4 => f32x4{
-            impl.e8m0ToFp32Half(bl.e[0]),
-            impl.e8m0ToFp32Half(bl.e[1]),
-            impl.e8m0ToFp32Half(bl.e[2]),
-            impl.e8m0ToFp32Half(bl.e[3]),
+        .iq4_nl => ggml.cpu.quants.arch.neon.cvt_f32_f16(ggml.cpu.quants.arch.neon.load_f16x4(@ptrCast(&bl.d))),
+        .mxfp4 => ggml.cpu.quants.arch.neon.f32x4{
+            ggml.impl.e8m0ToFp32Half(bl.e[0]),
+            ggml.impl.e8m0ToFp32Half(bl.e[1]),
+            ggml.impl.e8m0ToFp32Half(bl.e[2]),
+            ggml.impl.e8m0ToFp32Half(bl.e[3]),
         },
     };
 }
@@ -91,34 +79,34 @@ fn gemv(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
         const b_ptr: [*]const BlockX =
             @as([*]const BlockX, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
-        const a_ptr: [*]const c.block_q8_0 = @ptrCast(@alignCast(vy));
+        const a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
 
-        var sumf: f32x4 = @splat(0);
+        var sumf: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var l: usize = 0;
         while (l < @as(usize, @intCast(nb))) : (l += 1) {
             const qs: [*]const u8 = @ptrCast(&b_ptr[l].qs);
-            var b_lo: [4]i8x16 = undefined;
-            var b_hi: [4]i8x16 = undefined;
+            var b_lo: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
+            var b_hi: [4]ggml.cpu.quants.arch.neon.i8x16 = undefined;
             inline for (0..4) |i| {
                 const bq = loadqu(qs + i * 16);
-                b_hi[i] = neon.qtbl1q_s8(kvalues, bq >> @as(@Vector(16, u3), @splat(4)));
-                b_lo[i] = neon.qtbl1q_s8(kvalues, bq & @as(u8x16, @splat(0x0F)));
+                b_hi[i] = ggml.cpu.quants.arch.neon.qtbl1q_s8(kvalues, bq >> @as(@Vector(16, u3), @splat(4)));
+                b_lo[i] = ggml.cpu.quants.arch.neon.qtbl1q_s8(kvalues, bq & @as(ggml.cpu.quants.arch.neon.u8x16, @splat(0x0F)));
             }
 
             const aqs: [*]const i8 = @ptrCast(&a_ptr[l].qs);
             const a_0 = loadq(aqs);
             const a_1 = loadq(aqs + 16);
 
-            var sumi: i32x4 = @splat(0);
+            var sumi: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
             inline for (0..4) |i| {
-                sumi = neon.dotq_laneq_s32(sumi, b_lo[i], a_0, i);
-                sumi = neon.dotq_laneq_s32(sumi, b_hi[i], a_1, i);
+                sumi = ggml.cpu.quants.arch.neon.dotq_laneq_s32(sumi, b_lo[i], a_0, i);
+                sumi = ggml.cpu.quants.arch.neon.dotq_laneq_s32(sumi, b_hi[i], a_1, i);
             }
 
-            const a_d = neon.cvt_f32_f16(neon.dup_f16x4(a_ptr[l].d));
+            const a_d = ggml.cpu.quants.arch.neon.cvt_f32_f16(ggml.cpu.quants.arch.neon.dup_f16x4(a_ptr[l].d));
             const b_d = colScales(fmt, &b_ptr[l]);
             const d = a_d * b_d;
-            sumf = neon.fma_f32(sumf, d, neon.cvt_f32_s32(sumi));
+            sumf = ggml.cpu.quants.arch.neon.fma_f32(sumf, d, ggml.cpu.quants.arch.neon.cvt_f32_s32(sumi));
         }
         (res_ptr + @as(usize, @intCast(x * 4)))[0..4].* = sumf;
     }
@@ -133,39 +121,39 @@ fn gemm(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
 
     var y: c_int = 0;
     while (y < @divTrunc(nr, 4)) : (y += 1) {
-        const a_ptr: [*]const blocks.block_q8_0x4 =
-            @as([*]const blocks.block_q8_0x4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
+        const a_ptr: [*]const ggml.cpu.repack.blocks.block_q8_0x4 =
+            @as([*]const ggml.cpu.repack.blocks.block_q8_0x4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
         var x: c_int = 0;
         while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
             const b_ptr: [*]const BlockX =
                 @as([*]const BlockX, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
 
-            var sumf: [4]f32x4 = @splat(@as(f32x4, @splat(0)));
+            var sumf: [4]ggml.cpu.quants.arch.neon.f32x4 = @splat(@as(ggml.cpu.quants.arch.neon.f32x4, @splat(0)));
 
             var l: usize = 0;
             while (l < @as(usize, @intCast(nb))) : (l += 1) {
-                const a_d = neon.cvt_f32_f16(neon.load_f16x4(@ptrCast(&a_ptr[l].d)));
+                const a_d = ggml.cpu.quants.arch.neon.cvt_f32_f16(ggml.cpu.quants.arch.neon.load_f16x4(@ptrCast(&a_ptr[l].d)));
                 const b_d = colScales(fmt, &b_ptr[l]);
 
-                var sumi: [4]i32x4 = @splat(@as(i32x4, @splat(0)));
+                var sumi: [4]ggml.cpu.quants.arch.neon.i32x4 = @splat(@as(ggml.cpu.quants.arch.neon.i32x4, @splat(0)));
 
                 const qs: [*]const u8 = @ptrCast(&b_ptr[l].qs);
                 const aqs: [*]const i8 = @ptrCast(&a_ptr[l].qs);
                 for (0..4) |k| {
                     const bq = loadqu(qs + 16 * k);
-                    const b_hi = neon.qtbl1q_s8(kvalues, bq >> @as(@Vector(16, u3), @splat(4)));
-                    const b_lo = neon.qtbl1q_s8(kvalues, bq & @as(u8x16, @splat(0x0F)));
+                    const b_hi = ggml.cpu.quants.arch.neon.qtbl1q_s8(kvalues, bq >> @as(@Vector(16, u3), @splat(4)));
+                    const b_lo = ggml.cpu.quants.arch.neon.qtbl1q_s8(kvalues, bq & @as(ggml.cpu.quants.arch.neon.u8x16, @splat(0x0F)));
 
                     const a_0 = loadq(aqs + 16 * k);
                     const a_1 = loadq(aqs + 16 * k + 64);
 
-                    inline for (0..4) |m| sumi[m] = neon.dotq_laneq_s32(sumi[m], b_lo, a_0, m);
-                    inline for (0..4) |m| sumi[m] = neon.dotq_laneq_s32(sumi[m], b_hi, a_1, m);
+                    inline for (0..4) |m| sumi[m] = ggml.cpu.quants.arch.neon.dotq_laneq_s32(sumi[m], b_lo, a_0, m);
+                    inline for (0..4) |m| sumi[m] = ggml.cpu.quants.arch.neon.dotq_laneq_s32(sumi[m], b_hi, a_1, m);
                 }
 
                 inline for (0..4) |m| {
-                    const scale = b_d * @as(f32x4, @splat(a_d[m]));
-                    sumf[m] = neon.fma_f32(sumf[m], scale, neon.cvt_f32_s32(sumi[m]));
+                    const scale = b_d * @as(ggml.cpu.quants.arch.neon.f32x4, @splat(a_d[m]));
+                    sumf[m] = ggml.cpu.quants.arch.neon.fma_f32(sumf[m], scale, ggml.cpu.quants.arch.neon.cvt_f32_s32(sumi[m]));
                 }
             }
 
@@ -178,20 +166,20 @@ fn gemm(comptime fmt: Fmt, comptime BlockX: type, n: c_int, s: [*]f32, bs: usize
 }
 
 pub export fn ggml_gemv_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemv_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    gemv(.iq4_nl, blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemv_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    gemv(.iq4_nl, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemv_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemv_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    gemv(.mxfp4, blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemv_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    gemv(.mxfp4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemm_iq4_nl_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemm_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    gemm(.iq4_nl, blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemm_iq4_nl_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    gemm(.iq4_nl, ggml.cpu.repack.blocks.block_iq4_nlx4, n, s, bs, vx, vy, nr, nc);
 }
 pub export fn ggml_gemm_mxfp4_4x4_q8_0(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemm_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
-    gemm(.mxfp4, blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.nibble4.ggml_gemm_mxfp4_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    gemm(.mxfp4, ggml.cpu.repack.blocks.block_mxfp4x4, n, s, bs, vx, vy, nr, nc);
 }
 
 comptime {

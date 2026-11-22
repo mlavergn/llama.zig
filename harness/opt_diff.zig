@@ -1091,7 +1091,7 @@ fn libcxxOracle() usize {
 fn aborts(body: *const fn (api: *const Api, sched: c.ggml_backend_sched_t) void, api: *const Api, sched: c.ggml_backend_sched_t) bool {
     const pid = libc.fork();
     if (pid == 0) {
-        const devnull = libc.open("/dev/null", 1);
+        const devnull = libc.open("/dev/null", .{ .ACCMODE = .WRONLY });
         _ = libc.dup2(devnull, 2);
         body(api, sched);
         libc._exit(0);
@@ -1251,7 +1251,7 @@ fn captureStderr(r: *Run, comptime body: anytype, args: anytype) []const u8 {
     _ = libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
     _ = libc.dup2(saved, 2);
     _ = libc.close(saved);
-    _ = libc.lseek(fd, 0, 0);
+    _ = libc.lseek(fd, 0, std.c.SEEK.SET);
     var out: std.ArrayList(u8) = .empty;
     var chunk: [4096]u8 = undefined;
     while (true) {

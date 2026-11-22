@@ -16,19 +16,12 @@
 //! `sampling.zig`'s, whole.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const num = @import("stdlib").num;
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const llama = @import("llama");
-const params_mod = @import("params.zig");
-const log = @import("log.zig");
-const common = @import("common.zig");
-const arg = @import("arg.zig");
 const fit = @import("cli_fit");
-const sampling = @import("sampling.zig");
-
-const Params = params_mod.Params;
 
 /// `COM_*`'s `cmn  %12.*s: ` prefix.
 fn comPrefix(comptime fmt: []const u8) [:0]const u8 {
@@ -36,19 +29,19 @@ fn comPrefix(comptime fmt: []const u8) [:0]const u8 {
 }
 
 fn comTrc(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.trc(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
+    mod.log.trc(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
 fn comInf(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.inf(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
+    mod.log.inf(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
 fn comWrn(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.wrn(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
+    mod.log.wrn(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
 fn comErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
+    mod.log.err(comPrefix(fmt), .{ @as(c_int, 12), func } ++ args);
 }
 
 /// Ports `common_init_result` (common/common.h:1009 @b1b770d90).
@@ -56,7 +49,7 @@ pub const InitResult = struct {
     model: ?*c.llama_model = null,
     context: ?*c.llama_context = null,
     lora: std.ArrayList(*c.llama_adapter_lora) = .empty,
-    samplers: std.ArrayList(*sampling.Sampler) = .empty,
+    samplers: std.ArrayList(*mod.sampling.Sampler) = .empty,
     threadpool: ?*c.ggml_threadpool = null,
     threadpool_batch: ?*c.ggml_threadpool = null,
 
@@ -70,7 +63,7 @@ pub const InitResult = struct {
     ///
     /// Return: the sampler for `seq_id`, or null past the last; owned by
     /// the result.
-    pub fn sampler(self: *const InitResult, seq_id: c.llama_seq_id) ?*sampling.Sampler {
+    pub fn sampler(self: *const InitResult, seq_id: c.llama_seq_id) ?*mod.sampling.Sampler {
         if (seq_id < 0 or seq_id >= @as(c_int, @intCast(self.samplers.items.len))) return null;
         return self.samplers.items[@intCast(seq_id)];
     }
@@ -87,17 +80,17 @@ pub const InitResult = struct {
 
 /// Ports `common_init_sampler_from_model` (common/common.cpp:1079 @b1b770d90): the
 /// model's recommended sampling, where the command line set none.
-fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
+fn initSamplerFromModel(p: *mod.params.Params, model: ?*const c.llama_model) !void {
     const sp = &p.sampling;
     const config = sp.user_sampling_config;
-    const Cfg = params_mod.SamplingConfig;
+    const Cfg = mod.params.SamplingConfig;
 
     const Get = struct {
         fn int32(m: ?*const c.llama_model, cfg: u64, key: c.llama_model_meta_key, dst: *i32, user: u64) void {
             if (cfg & user != 0) return;
             var buf: [64]u8 = @splat(0);
             if (c.llama_model_meta_val_str(m, c.llama_model_meta_key_str(key), &buf, buf.len) > 0) {
-                const parsed = num.strtol(std.mem.sliceTo(&buf, 0), 10);
+                const parsed = stdlib.num.strtol(std.mem.sliceTo(&buf, 0), 10);
                 if (parsed.end != 0) dst.* = @truncate(parsed.value);
             }
         }
@@ -105,7 +98,7 @@ fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
             if (cfg & user != 0) return;
             var buf: [128]u8 = @splat(0);
             if (c.llama_model_meta_val_str(m, c.llama_model_meta_key_str(key), &buf, buf.len) > 0) {
-                const parsed = num.strtof(std.mem.sliceTo(&buf, 0));
+                const parsed = stdlib.num.strtof(std.mem.sliceTo(&buf, 0));
                 if (parsed.end != 0) dst.* = parsed.value;
             }
         }
@@ -138,18 +131,18 @@ fn initSamplerFromModel(p: *Params, model: ?*const c.llama_model) !void {
 
 /// What `common_sampler_init` throws; `common_init_from_params` does not
 /// catch it, so it escapes `main`.
-pub const SamplerError = sampling.InitError;
+pub const SamplerError = mod.sampling.InitError;
 
 /// `common_sampler_init` over a tool's parameters; `sampling.init` is the
 /// port.
 ///
 /// Return: the sampler, which the caller owns (`Sampler.destroy`).
-pub fn samplerInit(p: *Params, model: ?*const c.llama_model) !*sampling.Sampler {
-    return sampling.init(model, &p.sampling);
+pub fn samplerInit(p: *mod.params.Params, model: ?*const c.llama_model) !*mod.sampling.Sampler {
+    return mod.sampling.init(model, &p.sampling);
 }
 
 /// Ports `ggml_threadpool_params_from_cpu_params` (common/common.cpp:1784 @b1b770d90).
-fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
+fn threadpoolParams(cp: *const mod.params.CpuParams) c.ggml_threadpool_params {
     var tpp: c.ggml_threadpool_params = undefined;
     c.ggml_threadpool_params_init(&tpp, cp.n_threads); // setup the defaults
     if (cp.mask_valid) @memcpy(tpp.cpumask[0..c.GGML_MAX_N_THREADS], cp.cpumask[0..]);
@@ -160,7 +153,7 @@ fn threadpoolParams(cp: *const params_mod.CpuParams) c.ggml_threadpool_params {
 }
 
 /// Ports `init` (common/common.cpp:1808 @b1b770d90), a member of `common_threadpools`.
-fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) void {
+fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const mod.params.Params) void {
     const func = "init";
     comInf(func, "llama threadpool init, n_threads = %d\n", .{p.cpuparams.n_threads});
 
@@ -195,8 +188,6 @@ fn threadpoolsInit(res: *InitResult, ctx: ?*c.llama_context, p: *const Params) v
     c.llama_attach_threadpool(ctx, res.threadpool, res.threadpool_batch);
 }
 
-extern fn setpriority(which: c_int, who: c_uint, prio: c_int) c_int;
-
 /// Ports `set_process_priority` (common/common.cpp:281 @b1b770d90), the POSIX arm;
 /// Windows has its own, through `SetPriorityClass`.
 pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
@@ -227,7 +218,7 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
         c.GGML_SCHED_PRIO_REALTIME => -20,
         else => 0,
     };
-    if (setpriority(0, 0, v) != 0) {
+    if (stdlib.libc.setpriority(0, 0, v) != 0) {
         const e = std.c._errno().*;
         comWrn("set_process_priority", "failed to set process priority %d : %s (%d)\n", .{ @as(c_int, @intCast(prio)), stdlib.errno.strerror(e), e });
         return false;
@@ -239,7 +230,7 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
 const ControlVectorData = struct { n_embd: i32, data: std.ArrayList(f32) };
 
 /// Ports `common_control_vector_load_one` (common/common.cpp:1998 @b1b770d90).
-fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
+fn controlVectorLoadOne(a: std.mem.Allocator, info: mod.params.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load_one";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
 
@@ -263,7 +254,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
         if (std.mem.indexOfScalar(u8, name, '.')) |dotpos| {
             if (std.mem.eql(u8, name[0..dotpos], "direction")) {
                 const z = try a.dupeSentinel(u8, name[dotpos + 1 ..], 0);
-                layer_idx = arg.stoi(z) catch -1;
+                layer_idx = mod.arg.stoi(z) catch -1;
             }
         }
         if (layer_idx < 0) {
@@ -324,7 +315,7 @@ fn controlVectorLoadOne(a: std.mem.Allocator, info: params_mod.ControlVectorLoad
 
 /// Ports `common_control_vector_load` (common/common.cpp:2087 @b1b770d90):
 /// direction layer indices must be in `[1, n_layer]`.
-fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
+fn controlVectorLoad(a: std.mem.Allocator, infos: []const mod.params.ControlVectorLoadInfo, n_layer: i32) !ControlVectorData {
     const func = "common_control_vector_load";
     var result: ControlVectorData = .{ .n_embd = -1, .data = .empty };
 
@@ -363,11 +354,11 @@ fn controlVectorLoad(a: std.mem.Allocator, infos: []const params_mod.ControlVect
 /// - `gpa`: for the measurements; `p.arena` holds what lives on.
 /// - `p`: the parameters.
 /// - `mparams`, `cparams`: what `--fit` writes to.
-pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_params, cparams: *c.llama_context_params) !void {
+pub fn fitApply(gpa: std.mem.Allocator, p: *mod.params.Params, mparams: *c.llama_model_params, cparams: *c.llama_context_params) !void {
     if (!p.fit_params) return;
 
     const a = p.arena;
-    const model_paths = try common.modelPaths(a, &p.model);
+    const model_paths = try mod.common.modelPaths(a, &p.model);
 
     comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "fitting params to device memory ...\n")});
     comTrc("common_fit_apply", "%s", .{@as([*:0]const u8, "(for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n")});
@@ -380,13 +371,13 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
 
     var params_dft = @import("speculative.zig").baseParamsToSpeculative(p);
 
-    var mparams_dft = common.modelParamsToLlama(&params_dft);
-    var cparams_dft = common.contextParamsToLlama(&params_dft);
+    var mparams_dft = mod.common.modelParamsToLlama(&params_dft);
+    var cparams_dft = mod.common.contextParamsToLlama(&params_dft);
     if (spec_mtp) cparams_dft.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
     cparams_dft.n_rs_seq = 0;
 
     const extra: fit.ExtraModel = .{
-        .paths_model = try common.modelPaths(a, &params_dft.model),
+        .paths_model = try mod.common.modelPaths(a, &params_dft.model),
         .mparams = @ptrCast(&mparams_dft),
         .cparams = @ptrCast(&cparams_dft),
         .shares_model = !has_draft, // an MTP context runs on the weights of the main model
@@ -396,7 +387,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
     _ = try fit.fitParams(
         gpa,
         &patterns,
-        .{ .verbosity = std.math.maxInt(i32), .sink = common.fitLogSink, .json = common.fitLogJson },
+        .{ .verbosity = std.math.maxInt(i32), .sink = mod.common.fitLogSink, .json = mod.common.fitLogJson },
         model_paths,
         @ptrCast(mparams),
         @ptrCast(cparams),
@@ -405,7 +396,7 @@ pub fn fitApply(gpa: std.mem.Allocator, p: *Params, mparams: *c.llama_model_para
         p.fit_params_target.items.ptr,
         @bitCast(p.fit_params_min_ctx),
         if (has_draft or spec_mtp) &extra else null,
-        if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR,
+        if (p.verbosity >= mod.log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR,
     );
 }
 
@@ -429,14 +420,14 @@ pub const MemoryReports = struct {
 /// - `what_out`: `what()` of the exception, on `error.Runtime`.
 ///
 /// Return: the reports, their rows from `p.arena`.
-pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) !MemoryReports {
-    const log_level: c.enum_ggml_log_level = if (p.verbosity >= log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR;
-    const paths_model = try common.modelPaths(p.arena, &p.model);
+pub fn measureMemory(gpa: std.mem.Allocator, p: *mod.params.Params, what_out: *[]const u8) !MemoryReports {
+    const log_level: c.enum_ggml_log_level = if (p.verbosity >= mod.log.level_debug) c.GGML_LOG_LEVEL_DEBUG else c.GGML_LOG_LEVEL_ERROR;
+    const paths_model = try mod.common.modelPaths(p.arena, &p.model);
 
     var res: MemoryReports = .{};
 
-    const mparams = common.modelParamsToLlama(p);
-    var cparams = common.contextParamsToLlama(p);
+    const mparams = mod.common.modelParamsToLlama(p);
+    var cparams = mod.common.contextParamsToLlama(p);
 
     // max: what --fit picks now, no-op with -fit off
     {
@@ -469,16 +460,16 @@ pub fn measureMemory(gpa: std.mem.Allocator, p: *Params, what_out: *[]const u8) 
 }
 
 /// Ports `common_init_result` (common/common.cpp:1276 @b1b770d90), a member of `common_init_result`.
-fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitResult) !void {
+fn initResult(gpa: std.mem.Allocator, p: *mod.params.Params, model_only: bool, res: *InitResult) !void {
     const a = p.arena;
-    var mparams = common.modelParamsToLlama(p);
-    var cparams = common.contextParamsToLlama(p);
+    var mparams = mod.common.modelParamsToLlama(p);
+    var cparams = mod.common.contextParamsToLlama(p);
 
     const model_path = try a.dupeSentinel(u8, p.model.path, 0);
 
     try fitApply(gpa, p, &mparams, &cparams);
 
-    const model = common.modelLoad(try common.modelPaths(a, &p.model), mparams) orelse return;
+    const model = mod.common.modelLoad(try mod.common.modelPaths(a, &p.model), mparams) orelse return;
     res.model = model;
 
     if (model_only) return;
@@ -487,7 +478,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
 
     // these decision models return a score for each token via the embeddings output
     // TODO: maybe improve this in the future
-    const decision_type = common.getDecisionType(model);
+    const decision_type = mod.common.getDecisionType(model);
     // minicpm-ocr-jev reads its class scores from the pooled output, the pooling type is the one of the GGUF
     if (decision_type == .laya or decision_type == .kev or decision_type == .clef or
         decision_type == .lfm2_d1_omni or decision_type == .vllm_decision2 or
@@ -503,7 +494,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
         cparams.n_outputs_max = cparams.n_batch;
         cparams.n_outputs_max_per_seq = 1;
 
-        log.inf("%s", .{@as([*:0]const u8, "decision model reads the embeddings output, enabling embedding mode\n")});
+        mod.log.inf("%s", .{@as([*:0]const u8, "decision model reads the embeddings output, enabling embedding mode\n")});
     }
 
     if (llama.api.model.llama_model_classifier_free_guidance(@ptrCast(model))) { // llama-ext.h: C++ linkage, reached through the port's api
@@ -515,7 +506,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     // embeddings need the whole batch in one ubatch, so n_batch must not be larger than n_ubatch
     // (server.cpp does this check for --embedding, but before the model is loaded)
     if (cparams.embeddings and cparams.n_batch > cparams.n_ubatch) {
-        log.wrn("embeddings enabled: setting n_batch = n_ubatch = %u\n", .{cparams.n_ubatch});
+        mod.log.wrn("embeddings enabled: setting n_batch = n_ubatch = %u\n", .{cparams.n_ubatch});
         cparams.n_batch = cparams.n_ubatch;
         p.n_batch = p.n_ubatch;
     }
@@ -548,7 +539,7 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     var i: c.llama_token = 0;
     while (i < c.llama_vocab_n_tokens(vocab)) : (i += 1) {
         if (c.llama_vocab_is_eog(vocab, i)) {
-            comTrc("common_init_result", "added %s logit bias = %f\n", .{ (try common.tokenToPiece(a, vocab, i, true)).ptr, -std.math.inf(f64) });
+            comTrc("common_init_result", "added %s logit bias = %f\n", .{ (try mod.common.tokenToPiece(a, vocab, i, true)).ptr, -std.math.inf(f64) });
             try logit_bias_eog.append(a, .{ .token = i, .bias = -std.math.inf(f32) });
         }
     }
@@ -566,11 +557,11 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     while (k < cparams.n_seq_max) : (k += 1) {
         const s = samplerInit(p, model) catch |e| switch (e) {
             error.InvalidArgument => {
-                io_.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: %.*s\n", .{ @as(c_int, @intCast(arg.what().len)), arg.what().ptr });
+                mod.io.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: %.*s\n", .{ @as(c_int, @intCast(mod.arg.what().len)), mod.arg.what().ptr });
                 std.process.abort();
             },
             error.Runtime => {
-                io_.eprintf("libc++abi: terminating due to uncaught exception of type std::runtime_error: %.*s\n", .{ @as(c_int, @intCast(arg.what().len)), arg.what().ptr });
+                mod.io.eprintf("libc++abi: terminating due to uncaught exception of type std::runtime_error: %.*s\n", .{ @as(c_int, @intCast(mod.arg.what().len)), mod.arg.what().ptr });
                 std.process.abort();
             },
             else => |other| return other,
@@ -595,13 +586,11 @@ fn initResult(gpa: std.mem.Allocator, p: *Params, model_only: bool, res: *InitRe
     threadpoolsInit(res, lctx, p);
 }
 
-const io_ = @import("io.zig");
-
 /// Ports `common_init_from_params` (common/common.cpp:1432 @b1b770d90).
 ///
 /// Return: the model and context, either null where loading failed, having
 /// logged why. The caller owns the result.
-pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !InitResult {
+pub fn initFromParams(gpa: std.mem.Allocator, p: *mod.params.Params, model_only: bool) !InitResult {
     const func = "common_init_from_params";
     var res: InitResult = .{};
     try initResult(gpa, p, model_only, &res);
@@ -689,7 +678,7 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
         if (tmp.items.len == 0) try tmp.append(p.arena, 0);
 
         if (c.llama_model_has_encoder(model)) {
-            var batch = common.batchGetOne(gpa, lctx, tmp.items);
+            var batch = mod.common.batchGetOne(gpa, lctx, tmp.items);
             defer batch.deinit();
             _ = c.llama_process(lctx, c.LLAMA_PROCESS_TYPE_ENCODE, batch.get());
             var decoder_start_token_id = c.llama_model_decoder_start_token(model);
@@ -699,11 +688,11 @@ pub fn initFromParams(gpa: std.mem.Allocator, p: *Params, model_only: bool) !Ini
         }
         if (c.llama_model_has_decoder(model)) {
             tmp.shrinkRetainingCapacity(@min(tmp.items.len, @as(usize, @intCast(p.n_batch))));
-            var batch = common.batchGetOne(gpa, lctx, tmp.items);
+            var batch = mod.common.batchGetOne(gpa, lctx, tmp.items);
             defer batch.deinit();
             var zeros: std.ArrayList(f32) = .empty;
             defer zeros.deinit(gpa);
-            common.batchSetZeroState(gpa, &batch, model, &zeros);
+            mod.common.batchSetZeroState(gpa, &batch, model, &zeros);
             _ = c.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
         }
         c.llama_memory_clear(c.llama_get_memory(lctx), true);

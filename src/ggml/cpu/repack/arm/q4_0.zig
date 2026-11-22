@@ -29,53 +29,44 @@
 //! two accumulators merged by the **pairwise** `vpaddq_s32`.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const blocks = @import("../blocks.zig");
-const neon = @import("../../quants/arm/neon.zig");
+const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
 // without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
 // Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
-extern fn ggml_gemv_q4_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-extern fn ggml_gemv_q4_0_4x8_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
 
-const c = impl.c;
-const f32x4 = neon.f32x4;
-const i32x4 = neon.i32x4;
-const i8x16 = neon.i8x16;
-
-inline fn loadq(p: [*]const i8) i8x16 {
+inline fn loadq(p: [*]const i8) ggml.cpu.quants.arch.neon.i8x16 {
     return @bitCast(@as(@Vector(16, i8), p[0..16].*));
 }
 
 /// `b << 4` on `i8` lanes. Done on the unsigned reinterpretation because
 /// the bits shifted out of a signed lane are discarded, which `u8 << 4`
 /// says unambiguously and Zig has no `<<%` to say otherwise.
-inline fn shl4(v: i8x16) i8x16 {
+inline fn shl4(v: ggml.cpu.quants.arch.neon.i8x16) ggml.cpu.quants.arch.neon.i8x16 {
     const u: @Vector(16, u8) = @bitCast(v);
     return @bitCast(u << @as(@Vector(16, u3), @splat(4)));
 }
 
 /// `b & 0xf0` on `i8` lanes.
-inline fn hi4(v: i8x16) i8x16 {
+inline fn hi4(v: ggml.cpu.quants.arch.neon.i8x16) ggml.cpu.quants.arch.neon.i8x16 {
     const u: @Vector(16, u8) = @bitCast(v);
     return @bitCast(u & @as(@Vector(16, u8), @splat(0xf0)));
 }
 
 /// Ports `ggml_gemv_q4_0_4x4_q8_0` (arch/arm/repack.cpp:230 @b1b770d90).
 pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_0.ggml_gemv_q4_0_4x4_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const qk: c_int = 32;
     const nb = @divTrunc(n, qk);
     const ncols_interleaved: c_int = 4;
 
-    var b_ptr: [*]const blocks.block_q4_0x4 = @ptrCast(@alignCast(vx));
+    var b_ptr: [*]const ggml.cpu.repack.blocks.block_q4_0x4 = @ptrCast(@alignCast(vx));
     var s = s_out;
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const c.block_q8_0 = @ptrCast(@alignCast(vy));
-        var acc: f32x4 = @splat(0);
+        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
             const qs: [*]const i8 = @ptrCast(&b_ptr[0].qs);
@@ -83,24 +74,24 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
             const b1 = loadq(qs + 16);
             const b2 = loadq(qs + 32);
             const b3 = loadq(qs + 48);
-            const bd = neon.load_f16x4(@ptrCast(&b_ptr[0].d));
+            const bd = ggml.cpu.quants.arch.neon.load_f16x4(@ptrCast(&b_ptr[0].d));
 
             const aqs: [*]const i8 = @ptrCast(&a_ptr[0].qs);
             const a0 = loadq(aqs);
             const a1 = loadq(aqs + @as(usize, @intCast(@divTrunc(qk, 2))));
-            const ad = neon.dup_f16x4(a_ptr[0].d);
+            const ad = ggml.cpu.quants.arch.neon.dup_f16x4(a_ptr[0].d);
 
-            var ret: i32x4 = @splat(0);
-            ret = neon.dotq_laneq_s32(ret, shl4(b0), a0, 0);
-            ret = neon.dotq_laneq_s32(ret, shl4(b1), a0, 1);
-            ret = neon.dotq_laneq_s32(ret, shl4(b2), a0, 2);
-            ret = neon.dotq_laneq_s32(ret, shl4(b3), a0, 3);
-            ret = neon.dotq_laneq_s32(ret, hi4(b0), a1, 0);
-            ret = neon.dotq_laneq_s32(ret, hi4(b1), a1, 1);
-            ret = neon.dotq_laneq_s32(ret, hi4(b2), a1, 2);
-            ret = neon.dotq_laneq_s32(ret, hi4(b3), a1, 3);
+            var ret: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, shl4(b0), a0, 0);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, shl4(b1), a0, 1);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, shl4(b2), a0, 2);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, shl4(b3), a0, 3);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, hi4(b0), a1, 0);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, hi4(b1), a1, 1);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, hi4(b2), a1, 2);
+            ret = ggml.cpu.quants.arch.neon.dotq_laneq_s32(ret, hi4(b3), a1, 3);
 
-            acc = neon.fma_f32(acc, neon.cvtq_n_f32_s32(ret, 4), neon.cvt_f32_f16(ad) * neon.cvt_f32_f16(bd));
+            acc = ggml.cpu.quants.arch.neon.fma_f32(acc, ggml.cpu.quants.arch.neon.cvtq_n_f32_s32(ret, 4), ggml.cpu.quants.arch.neon.cvt_f32_f16(ad) * ggml.cpu.quants.arch.neon.cvt_f32_f16(bd));
             a_ptr += 1;
             b_ptr += 1;
         }
@@ -111,17 +102,17 @@ pub export fn ggml_gemv_q4_0_4x4_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
 
 /// Ports `ggml_gemv_q4_0_4x8_q8_0` (arch/arm/repack.cpp:291 @b1b770d90).
 pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemv_q4_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_0.ggml_gemv_q4_0_4x8_q8_0_generic(n, s_out, bs, vx, vy, nr, nc);
     const nb = @divTrunc(n, 32);
     const ncols_interleaved: c_int = 4;
 
-    var b_ptr: [*]const blocks.block_q4_0x4 = @ptrCast(@alignCast(vx));
+    var b_ptr: [*]const ggml.cpu.repack.blocks.block_q4_0x4 = @ptrCast(@alignCast(vx));
     var s = s_out;
 
     var col: c_int = 0;
     while (col < nc) : (col += ncols_interleaved) {
-        var a_ptr: [*]const c.block_q8_0 = @ptrCast(@alignCast(vy));
-        var acc: f32x4 = @splat(0);
+        var a_ptr: [*]const ggml.impl.c.block_q8_0 = @ptrCast(@alignCast(vy));
+        var acc: ggml.cpu.quants.arch.neon.f32x4 = @splat(0);
         var b: c_int = 0;
         while (b < nb) : (b += 1) {
             const qs: [*]const i8 = @ptrCast(&b_ptr[0].qs);
@@ -129,29 +120,29 @@ pub export fn ggml_gemv_q4_0_4x8_q8_0(n: c_int, s_out: [*]f32, bs: usize, vx: *c
             const b1 = loadq(qs + 16);
             const b2 = loadq(qs + 32);
             const b3 = loadq(qs + 48);
-            const bd = neon.load_f16x4(@ptrCast(&b_ptr[0].d));
+            const bd = ggml.cpu.quants.arch.neon.load_f16x4(@ptrCast(&b_ptr[0].d));
 
             const aqs: [*]const i8 = @ptrCast(&a_ptr[0].qs);
-            const a0 = neon.dupq_i8x16_from8(aqs);
-            const a1 = neon.dupq_i8x16_from8(aqs + 8);
-            const a2 = neon.dupq_i8x16_from8(aqs + 16);
-            const a3 = neon.dupq_i8x16_from8(aqs + 24);
-            const ad = neon.dup_f16x4(a_ptr[0].d);
+            const a0 = ggml.cpu.quants.arch.neon.dupq_i8x16_from8(aqs);
+            const a1 = ggml.cpu.quants.arch.neon.dupq_i8x16_from8(aqs + 8);
+            const a2 = ggml.cpu.quants.arch.neon.dupq_i8x16_from8(aqs + 16);
+            const a3 = ggml.cpu.quants.arch.neon.dupq_i8x16_from8(aqs + 24);
+            const ad = ggml.cpu.quants.arch.neon.dup_f16x4(a_ptr[0].d);
 
-            var ret0: i32x4 = @splat(0);
-            var ret1: i32x4 = @splat(0);
-            ret0 = neon.dotq_s32(ret0, shl4(b0), a0);
-            ret1 = neon.dotq_s32(ret1, shl4(b1), a0);
-            ret0 = neon.dotq_s32(ret0, shl4(b2), a1);
-            ret1 = neon.dotq_s32(ret1, shl4(b3), a1);
-            ret0 = neon.dotq_s32(ret0, hi4(b0), a2);
-            ret1 = neon.dotq_s32(ret1, hi4(b1), a2);
-            ret0 = neon.dotq_s32(ret0, hi4(b2), a3);
-            ret1 = neon.dotq_s32(ret1, hi4(b3), a3);
+            var ret0: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+            var ret1: ggml.cpu.quants.arch.neon.i32x4 = @splat(0);
+            ret0 = ggml.cpu.quants.arch.neon.dotq_s32(ret0, shl4(b0), a0);
+            ret1 = ggml.cpu.quants.arch.neon.dotq_s32(ret1, shl4(b1), a0);
+            ret0 = ggml.cpu.quants.arch.neon.dotq_s32(ret0, shl4(b2), a1);
+            ret1 = ggml.cpu.quants.arch.neon.dotq_s32(ret1, shl4(b3), a1);
+            ret0 = ggml.cpu.quants.arch.neon.dotq_s32(ret0, hi4(b0), a2);
+            ret1 = ggml.cpu.quants.arch.neon.dotq_s32(ret1, hi4(b1), a2);
+            ret0 = ggml.cpu.quants.arch.neon.dotq_s32(ret0, hi4(b2), a3);
+            ret1 = ggml.cpu.quants.arch.neon.dotq_s32(ret1, hi4(b3), a3);
 
-            const ret = neon.paddq_s32(ret0, ret1);
+            const ret = ggml.cpu.quants.arch.neon.paddq_s32(ret0, ret1);
 
-            acc = neon.fma_f32(acc, neon.cvtq_n_f32_s32(ret, 4), neon.cvt_f32_f16(ad) * neon.cvt_f32_f16(bd));
+            acc = ggml.cpu.quants.arch.neon.fma_f32(acc, ggml.cpu.quants.arch.neon.cvtq_n_f32_s32(ret, 4), ggml.cpu.quants.arch.neon.cvt_f32_f16(ad) * ggml.cpu.quants.arch.neon.cvt_f32_f16(bd));
             a_ptr += 1;
             b_ptr += 1;
         }

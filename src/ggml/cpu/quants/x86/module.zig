@@ -25,12 +25,20 @@
 
 const std = @import("std");
 
+pub const rows = @import("rows.zig");
+pub const legacy = @import("legacy.zig");
+pub const k = @import("k.zig");
+pub const ternary = @import("ternary.zig");
+pub const iq = @import("iq.zig");
+pub const avx2 = @import("avx2.zig");
+pub const common = @import("common.zig");
+
 comptime {
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("k.zig");
-    _ = @import("ternary.zig");
-    _ = @import("iq.zig");
+    _ = rows;
+    _ = legacy;
+    _ = k;
+    _ = ternary;
+    _ = iq;
 }
 
 // -----------------------------------------------------------------------------
@@ -38,11 +46,6 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("avx2.zig");
-    _ = @import("common.zig");
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("k.zig");
-    _ = @import("ternary.zig");
-    _ = @import("iq.zig");
+    _ = avx2;
+    _ = common;
 }

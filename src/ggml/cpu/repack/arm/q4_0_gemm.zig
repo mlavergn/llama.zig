@@ -33,15 +33,11 @@
 //! travel with the code rather than being dropped.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const neon = @import("../../quants/arm/neon.zig");
+const ggml = @import("../../../module.zig");
 
 // The `_generic` bodies, in `cpu/repack/`, that each export below falls to
 // without `__ARM_FEATURE_DOTPROD` -- the C's trailing call after its `#if`.
 // Zig's `aarch64-linux` baseline, `generic`, takes them; no Apple core does.
-extern fn ggml_gemm_q4_0_4x4_q8_0_generic(n: c_int, s: [*]f32, bs: usize, vx: *const anyopaque, vy: *const anyopaque, nr: c_int, nc: c_int) void;
-
-const c = impl.c;
 
 /// Ports `ggml_gemm_q4_0_4x4_q8_0` (arch/arm/repack.cpp:2089 @b1b770d90).
 ///
@@ -59,7 +55,7 @@ pub export fn ggml_gemm_q4_0_4x4_q8_0(
     nr: c_int,
     nc: c_int,
 ) callconv(.c) void {
-    if (comptime !neon.has_dotprod) return ggml_gemm_q4_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+    if (comptime !ggml.cpu.quants.arch.neon.has_dotprod) return ggml.cpu.repack.q4_0.ggml_gemm_q4_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
     const nb: usize = @intCast(@divTrunc(n, 32));
 
     const b_ptr: [*]const u8 = @ptrCast(vx);
@@ -573,5 +569,5 @@ pub export fn ggml_gemm_q4_0_4x4_q8_0(
 
 comptime {
     _ = std;
-    _ = c;
+    _ = ggml.impl.c;
 }

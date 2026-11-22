@@ -11,7 +11,6 @@ const std = @import("std");
 const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 
-const log = tc.log;
 const Allocator = std.mem.Allocator;
 
 const LOCK = std.posix.LOCK;
@@ -86,7 +85,7 @@ pub const FileLock = struct {
             const f = openNoFollow(io, self.lock_path) catch {
                 const z = try self.a.dupeSentinel(u8, self.lock_path, 0);
                 defer self.a.free(z);
-                log.err("%s: cannot open lock file: %s\n", .{ func, z.ptr });
+                tc.log.err("%s: cannot open lock file: %s\n", .{ func, z.ptr });
                 return .err;
             };
             // open() filters the mode through the umask
@@ -109,7 +108,7 @@ pub const FileLock = struct {
             return .busy;
         }
         // flock is not implemented (some NFS/FUSE mounts): report it instead of racing
-        log.err("%s: file locking failed (%s)\n", .{ func, stdlib.errno.strerror(@backingInt(e)) });
+        tc.log.err("%s: file locking failed (%s)\n", .{ func, stdlib.errno.strerror(@backingInt(e)) });
         return .err;
     }
 
@@ -128,7 +127,7 @@ pub const FileLock = struct {
                 if (ec != 0) {
                     const z = try self.a.dupeSentinel(u8, lock_dir, 0);
                     defer self.a.free(z);
-                    log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, stdlib.errno.strerror(ec) });
+                    tc.log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, stdlib.errno.strerror(ec) });
                     return false;
                 }
             }

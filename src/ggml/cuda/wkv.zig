@@ -8,14 +8,7 @@
 //! kernels -- `rwkv_wkv_f32`, `rwkv_wkv7_f32` and
 //! `rwkv_wkv7_f32_t1_warp_row` -- stay CUDA. Every launch is `<<<>>>`.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `CUDA_WKV_BLOCK_SIZE` (wkv.cuh:3 @b1b770d90).
 const block_size = 64;
 
@@ -29,12 +22,12 @@ fn int(x: i64) c_int {
     return @truncate(x);
 }
 
-fn srcData(dst: *const Tensor, i: usize) ?*const anyopaque {
-    return impl.one(Tensor, dst.src[i]).data;
+fn srcData(dst: *const ggml.impl.c.ggml_tensor, i: usize) ?*const anyopaque {
+    return ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[i]).data;
 }
 
 /// Ports `ggml_cuda_op_rwkv_wkv6` (wkv.cu:193 @b1b770d90).
-pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
+pub fn opRwkvWkv6(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const k_d = srcData(dst, 0);
     const v_d = srcData(dst, 1);
     const r_d = srcData(dst, 2);
@@ -51,21 +44,21 @@ pub fn opRwkvWkv6(ctx: *common.Context, dst: *Tensor) void {
 
     const stream = ctx.stream();
 
-    impl.assert(dst.src[5].*.type == c.GGML_TYPE_F32, "dst->src[5]->type == GGML_TYPE_F32");
-    impl.assert(@rem(C, H) == 0, "C % H == 0");
-    impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
+    ggml.impl.assert(dst.src[5].*.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[5]->type == GGML_TYPE_F32");
+    ggml.impl.assert(@rem(C, H) == 0, "C % H == 0");
+    ggml.impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
 
-    const p: kernels.LaunchParams = .{ .grid = .{ .x = dim(B * H) }, .block = .{ .x = dim(@divTrunc(C, H)) }, .shmem = 0, .stream = stream };
+    const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = dim(B * H) }, .block = .{ .x = dim(@divTrunc(C, H)) }, .shmem = 0, .stream = stream };
     const args = .{ int(B), int(T), int(C), int(H), k_d, v_d, r_d, tf_d, td_d, s_d, dst_d };
     if (@divTrunc(C, H) == block_size) {
-        kernels.launch(kernels.get("wkv", kernels.tmpl("rwkv_wkv_f32", &.{kernels.int(block_size)})), p, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("wkv", ggml.cuda.kernels.tmpl("rwkv_wkv_f32", &.{ggml.cuda.kernels.int(block_size)})), p, args);
     } else {
-        kernels.launch(kernels.get("wkv", kernels.tmpl("rwkv_wkv_f32", &.{kernels.int(block_size * 2)})), p, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("wkv", ggml.cuda.kernels.tmpl("rwkv_wkv_f32", &.{ggml.cuda.kernels.int(block_size * 2)})), p, args);
     }
 }
 
 /// Ports `ggml_cuda_op_rwkv_wkv7` (wkv.cu:221 @b1b770d90).
-pub fn opRwkvWkv7(ctx: *common.Context, dst: *Tensor) void {
+pub fn opRwkvWkv7(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const r_d = srcData(dst, 0);
     const w_d = srcData(dst, 1);
     const k_d = srcData(dst, 2);
@@ -83,25 +76,25 @@ pub fn opRwkvWkv7(ctx: *common.Context, dst: *Tensor) void {
 
     const stream = ctx.stream();
 
-    impl.assert(dst.src[6].*.type == c.GGML_TYPE_F32, "dst->src[6]->type == GGML_TYPE_F32");
-    impl.assert(@rem(C, H) == 0, "C % H == 0");
-    impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
+    ggml.impl.assert(dst.src[6].*.type == ggml.impl.c.GGML_TYPE_F32, "dst->src[6]->type == GGML_TYPE_F32");
+    ggml.impl.assert(@rem(C, H) == 0, "C % H == 0");
+    ggml.impl.assert(@divTrunc(C, H) == block_size or @divTrunc(C, H) == block_size * 2, "C / H == CUDA_WKV_BLOCK_SIZE || C / H == CUDA_WKV_BLOCK_SIZE * 2");
 
     if (@divTrunc(T, B) == 1 and @divTrunc(C, H) == block_size) {
         const rows_per_block = 4;
-        kernels.launch(kernels.get("wkv", kernels.tmpl("rwkv_wkv7_f32_t1_warp_row", &.{kernels.int(rows_per_block)})), .{
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("wkv", ggml.cuda.kernels.tmpl("rwkv_wkv7_f32_t1_warp_row", &.{ggml.cuda.kernels.int(rows_per_block)})), .{
             .grid = .{ .x = dim(B * H), .y = block_size / rows_per_block },
-            .block = .{ .x = common.warp_size, .y = rows_per_block },
+            .block = .{ .x = ggml.cuda.common.warp_size, .y = rows_per_block },
             .shmem = 0,
             .stream = stream,
         }, .{ int(T), int(C), int(H), r_d, w_d, k_d, v_d, a_d, b_d, s_d, dst_d });
     } else {
-        const p: kernels.LaunchParams = .{ .grid = .{ .x = dim(B * H) }, .block = .{ .x = dim(@divTrunc(C, H)) }, .shmem = 0, .stream = stream };
+        const p: ggml.cuda.kernels.LaunchParams = .{ .grid = .{ .x = dim(B * H) }, .block = .{ .x = dim(@divTrunc(C, H)) }, .shmem = 0, .stream = stream };
         const args = .{ int(B), int(T), int(C), int(H), r_d, w_d, k_d, v_d, a_d, b_d, s_d, dst_d };
         if (@divTrunc(C, H) == block_size) {
-            kernels.launch(kernels.get("wkv", kernels.tmpl("rwkv_wkv7_f32", &.{kernels.int(block_size)})), p, args);
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("wkv", ggml.cuda.kernels.tmpl("rwkv_wkv7_f32", &.{ggml.cuda.kernels.int(block_size)})), p, args);
         } else {
-            kernels.launch(kernels.get("wkv", kernels.tmpl("rwkv_wkv7_f32", &.{kernels.int(block_size * 2)})), p, args);
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("wkv", ggml.cuda.kernels.tmpl("rwkv_wkv7_f32", &.{ggml.cuda.kernels.int(block_size * 2)})), p, args);
         }
     }
 }

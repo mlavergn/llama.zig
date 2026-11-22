@@ -37,9 +37,8 @@
 //! come from `env`.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const sync = @import("sync/module.zig");
-const env = @import("env.zig");
 
 const fd_t = std.posix.fd_t;
 const pid_t = std.posix.pid_t;
@@ -51,14 +50,14 @@ const EXIT_FAILURE: c_int = 1;
 /// std builds the child's `argv` and environment before it forks.
 var spawner_state: std.Io.Threaded = .init_single_threaded;
 var spawner_ready: std.atomic.Value(bool) = .init(false);
-var spawner_mutex: sync.Mutex = .{};
+var spawner_mutex: mod.sync.Mutex = .{};
 
 fn spawner() std.Io {
     if (!spawner_ready.load(.acquire)) {
         spawner_mutex.lock();
         defer spawner_mutex.unlock();
         if (!spawner_ready.load(.acquire)) {
-            const environ = env.processEnviron();
+            const environ = mod.env.processEnviron();
             spawner_state.environ = .{ .process_environ = environ };
             spawner_state.environ_initialized = environ.block.isEmpty();
             spawner_state.allocator = std.heap.page_allocator;

@@ -574,7 +574,6 @@ pub fn build(b: *std.Build) !void {
     // The one permitted dependency, and only here: chat templates are Jinja,
     // and `libllamazig` must stay dependency-free.
     cli_module.addImport("zigjinja", jinja_module);
-    cli_module.addImport("llama_h", llama_h_module);
     // libllama's own module, compiled into the CLI rather than linked as
     // `libllama.a`: `cli/fit.zig` ports `common/fit.cpp`, which reads
     // libllama's internal `llama-ext.h`, and calls `api/` as Zig. One
@@ -764,9 +763,6 @@ pub fn build(b: *std.Build) !void {
     });
     cli_tests_module.addOptions("config", options);
     cli_tests_module.addImport("zigjinja", jinja_module);
-    // `session.zig` imports llama.h, so even the argument-parsing tests need
-    // the header and the library behind it.
-    cli_tests_module.addImport("llama_h", llama_h_module);
     cli_tests_module.addImport("llama", reference.llama.root_module);
     cli_tests_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     cli_tests_module.addImport("cli_fit", cli_fit_module);

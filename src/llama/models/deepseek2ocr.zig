@@ -12,22 +12,10 @@
 //! architecture is this one; `deepseek2.zig` holds it.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-const deepseek2 = @import("deepseek2.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_deepseek2ocr`'s `load_arch_hparams` (models/deepseek2ocr.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -40,8 +28,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(bool, .expert_weights_norm, false, exc)) |v| hp.expert_weights_norm = v;
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
 
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.softmax);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.softmax);
     }
 
     self.type = switch (hp.nLayer()) {
@@ -51,11 +39,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_deepseek2ocr`'s `load_arch_tensors` (models/deepseek2ocr.cpp:23 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     // As DeepSeek-V2, without MLA.
     const n_ff_exp: i64 = hp.nFfExp(0);
@@ -67,7 +55,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     // The output, or failing that the token embeddings (tied embeddings).
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -116,12 +104,12 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// - `il`: the layer.
 ///
 /// Return: the RoPE of layer `il`, for the graph and the K-shift alike.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     res.n_rot = @intCast(model.hparams.nEmbdHeadK(il));
     res.n_offs = 0;
-    res.type = c.LLAMA_ROPE_TYPE_NEOX;
+    res.type = llama.impl.c.LLAMA_ROPE_TYPE_NEOX;
     res.n_ctx_orig = 0;
     res.freq_scale = 1.0;
     res.ext_factor = 0.0;
@@ -135,8 +123,8 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 
 /// Ports `llama_model_deepseek2ocr`'s `build_arch_graph` (models/deepseek2ocr.cpp:94
 /// @b1b770d90): DeepSeek-V2's main graph, whatever the graph type.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    deepseek2.buildGraph(model, b);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.models.deepseek2.buildGraph(model, b);
 }
 
 // -----------------------------------------------------------------------------

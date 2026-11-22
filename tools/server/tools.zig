@@ -31,21 +31,12 @@
 //! Darwin has run this.
 
 const std = @import("std");
-const sync = stdlib.sync;
+const mod = @import("module.zig");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const json = @import("json");
-const libcxx = @import("stdlib").libcxx;
-const regex = @import("llama").regex;
-const http = @import("http.zig");
-const common = @import("common.zig");
-const queue = @import("queue.zig");
-const mcp = @import("mcp.zig");
 
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Subproc = stdlib.subproc.Subproc;
-const srv = common.srv;
-const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
 
@@ -143,7 +134,7 @@ fn runSubprocess(
 ) !ExecResult {
     var res: ExecResult = .{};
 
-    var proc: Subproc = .{};
+    var proc: stdlib.subproc.Subproc = .{};
     defer proc.deinit();
 
     var options = stdlib.subproc.option_no_window | stdlib.subproc.option_inherit_environment | stdlib.subproc.option_search_user_path;
@@ -157,7 +148,7 @@ fn runSubprocess(
     const Timeout = struct {
         done: std.atomic.Value(bool) = .init(false),
         timed_out: std.atomic.Value(bool) = .init(false),
-        proc: *Subproc,
+        proc: *stdlib.subproc.Subproc,
         deadline: i64,
 
         fn run(self: *@This()) void {
@@ -739,27 +730,27 @@ const Io = union(enum) {
 /// Ports `make_tools_io` (server-tools.cpp:822 @b1b770d90): the host for an empty
 /// `runtime`, an attached container or an ssh host otherwise; anything
 /// else throws rather than fall back to the host.
-fn makeToolsIo(a: Allocator, params: *const Value) !Io {
-    const cwd = try a.dupe(u8, common.jsonValue(params, "cwd", []const u8, ""));
-    const runtime = try a.dupe(u8, common.jsonValue(params, "runtime", []const u8, ""));
+fn makeToolsIo(a: Allocator, params: *const json.Value) !Io {
+    const cwd = try a.dupe(u8, mod.common.jsonValue(params, "cwd", []const u8, ""));
+    const runtime = try a.dupe(u8, mod.common.jsonValue(params, "runtime", []const u8, ""));
     if (runtime.len == 0) {
         // an empty runtime runs the tools on the host
         return .{ .basic = .{ .cwd = cwd } };
     }
     if (ContainerSpec.parse(runtime)) |container| {
         // spawning belongs to the runtime that owns the container, a tool call only attaches
-        if (!container.attach) return throw(error.RuntimeError, "tool runtime must name a running container: {s}", .{runtime});
-        if (!ContainerSpec.isValidId(container.arg)) return throw(error.RuntimeError, "invalid container id: {s}", .{container.arg});
+        if (!container.attach) return mod.common.throw(error.RuntimeError, "tool runtime must name a running container: {s}", .{runtime});
+        if (!ContainerSpec.isValidId(container.arg)) return mod.common.throw(error.RuntimeError, "invalid container id: {s}", .{container.arg});
         return .{ .isolate = .{ .cwd = cwd, .transport = .{ .container = .{ .bin = container.bin, .container_id = container.arg } } } };
     }
     const ssh_prefix = "ssh:";
     if (std.mem.startsWith(u8, runtime, ssh_prefix)) {
         const target = runtime[ssh_prefix.len..];
-        if (!sshIsValidTarget(target)) return throw(error.RuntimeError, "invalid ssh target: {s}", .{target});
+        if (!sshIsValidTarget(target)) return mod.common.throw(error.RuntimeError, "invalid ssh target: {s}", .{target});
         return .{ .isolate = .{ .cwd = cwd, .transport = .{ .ssh = .{ .target = target } } } };
     }
     // do not fall back to the host, the caller asked for an isolate
-    return throw(error.RuntimeError, "unknown tool runtime: {s}", .{runtime});
+    return mod.common.throw(error.RuntimeError, "unknown tool runtime: {s}", .{runtime});
 }
 
 // -----------------------------------------------------------------------------
@@ -879,7 +870,7 @@ fn globMatchAt(pattern_in: []const u8, str_in: []const u8, depth: usize) bool {
 /// matches the basename at any depth; otherwise the full relative path,
 /// anchored with `**/` unless it already is.
 fn pathGlobMatch(a: Allocator, pattern: []const u8, rel_path: []const u8) !bool {
-    if (std.mem.findScalar(u8, pattern, '/') == null) return globMatch(pattern, common.pathFilename(rel_path));
+    if (std.mem.findScalar(u8, pattern, '/') == null) return globMatch(pattern, mod.common.pathFilename(rel_path));
     if (std.mem.eql(u8, pattern, "**") or std.mem.startsWith(u8, pattern, "**/") or std.mem.startsWith(u8, pattern, "/")) {
         return globMatch(pattern, rel_path);
     }
@@ -948,7 +939,7 @@ pub const Kind = enum { read_file, file_glob_search, grep_search, exec_shell_com
 pub const Stream = struct {
     qr: *ResultQueue,
     id: i32,
-    alive: ?mcp.StopFn, // true while the client is there
+    alive: ?mod.mcp.StopFn, // true while the client is there
 
     /// Ports `server_tool`'s `stream`'s `push` (server-tools.cpp:1777 @b1b770d90).
     fn push(self: *const Stream, chunk: []const u8) !void {
@@ -977,8 +968,8 @@ pub const Tool = struct {
     // server_mcp_tool
     server_name: []const u8 = "",
     tool_name: []const u8 = "",
-    def: ?mcp.ToolDef = null,
-    mcp_mgr: ?*mcp.Mcp = null,
+    def: ?mod.mcp.ToolDef = null,
+    mcp_mgr: ?*mod.mcp.Mcp = null,
 
     /// Ports `server_tool`'s `type` (server-tools.h:21 @b1b770d90), and
     /// `server_mcp_tool`'s `type` (server-tools.cpp:1821 @b1b770d90).
@@ -988,7 +979,7 @@ pub const Tool = struct {
 
     /// Ports each tool's `get_definition`, `server_mcp_tool`'s
     /// `get_definition` (server-tools.cpp:1823 @b1b770d90) among them.
-    fn getDefinition(self: *const Tool, a: Allocator) !Value {
+    fn getDefinition(self: *const Tool, a: Allocator) !json.Value {
         const text = switch (self.kind) {
             .read_file => defs.read_file,
             .file_glob_search => defs.file_glob_search,
@@ -999,12 +990,12 @@ pub const Tool = struct {
             .get_info => defs.get_info,
             .mcp => {
                 var schema = try self.def.?.input_schema.clone(a);
-                if (schema.isNull() or !schema.isObject()) schema = Value.emptyObject();
-                var func = common.Obj.init(a);
+                if (schema.isNull() or !schema.isObject()) schema = json.Value.emptyObject();
+                var func = mod.common.Obj.init(a);
                 try func.put("name", self.name);
                 try func.put("description", self.def.?.description);
                 try func.put("parameters", schema);
-                var o = common.Obj.init(a);
+                var o = mod.common.Obj.init(a);
                 try o.put("type", "function");
                 try o.put("function", func.done());
                 return o.done();
@@ -1014,10 +1005,10 @@ pub const Tool = struct {
     }
 
     /// Ports `server_tool`'s `to_json` (server-tools.cpp:91 @b1b770d90).
-    fn toJson(self: *const Tool, a: Allocator) !Value {
-        var perms = common.Obj.init(a);
+    fn toJson(self: *const Tool, a: Allocator) !json.Value {
+        var perms = mod.common.Obj.init(a);
         try perms.put("write", self.permission_write);
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("display_name", self.display_name);
         try o.put("tool", self.name);
         try o.put("type", self.typeName());
@@ -1033,7 +1024,7 @@ pub const Tool = struct {
     /// MCP tools read it.
     ///
     /// Return: allocated by `a`.
-    fn invoke(self: *const Tool, a: Allocator, params: *const Value, st: ?*const Stream, should_stop: ?mcp.StopFn) !Value {
+    fn invoke(self: *const Tool, a: Allocator, params: *const json.Value, st: ?*const Stream, should_stop: ?mod.mcp.StopFn) !json.Value {
         return switch (self.kind) {
             .read_file => invokeReadFile(a, params),
             .file_glob_search => invokeFileGlobSearch(a, params),
@@ -1049,34 +1040,34 @@ pub const Tool = struct {
 };
 
 /// `{"error": msg}`.
-fn errorObj(a: Allocator, msg: []const u8) !Value {
-    var o = common.Obj.init(a);
+fn errorObj(a: Allocator, msg: []const u8) !json.Value {
+    var o = mod.common.Obj.init(a);
     try o.put("error", msg);
     return o.done();
 }
 
 /// `{"plain_text_response": text}`.
-fn plainText(a: Allocator, text: []const u8) !Value {
-    var o = common.Obj.init(a);
+fn plainText(a: Allocator, text: []const u8) !json.Value {
+    var o = mod.common.Obj.init(a);
     try o.put("plain_text_response", text);
     return o.done();
 }
 
 /// `params.at(key).get<std::string>()`.
-fn atString(params: *const Value, key: []const u8) ![]const u8 {
+fn atString(params: *const json.Value, key: []const u8) ![]const u8 {
     return (try params.at(key)).get([]const u8);
 }
 
 /// Ports `server_tool_read_file`'s `invoke` (server-tools.cpp:899 @b1b770d90): a
 /// line range, optionally numbered; or, asked by the `x-resp-type` header,
 /// the whole file in base64.
-fn invokeReadFile(a: Allocator, params: *const Value) !Value {
+fn invokeReadFile(a: Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
-    const start_line = common.jsonValue(params, "start_line", c_int, 1);
-    const end_line = common.jsonValue(params, "end_line", c_int, -1); // -1 = no limit
-    const append_loc = common.jsonValue(params, "append_loc", bool, false);
+    const start_line = mod.common.jsonValue(params, "start_line", c_int, 1);
+    const end_line = mod.common.jsonValue(params, "end_line", c_int, -1); // -1 = no limit
+    const append_loc = mod.common.jsonValue(params, "append_loc", bool, false);
     // comes from the x-resp-type header, the model cannot ask for it
-    const as_base64 = std.mem.eql(u8, common.jsonValue(params, "resp_type", []const u8, ""), "base64");
+    const as_base64 = std.mem.eql(u8, mod.common.jsonValue(params, "resp_type", []const u8, ""), "base64");
 
     const io = try makeToolsIo(a, params);
 
@@ -1093,7 +1084,7 @@ fn invokeReadFile(a: Allocator, params: *const Value) !Value {
         const enc = std.base64.standard.Encoder;
         const out = try a.alloc(u8, enc.calcSize(content.len));
         _ = enc.encode(out, content);
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("base64", out);
         try o.put("size_bytes", @as(usize, content.len));
         return o.done();
@@ -1129,17 +1120,17 @@ fn invokeReadFile(a: Allocator, params: *const Value) !Value {
 }
 
 /// Ports `server_tool_file_glob_search`'s `invoke` (server-tools.cpp:1016 @b1b770d90).
-fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
+fn invokeFileGlobSearch(a: Allocator, params: *const json.Value) !json.Value {
     const io = try makeToolsIo(a, params);
 
     const path = try atString(params, "path");
 
     const base = try io.resolve(a, path);
-    const include = common.jsonValue(params, "include", []const u8, "**");
-    const exclude = common.jsonValue(params, "exclude", []const u8, "");
-    const ty = common.jsonValue(params, "type", []const u8, "file");
-    const max_depth = @max(0, common.jsonValue(params, "max_depth", c_int, 0));
-    const limit_req = common.jsonValue(params, "limit", c_int, file_search_max_results);
+    const include = mod.common.jsonValue(params, "include", []const u8, "**");
+    const exclude = mod.common.jsonValue(params, "exclude", []const u8, "");
+    const ty = mod.common.jsonValue(params, "type", []const u8, "file");
+    const max_depth = @max(0, mod.common.jsonValue(params, "max_depth", c_int, 0));
+    const limit_req = mod.common.jsonValue(params, "limit", c_int, file_search_max_results);
     if (limit_req < 1) {
         return errorObj(a, try std.fmt.allocPrint(a, "invalid limit: {d} (expected 1 or more)", .{limit_req}));
     }
@@ -1170,10 +1161,10 @@ fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
     const shown = @min(total, @as(usize, @intCast(limit)));
 
     var output_text: std.ArrayList(u8) = .empty;
-    var entries_json = Value.emptyArray();
+    var entries_json = json.Value.emptyArray();
     for (matches.items[0..shown]) |m| {
         try output_text.print(a, "{s}{s}\n", .{ m.rel, if (m.is_dir) "/" else "" });
-        var e = common.Obj.init(a);
+        var e = mod.common.Obj.init(a);
         try e.put("path", m.rel);
         try e.put("type", if (m.is_dir) "dir" else "file");
         try entries_json.pushBack(a, e.done());
@@ -1190,7 +1181,7 @@ fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
     // `base` is always absolute (resolve falls back to the server cwd), so
     // API clients (e.g. the web UI picker) can join the relative entries
     // into absolute paths.
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("plain_text_response", output_text.items);
     try o.put("entries", entries_json);
     try o.put("base", base);
@@ -1200,15 +1191,15 @@ fn invokeFileGlobSearch(a: Allocator, params: *const Value) !Value {
 /// Ports `server_tool_grep_search`'s `invoke` (server-tools.cpp:1131 @b1b770d90): an
 /// ECMAScript regex (or a literal) over every line of the files under a
 /// path, with context lines.
-fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
+fn invokeGrepSearch(a: Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const pat_str = try atString(params, "pattern");
-    const include = common.jsonValue(params, "include", []const u8, "**");
-    const exclude = common.jsonValue(params, "exclude", []const u8, "");
-    const show_lineno = common.jsonValue(params, "return_line_numbers", bool, false);
-    const literal = common.jsonValue(params, "literal", bool, false);
-    const ignore_case = common.jsonValue(params, "ignore_case", bool, false);
-    const ctx_lines = @max(0, common.jsonValue(params, "context_lines", c_int, 0));
+    const include = mod.common.jsonValue(params, "include", []const u8, "**");
+    const exclude = mod.common.jsonValue(params, "exclude", []const u8, "");
+    const show_lineno = mod.common.jsonValue(params, "return_line_numbers", bool, false);
+    const literal = mod.common.jsonValue(params, "literal", bool, false);
+    const ignore_case = mod.common.jsonValue(params, "ignore_case", bool, false);
+    const ctx_lines = @max(0, mod.common.jsonValue(params, "context_lines", c_int, 0));
 
     var pattern_src: []const u8 = pat_str;
     if (literal) {
@@ -1221,8 +1212,8 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
         pattern_src = escaped.items;
     }
 
-    var pattern = regex.Regex.compileWith(pattern_src, .{ .icase = ignore_case }) catch |e| {
-        return errorObj(a, try std.mem.concat(a, u8, &.{ "invalid regex: ", regex.errorText(e) }));
+    var pattern = llama.regex.Regex.compileWith(pattern_src, .{ .icase = ignore_case }) catch |e| {
+        return errorObj(a, try std.mem.concat(a, u8, &.{ "invalid regex: ", llama.regex.errorText(e) }));
     };
     defer pattern.deinit();
 
@@ -1254,7 +1245,7 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
     var limit_reached = false;
     const show_num = show_lineno or ctx_lines > 0;
 
-    var m = regex.Match.init();
+    var m = llama.regex.Match.init();
     defer m.deinit();
     for (files.items) |file_entry| {
         if (limit_reached) break;
@@ -1268,7 +1259,7 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
                 limit_reached = true;
                 break;
             }
-            const found = pattern.trySearch(line, &m) catch |e| return throw(error.RuntimeError, "{s}", .{regex.errorText(e)});
+            const found = pattern.trySearch(line, &m) catch |e| return mod.common.throw(error.RuntimeError, "{s}", .{llama.regex.errorText(e)});
             if (!found) continue;
 
             const ii: i64 = @intCast(i);
@@ -1303,10 +1294,10 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
 /// Ports `server_tool_exec_shell_command`'s `invoke` (server-tools.cpp:1274 @b1b770d90):
 /// `sh -c` with a timeout and an output cap; with a stream, each chunk as
 /// it comes and the exit code last.
-fn invokeExecShellCommand(a: Allocator, params: *const Value, st: ?*const Stream) !Value {
+fn invokeExecShellCommand(a: Allocator, params: *const json.Value, st: ?*const Stream) !json.Value {
     const command = try atString(params, "command");
-    var timeout = common.jsonValue(params, "timeout", c_int, 10);
-    var max_output: usize = @bitCast(@as(isize, common.jsonValue(params, "max_output_size", c_int, @intCast(exec_shell_command_max_output_size))));
+    var timeout = mod.common.jsonValue(params, "timeout", c_int, 10);
+    var max_output: usize = @bitCast(@as(isize, mod.common.jsonValue(params, "max_output_size", c_int, @intCast(exec_shell_command_max_output_size))));
 
     timeout = @min(timeout, exec_shell_command_max_timeout);
     max_output = @min(max_output, exec_shell_command_max_output_size);
@@ -1343,7 +1334,7 @@ fn invokeExecShellCommand(a: Allocator, params: *const Value, st: ?*const Stream
 }
 
 /// Ports `server_tool_write_file`'s `invoke` (server-tools.cpp:1351 @b1b770d90).
-fn invokeWriteFile(a: Allocator, params: *const Value) !Value {
+fn invokeWriteFile(a: Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const content = try atString(params, "content");
 
@@ -1352,7 +1343,7 @@ fn invokeWriteFile(a: Allocator, params: *const Value) !Value {
         return errorObj(a, try std.mem.concat(a, u8, &.{ "failed to write file: ", path }));
     }
 
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("result", "file written successfully");
     try o.put("path", path);
     try o.put("bytes", @as(usize, content.len));
@@ -1372,7 +1363,7 @@ const npos = std.math.maxInt(usize);
 
 /// `s.substr(pos, n)`: throws `std::out_of_range` past the end.
 fn substr(s: []const u8, pos: usize, n: usize) ![]const u8 {
-    if (pos > s.len) return throw(error.RuntimeError, "basic_string", .{});
+    if (pos > s.len) return mod.common.throw(error.RuntimeError, "basic_string", .{});
     return s[pos..@min(s.len, pos +| n)];
 }
 
@@ -1554,7 +1545,7 @@ fn applyReplacementsPreservingUnchangedLines(a: Allocator, original_content: []c
 /// Ports `server_tool_edit_file`'s `invoke` (server-tools.cpp:1408 @b1b770d90): every
 /// edit matched against the original content, exactly or -- when any one
 /// has no exact match -- after normalizing whitespace and typography.
-fn invokeEditFile(a: Allocator, params: *const Value) !Value {
+fn invokeEditFile(a: Allocator, params: *const json.Value) !json.Value {
     const path = try atString(params, "path");
     const edits_json = try params.at("edits");
 
@@ -1606,7 +1597,7 @@ fn invokeEditFile(a: Allocator, params: *const Value) !Value {
             return x.match_index < y.match_index;
         }
     };
-    libcxx.sort(MatchedEdit, matched.items, {}, Less.f);
+    stdlib.libcxx.sort(MatchedEdit, matched.items, {}, Less.f);
     var i: usize = 1;
     while (i < matched.items.len) : (i += 1) {
         const prev = matched.items[i - 1];
@@ -1628,7 +1619,7 @@ fn invokeEditFile(a: Allocator, params: *const Value) !Value {
         return errorObj(a, try std.mem.concat(a, u8, &.{ "failed to write file: ", path }));
     }
 
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("result", "file edited successfully");
     try o.put("path", path);
     try o.put("edits_applied", @as(c_int, @intCast(matched.items.len)));
@@ -1637,7 +1628,7 @@ fn invokeEditFile(a: Allocator, params: *const Value) !Value {
 
 /// Ports `server_tool_get_info`'s `invoke` (server-tools.cpp:1724 @b1b770d90): `uname
 /// -a` and the working directory.
-fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
+fn invokeGetInfo(a: Allocator, params: *const json.Value) !json.Value {
     const io = try makeToolsIo(a, params);
 
     // inside an isolate, we always use the linux command
@@ -1645,9 +1636,9 @@ fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
     // a failed spawn or a timeout leaves a diagnostic in res.output, which is not an OS name
     const os_info = if (res.exit_code == 0 and !res.timed_out) stdlib.strings.strip(res.output) else "unknown";
 
-    var cwd: []const u8 = common.jsonValue(params, "cwd", []const u8, "");
+    var cwd: []const u8 = mod.common.jsonValue(params, "cwd", []const u8, "");
     if (cwd.len == 0) {
-        if (common.jsonValue(params, "runtime", []const u8, "").len == 0) {
+        if (mod.common.jsonValue(params, "runtime", []const u8, "").len == 0) {
             cwd = stdlib.fs.currentPathAlloc(a) orelse "";
         } else {
             const pwd = try io.run(a, &.{"pwd"}, get_info_max_output, get_info_timeout, null);
@@ -1655,7 +1646,7 @@ fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
         }
     }
 
-    var o = common.Obj.init(a);
+    var o = mod.common.Obj.init(a);
     try o.put("os", os_info);
     try o.put("cwd", cwd);
     return o.done();
@@ -1685,8 +1676,8 @@ pub const StreamResult = struct {
     }
 
     /// Ports `server_tool_stream_result`'s `to_json` (server-tools.cpp:1764 @b1b770d90).
-    fn toJson(self: *const StreamResult, a: Allocator) !Value {
-        var o = common.Obj.init(a);
+    fn toJson(self: *const StreamResult, a: Allocator) !json.Value {
+        var o = mod.common.Obj.init(a);
         if (!self.done) {
             try o.put("chunk", self.chunk);
         } else {
@@ -1698,12 +1689,12 @@ pub const StreamResult = struct {
 };
 
 /// `server_response` over tool stream results.
-pub const ResultQueue = queue.Response(*StreamResult);
+pub const ResultQueue = mod.queue.Response(*StreamResult);
 
 /// Ports `server_tools_res` (server-tools.cpp:1785 @b1b770d90): a response whose
 /// destructor joins the streaming worker and stops waiting for its id.
 const ToolsRes = struct {
-    base: http.Res,
+    base: mod.http.Res,
     worker: ?std.Thread = null,
     qr: ?*ResultQueue = null, // set only for streaming responses
     id: i32 = -1,
@@ -1712,7 +1703,7 @@ const ToolsRes = struct {
     owner: ?*Tools = null,
     worker_arena: ?*std.heap.ArenaAllocator = null,
 
-    const vtable: http.Res.VTable = .{ .on_complete = http.Res.noComplete, .destroy = destroyRes };
+    const vtable: mod.http.Res.VTable = .{ .on_complete = mod.http.Res.noComplete, .destroy = destroyRes };
 
     fn create() !*ToolsRes {
         const self = try gpa.create(ToolsRes);
@@ -1721,7 +1712,7 @@ const ToolsRes = struct {
     }
 
     /// Ports `server_tools_res`'s destructor (server-tools.cpp:1790 @b1b770d90).
-    fn destroyRes(res: *http.Res) void {
+    fn destroyRes(res: *mod.http.Res) void {
         const self: *ToolsRes = @fieldParentPtr("base", res);
         if (self.worker) |t| t.join();
         if (self.qr) |q| q.removeWaitingTaskId(self.id);
@@ -1772,15 +1763,15 @@ const ContainerRuntime = struct {
     bin: []const u8,
     image: []const u8,
     container_id: []u8 = &.{},
-    proc: Subproc = .{}, // `<engine> run` client that keeps the container alive
-    mutex: sync.Mutex = .{},
+    proc: stdlib.subproc.Subproc = .{}, // `<engine> run` client that keeps the container alive
+    mutex: stdlib.sync.Mutex = .{},
 
     /// Ports `server_tools_container_runtime`'s constructor (server-tools.cpp:1865 @b1b770d90).
     fn create(spec_str: []const u8) !*ContainerRuntime {
         const parsed = ContainerSpec.parse(spec_str) orelse
-            return throw(error.RuntimeError, "unknown --tools-runtime option: {s}", .{spec_str});
+            return mod.common.throw(error.RuntimeError, "unknown --tools-runtime option: {s}", .{spec_str});
         if (parsed.arg.len == 0) {
-            return throw(error.RuntimeError, "--tools-runtime {s}:<image> requires an image name", .{parsed.bin});
+            return mod.common.throw(error.RuntimeError, "--tools-runtime {s}:<image> requires an image name", .{parsed.bin});
         }
         const self = try gpa.create(ContainerRuntime);
         self.* = .{ .bin = parsed.bin, .image = try gpa.dupe(u8, parsed.arg) };
@@ -1809,11 +1800,11 @@ const ContainerRuntime = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (!self.proc.alive()) {
-            const b = common.dupZ(self.bin);
-            defer common.freeZ(b);
-            const c = common.dupZ(self.container_id);
-            defer common.freeZ(c);
-            srv(.wrn, "spec", "%s tools runtime container \"%s\" died, respawning\n", .{ b, c });
+            const b = mod.common.dupZ(self.bin);
+            defer mod.common.freeZ(b);
+            const c = mod.common.dupZ(self.container_id);
+            defer mod.common.freeZ(c);
+            mod.common.srv(.wrn, "spec", "%s tools runtime container \"%s\" died, respawning\n", .{ b, c });
             try self.spawn();
         }
         return std.mem.concat(a, u8, &.{ self.bin, "-container:", self.container_id });
@@ -1837,7 +1828,7 @@ const ContainerRuntime = struct {
         const args = [_][]const u8{ self.bin, "run", "--rm", "-i", "--cidfile", cidfile, self.image, "sh" };
         const options = stdlib.subproc.option_no_window | stdlib.subproc.option_inherit_environment | stdlib.subproc.option_search_user_path;
         if (!self.proc.create(&args, options, &.{}, null)) {
-            return throw(error.RuntimeError, "failed to spawn {s} container for tools runtime (image: {s})", .{ self.bin, self.image });
+            return mod.common.throw(error.RuntimeError, "failed to spawn {s} container for tools runtime (image: {s})", .{ self.bin, self.image });
         }
 
         var cid: []const u8 = "";
@@ -1851,7 +1842,7 @@ const ContainerRuntime = struct {
         _ = stdlib.fs.remove(cidfile);
         if (cid.len == 0) {
             self.proc.terminate();
-            return throw(error.RuntimeError, "timed out waiting for {s} container to start (image: {s})", .{ self.bin, self.image });
+            return mod.common.throw(error.RuntimeError, "timed out waiting for {s} container to start (image: {s})", .{ self.bin, self.image });
         }
         gpa.free(self.container_id);
         self.container_id = try gpa.dupe(u8, cid);
@@ -1867,8 +1858,8 @@ fn makeToolsRuntime(spec_str: []const u8) !Runtime {
     }
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    var params = Value.emptyObject();
-    try params.set(arena.allocator(), "runtime", try Value.initString(arena.allocator(), spec_str));
+    var params = json.Value.emptyObject();
+    try params.set(arena.allocator(), "runtime", try json.Value.initString(arena.allocator(), spec_str));
     _ = try makeToolsIo(arena.allocator(), &params); // nothing to own, just reject a bad spec now
     return .{ .static = try gpa.dupe(u8, spec_str) };
 }
@@ -1881,12 +1872,12 @@ fn findTool(tools: []const *Tool, name: []const u8, require_stream: bool) !*Tool
     for (tools) |t| {
         if (std.mem.eql(u8, t.name, name)) {
             if (require_stream and !t.support_stream) {
-                return throw(error.InvalidArgument, "tool \"{s}\" does not support stream = true", .{name});
+                return mod.common.throw(error.InvalidArgument, "tool \"{s}\" does not support stream = true", .{name});
             }
             return t;
         }
     }
-    return throw(error.InvalidArgument, "unknown tool \"{s}\"", .{name});
+    return mod.common.throw(error.InvalidArgument, "unknown tool \"{s}\"", .{name});
 }
 
 /// Ports `build_tools` (server-tools.cpp:1952 @b1b770d90), with each tool's constructor:
@@ -1918,7 +1909,7 @@ fn buildTools() ![7]*Tool {
 /// Ports `get_header` (server-tools.cpp:1974 @b1b770d90) over `str_to_lower`
 /// (server-tools.cpp:1968 @b1b770d90): the first header whose name matches
 /// without case, in the map's order.
-fn getHeader(headers: *const http.StringMap, key: []const u8) []const u8 {
+fn getHeader(headers: *const mod.http.StringMap, key: []const u8) []const u8 {
     for (headers.entries.items) |h| {
         if (std.ascii.eqlIgnoreCase(h.key, key)) return h.value;
     }
@@ -1950,7 +1941,7 @@ pub const Tools = struct {
         for (self.tools.items) |t| {
             if (t.def) |*d| {
                 var dd = d.*;
-                mcp.freeDef(&dd);
+                mod.mcp.freeDef(&dd);
                 gpa.free(t.name);
             }
             gpa.destroy(t);
@@ -1962,11 +1953,11 @@ pub const Tools = struct {
     /// Ports `server_tools`'s `setup` (server-tools.cpp:1998 @b1b770d90): the runtime,
     /// the enabled built-in tools (`all` for every one), then the MCP
     /// servers' tools, skipping a name already taken.
-    pub fn setup(self: *Tools, enabled_tools: []const []const u8, mcp_mgr: *mcp.Mcp, tools_runtime: []const u8) !void {
+    pub fn setup(self: *Tools, enabled_tools: []const []const u8, mcp_mgr: *mod.mcp.Mcp, tools_runtime: []const u8) !void {
         if (tools_runtime.len != 0) self.runtime = try makeToolsRuntime(tools_runtime);
 
         if (enabled_tools.len != 0) {
-            if (!Subproc.isSupported()) return throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
+            if (!stdlib.subproc.Subproc.isSupported()) return mod.common.throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
 
             var all_tools = try buildTools();
             var taken: [7]bool = @splat(false);
@@ -1986,7 +1977,7 @@ pub const Tools = struct {
                         if (i != 0) try names.appendSlice(gpa, ", ");
                         try names.appendSlice(gpa, t.name);
                     }
-                    return throw(error.RuntimeError, "unknown tool \"{s}\". available tools: {s}", .{ name, names.items });
+                    return mod.common.throw(error.RuntimeError, "unknown tool \"{s}\". available tools: {s}", .{ name, names.items });
                 }
             }
 
@@ -2012,13 +2003,13 @@ pub const Tools = struct {
             for (list) |*def| {
                 const mcp_name = try std.mem.concat(gpa, u8, &.{ def.server_name, "_", def.name });
                 if (seen_names.contains(mcp_name)) {
-                    const n = common.dupZ(mcp_name);
-                    defer common.freeZ(n);
-                    const s = common.dupZ(def.server_name);
-                    defer common.freeZ(s);
-                    srv(.wrn, "setup", "MCP tool \"%s\" from server \"%s\" collides with an existing tool, skipping\n", .{ n, s });
+                    const n = mod.common.dupZ(mcp_name);
+                    defer mod.common.freeZ(n);
+                    const s = mod.common.dupZ(def.server_name);
+                    defer mod.common.freeZ(s);
+                    mod.common.srv(.wrn, "setup", "MCP tool \"%s\" from server \"%s\" collides with an existing tool, skipping\n", .{ n, s });
                     gpa.free(mcp_name);
-                    mcp.freeDef(def);
+                    mod.mcp.freeDef(def);
                     continue;
                 }
                 try seen_names.put(gpa, mcp_name, {});
@@ -2036,29 +2027,29 @@ pub const Tools = struct {
                 try self.tools.append(gpa, t);
                 n_added += 1;
             }
-            if (n_added > 0) srv(.inf, "setup", "Added %zu MCP tools\n", .{n_added});
+            if (n_added > 0) mod.common.srv(.inf, "setup", "Added %zu MCP tools\n", .{n_added});
         }
     }
 
     /// `handle_get`, bound to this.
-    pub fn handleGet(self: *Tools) http.Handler {
+    pub fn handleGet(self: *Tools) mod.http.Handler {
         return .{ .ctx = self, .func = handleGetImpl };
     }
 
     /// `handle_post`, bound to this.
-    pub fn handlePost(self: *Tools) http.Handler {
+    pub fn handlePost(self: *Tools) mod.http.Handler {
         return .{ .ctx = self, .func = handlePostImpl };
     }
 
     /// Ports the `handle_get` lambda (server-tools.cpp:2062 @b1b770d90): every tool's
     /// `to_json`.
-    fn handleGetImpl(ctx: ?*anyopaque, _: *const http.Req) anyerror!*http.Res {
+    fn handleGetImpl(ctx: ?*anyopaque, _: *const mod.http.Req) anyerror!*mod.http.Res {
         const self: *Tools = @ptrCast(@alignCast(ctx.?));
-        const res = try http.Res.create(gpa);
+        const res = try mod.http.Res.create(gpa);
         errdefer res.destroy();
         const a = res.allocator();
         build: {
-            var result = Value.emptyArray();
+            var result = json.Value.emptyArray();
             for (self.tools.items) |t| {
                 const v = t.toJson(a) catch |e| {
                     try serverError(res, e);
@@ -2066,27 +2057,27 @@ pub const Tools = struct {
                 };
                 try result.pushBack(a, v);
             }
-            try res.setData(try common.safeJsonToStr(a, &result));
+            try res.setData(try mod.common.safeJsonToStr(a, &result));
         }
         return res;
     }
 
     /// The handlers' `catch (const std::exception & e)`: logged, 500.
-    fn serverError(res: *http.Res, e: anyerror) !void {
+    fn serverError(res: *mod.http.Res, e: anyerror) !void {
         const a = res.allocator();
-        const w = common.exception.what(e);
+        const w = mod.common.exception.what(e);
         const wz = try a.dupeSentinel(u8, w, 0);
-        srv(.err, "operator()", "got exception: %s\n", .{wz.ptr});
+        mod.common.srv(.err, "operator()", "got exception: %s\n", .{wz.ptr});
         res.status = 500;
-        var v = try common.formatErrorResponse(a, w, .server);
-        try res.setData(try common.safeJsonToStr(a, &v));
+        var v = try mod.common.formatErrorResponse(a, w, .server);
+        try res.setData(try mod.common.safeJsonToStr(a, &v));
     }
 
     /// Ports the `handle_post` lambda (server-tools.cpp:2078 @b1b770d90): one tool call,
     /// its `cwd`, `runtime` and `resp_type` taken from the `x-tool-cwd`,
     /// `x-tool-runtime` and `x-resp-type` headers and never from the body;
     /// streamed through `queue_res` when asked.
-    fn handlePostImpl(ctx: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
+    fn handlePostImpl(ctx: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
         const self: *Tools = @ptrCast(@alignCast(ctx.?));
         const res = try ToolsRes.create();
         errdefer res.base.destroy();
@@ -2094,30 +2085,30 @@ pub const Tools = struct {
         self.post(res, req) catch |e| switch (e) {
             error.JsonError => {
                 res.base.status = 400;
-                var v = try common.formatErrorResponse(a, json.what(), .invalid_request);
-                try res.base.setData(try common.safeJsonToStr(a, &v));
+                var v = try mod.common.formatErrorResponse(a, json.what(), .invalid_request);
+                try res.base.setData(try mod.common.safeJsonToStr(a, &v));
             },
             error.InvalidArgument => {
                 res.base.status = 404;
-                var v = try common.formatErrorResponse(a, common.what(e), .invalid_request);
-                try res.base.setData(try common.safeJsonToStr(a, &v));
+                var v = try mod.common.formatErrorResponse(a, mod.common.what(e), .invalid_request);
+                try res.base.setData(try mod.common.safeJsonToStr(a, &v));
             },
             else => try serverError(&res.base, e),
         };
         return &res.base;
     }
 
-    fn post(self: *Tools, res: *ToolsRes, req: *const http.Req) !void {
+    fn post(self: *Tools, res: *ToolsRes, req: *const mod.http.Req) !void {
         const a = res.base.allocator();
         var body = try json.parse(a, req.body);
         const tool_name = try (try body.at("tool")).get([]const u8);
-        var params = if (body.contains("params")) try (try body.at("params")).clone(a) else Value.emptyObject();
+        var params = if (body.contains("params")) try (try body.at("params")).clone(a) else json.Value.emptyObject();
         const stream = try body.value("stream", bool, false);
 
         // accept x-tool-cwd header to override of the process
         if (params.contains("cwd")) try params.erase(a, "cwd");
         const cwd = getHeader(&req.headers, "x-tool-cwd");
-        if (cwd.len != 0) try params.set(a, "cwd", try Value.initString(a, cwd));
+        if (cwd.len != 0) try params.set(a, "cwd", try json.Value.initString(a, cwd));
 
         // accept x-tool-runtime header to route tool I/O through an isolate, e.g. "docker-container:<id>";
         // --tools-runtime wins: it is the sandbox, the client must not move tools out of it
@@ -2126,19 +2117,19 @@ pub const Tools = struct {
         if (self.runtime) |r| {
             if (runtime_header.len != 0) {
                 res.base.status = 403;
-                var v = try common.formatErrorResponse(a, "x-tool-runtime is not allowed when --tools-runtime is set", .permission);
-                try res.base.setData(try common.safeJsonToStr(a, &v));
+                var v = try mod.common.formatErrorResponse(a, "x-tool-runtime is not allowed when --tools-runtime is set", .permission);
+                try res.base.setData(try mod.common.safeJsonToStr(a, &v));
                 return;
             }
-            try params.set(a, "runtime", try Value.initString(a, try r.spec(a)));
+            try params.set(a, "runtime", try json.Value.initString(a, try r.spec(a)));
         } else if (runtime_header.len != 0) {
-            try params.set(a, "runtime", try Value.initString(a, runtime_header));
+            try params.set(a, "runtime", try json.Value.initString(a, runtime_header));
         }
 
         // x-resp-type header is only used by read_file for now
         if (params.contains("resp_type")) try params.erase(a, "resp_type");
         const resp_type = getHeader(&req.headers, "x-resp-type");
-        if (resp_type.len != 0) try params.set(a, "resp_type", try Value.initString(a, resp_type));
+        if (resp_type.len != 0) try params.set(a, "resp_type", try json.Value.initString(a, resp_type));
 
         const tool = try findTool(self.tools.items, tool_name, stream);
 
@@ -2163,13 +2154,13 @@ pub const Tools = struct {
         } else {
             const result = try tool.invoke(a, &params, null, .{ .ctx = @constCast(req), .f = reqShouldStop });
             res.base.status = 200;
-            try res.base.setData(try common.safeJsonToStr(a, &result));
+            try res.base.setData(try mod.common.safeJsonToStr(a, &result));
         }
     }
 
     /// `req.should_stop`, as the `std::function<bool()>` `invoke` takes.
     fn reqShouldStop(ctx: ?*anyopaque) bool {
-        const req: *const http.Req = @ptrCast(@alignCast(ctx.?));
+        const req: *const mod.http.Req = @ptrCast(@alignCast(ctx.?));
         return req.should_stop.call();
     }
 
@@ -2178,13 +2169,13 @@ pub const Tools = struct {
     const Worker = struct {
         tools: *Tools,
         id: i32,
-        req: *const http.Req,
+        req: *const mod.http.Req,
         tool: *Tool,
-        params: Value,
+        params: json.Value,
         arena: Allocator,
 
         fn alive(ctx: ?*anyopaque) bool {
-            const req: *const http.Req = @ptrCast(@alignCast(ctx.?));
+            const req: *const mod.http.Req = @ptrCast(@alignCast(ctx.?));
             return !req.should_stop.call();
         }
 
@@ -2193,7 +2184,7 @@ pub const Tools = struct {
             const done = StreamResult.create() catch return;
             _ = self.tool.invoke(self.arena, &self.params, &st, .{ .ctx = @constCast(self.req), .f = reqShouldStop }) catch |e| {
                 done.error_msg = gpa.dupe(u8, if (e == error.JsonError or e == error.RuntimeError or e == error.InvalidArgument or e == error.OutOfMemory)
-                    common.exception.what(e)
+                    mod.common.exception.what(e)
                 else
                     "An unknown error occurred") catch &.{};
             };
@@ -2212,7 +2203,7 @@ pub const Tools = struct {
 
         fn call(ctx: ?*anyopaque, out: *std.ArrayList(u8), al: Allocator) anyerror!bool {
             const self: *Next = @ptrCast(@alignCast(ctx.?));
-            var ids = try queue.IdSet.init(gpa);
+            var ids = try mod.queue.IdSet.init(gpa);
             defer ids.deinit();
             try ids.insert(self.id);
             const result = self.tools.queue_res.recv(&ids);
@@ -2221,7 +2212,7 @@ pub const Tools = struct {
             defer arena.deinit();
             const v = try result.toJson(arena.allocator());
             try out.appendSlice(al, "data: ");
-            try out.appendSlice(al, try common.safeJsonToStr(arena.allocator(), &v));
+            try out.appendSlice(al, try mod.common.safeJsonToStr(arena.allocator(), &v));
             try out.appendSlice(al, "\n\n");
             if (result.done) {
                 self.tools.queue_res.removeWaitingTaskId(self.id);

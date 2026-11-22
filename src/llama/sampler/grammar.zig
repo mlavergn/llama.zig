@@ -7,109 +7,100 @@
 //! The grammar itself is `src/llama/grammar/`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const core = @import("core.zig");
-const grammar = @import("../grammar/grammar.zig");
-
-const c = impl.c;
-const Sampler = core.Sampler;
-const SamplerI = core.SamplerI;
-const TokenDataArray = core.TokenDataArray;
-const Token = core.Token;
-const src = core.src;
+const llama = @import("../module.zig");
 
 /// Ports `llama_sampler_grammar` (llama-sampler.cpp:2667 @b1b770d90).
 const Gram = struct {
-    vocab: ?*const c.struct_llama_vocab,
+    vocab: ?*const llama.impl.c.struct_llama_vocab,
 
     /// Kept to rebuild the grammar on reset; empty when there is none.
     grammar_str: [:0]u8,
     grammar_root: [:0]u8,
 
-    grammar: ?*grammar.Grammar,
+    grammar: ?*llama.grammar.grammar.Grammar,
 };
 
 fn emptyZ() [:0]u8 {
-    return impl.allocator.dupeSentinel(u8, "", 0) catch impl.abort(src, 0, "out of memory");
+    return std.heap.c_allocator.dupeSentinel(u8, "", 0) catch llama.impl.abort(llama.sampler.core.src, 0, "out of memory");
 }
 
 /// Ports `llama_sampler_grammar_name` (llama-sampler.cpp:2676 @b1b770d90).
-fn grammarName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn grammarName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "grammar";
 }
 
 /// Ports `llama_sampler_grammar_accept_impl` (llama-sampler.cpp:2680 @b1b770d90).
-fn grammarAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
-    const ctx = core.ctxOf(Gram, smpl);
-    if (ctx.grammar) |g| grammar.acceptImpl(g, token);
+fn grammarAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Gram, smpl);
+    if (ctx.grammar) |g| llama.grammar.grammar.acceptImpl(g, token);
 }
 
 /// Ports `llama_sampler_grammar_apply` (llama-sampler.cpp:2687 @b1b770d90).
-fn grammarApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(Gram, smpl);
-    if (ctx.grammar) |g| grammar.applyImpl(g, cur_p);
+fn grammarApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Gram, smpl);
+    if (ctx.grammar) |g| llama.grammar.grammar.applyImpl(g, cur_p);
 }
 
 /// Ports `llama_sampler_grammar_reset` (llama-sampler.cpp:2705 @b1b770d90).
 ///
 /// Rebuilds the grammar from its text, keeping its trigger configuration.
-fn grammarReset(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(Gram, smpl);
+fn grammarReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Gram, smpl);
     const g = ctx.grammar orelse return;
 
     var trigger_patterns_c: std.ArrayList([*:0]const u8) = .empty;
-    defer trigger_patterns_c.deinit(impl.allocator);
+    defer trigger_patterns_c.deinit(std.heap.c_allocator);
     var owned: std.ArrayList([:0]u8) = .empty;
     defer {
-        for (owned.items) |z| impl.allocator.free(z);
-        owned.deinit(impl.allocator);
+        for (owned.items) |z| std.heap.c_allocator.free(z);
+        owned.deinit(std.heap.c_allocator);
     }
     for (g.trigger_patterns.items) |tp| {
-        const z = impl.allocator.dupeSentinel(u8, tp.pattern, 0) catch impl.abort(src, 2709, "out of memory");
-        owned.append(impl.allocator, z) catch impl.abort(src, 2709, "out of memory");
-        trigger_patterns_c.append(impl.allocator, z.ptr) catch impl.abort(src, 2709, "out of memory");
+        const z = std.heap.c_allocator.dupeSentinel(u8, tp.pattern, 0) catch llama.impl.abort(llama.sampler.core.src, 2709, "out of memory");
+        owned.append(std.heap.c_allocator, z) catch llama.impl.abort(llama.sampler.core.src, 2709, "out of memory");
+        trigger_patterns_c.append(std.heap.c_allocator, z.ptr) catch llama.impl.abort(llama.sampler.core.src, 2709, "out of memory");
     }
 
-    const grammar_new = grammar.initImpl(g.vocab, ctx.grammar_str.ptr, ctx.grammar_root.ptr, g.lazy, trigger_patterns_c.items, g.trigger_tokens.items);
+    const grammar_new = llama.grammar.grammar.initImpl(g.vocab, ctx.grammar_str.ptr, ctx.grammar_root.ptr, g.lazy, trigger_patterns_c.items, g.trigger_tokens.items);
 
-    grammar.freeImpl(g);
+    llama.grammar.grammar.freeImpl(g);
     ctx.grammar = grammar_new;
 }
 
 /// Ports `llama_sampler_grammar_clone` (llama-sampler.cpp:2725 @b1b770d90).
-fn grammarClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    const ctx = core.ctxOf(Gram, smpl);
+fn grammarClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    const ctx = llama.sampler.core.ctxOf(Gram, smpl);
 
     const result = initGrammarImpl(ctx.vocab, null, null, false, &.{}, &.{});
-    impl.assert(result != null, src, 2729, "result");
+    llama.impl.assert(result != null, llama.sampler.core.src, 2729, "result");
 
-    const result_ctx = core.ctxOf(Gram, result);
+    const result_ctx = llama.sampler.core.ctxOf(Gram, result);
     if (ctx.grammar) |g| {
-        impl.allocator.free(result_ctx.grammar_str);
-        impl.allocator.free(result_ctx.grammar_root);
-        result_ctx.grammar_str = impl.allocator.dupeSentinel(u8, ctx.grammar_str, 0) catch impl.abort(src, 2736, "out of memory");
-        result_ctx.grammar_root = impl.allocator.dupeSentinel(u8, ctx.grammar_root, 0) catch impl.abort(src, 2737, "out of memory");
+        std.heap.c_allocator.free(result_ctx.grammar_str);
+        std.heap.c_allocator.free(result_ctx.grammar_root);
+        result_ctx.grammar_str = std.heap.c_allocator.dupeSentinel(u8, ctx.grammar_str, 0) catch llama.impl.abort(llama.sampler.core.src, 2736, "out of memory");
+        result_ctx.grammar_root = std.heap.c_allocator.dupeSentinel(u8, ctx.grammar_root, 0) catch llama.impl.abort(llama.sampler.core.src, 2737, "out of memory");
 
-        result_ctx.grammar = grammar.cloneImpl(g);
+        result_ctx.grammar = llama.grammar.grammar.cloneImpl(g);
     }
 
     return result;
 }
 
 /// Ports `llama_sampler_grammar_free` (llama-sampler.cpp:2746 @b1b770d90).
-fn grammarFree(smpl: [*c]Sampler) callconv(.c) void {
-    const ctx = core.ctxOf(Gram, smpl);
+fn grammarFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Gram, smpl);
 
-    if (ctx.grammar) |g| grammar.freeImpl(g);
+    if (ctx.grammar) |g| llama.grammar.grammar.freeImpl(g);
 
-    impl.allocator.free(ctx.grammar_str);
-    impl.allocator.free(ctx.grammar_root);
-    core.destroy(Gram, ctx);
+    std.heap.c_allocator.free(ctx.grammar_str);
+    std.heap.c_allocator.free(ctx.grammar_root);
+    llama.sampler.core.destroy(Gram, ctx);
 }
 
 /// Ports `llama_sampler_grammar_i` (llama-sampler.cpp:2756 @b1b770d90).
-var grammar_iface: SamplerI = .{
+var grammar_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = grammarName,
     .accept = grammarAccept,
     .apply = grammarApply,
@@ -123,26 +114,26 @@ var grammar_iface: SamplerI = .{
 /// An empty or null grammar text gives a sampler with no grammar, which
 /// constrains nothing.
 fn initGrammarImpl(
-    vocab: ?*const c.struct_llama_vocab,
+    vocab: ?*const llama.impl.c.struct_llama_vocab,
     grammar_str: ?[*:0]const u8,
     grammar_root: ?[*:0]const u8,
     lazy: bool,
-    trigger_tokens: []const Token,
+    trigger_tokens: []const llama.impl.c.llama_token,
     trigger_patterns: []const [*:0]const u8,
-) [*c]Sampler {
+) [*c]llama.impl.c.struct_llama_sampler {
     if (grammar_str != null and grammar_str.?[0] != 0) {
-        const g = grammar.initImpl(vocab, grammar_str.?, grammar_root.?, lazy, trigger_patterns, trigger_tokens);
+        const g = llama.grammar.grammar.initImpl(vocab, grammar_str.?, grammar_root.?, lazy, trigger_patterns, trigger_tokens);
         if (g == null) return null;
 
-        return core.llama_sampler_init(&grammar_iface, core.create(Gram, .{
+        return llama.sampler.core.llama_sampler_init(&grammar_iface, llama.sampler.core.create(Gram, .{
             .vocab = vocab,
-            .grammar_str = impl.allocator.dupeSentinel(u8, std.mem.span(grammar_str.?), 0) catch impl.abort(src, 2786, "out of memory"),
-            .grammar_root = impl.allocator.dupeSentinel(u8, std.mem.span(grammar_root.?), 0) catch impl.abort(src, 2787, "out of memory"),
+            .grammar_str = std.heap.c_allocator.dupeSentinel(u8, std.mem.span(grammar_str.?), 0) catch llama.impl.abort(llama.sampler.core.src, 2786, "out of memory"),
+            .grammar_root = std.heap.c_allocator.dupeSentinel(u8, std.mem.span(grammar_root.?), 0) catch llama.impl.abort(llama.sampler.core.src, 2787, "out of memory"),
             .grammar = g,
         }));
     }
 
-    return core.llama_sampler_init(&grammar_iface, core.create(Gram, .{
+    return llama.sampler.core.llama_sampler_init(&grammar_iface, llama.sampler.core.create(Gram, .{
         .vocab = vocab,
         .grammar_str = emptyZ(),
         .grammar_root = emptyZ(),
@@ -164,7 +155,7 @@ fn cSlice(comptime T: type, ptr: [*c]const T, n: usize) []const T {
 /// - `grammar_root`: the start symbol.
 ///
 /// Return: the sampler, or null when the grammar does not parse.
-pub export fn llama_sampler_init_grammar(vocab: ?*const c.struct_llama_vocab, grammar_str: [*c]const u8, grammar_root: [*c]const u8) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_init_grammar(vocab: ?*const llama.impl.c.struct_llama_vocab, grammar_str: [*c]const u8, grammar_root: [*c]const u8) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     return initGrammarImpl(vocab, @ptrCast(grammar_str), @ptrCast(grammar_root), false, &.{}, &.{});
 }
 
@@ -182,20 +173,20 @@ pub export fn llama_sampler_init_grammar(vocab: ?*const c.struct_llama_vocab, gr
 ///
 /// Return: the sampler, or null when the grammar does not parse.
 pub export fn llama_sampler_init_grammar_lazy_patterns(
-    vocab: ?*const c.struct_llama_vocab,
+    vocab: ?*const llama.impl.c.struct_llama_vocab,
     grammar_str: [*c]const u8,
     grammar_root: [*c]const u8,
     trigger_patterns: [*c]const [*c]const u8,
     num_trigger_patterns: usize,
-    trigger_tokens: [*c]const Token,
+    trigger_tokens: [*c]const llama.impl.c.llama_token,
     num_trigger_tokens: usize,
-) callconv(.c) [*c]Sampler {
+) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     return initGrammarImpl(
         vocab,
         @ptrCast(grammar_str),
         @ptrCast(grammar_root),
         true,
-        cSlice(Token, trigger_tokens, num_trigger_tokens),
+        cSlice(llama.impl.c.llama_token, trigger_tokens, num_trigger_tokens),
         @ptrCast(cSlice([*c]const u8, trigger_patterns, num_trigger_patterns)),
     );
 }

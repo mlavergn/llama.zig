@@ -29,17 +29,13 @@
 //! accumulation *order* is what has to match, not just the arithmetic.
 
 const std = @import("std");
+const ggml = @import("../../module.zig");
 const builtin = @import("builtin");
-const impl = @import("../../impl.zig");
-const convert = @import("../convert.zig");
-const simd = @import("../simd.zig");
-const blocks = @import("../../quants/blocks.zig");
-const c = impl.c;
 
 /// The unsuffixed `d` of a block, widened. `GGML_CPU_FP16_TO_FP32` on ARM is
 /// the hardware conversion -- see `convert.cpuFp16ToFp32`.
 inline fn f(h: u16) f32 {
-    return convert.cpuFp16ToFp32(h);
+    return ggml.cpu.convert.cpuFp16ToFp32(h);
 }
 
 /// The block array a `vx` or `vy` pointer really is.
@@ -71,15 +67,15 @@ pub export fn ggml_vec_dot_q1_0_q8_0_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK1_0;
+    const qk = ggml.impl.c.QK1_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q1_0, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.Q1_0, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
     var sumf: f32 = 0.0;
 
@@ -128,15 +124,15 @@ pub export fn ggml_vec_dot_q2_0_q8_0_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK2_0;
+    const qk = ggml.impl.c.QK2_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q2_0, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.Q2_0, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
     var sumf: f32 = 0.0;
 
@@ -186,15 +182,15 @@ pub export fn ggml_vec_dot_q4_0_q8_0_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK8_0;
+    const qk = ggml.impl.c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q4_0, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.Q4_0, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
     var sumf: f32 = 0;
 
@@ -218,7 +214,7 @@ pub export fn ggml_vec_dot_q4_0_q8_0_generic(
 }
 
 /// One element of a q8_0 row, as `i32`.
-inline fn x_q8(y: [*]const blocks.Q8_0, ib: usize, j: usize) i32 {
+inline fn x_q8(y: [*]const ggml.quants.blocks.Q8_0, ib: usize, j: usize) i32 {
     return y[ib].qs[j];
 }
 
@@ -237,15 +233,15 @@ pub export fn ggml_vec_dot_q4_1_q8_1_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK8_1;
+    const qk = ggml.impl.c.QK8_1;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q4_1, vx);
-    const y = as(blocks.Q8_1, vy);
+    const x = as(ggml.quants.blocks.Q4_1, vx);
+    const y = as(ggml.quants.blocks.Q8_1, vy);
 
     var sumf: f32 = 0;
 
@@ -285,25 +281,25 @@ pub export fn ggml_vec_dot_mxfp4_q8_0_generic(
     nrc: c_int,
 ) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, c.QK_MXFP4) == 0);
-    comptime std.debug.assert(c.QK_MXFP4 == c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_MXFP4) == 0);
+    comptime std.debug.assert(ggml.impl.c.QK_MXFP4 == ggml.impl.c.QK8_0);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.MXFP4, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.MXFP4, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, c.QK_MXFP4);
+    const nb = @divTrunc(n, ggml.impl.c.QK_MXFP4);
 
     var sumf: f32 = 0;
 
     for (0..@intCast(nb)) |ib| {
-        const d = f(y[ib].d) * impl.e8m0ToFp32Half(x[ib].e);
+        const d = f(y[ib].d) * ggml.impl.e8m0ToFp32Half(x[ib].e);
 
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..c.QK_MXFP4 / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j]) * c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + c.QK_MXFP4 / 2]) * c.kvalues_mxfp4[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.c.QK_MXFP4 / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK_MXFP4 / 2]) * ggml.impl.c.kvalues_mxfp4[x[ib].qs[j] >> 4];
         }
         sumf += d * @as(f32, @floatFromInt(sumi1 + sumi2));
     }
@@ -327,20 +323,20 @@ pub export fn ggml_vec_dot_nvfp4_q8_0_generic(
     nrc: c_int,
 ) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, c.QK_NVFP4) == 0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK_NVFP4) == 0);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.NVFP4, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.NVFP4, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, c.QK_NVFP4);
-    const sub = c.QK_NVFP4_SUB;
+    const nb = @divTrunc(n, ggml.impl.c.QK_NVFP4);
+    const sub = ggml.impl.c.QK_NVFP4_SUB;
 
     var sumf: f32 = 0;
 
     for (0..@intCast(nb)) |ib| {
         for (0..4) |s_idx| {
-            const d = impl.ue4m3ToFp32(x[ib].d[s_idx]);
+            const d = ggml.impl.ue4m3ToFp32(x[ib].d[s_idx]);
             const q8_block = s_idx / 2;
             const q8_off = (s_idx % 2) * sub;
             const dy = f(y[2 * ib + q8_block].d);
@@ -350,8 +346,8 @@ pub export fn ggml_vec_dot_nvfp4_q8_0_generic(
             for (0..sub / 2) |j| {
                 const qv = x[ib].qs[s_idx * (sub / 2) + j];
                 const q = &y[2 * ib + q8_block].qs;
-                sumi_lo += @as(i32, q[q8_off + j]) * c.kvalues_mxfp4[qv & 0xf];
-                sumi_hi += @as(i32, q[q8_off + j + sub / 2]) * c.kvalues_mxfp4[qv >> 4];
+                sumi_lo += @as(i32, q[q8_off + j]) * ggml.impl.c.kvalues_mxfp4[qv & 0xf];
+                sumi_hi += @as(i32, q[q8_off + j + sub / 2]) * ggml.impl.c.kvalues_mxfp4[qv >> 4];
             }
 
             sumf += dy * d * @as(f32, @floatFromInt(sumi_lo + sumi_hi));
@@ -389,8 +385,8 @@ pub export fn ggml_vec_dot_f8_e4m3_f32(
     nrc: c_int,
 ) void {
     _ = .{ bs, bx, by, nrc };
-    const F = simd.F32;
-    const table = &convert.ggml_table_f32_f8_e4m3;
+    const F = ggml.cpu.simd.F32;
+    const table = &ggml.cpu.convert.ggml_table_f32_f8_e4m3;
 
     const x: [*]const u8 = @ptrCast(vx.?);
     const y: [*]const f32 = @ptrCast(@alignCast(vy.?));
@@ -469,16 +465,16 @@ pub export fn ggml_vec_dot_q5_0_q8_0_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK8_0;
+    const qk = ggml.impl.c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(c.QK8_0 == c.QK5_0);
+    comptime std.debug.assert(ggml.impl.c.QK8_0 == ggml.impl.c.QK5_0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q5_0, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.Q5_0, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
     var sumf: f32 = 0;
 
@@ -522,16 +518,16 @@ pub export fn ggml_vec_dot_q5_1_q8_1_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK8_1;
+    const qk = ggml.impl.c.QK8_1;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
-    comptime std.debug.assert(c.QK8_1 == c.QK5_1);
+    comptime std.debug.assert(ggml.impl.c.QK8_1 == ggml.impl.c.QK5_1);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q5_1, vx);
-    const y = as(blocks.Q8_1, vy);
+    const x = as(ggml.quants.blocks.Q5_1, vx);
+    const y = as(ggml.quants.blocks.Q8_1, vy);
 
     var sumf: f32 = 0;
 
@@ -574,15 +570,15 @@ pub export fn ggml_vec_dot_q8_0_q8_0_generic(
     by: usize,
     nrc: c_int,
 ) void {
-    const qk = c.QK8_0;
+    const qk = ggml.impl.c.QK8_0;
     const nb = @divTrunc(n, qk);
 
     std.debug.assert(@rem(n, qk) == 0);
     std.debug.assert(nrc == 1);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.Q8_0, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.Q8_0, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
     var sumf: f32 = 0;
 
@@ -614,14 +610,14 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0_generic(
     nrc: c_int,
 ) void {
     std.debug.assert(nrc == 1);
-    std.debug.assert(@rem(n, c.QK4_NL) == 0);
-    comptime std.debug.assert(c.QK4_NL == c.QK8_0);
+    std.debug.assert(@rem(n, ggml.impl.c.QK4_NL) == 0);
+    comptime std.debug.assert(ggml.impl.c.QK4_NL == ggml.impl.c.QK8_0);
     _ = .{ bs, bx, by };
 
-    const x = as(blocks.IQ4_NL, vx);
-    const y = as(blocks.Q8_0, vy);
+    const x = as(ggml.quants.blocks.IQ4_NL, vx);
+    const y = as(ggml.quants.blocks.Q8_0, vy);
 
-    const nb = @divTrunc(n, c.QK4_NL);
+    const nb = @divTrunc(n, ggml.impl.c.QK4_NL);
 
     var sumf: f32 = 0;
 
@@ -629,9 +625,9 @@ pub export fn ggml_vec_dot_iq4_nl_q8_0_generic(
         const d = f(y[ib].d) * f(x[ib].d);
         var sumi1: i32 = 0;
         var sumi2: i32 = 0;
-        for (0..c.QK4_NL / 2) |j| {
-            sumi1 += @as(i32, y[ib].qs[j]) * c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
-            sumi2 += @as(i32, y[ib].qs[j + c.QK4_NL / 2]) * c.kvalues_iq4nl[x[ib].qs[j] >> 4];
+        for (0..ggml.impl.c.QK4_NL / 2) |j| {
+            sumi1 += @as(i32, y[ib].qs[j]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] & 0xf];
+            sumi2 += @as(i32, y[ib].qs[j + ggml.impl.c.QK4_NL / 2]) * ggml.impl.c.kvalues_iq4nl[x[ib].qs[j] >> 4];
         }
         sumf += d * @as(f32, @floatFromInt(sumi1 + sumi2));
     }
@@ -646,45 +642,42 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-const testing = @import("testing.zig");
-const golden = @import("golden.zig");
-
 test "q1_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_q1_0_q8_0_generic, c.GGML_TYPE_Q1_0, c.GGML_TYPE_Q8_0, golden.q1_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q1_0_q8_0_generic, ggml.impl.c.GGML_TYPE_Q1_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.q1_0);
 }
 
 test "q2_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_q2_0_q8_0_generic, c.GGML_TYPE_Q2_0, c.GGML_TYPE_Q8_0, golden.q2_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q2_0_q8_0_generic, ggml.impl.c.GGML_TYPE_Q2_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.q2_0);
 }
 
 test "q4_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_q4_0_q8_0_generic, c.GGML_TYPE_Q4_0, c.GGML_TYPE_Q8_0, golden.q4_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_0_q8_0_generic, ggml.impl.c.GGML_TYPE_Q4_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.q4_0);
 }
 
 test "q4_1 dot matches the C" {
-    try testing.check(ggml_vec_dot_q4_1_q8_1_generic, c.GGML_TYPE_Q4_1, c.GGML_TYPE_Q8_1, golden.q4_1);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q4_1_q8_1_generic, ggml.impl.c.GGML_TYPE_Q4_1, ggml.impl.c.GGML_TYPE_Q8_1, ggml.cpu.quants.golden.q4_1);
 }
 
 test "q5_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_q5_0_q8_0_generic, c.GGML_TYPE_Q5_0, c.GGML_TYPE_Q8_0, golden.q5_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_0_q8_0_generic, ggml.impl.c.GGML_TYPE_Q5_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.q5_0);
 }
 
 test "q5_1 dot matches the C" {
-    try testing.check(ggml_vec_dot_q5_1_q8_1_generic, c.GGML_TYPE_Q5_1, c.GGML_TYPE_Q8_1, golden.q5_1);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q5_1_q8_1_generic, ggml.impl.c.GGML_TYPE_Q5_1, ggml.impl.c.GGML_TYPE_Q8_1, ggml.cpu.quants.golden.q5_1);
 }
 
 test "q8_0 dot matches the C" {
-    try testing.check(ggml_vec_dot_q8_0_q8_0_generic, c.GGML_TYPE_Q8_0, c.GGML_TYPE_Q8_0, golden.q8_0);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_q8_0_q8_0_generic, ggml.impl.c.GGML_TYPE_Q8_0, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.q8_0);
 }
 
 test "mxfp4 dot matches the C" {
-    try testing.check(ggml_vec_dot_mxfp4_q8_0_generic, c.GGML_TYPE_MXFP4, c.GGML_TYPE_Q8_0, golden.mxfp4);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_mxfp4_q8_0_generic, ggml.impl.c.GGML_TYPE_MXFP4, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.mxfp4);
 }
 
 test "nvfp4 dot matches the C" {
-    try testing.check(ggml_vec_dot_nvfp4_q8_0_generic, c.GGML_TYPE_NVFP4, c.GGML_TYPE_Q8_0, golden.nvfp4);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_nvfp4_q8_0_generic, ggml.impl.c.GGML_TYPE_NVFP4, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.nvfp4);
 }
 
 test "iq4_nl dot matches the C" {
-    try testing.check(ggml_vec_dot_iq4_nl_q8_0_generic, c.GGML_TYPE_IQ4_NL, c.GGML_TYPE_Q8_0, golden.iq4_nl);
+    try ggml.cpu.quants.testing.check(ggml_vec_dot_iq4_nl_q8_0_generic, ggml.impl.c.GGML_TYPE_IQ4_NL, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.iq4_nl);
 }

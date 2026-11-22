@@ -9,41 +9,33 @@
 //! declaration names what it ports and the line it began at.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("exception.zig");
-const msg_mod = @import("msg.zig");
-const chat_peg = @import("chat_peg.zig");
-const util = @import("util.zig");
-const log = @import("log.zig");
-const input_mod = @import("input.zig");
 
 const Allocator = std.mem.Allocator;
-const Error = exception.Error;
-const Msg = msg_mod.Msg;
-const Input = input_mod.Input;
 
 /// Ports `common_chat_parser_params` (chat.h:347 @b1b770d90): per-message
 /// parsing syntax, derived from `common_chat_params`.
 pub const ParserParams = struct {
-    format: msg_mod.Format = .content_only,
+    format: mod.msg.Format = .content_only,
     /// Borrowed.
-    generation_prompt: ?*const Input = null,
+    generation_prompt: ?*const mod.input.Input = null,
     debug: bool = false, // Enable debug output for PEG parser
     /// `common_peg_arena parser`: null for the empty arena. Borrowed.
     parser: ?*const peg.Arena = null,
 };
 
 /// Ports `common_chat_parse` (chat.cpp:1801 @b1b770d90).
-pub fn parse(gpa: Allocator, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
+pub fn parse(gpa: Allocator, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
     return pegParse(gpa, params.parser, input, is_partial, params);
 }
 
-fn pureContent(_: void, p: *chat_peg.ChatBuilder) chat_peg.Error!peg.ParserId {
+fn pureContent(_: void, p: *mod.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
     return p.b.plus(try p.content(try p.b.rest()), try p.b.end());
 }
 
-fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
+fn mapperKind(format: mod.msg.Format) mod.chat_peg.Mapper.Kind {
     return switch (format) {
         .peg_gemma4 => .gemma4,
         .peg_minimax_m3 => .minimax_m3,
@@ -61,7 +53,7 @@ fn mapperKind(format: msg_mod.Format) chat_peg.Mapper.Kind {
 /// - `src_parser`: the parser; null or empty for content only.
 ///
 /// Return: the message. `error.RuntimeError` when the reply does not match.
-pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Input, is_partial: bool, params: *const ParserParams) Error!Msg {
+pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const mod.input.Input, is_partial: bool, params: *const ParserParams) mod.exception.Error!mod.msg.Msg {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -72,8 +64,8 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Inp
     var built: ?peg.Arena = null;
     defer if (built) |*b| b.deinit();
     if (empty) {
-        built = chat_peg.buildChatPegParser(a, {}, pureContent) catch |e| return util.fromPeg(e);
-        log.dbg("No parser definition detected, assuming pure content parser.", .{});
+        built = mod.chat_peg.buildChatPegParser(a, {}, pureContent) catch |e| return mod.util.fromPeg(e);
+        mod.log.dbg("No parser definition detected, assuming pure content parser.", .{});
     }
     const parser: *const peg.Arena = if (built) |*b| b else src_parser.?;
 
@@ -84,9 +76,9 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Inp
     if (!is_partial) flags |= peg.Flags.complete;
     if (params.debug) flags |= peg.Flags.debug;
 
-    var ctx = peg.ParseContext.initTokens(a, effective_input.text.items, effective_input.tokens.items, flags) catch |e| return util.fromPeg(e);
+    var ctx = peg.ParseContext.initTokens(a, effective_input.text.items, effective_input.tokens.items, flags) catch |e| return mod.util.fromPeg(e);
     defer ctx.deinit();
-    const result = parser.parse(&ctx, 0) catch |e| return util.fromPeg(e);
+    const result = parser.parse(&ctx, 0) catch |e| return mod.util.fromPeg(e);
 
     if (result.fail()) {
         // During partial parsing, return partial results if any AST nodes were captured
@@ -95,40 +87,40 @@ pub fn pegParse(gpa: Allocator, src_parser: ?*const peg.Arena, input: *const Inp
             // Try to extract any partial results from what was successfully parsed
             const msg = try mapMessage(gpa, &ctx, &result, params.format);
             if (ctx.isDebug()) {
-                const dumped = ctx.ast.dump(a) catch |e| return util.fromPeg(e);
-                peg.errors.eprint("\nAST for partial parse (fail):\n{s}\n", .{dumped}) catch |e| return util.fromPeg(e);
+                const dumped = ctx.ast.dump(a) catch |e| return mod.util.fromPeg(e);
+                peg.errors.eprint("\nAST for partial parse (fail):\n{s}\n", .{dumped}) catch |e| return mod.util.fromPeg(e);
             }
             return msg;
         }
-        log.wrn("{s}: unparsed {s} output: {s}\n", .{ "common_chat_peg_parse", params.format.name(), try util.substrFrom(ctx.input, result.end) });
-        log.dbg("{s}: full {s} output triggering error:\n=== BEGIN ===\n{s}\n=== END ===\n", .{ "common_chat_peg_parse", params.format.name(), ctx.input });
-        return exception.throw(error.RuntimeError, "The model produced output that does not match the expected {s} format", .{params.format.name()});
+        mod.log.wrn("{s}: unparsed {s} output: {s}\n", .{ "common_chat_peg_parse", params.format.name(), try mod.util.substrFrom(ctx.input, result.end) });
+        mod.log.dbg("{s}: full {s} output triggering error:\n=== BEGIN ===\n{s}\n=== END ===\n", .{ "common_chat_peg_parse", params.format.name(), ctx.input });
+        return mod.exception.throw(error.RuntimeError, "The model produced output that does not match the expected {s} format", .{params.format.name()});
     }
 
     var msg = try mapMessage(gpa, &ctx, &result, params.format);
     errdefer msg.deinit(gpa);
 
     if (ctx.isDebug()) {
-        const dumped = ctx.ast.dump(a) catch |e| return util.fromPeg(e);
-        peg.errors.eprint("\nAST for {s} parse:\n{s}\n", .{ if (is_partial) "partial" else "full", dumped }) catch |e| return util.fromPeg(e);
+        const dumped = ctx.ast.dump(a) catch |e| return mod.util.fromPeg(e);
+        peg.errors.eprint("\nAST for {s} parse:\n{s}\n", .{ if (is_partial) "partial" else "full", dumped }) catch |e| return mod.util.fromPeg(e);
     }
 
-    if (!is_partial and log.debugEnabled()) {
-        var arr = try msg_mod.msgsToJsonOaicompat(a, (&msg)[0..1], false);
-        const dumped = json.dump(a, arr.atIndex(0) catch |e| return util.fromJson(e), -1) catch |e| return util.fromJson(e);
-        log.dbg("Parsed message: {s}\n", .{dumped});
+    if (!is_partial and mod.log.debugEnabled()) {
+        var arr = try mod.msg.msgsToJsonOaicompat(a, (&msg)[0..1], false);
+        const dumped = json.dump(a, arr.atIndex(0) catch |e| return mod.util.fromJson(e), -1) catch |e| return mod.util.fromJson(e);
+        mod.log.dbg("Parsed message: {s}\n", .{dumped});
     }
     return msg;
 }
 
 /// The message a mapper of the format's kind reads off the AST.
-fn mapMessage(gpa: Allocator, ctx: *const peg.ParseContext, result: *const peg.ParseResult, format: msg_mod.Format) Error!Msg {
-    var msg: Msg = .{};
+fn mapMessage(gpa: Allocator, ctx: *const peg.ParseContext, result: *const peg.ParseResult, format: mod.msg.Format) mod.exception.Error!mod.msg.Msg {
+    var msg: mod.msg.Msg = .{};
     errdefer msg.deinit(gpa);
-    try Msg.setField(gpa, &msg.role, "assistant");
-    var mapper = chat_peg.Mapper.init(gpa, &msg, mapperKind(format));
+    try mod.msg.Msg.setField(gpa, &msg.role, "assistant");
+    var mapper = mod.chat_peg.Mapper.init(gpa, &msg, mapperKind(format));
     defer mapper.deinit();
-    mapper.fromAst(&ctx.ast, result) catch |e| return util.fromPeg(e);
+    mapper.fromAst(&ctx.ast, result) catch |e| return mod.util.fromPeg(e);
     return msg;
 }
 
@@ -141,9 +133,9 @@ test {
 
 test "without a parser the reply is all content" {
     const a = std.testing.allocator;
-    var gp = try Input.fromText(a, "<a>");
+    var gp = try mod.input.Input.fromText(a, "<a>");
     defer gp.deinit();
-    var in = try Input.fromText(a, "hello");
+    var in = try mod.input.Input.fromText(a, "hello");
     defer in.deinit();
     const params: ParserParams = .{ .generation_prompt = &gp };
     var msg = try parse(a, &in, false, &params);

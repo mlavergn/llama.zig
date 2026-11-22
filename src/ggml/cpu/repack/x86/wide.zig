@@ -37,13 +37,8 @@
 //! the product with `|x| = 0` is zero either way. Each width uses its own.
 
 const std = @import("std");
+const cpu = @import("../../module.zig");
 const builtin = @import("builtin");
-const avx = @import("../../quants/x86/avx2.zig");
-const common = @import("common.zig");
-
-const m256i = avx.m256i;
-const m128i = avx.m128i;
-const m256 = avx.m256;
 
 /// The C's `__AVX512BW__ && __AVX512DQ__`, which compiles the gemms'
 /// 512-bit arms.
@@ -88,25 +83,25 @@ pub fn Wide(comptime bits: u16) type {
         /// The register the C builds from 256-bit halves: `lo` alone at 256
         /// bits; at 512, `_mm512_inserti32x8(_mm512_castsi256_si512(lo), hi,
         /// 1)`.
-        pub inline fn join(lo: m256i, hi: m256i) I {
+        pub inline fn join(lo: cpu.quants.arch.avx2.m256i, hi: cpu.quants.arch.avx2.m256i) I {
             if (bits == 256) return lo;
             return @shuffle(i64, lo, hi, [8]i32{ 0, 1, 2, 3, -1, -2, -3, -4 });
         }
 
         /// `join` for floats: `_mm512_insertf32x8(_mm512_castps256_ps512(lo),
         /// hi, 1)`, or `GGML_F32Cx8x2_LOAD`'s widening of two loads.
-        pub inline fn joinF(lo: m256, hi: m256) F {
+        pub inline fn joinF(lo: cpu.quants.arch.avx2.m256, hi: cpu.quants.arch.avx2.m256) F {
             if (bits == 256) return lo;
             return @shuffle(f32, lo, hi, [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8 });
         }
 
         /// `join(v, v)`: an activation register, the same in both halves.
-        pub inline fn rep(v: m256i) I {
+        pub inline fn rep(v: cpu.quants.arch.avx2.m256i) I {
             return join(v, v);
         }
 
         /// `joinF(v, v)`.
-        pub inline fn repF(v: m256) F {
+        pub inline fn repF(v: cpu.quants.arch.avx2.m256) F {
             return joinF(v, v);
         }
 
@@ -127,43 +122,43 @@ pub fn Wide(comptime bits: u16) type {
         }
 
         pub inline fn add_epi16(a: I, b: I) I {
-            if (bits == 256) return avx.mm256_add_epi16(a, b);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_add_epi16(a, b);
             return as(I, as(@Vector(n16, i16), a) +% as(@Vector(n16, i16), b));
         }
 
         pub inline fn add_epi32(a: I, b: I) I {
-            if (bits == 256) return avx.mm256_add_epi32(a, b);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_add_epi32(a, b);
             return as(I, as(@Vector(n32, i32), a) +% as(@Vector(n32, i32), b));
         }
 
         /// `srli_epi16` by a constant, as every repack call site shifts.
         pub inline fn srli_epi16(a: I, comptime count: u32) I {
-            if (bits == 256) return avx.mm256_srli_epi16(a, count);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_srli_epi16(a, count);
             return as(I, @"llvm.x86.avx512.psrli.w.512"(as(@Vector(32, i16), a), count));
         }
 
         /// `pmaddubsw`: unsigned bytes of `a` times signed bytes of `b`,
         /// pairs summed with signed saturation.
         pub inline fn maddubs_epi16(a: I, b: I) I {
-            if (bits == 256) return avx.mm256_maddubs_epi16(a, b);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_maddubs_epi16(a, b);
             return as(I, @"llvm.x86.avx512.pmaddubs.w.512"(as(@Vector(64, u8), a), as(@Vector(64, i8), b)));
         }
 
         pub inline fn madd_epi16(a: I, b: I) I {
-            if (bits == 256) return avx.mm256_madd_epi16(a, b);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_madd_epi16(a, b);
             return as(I, @"llvm.x86.avx512.pmaddw.d.512"(as(@Vector(32, i16), a), as(@Vector(32, i16), b)));
         }
 
         /// `pshufb`, within each 128-bit lane.
         pub inline fn shuffle_epi8(a: I, b: I) I {
-            if (bits == 256) return avx.mm256_shuffle_epi8(a, b);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_shuffle_epi8(a, b);
             return as(I, @"llvm.x86.avx512.pshuf.b.512"(as(@Vector(64, i8), a), as(@Vector(64, i8), b)));
         }
 
         /// `_mm256_shuffle_epi32` / `_mm512_shuffle_epi32`: the same
         /// four-lane permute in every 128-bit lane.
         pub inline fn shuffle_epi32(a: I, comptime imm: u8) I {
-            if (bits == 256) return avx.mm256_shuffle_epi32(a, imm);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_shuffle_epi32(a, imm);
             const sel = comptime blk: {
                 @setEvalBranchQuota(10000);
                 var m: [n32]i32 = undefined;
@@ -177,7 +172,7 @@ pub fn Wide(comptime bits: u16) type {
         /// the AVX-512 arms write for it, whose 16-bit mask repeats `imm`
         /// (`204` and `0xCCCC`).
         pub inline fn blend_epi32(a: I, b: I, comptime imm: u8) I {
-            if (bits == 256) return avx.mm256_blend_epi32(a, b, imm);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_blend_epi32(a, b, imm);
             const mask: @Vector(n32, bool) = comptime blk: {
                 @setEvalBranchQuota(10000);
                 var m: [n32]bool = undefined;
@@ -190,7 +185,7 @@ pub fn Wide(comptime bits: u16) type {
         /// `_mm256_shuffle_ps(a, a, imm)` / `_mm512_shuffle_ps(a, a, imm)`:
         /// every call site shuffles a register with itself.
         pub inline fn shuffle_ps(a: F, comptime imm: u8) F {
-            if (bits == 256) return avx.mm256_shuffle_ps(a, a, imm);
+            if (bits == 256) return cpu.quants.arch.avx2.mm256_shuffle_ps(a, a, imm);
             const sel = comptime blk: {
                 @setEvalBranchQuota(10000);
                 var m: [n32]i32 = undefined;
@@ -228,7 +223,7 @@ pub fn Wide(comptime bits: u16) type {
         /// (arch/x86/repack.cpp:123, 118 @b1b770d90) inlined: `vpdpbusd` with
         /// `__AVX512VNNI__`, `maddubs` then `madd` without.
         pub inline fn mul_sum_i8_pairs_acc(acc: I, x: I, y: I) I {
-            if (bits == 256) return common.mul_sum_i8_pairs_acc_int32x8(acc, x, y);
+            if (bits == 256) return cpu.repack.arch.common.mul_sum_i8_pairs_acc_int32x8(acc, x, y);
             const xb = as(@Vector(64, i8), x);
             const yb = as(@Vector(64, i8), y);
             // `_mm512_abs_epi8`, wrapping: |-128| is 0x80.

@@ -17,20 +17,10 @@
 //! `vendor/` and `std.crypto`.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("impl.zig");
-const mtmd = @import("mtmd.zig");
-const vendor = @import("vendor/module.zig");
-const lapi = @import("llama").api;
-const c = impl.c;
-const gpa = impl.gpa;
-
-const Context = mtmd.Context;
-const Token = c.llama_token;
-
-extern fn ftell(f: ?*anyopaque) c_long;
 
 const is_windows = builtin.os.tag == .windows;
 const win32 = struct {
@@ -45,7 +35,7 @@ const seek_end: c_int = 2;
 
 /// Ports `mtmd_helper_bitmap_wrapper` (mtmd-helper.h:49 @b1b770d90).
 pub const BitmapWrapper = extern struct {
-    bitmap: ?*mtmd.Bitmap,
+    bitmap: ?*mod.mtmd.Bitmap,
     video_ctx: ?*anyopaque,
 };
 
@@ -55,9 +45,9 @@ pub const EmbdBatchView = extern struct {
     n_tokens: i32,
     embd: ?[*]const f32, // [n_tokens, n_embd]
     n_embd: i32,
-    pos: ?[*]const c.llama_pos, // [n_pos, n_tokens], section-major
+    pos: ?[*]const mod.impl.c.llama_pos, // [n_pos, n_tokens], section-major
     n_pos: i32, // 4 for M-RoPE models, 1 otherwise
-    seq_id: c.llama_seq_id,
+    seq_id: mod.impl.c.llama_seq_id,
 };
 
 /// Ports `mtmd_helper_post_decode_callback` (mtmd-helper.h:141 @b1b770d90):
@@ -107,26 +97,26 @@ pub const InitOpt = extern struct {
 // -----------------------------------------------------------------------------
 // mtmd-helper-common.h: logging
 
-fn defaultCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
+fn defaultCallback(level: mod.impl.c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
     const f = stdlib.stdio.cStream(.stderr);
-    _ = libc.fputs(text, f);
-    _ = libc.fflush(f);
+    _ = stdlib.libc.fputs(text, f);
+    _ = stdlib.libc.fflush(f);
 }
 
 /// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @b1b770d90): the
 /// helpers' logger, separate from libmtmd's.
 pub const Logger = struct {
-    default_callback: c.ggml_log_callback = defaultCallback,
-    log_callback: c.ggml_log_callback = defaultCallback,
+    default_callback: mod.impl.c.ggml_log_callback = defaultCallback,
+    log_callback: mod.impl.c.ggml_log_callback = defaultCallback,
     log_callback_user_data: ?*anyopaque = null,
 
     /// `log` (mtmd-helper-common.h:52 @b1b770d90): format into 128 bytes,
     /// or a heap buffer when that is too short.
-    pub fn log(self: *const Logger, level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
+    pub fn log(self: *const Logger, level: mod.impl.c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
         var buffer: [128]u8 = undefined;
-        const len = @call(.auto, libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
+        const len = @call(.auto, stdlib.libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
         const cb = self.log_callback orelse return;
         if (len < 128) {
             cb(level, @ptrCast(&buffer), self.log_callback_user_data);
@@ -135,7 +125,7 @@ pub const Logger = struct {
             const buffer2 = std.heap.c_allocator.alloc(u8, n + 1) catch return;
             defer std.heap.c_allocator.free(buffer2);
             @memset(buffer2, 0);
-            _ = @call(.auto, libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
+            _ = @call(.auto, stdlib.libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
             buffer2[n] = 0;
             cb(level, @ptrCast(buffer2.ptr), self.log_callback_user_data);
         }
@@ -147,16 +137,16 @@ pub const Logger = struct {
 pub var g_logger: Logger = .{};
 
 pub fn logDbg(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(c.GGML_LOG_LEVEL_DEBUG, fmt, args);
+    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_DEBUG, fmt, args);
 }
 pub fn logInf(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(c.GGML_LOG_LEVEL_INFO, fmt, args);
+    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_INFO, fmt, args);
 }
 pub fn logWrn(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(c.GGML_LOG_LEVEL_WARN, fmt, args);
+    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_WARN, fmt, args);
 }
 pub fn logErr(comptime fmt: [*:0]const u8, args: anytype) void {
-    g_logger.log(c.GGML_LOG_LEVEL_ERROR, fmt, args);
+    g_logger.log(mod.impl.c.GGML_LOG_LEVEL_ERROR, fmt, args);
 }
 
 // -----------------------------------------------------------------------------
@@ -170,36 +160,36 @@ pub const EmbdBatch = struct {
     n_mmproj_embd: c_int,
     n_tokens: i32,
     embd: ?[*]const f32, // [n_tokens, n_mmproj_embd], not owned
-    pos: std.ArrayList(c.llama_pos) = .empty, // [n_pos_per_embd, n_tokens], section-major
-    pos_view: std.ArrayList(c.llama_pos) = .empty, // sliced positions of the last get_view()
+    pos: std.ArrayList(mod.impl.c.llama_pos) = .empty, // [n_pos_per_embd, n_tokens], section-major
+    pos_view: std.ArrayList(mod.impl.c.llama_pos) = .empty, // sliced positions of the last get_view()
     logits: std.ArrayList(i8) = .empty,
-    seq_id: c.llama_seq_id = 0,
+    seq_id: mod.impl.c.llama_seq_id = 0,
 
-    batch: ?*c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
+    batch: ?*mod.impl.c.struct_llama_batch_ext = null, // rendered sub-batch, see render()
 
     /// The constructor `decode_embd_batch` (mtmd-helper-common.h:86 @b1b770d90).
     /// Heap-allocated, as the callers hold it by pointer.
     pub fn create(embd: ?[*]const f32, n_tokens: i32, n_pos_per_embd: c_int, n_mmproj_embd: c_int) *EmbdBatch {
-        impl.ggmlAssert(n_tokens > 0 and n_pos_per_embd > 0 and n_mmproj_embd > 0, "mtmd-helper-common.h", 88, "n_tokens > 0 && n_pos_per_embd > 0 && n_mmproj_embd > 0");
-        const self = gpa.create(EmbdBatch) catch oom();
+        mod.impl.ggmlAssert(n_tokens > 0 and n_pos_per_embd > 0 and n_mmproj_embd > 0, "mtmd-helper-common.h", 88, "n_tokens > 0 && n_pos_per_embd > 0 && n_mmproj_embd > 0");
+        const self = std.heap.c_allocator.create(EmbdBatch) catch oom();
         self.* = .{ .n_pos_per_embd = n_pos_per_embd, .n_mmproj_embd = n_mmproj_embd, .n_tokens = n_tokens, .embd = embd };
         const n: usize = @intCast(n_tokens);
-        resizeZero(c.llama_pos, &self.pos, n * @as(usize, @intCast(n_pos_per_embd)));
+        resizeZero(mod.impl.c.llama_pos, &self.pos, n * @as(usize, @intCast(n_pos_per_embd)));
         resizeZero(i8, &self.logits, n);
         return self;
     }
 
     /// The destructor: `batch`'s `llama_batch_ext_ptr` frees it.
     pub fn destroy(self: *EmbdBatch) void {
-        if (self.batch) |b| lapi.batch.llama_batch_ext_free(b);
-        self.pos.deinit(gpa);
-        self.pos_view.deinit(gpa);
-        self.logits.deinit(gpa);
-        gpa.destroy(self);
+        if (self.batch) |b| llama.api.batch.llama_batch_ext_free(b);
+        self.pos.deinit(std.heap.c_allocator);
+        self.pos_view.deinit(std.heap.c_allocator);
+        self.logits.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// `set_position_normal` (mtmd-helper-common.h:93 @b1b770d90).
-    pub fn setPositionNormal(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
+    pub fn setPositionNormal(self: *EmbdBatch, pos_0: mod.impl.c.llama_pos, seq_id: mod.impl.c.llama_seq_id) void {
         self.seq_id = seq_id;
         var i: i32 = 0;
         while (i < self.n_tokens) : (i += 1) {
@@ -209,9 +199,9 @@ pub const EmbdBatch = struct {
 
     /// `set_position_mrope_2d` (mtmd-helper-common.h:101 @b1b770d90): M-RoPE
     /// for image.
-    pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mtmd.DecoderPos, seq_id: c.llama_seq_id) void {
-        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 102, "n_pos_per_embd == 4");
-        impl.ggmlAssert(rel_pos.len != 0 and @as(i32, @truncate(@as(isize, @intCast(rel_pos.len)))) == self.n_tokens, "mtmd-helper-common.h", 103, "!rel_pos.empty() && (int32_t)rel_pos.size() == n_tokens");
+    pub fn setPositionMrope2d(self: *EmbdBatch, rel_pos: []const mod.mtmd.DecoderPos, seq_id: mod.impl.c.llama_seq_id) void {
+        mod.impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 102, "n_pos_per_embd == 4");
+        mod.impl.ggmlAssert(rel_pos.len != 0 and @as(i32, @truncate(@as(isize, @intCast(rel_pos.len)))) == self.n_tokens, "mtmd-helper-common.h", 103, "!rel_pos.empty() && (int32_t)rel_pos.size() == n_tokens");
         self.seq_id = seq_id;
         const n: usize = @intCast(self.n_tokens);
         for (0..n) |idx| {
@@ -224,8 +214,8 @@ pub const EmbdBatch = struct {
 
     /// `set_position_mrope_1d` (mtmd-helper-common.h:116 @b1b770d90): M-RoPE
     /// for audio.
-    pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: c.llama_pos, seq_id: c.llama_seq_id) void {
-        impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 117, "n_pos_per_embd == 4");
+    pub fn setPositionMrope1d(self: *EmbdBatch, pos_0: mod.impl.c.llama_pos, seq_id: mod.impl.c.llama_seq_id) void {
+        mod.impl.ggmlAssert(self.n_pos_per_embd == 4, "mtmd-helper-common.h", 117, "n_pos_per_embd == 4");
         self.seq_id = seq_id;
         const n: usize = @intCast(self.n_tokens);
         for (0..n) |idx| {
@@ -241,11 +231,11 @@ pub const EmbdBatch = struct {
     /// entries `[offset, offset + n)` with section-major positions, copied
     /// into `pos_view`; valid until the next call.
     pub fn getView(self: *EmbdBatch, offset: c_int, n: c_int) EmbdBatchView {
-        impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 131, "offset >= 0 && n > 0 && offset + n <= n_tokens");
+        mod.impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 131, "offset >= 0 && n > 0 && offset + n <= n_tokens");
         const off: usize = @intCast(offset);
         const nn: usize = @intCast(n);
         self.pos_view.clearRetainingCapacity();
-        self.pos_view.ensureTotalCapacity(gpa, nn * @as(usize, @intCast(self.n_pos_per_embd))) catch oom();
+        self.pos_view.ensureTotalCapacity(std.heap.c_allocator, nn * @as(usize, @intCast(self.n_pos_per_embd))) catch oom();
         var j: usize = 0;
         while (j < @as(usize, @intCast(self.n_pos_per_embd))) : (j += 1) {
             const src = j * @as(usize, @intCast(self.n_tokens)) + off;
@@ -264,32 +254,32 @@ pub const EmbdBatch = struct {
     /// `render` (mtmd-helper-common.h:149 @b1b770d90): the entries
     /// `[offset, offset + n)` as a batch this object owns, ready for
     /// `llama_process`.
-    pub fn render(self: *EmbdBatch, lctx: ?*c.struct_llama_context, offset: c_int, n: c_int) ?*c.struct_llama_batch_ext {
-        impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 150, "offset >= 0 && n > 0 && offset + n <= n_tokens");
+    pub fn render(self: *EmbdBatch, lctx: ?*mod.impl.c.struct_llama_context, offset: c_int, n: c_int) ?*mod.impl.c.struct_llama_batch_ext {
+        mod.impl.ggmlAssert(offset >= 0 and n > 0 and offset + n <= self.n_tokens, "mtmd-helper-common.h", 150, "offset >= 0 && n > 0 && offset + n <= n_tokens");
         if (self.batch == null) {
-            self.batch = lapi.batch.llama_batch_ext_init(lctx);
+            self.batch = llama.api.batch.llama_batch_ext_init(lctx);
         }
-        lapi.batch.llama_batch_ext_clear(self.batch);
+        llama.api.batch.llama_batch_ext_clear(self.batch);
         const n_tokens: usize = @intCast(self.n_tokens);
         var i: usize = @intCast(offset);
         while (i < @as(usize, @intCast(offset + n))) : (i += 1) {
-            const e: c.struct_llama_embd = .{
+            const e: mod.impl.c.struct_llama_embd = .{
                 .data = if (self.embd) |p| p + i * @as(usize, @intCast(self.n_mmproj_embd)) else null,
                 .n_rows = 1,
                 .n_embd = @intCast(self.n_mmproj_embd),
             };
-            const idx = lapi.batch.llama_batch_ext_add_embd(self.batch, self.seq_id, e);
-            impl.ggmlAssert(idx >= 0, "mtmd-helper-common.h", 158, "idx >= 0");
+            const idx = llama.api.batch.llama_batch_ext_add_embd(self.batch, self.seq_id, e);
+            mod.impl.ggmlAssert(idx >= 0, "mtmd-helper-common.h", 158, "idx >= 0");
 
-            var p = [_]c.llama_pos{ 0, 0, 0, 0 }; // GGML_MROPE_SECTIONS
+            var p = [_]mod.impl.c.llama_pos{ 0, 0, 0, 0 }; // GGML_MROPE_SECTIONS
             var j: usize = 0;
             while (j < @as(usize, @intCast(self.n_pos_per_embd))) : (j += 1) {
                 p[j] = self.pos.items[j * n_tokens + i];
             }
-            _ = lapi.batch.llama_batch_ext_set_pos(self.batch, idx, &p);
+            _ = llama.api.batch.llama_batch_ext_set_pos(self.batch, idx, &p);
 
             if (self.logits.items[i] != 0) {
-                _ = lapi.batch.llama_batch_ext_set_output_logits(self.batch, idx, true);
+                _ = llama.api.batch.llama_batch_ext_set_output_logits(self.batch, idx, true);
             }
         }
         return self.batch;
@@ -297,12 +287,12 @@ pub const EmbdBatch = struct {
 };
 
 fn oom() noreturn {
-    impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
+    mod.impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
 }
 
 fn resizeZero(comptime T: type, list: *std.ArrayList(T), n: usize) void {
     const old = list.items.len;
-    list.resize(gpa, n) catch oom();
+    list.resize(std.heap.c_allocator, n) catch oom();
     if (n > old) @memset(list.items[old..], std.mem.zeroes(T));
 }
 
@@ -311,100 +301,100 @@ fn resizeZero(comptime T: type, list: *std.ArrayList(T), n: usize) void {
 
 /// Ports `mtmd_helper_log_set` (mtmd-helper.cpp:58 @b1b770d90): the
 /// helpers' logger and libmtmd's together.
-pub fn mtmd_helper_log_set(log_callback_in: c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
+pub fn mtmd_helper_log_set(log_callback_in: mod.impl.c.ggml_log_callback, user_data: ?*anyopaque) callconv(.c) void {
     const log_callback = log_callback_in orelse g_logger.default_callback;
     g_logger.log_callback = log_callback;
     g_logger.log_callback_user_data = user_data;
-    mtmd.mtmd_log_set(log_callback, user_data);
+    mod.mtmd.mtmd_log_set(log_callback, user_data);
 }
 
 /// Ports `mtmd_helper_get_n_tokens` (mtmd-helper.cpp:71 @b1b770d90).
-pub fn mtmd_helper_get_n_tokens(chunks: *const mtmd.InputChunks) callconv(.c) usize {
+pub fn mtmd_helper_get_n_tokens(chunks: *const mod.mtmd.InputChunks) callconv(.c) usize {
     var n_tokens: usize = 0;
     var i: usize = 0;
-    while (i < mtmd.mtmd_input_chunks_size(chunks)) : (i += 1) {
-        const chunk = mtmd.mtmd_input_chunks_get(chunks, i).?;
-        n_tokens +%= mtmd.mtmd_input_chunk_get_n_tokens(chunk);
+    while (i < mod.mtmd.mtmd_input_chunks_size(chunks)) : (i += 1) {
+        const chunk = mod.mtmd.mtmd_input_chunks_get(chunks, i).?;
+        n_tokens +%= mod.mtmd.mtmd_input_chunk_get_n_tokens(chunk);
     }
     return n_tokens;
 }
 
 /// Ports `mtmd_helper_get_n_pos` (mtmd-helper.cpp:80 @b1b770d90).
-pub fn mtmd_helper_get_n_pos(chunks: *const mtmd.InputChunks) callconv(.c) c.llama_pos {
-    var n_pos: c.llama_pos = 0;
+pub fn mtmd_helper_get_n_pos(chunks: *const mod.mtmd.InputChunks) callconv(.c) mod.impl.c.llama_pos {
+    var n_pos: mod.impl.c.llama_pos = 0;
     var i: usize = 0;
-    while (i < mtmd.mtmd_input_chunks_size(chunks)) : (i += 1) {
-        const chunk = mtmd.mtmd_input_chunks_get(chunks, i).?;
-        n_pos +%= mtmd.mtmd_input_chunk_get_n_pos(chunk);
+    while (i < mod.mtmd.mtmd_input_chunks_size(chunks)) : (i += 1) {
+        const chunk = mod.mtmd.mtmd_input_chunks_get(chunks, i).?;
+        n_pos +%= mod.mtmd.mtmd_input_chunk_get_n_pos(chunk);
     }
     return n_pos;
 }
 
 /// Ports `mtmd_helper_image_get_decoder_pos` (mtmd-helper.cpp:89 @b1b770d90).
-pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mtmd.ImageTokens, pos_0: c.llama_pos, out_pos: [*]mtmd.DecoderPos) callconv(.c) void {
-    const n_tokens = mtmd.mtmd_image_tokens_get_n_tokens(chunks);
-    for (0..n_tokens) |i| out_pos[i] = mtmd.mtmd_image_tokens_get_decoder_pos(chunks, pos_0, i);
+pub fn mtmd_helper_image_get_decoder_pos(chunks: *const mod.mtmd.ImageTokens, pos_0: mod.impl.c.llama_pos, out_pos: [*]mod.mtmd.DecoderPos) callconv(.c) void {
+    const n_tokens = mod.mtmd.mtmd_image_tokens_get_n_tokens(chunks);
+    for (0..n_tokens) |i| out_pos[i] = mod.mtmd.mtmd_image_tokens_get_decoder_pos(chunks, pos_0, i);
 }
 
 /// Ports `mtmd_helper_decode_image_chunk` (mtmd-helper.cpp:120 @b1b770d90):
 /// decodes media embeddings already computed, in batches of `n_batch`.
 /// `scope_non_causal` (mtmd-helper.cpp:97 @b1b770d90) is the `defer`.
 pub fn mtmd_helper_decode_image_chunk(
-    ctx: *Context,
-    lctx: ?*c.struct_llama_context,
-    chunk: *const mtmd.InputChunk,
+    ctx: *mod.mtmd.Context,
+    lctx: ?*mod.impl.c.struct_llama_context,
+    chunk: *const mod.mtmd.InputChunk,
     encoded_embd: ?[*]f32,
-    n_past_in: c.llama_pos,
-    seq_id: c.llama_seq_id,
+    n_past_in: mod.impl.c.llama_pos,
+    seq_id: mod.impl.c.llama_seq_id,
     n_batch: i32,
-    new_n_past: *c.llama_pos,
+    new_n_past: *mod.impl.c.llama_pos,
     callback: PostDecodeCallback,
     user_data: ?*anyopaque,
 ) callconv(.c) i32 {
     var n_past = n_past_in;
-    impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 131, "n_batch > 0");
-    const chunk_type = mtmd.mtmd_input_chunk_get_type(chunk);
+    mod.impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 131, "n_batch > 0");
+    const chunk_type = mod.mtmd.mtmd_input_chunk_get_type(chunk);
     const name: [*:0]const u8 = if (chunk_type == .image) "image" else "audio";
     if (chunk_type == .text) {
         logErr("failed to decode chunk: input chunk not of image/audio type\n", .{});
         return -1;
     }
 
-    const model = lapi.context.llama_get_model(lctx);
-    const n_mmproj_embd = lapi.model.llama_model_n_embd_inp(model);
-    const n_pos_per_embd: c_int = if (mtmd.mtmd_decode_use_mrope(ctx)) 4 else 1;
+    const model = llama.api.context.llama_get_model(lctx);
+    const n_mmproj_embd = llama.api.model.llama_model_n_embd_inp(model);
+    const n_pos_per_embd: c_int = if (mod.mtmd.mtmd_decode_use_mrope(ctx)) 4 else 1;
 
-    const n_tokens: i32 = @truncate(@as(isize, @bitCast(mtmd.mtmd_input_chunk_get_n_tokens(chunk))));
+    const n_tokens: i32 = @truncate(@as(isize, @bitCast(mod.mtmd.mtmd_input_chunk_get_n_tokens(chunk))));
     var i_batch: i32 = 0;
     const n_img_batches: i32 = @divTrunc(n_tokens + n_batch - 1, n_batch);
     const batch_embd = EmbdBatch.create(encoded_embd, n_tokens, n_pos_per_embd, n_mmproj_embd);
     defer batch_embd.destroy();
 
-    if (mtmd.mtmd_decode_use_mrope(ctx)) {
+    if (mod.mtmd.mtmd_decode_use_mrope(ctx)) {
         if (chunk_type == .image) {
-            const image_tokens = mtmd.mtmd_input_chunk_get_tokens_image(chunk) orelse {
+            const image_tokens = mod.mtmd.mtmd_input_chunk_get_tokens_image(chunk) orelse {
                 logErr("failed to decode chunk: image tokens are null\n", .{});
                 return -1;
             };
-            const n_img_tokens = mtmd.mtmd_image_tokens_get_n_tokens(image_tokens);
-            const rel_pos = gpa.alloc(mtmd.DecoderPos, n_img_tokens) catch oom();
-            defer gpa.free(rel_pos);
-            @memset(rel_pos, std.mem.zeroes(mtmd.DecoderPos));
+            const n_img_tokens = mod.mtmd.mtmd_image_tokens_get_n_tokens(image_tokens);
+            const rel_pos = std.heap.c_allocator.alloc(mod.mtmd.DecoderPos, n_img_tokens) catch oom();
+            defer std.heap.c_allocator.free(rel_pos);
+            @memset(rel_pos, std.mem.zeroes(mod.mtmd.DecoderPos));
             mtmd_helper_image_get_decoder_pos(image_tokens, n_past, rel_pos.ptr);
             batch_embd.setPositionMrope2d(rel_pos, seq_id);
         } else if (chunk_type == .audio) {
             batch_embd.setPositionMrope1d(n_past, seq_id);
         } else {
-            impl.abort("mtmd-helper.cpp", 162, "invalid chunk type for M-RoPE");
+            mod.impl.abort("mtmd-helper.cpp", 162, "invalid chunk type for M-RoPE");
         }
     } else {
         batch_embd.setPositionNormal(n_past, seq_id);
     }
 
-    const use_non_causal = mtmd.mtmd_decode_use_non_causal(ctx, chunk);
+    const use_non_causal = mod.mtmd.mtmd_decode_use_non_causal(ctx, chunk);
     // TODO @ngxson : need to make sure only one image is processed at a time, and n_ubatch must be enough to hold the image
-    if (use_non_causal) lapi.context.llama_set_causal_attn(lctx, false);
-    defer if (use_non_causal) lapi.context.llama_set_causal_attn(lctx, true);
+    if (use_non_causal) llama.api.context.llama_set_causal_attn(lctx, false);
+    defer if (use_non_causal) llama.api.context.llama_set_causal_attn(lctx, true);
 
     while (i_batch < n_img_batches) { // split into batches
         const pos_offset = i_batch * n_batch;
@@ -412,8 +402,8 @@ pub fn mtmd_helper_decode_image_chunk(
 
         logInf("decoding %s batch %d/%d, n_tokens_batch = %d\n", .{ name, i_batch + 1, n_img_batches, n_tokens_batch });
 
-        const t1 = c.ggml_time_ms();
-        var ret = lapi.context.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(lctx, pos_offset, n_tokens_batch));
+        const t1 = mod.impl.c.ggml_time_ms();
+        var ret = llama.api.context.llama_process(lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, batch_embd.render(lctx, pos_offset, n_tokens_batch));
         if (ret != 0) {
             logErr("failed to decode %s\n", .{name});
             return ret;
@@ -428,12 +418,12 @@ pub fn mtmd_helper_decode_image_chunk(
             }
         }
 
-        logInf("%s decoded (batch %d/%d) in %lld ms\n", .{ name, i_batch + 1, n_img_batches, @as(c_longlong, c.ggml_time_ms() - t1) });
+        logInf("%s decoded (batch %d/%d) in %lld ms\n", .{ name, i_batch + 1, n_img_batches, @as(c_longlong, mod.impl.c.ggml_time_ms() - t1) });
 
         i_batch += 1;
     }
 
-    n_past +%= mtmd.mtmd_input_chunk_get_n_pos(chunk);
+    n_past +%= mod.mtmd.mtmd_input_chunk_get_n_pos(chunk);
     new_n_past.* = n_past;
 
     return 0;
@@ -442,44 +432,44 @@ pub fn mtmd_helper_decode_image_chunk(
 /// Ports `mtmd_helper_eval_chunk_single` (mtmd-helper.cpp:204 @b1b770d90):
 /// a text chunk goes through a `llama_batch_ext`.
 pub fn mtmd_helper_eval_chunk_single(
-    ctx: *Context,
-    lctx: ?*c.struct_llama_context,
-    chunk: *const mtmd.InputChunk,
-    n_past_in: c.llama_pos,
-    seq_id: c.llama_seq_id,
+    ctx: *mod.mtmd.Context,
+    lctx: ?*mod.impl.c.struct_llama_context,
+    chunk: *const mod.mtmd.InputChunk,
+    n_past_in: mod.impl.c.llama_pos,
+    seq_id: mod.impl.c.llama_seq_id,
     n_batch: i32,
     logits_last: bool,
-    new_n_past: *c.llama_pos,
+    new_n_past: *mod.impl.c.llama_pos,
 ) callconv(.c) i32 {
     var n_past = n_past_in;
-    impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 212, "n_batch > 0");
+    mod.impl.ggmlAssert(n_batch > 0, "mtmd-helper.cpp", 212, "n_batch > 0");
     var ret: i32 = undefined;
-    const chunk_type = mtmd.mtmd_input_chunk_get_type(chunk);
+    const chunk_type = mod.mtmd.mtmd_input_chunk_get_type(chunk);
 
     if (chunk_type == .text) {
         var n_tokens: usize = 0;
-        const tokens = mtmd.mtmd_input_chunk_get_tokens_text(chunk, &n_tokens);
+        const tokens = mod.mtmd.mtmd_input_chunk_get_tokens_text(chunk, &n_tokens);
         // LOG_INF("decoding text chunk, n_tokens = %zu\n", n_tokens);
-        const text_batch = lapi.batch.llama_batch_ext_init(lctx);
-        defer lapi.batch.llama_batch_ext_free(text_batch);
+        const text_batch = llama.api.batch.llama_batch_ext_init(lctx);
+        defer llama.api.batch.llama_batch_ext_free(text_batch);
         var i: usize = 0;
         while (i < n_tokens) { // split into batches
-            lapi.batch.llama_batch_ext_clear(text_batch);
+            llama.api.batch.llama_batch_ext_clear(text_batch);
             var n_added: i32 = 0;
             var idx: i32 = -1;
             while (i < n_tokens and n_added < n_batch) : (i += 1) {
-                idx = lapi.batch.llama_batch_ext_add_token(text_batch, seq_id, tokens.?[i]);
-                impl.ggmlAssert(idx >= 0, "mtmd-helper.cpp", 228, "idx >= 0");
-                const pos: c.llama_pos = n_past;
+                idx = llama.api.batch.llama_batch_ext_add_token(text_batch, seq_id, tokens.?[i]);
+                mod.impl.ggmlAssert(idx >= 0, "mtmd-helper.cpp", 228, "idx >= 0");
+                const pos: mod.impl.c.llama_pos = n_past;
                 n_past +%= 1;
-                _ = lapi.batch.llama_batch_ext_set_pos(text_batch, idx, &pos);
+                _ = llama.api.batch.llama_batch_ext_set_pos(text_batch, idx, &pos);
                 n_added += 1;
             }
             const is_last_token = (i == n_tokens);
             if (logits_last and is_last_token) {
-                _ = lapi.batch.llama_batch_ext_set_output_logits(text_batch, idx, true);
+                _ = llama.api.batch.llama_batch_ext_set_output_logits(text_batch, idx, true);
             }
-            ret = lapi.context.llama_process(lctx, c.LLAMA_PROCESS_TYPE_DECODE, text_batch);
+            ret = llama.api.context.llama_process(lctx, mod.impl.c.LLAMA_PROCESS_TYPE_DECODE, text_batch);
             if (ret != 0) {
                 logErr("failed to decode text\n", .{});
                 return ret;
@@ -488,26 +478,26 @@ pub fn mtmd_helper_eval_chunk_single(
         }
     } else if (chunk_type == .image or chunk_type == .audio) {
         const name: [*:0]const u8 = if (chunk_type == .image) "image" else "audio";
-        const t0 = c.ggml_time_ms();
+        const t0 = mod.impl.c.ggml_time_ms();
 
         logInf("encoding %s slice...\n", .{name});
 
-        ret = mtmd.mtmd_encode_chunk(ctx, chunk);
+        ret = mod.mtmd.mtmd_encode_chunk(ctx, chunk);
         if (ret != 0) {
             logErr("failed to encode %s slice\n", .{name});
             return ret;
         }
 
-        logInf("%s slice encoded in %lld ms\n", .{ name, @as(c_longlong, c.ggml_time_ms() - t0) });
+        logInf("%s slice encoded in %lld ms\n", .{ name, @as(c_longlong, mod.impl.c.ggml_time_ms() - t0) });
 
-        const embd = mtmd.mtmd_get_output_embd(ctx);
+        const embd = mod.mtmd.mtmd_get_output_embd(ctx);
         ret = mtmd_helper_decode_image_chunk(ctx, lctx, chunk, embd, n_past, seq_id, n_batch, new_n_past, null, null);
         if (ret != 0) {
             logErr("failed to decode %s\n", .{name});
             return ret;
         }
     } else {
-        impl.abort("mtmd-helper.cpp", 266, "chunk type not supported");
+        mod.impl.abort("mtmd-helper.cpp", 266, "chunk type not supported");
     }
 
     return 0;
@@ -515,17 +505,17 @@ pub fn mtmd_helper_eval_chunk_single(
 
 /// Ports `mtmd_helper_eval_chunks` (mtmd-helper.cpp:272 @b1b770d90).
 pub fn mtmd_helper_eval_chunks(
-    ctx: *Context,
-    lctx: ?*c.struct_llama_context,
-    chunks: *const mtmd.InputChunks,
-    n_past_in: c.llama_pos,
-    seq_id: c.llama_seq_id,
+    ctx: *mod.mtmd.Context,
+    lctx: ?*mod.impl.c.struct_llama_context,
+    chunks: *const mod.mtmd.InputChunks,
+    n_past_in: mod.impl.c.llama_pos,
+    seq_id: mod.impl.c.llama_seq_id,
     n_batch: i32,
     logits_last: bool,
-    new_n_past: *c.llama_pos,
+    new_n_past: *mod.impl.c.llama_pos,
 ) callconv(.c) i32 {
     var n_past = n_past_in;
-    const n_chunks = mtmd.mtmd_input_chunks_size(chunks);
+    const n_chunks = mod.mtmd.mtmd_input_chunks_size(chunks);
     if (n_chunks == 0) {
         logWrn("no chunks to eval\n", .{});
         return 0;
@@ -533,7 +523,7 @@ pub fn mtmd_helper_eval_chunks(
 
     for (0..n_chunks) |i| {
         const chunk_logits_last = (i == n_chunks - 1) and logits_last;
-        const chunk = mtmd.mtmd_input_chunks_get(chunks, i).?;
+        const chunk = mod.mtmd.mtmd_input_chunks_get(chunks, i).?;
 
         const res = mtmd_helper_eval_chunk_single(ctx, lctx, chunk, n_past, seq_id, n_batch, chunk_logits_last, &n_past);
         if (res != 0) {
@@ -564,21 +554,16 @@ fn isAudioFile(buf: []const u8) bool {
 /// `decode_audio_from_buf` (mtmd-helper.cpp:322 @b1b770d90), a member of `audio_helpers`,
 /// which is miniaudio's decoder, in `vendor/`.
 fn decodeAudioFromBuf(buf: []const u8, target_sample_rate: c_int, out: *std.ArrayList(f32)) bool {
-    return vendor.miniaudio.decodeAudioFromBuf(gpa, buf, target_sample_rate, out);
+    return mod.vendor.miniaudio.decodeAudioFromBuf(std.heap.c_allocator, buf, target_sample_rate, out);
 }
 
-/// Ports `mtmd_helper_resampler` (mtmd-helper.cpp:363 @b1b770d90): the
-/// state and the loop are `vendor/miniaudio.zig`'s `HelperResampler`, beside
-/// the rest of `audio_helpers`, so the decode gate can reach them.
-pub const Resampler = vendor.miniaudio.HelperResampler;
-
 /// Ports `mtmd_helper_resampler_init` (mtmd-helper.cpp:369 @b1b770d90).
-pub fn mtmd_helper_resampler_init(rate_in: i32, rate_out: i32) callconv(.c) ?*Resampler {
+pub fn mtmd_helper_resampler_init(rate_in: i32, rate_out: i32) callconv(.c) ?*mod.vendor.miniaudio.HelperResampler {
     if (rate_in <= 0 or rate_out <= 0) {
         logErr("%s: invalid sample rate %d -> %d\n", .{ "mtmd_helper_resampler_init", rate_in, rate_out });
         return null;
     }
-    return Resampler.create(gpa, @intCast(rate_in), @intCast(rate_out)) catch oom() orelse {
+    return mod.vendor.miniaudio.HelperResampler.create(std.heap.c_allocator, @intCast(rate_in), @intCast(rate_out)) catch oom() orelse {
         // unreachable with both rates positive, as `ma_resampler_init` is
         logErr("%s: failed to initialize the resampler %d -> %d\n", .{ "mtmd_helper_resampler_init", rate_in, rate_out });
         return null;
@@ -586,15 +571,15 @@ pub fn mtmd_helper_resampler_init(rate_in: i32, rate_out: i32) callconv(.c) ?*Re
 }
 
 /// Ports `mtmd_helper_resampler_free` (mtmd-helper.cpp:390 @b1b770d90).
-pub fn mtmd_helper_resampler_free(ctx: ?*Resampler) callconv(.c) void {
+pub fn mtmd_helper_resampler_free(ctx: ?*mod.vendor.miniaudio.HelperResampler) callconv(.c) void {
     const r = ctx orelse return;
-    r.destroy(gpa);
+    r.destroy(std.heap.c_allocator);
 }
 
 /// Ports `mtmd_helper_resampler_process` (mtmd-helper.cpp:400 @b1b770d90):
 /// `*out` stays valid until the next call; returns the samples written.
-pub fn mtmd_helper_resampler_process(ctx: *Resampler, in: ?[*]const f32, n_in: usize, out: *?[*]const f32) callconv(.c) i64 {
-    return ctx.process(gpa, in, n_in, out) catch oom();
+pub fn mtmd_helper_resampler_process(ctx: *mod.vendor.miniaudio.HelperResampler, in: ?[*]const f32, n_in: usize, out: *?[*]const f32) callconv(.c) i64 {
+    return ctx.process(std.heap.c_allocator, in, n_in, out) catch oom();
 }
 
 /// SHA-256 of `buf` in lowercase hex: `hash_sha256_hex` (vendor/hash/hash.cpp:19
@@ -616,7 +601,7 @@ fn sha256Hex(buf: []const u8) [64:0]u8 {
 /// audio by its magic bytes, else an image stb_image can read. The ID is
 /// the buffer's SHA-256 unless `placeholder`. `opt` is only read by the
 /// video paths, which this build does not compile.
-pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const u8, len: usize, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
+pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const mod.mtmd.Context, buf_ptr: ?[*]const u8, len: usize, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     _ = opt; // only used by video code paths
     const buf: []const u8 = if (len == 0) &.{} else buf_ptr.?[0..len];
     // calculate the hash if needed
@@ -631,8 +616,8 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
 
     if (isAudioFile(buf)) {
         var pcmf32: std.ArrayList(f32) = .empty;
-        defer pcmf32.deinit(gpa);
-        const sample_rate = mtmd.mtmd_get_audio_sample_rate(ctx);
+        defer pcmf32.deinit(std.heap.c_allocator);
+        const sample_rate = mod.mtmd.mtmd_get_audio_sample_rate(ctx);
         if (sample_rate < 0) {
             logErr("This model does not support audio input\n", .{});
             return .{ .bitmap = null, .video_ctx = null };
@@ -641,17 +626,17 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
             logErr("Unable to read WAV audio file from buffer\n", .{});
             return .{ .bitmap = null, .video_ctx = null };
         }
-        const result = mtmd.mtmd_bitmap_init_from_audio(pcmf32.items.len, if (placeholder) null else pcmf32.items.ptr);
-        mtmd.mtmd_bitmap_set_id(result, id);
+        const result = mod.mtmd.mtmd_bitmap_init_from_audio(pcmf32.items.len, if (placeholder) null else pcmf32.items.ptr);
+        mod.mtmd.mtmd_bitmap_set_id(result, id);
         return .{ .bitmap = result, .video_ctx = null };
     }
 
     // otherwise, we assume it's an image
-    switch (vendor.stb_image.loadFromMemory(gpa, buf, 3)) {
+    switch (mod.vendor.stb_image.loadFromMemory(std.heap.c_allocator, buf, 3)) {
         .ok => |img| {
-            defer gpa.free(img.pixels);
-            const result = mtmd.mtmd_bitmap_init(@bitCast(img.x), @bitCast(img.y), if (placeholder) null else img.pixels.ptr);
-            mtmd.mtmd_bitmap_set_id(result, id);
+            defer std.heap.c_allocator.free(img.pixels);
+            const result = mod.mtmd.mtmd_bitmap_init(@bitCast(img.x), @bitCast(img.y), if (placeholder) null else img.pixels.ptr);
+            mod.mtmd.mtmd_bitmap_set_id(result, id);
             return .{ .bitmap = result, .video_ctx = null };
         },
         // otherwise, fallthrough to video decoding (if supported)
@@ -663,23 +648,23 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
 }
 
 /// Ports `mtmd_helper_bitmap_init_from_file` (mtmd-helper.cpp:530 @b1b770d90).
-pub fn mtmd_helper_bitmap_init_from_file(ctx: *const Context, fname: [*:0]const u8, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
+pub fn mtmd_helper_bitmap_init_from_file(ctx: *const mod.mtmd.Context, fname: [*:0]const u8, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     const f = openFile(fname) orelse return .{ .bitmap = null, .video_ctx = null };
 
-    _ = libc.fseek(f, 0, seek_end);
-    const file_size = ftell(f);
-    _ = libc.fseek(f, 0, seek_set);
+    _ = stdlib.libc.fseek(f, 0, seek_end);
+    const file_size = stdlib.libc.ftell(f);
+    _ = stdlib.libc.fseek(f, 0, seek_set);
     if (file_size < 0) {
         logErr("Failed to get file size of %s\n", .{fname});
-        _ = libc.fclose(f);
+        _ = stdlib.libc.fclose(f);
         return .{ .bitmap = null, .video_ctx = null };
     }
-    const buf = gpa.alloc(u8, @intCast(file_size)) catch oom();
-    defer gpa.free(buf);
+    const buf = std.heap.c_allocator.alloc(u8, @intCast(file_size)) catch oom();
+    defer std.heap.c_allocator.free(buf);
     @memset(buf, 0);
 
-    const n_read = libc.fread(buf.ptr, 1, buf.len, f);
-    _ = libc.fclose(f);
+    const n_read = stdlib.libc.fread(buf.ptr, 1, buf.len, f);
+    _ = stdlib.libc.fclose(f);
     if (n_read != buf.len) {
         logErr("Failed to read entire file %s", .{fname});
         return .{ .bitmap = null, .video_ctx = null };
@@ -698,19 +683,19 @@ fn openFile(fname: [*:0]const u8) ?*anyopaque {
             logErr("Unable to convert filename to UTF-16: %s\n", .{fname});
             return null;
         }
-        const wfname = gpa.alloc(u16, @intCast(wlen)) catch oom();
-        defer gpa.free(wfname);
+        const wfname = std.heap.c_allocator.alloc(u16, @intCast(wlen)) catch oom();
+        defer std.heap.c_allocator.free(wfname);
         @memset(wfname, 0);
         wlen = win32.MultiByteToWideChar(cp_utf8, 0, fname, -1, wfname.ptr, wlen);
         if (wlen == 0) {
             logErr("Unable to convert filename to UTF-16: %s\n", .{fname});
             return null;
         }
-        const f = libc._wfopen(@ptrCast(wfname.ptr), std.unicode.utf8ToUtf16LeStringLiteral("rb"));
+        const f = stdlib.libc._wfopen(@ptrCast(wfname.ptr), std.unicode.utf8ToUtf16LeStringLiteral("rb"));
         if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, stdlib.errno.strerror(std.c._errno().*) });
         return f;
     }
-    const f = libc.fopen(fname, "rb");
+    const f = stdlib.libc.fopen(fname, "rb");
     if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, stdlib.errno.strerror(std.c._errno().*) });
     return f;
 }
@@ -728,7 +713,7 @@ pub fn mtmd_helper_init_opt_default() callconv(.c) InitOpt {
 
 /// Ports `mtmd_helper_video_init` (mtmd-helper.cpp:1200 @b1b770d90), its
 /// `#else` arm.
-pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, params: VideoInitParams) callconv(.c) ?*anyopaque {
+pub fn mtmd_helper_video_init(mctx: ?*const mod.mtmd.Context, path: ?[*:0]const u8, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
     _ = path;
     _ = params;
@@ -738,7 +723,7 @@ pub fn mtmd_helper_video_init(mctx: ?*const Context, path: ?[*:0]const u8, param
 
 /// Ports `mtmd_helper_video_init_from_buf` (mtmd-helper.cpp:1239 @b1b770d90),
 /// its `#else` arm.
-pub fn mtmd_helper_video_init_from_buf(mctx: ?*const Context, buf: ?[*]const u8, len: usize, params: VideoInitParams) callconv(.c) ?*anyopaque {
+pub fn mtmd_helper_video_init_from_buf(mctx: ?*const mod.mtmd.Context, buf: ?[*]const u8, len: usize, params: VideoInitParams) callconv(.c) ?*anyopaque {
     _ = mctx;
     _ = buf;
     _ = len;
@@ -758,51 +743,51 @@ pub fn mtmd_helper_video_free(ctx: ?*anyopaque) callconv(.c) void {
 /// `#else` arm.
 pub fn mtmd_helper_video_get_info(ctx: ?*const anyopaque) callconv(.c) VideoInfo {
     _ = ctx;
-    impl.ggmlAssert(false, "mtmd-helper.cpp", 1295, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
+    mod.impl.ggmlAssert(false, "mtmd-helper.cpp", 1295, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
     unreachable;
 }
 
 /// Ports `mtmd_helper_video_read_next` (mtmd-helper.cpp:1299 @b1b770d90), its
 /// `#else` arm.
-pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mtmd.Bitmap, out_text: ?*?[*:0]u8) callconv(.c) i32 {
+pub fn mtmd_helper_video_read_next(ctx: ?*anyopaque, out_bitmap: ?*?*mod.mtmd.Bitmap, out_text: ?*?[*:0]u8) callconv(.c) i32 {
     _ = ctx;
     _ = out_bitmap;
     _ = out_text;
-    impl.ggmlAssert(false, "mtmd-helper.cpp", 1308, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
+    mod.impl.ggmlAssert(false, "mtmd-helper.cpp", 1308, "false && \"video is not supported in this build (MTMD_VIDEO is set to OFF)\"");
     unreachable;
 }
 
 /// Ports `mtmd_helper_get_capabilities` (mtmd-helper.cpp:1312 @b1b770d90): `mctx` can be
 /// null (text-only model). Video is not compiled in.
-pub fn mtmd_helper_get_capabilities(model: ?*const c.struct_llama_model, mctx: ?*const Context) callconv(.c) Cap {
+pub fn mtmd_helper_get_capabilities(model: ?*const mod.impl.c.struct_llama_model, mctx: ?*const mod.mtmd.Context) callconv(.c) Cap {
     var cap = std.mem.zeroes(Cap);
     cap.chat = true;
     cap.text_gen = true;
     const m = mctx orelse return cap;
 
-    cap.vision = mtmd.mtmd_support_vision(m);
-    cap.audio = mtmd.mtmd_support_audio(m);
-    cap.audio_stream = mtmd.mtmd_support_audio_stream(m);
-    const gen_audio_type = mtmd.mtmd_gen_audio_get_info(m).type;
+    cap.vision = mod.mtmd.mtmd_support_vision(m);
+    cap.audio = mod.mtmd.mtmd_support_audio(m);
+    cap.audio_stream = mod.mtmd.mtmd_support_audio_stream(m);
+    const gen_audio_type = mod.mtmd.mtmd_gen_audio_get_info(m).type;
     cap.audio_gen = gen_audio_type != .none;
     cap.audio_gen_spk_ref = gen_audio_type == .qwen3tts or gen_audio_type == .pockettts;
 
     // a tts model without a chat template only outputs audio, it cannot be used for chat
     // neither can a realtime transcription model (e.g. Voxtral Realtime): its text follows the audio by a token delay
-    cap.text_gen = !cap.audio_gen or lapi.model.llama_model_chat_template(model, null) != null;
-    cap.chat = cap.text_gen and lapi.model.llama_model_n_tokens_delay(model) == 0;
+    cap.text_gen = !cap.audio_gen or llama.api.model.llama_model_chat_template(model, null) != null;
+    cap.chat = cap.text_gen and llama.api.model.llama_model_n_tokens_delay(model) == 0;
 
     return cap;
 }
 
 /// Ports `mtmd_helper_model_can_chat` (mtmd-helper.cpp:1339 @b1b770d90).
-pub fn mtmd_helper_model_can_chat(lctx: ?*const c.struct_llama_context, mctx: ?*const Context) callconv(.c) bool {
-    return mtmd_helper_get_capabilities(lapi.context.llama_get_model(lctx), mctx).chat;
+pub fn mtmd_helper_model_can_chat(lctx: ?*const mod.impl.c.struct_llama_context, mctx: ?*const mod.mtmd.Context) callconv(.c) bool {
+    return mtmd_helper_get_capabilities(llama.api.context.llama_get_model(lctx), mctx).chat;
 }
 
 /// Ports `mtmd_helper_support_video` (mtmd-helper.cpp:1343 @b1b770d90): video
 /// is not compiled in.
-pub fn mtmd_helper_support_video(ctx: ?*const Context) callconv(.c) bool {
+pub fn mtmd_helper_support_video(ctx: ?*const mod.mtmd.Context) callconv(.c) bool {
     _ = ctx;
     return false;
 }

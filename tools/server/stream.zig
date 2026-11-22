@@ -25,20 +25,14 @@
 //! observable.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const tc = @import("tools_common");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const json = @import("json");
-const libcxx = @import("stdlib").libcxx;
 
-const http = @import("http.zig");
-const common = @import("common.zig");
-
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
 
 const gpa = std.heap.c_allocator;
-const srv = common.srv;
 
 /// Ports `stream_read_status` (server-stream.cpp:11 @b1b770d90).
 const ReadStatus = enum { ok, offset_lost };
@@ -68,8 +62,8 @@ pub const Session = struct {
 
     refs: std.atomic.Value(u32) = .init(1),
 
-    mu: sync.Mutex = .{},
-    cv: sync.Condition = .{},
+    mu: stdlib.sync.Mutex = .{},
+    cv: stdlib.sync.Condition = .{},
     buffer: std.ArrayList(u8) = .empty,
     prefix_dropped: usize = 0,
     cap_bytes: usize,
@@ -242,15 +236,15 @@ pub const Session = struct {
 /// live session, keyed by conversation id; one conversation, at most one
 /// live session; a periodic GC evicts expired ones.
 const Manager = struct {
-    map_mu: sync.Mutex = .{},
-    sessions: ?libcxx.StringMap(?*Session) = null, // key: conversation_id
+    map_mu: stdlib.sync.Mutex = .{},
+    sessions: ?stdlib.libcxx.StringMap(?*Session) = null, // key: conversation_id
     gc_thread: ?std.Thread = null,
     running: bool = false,
-    gc_wake_mu: sync.Mutex = .{},
-    gc_wake_cv: sync.Condition = .{},
+    gc_wake_mu: stdlib.sync.Mutex = .{},
+    gc_wake_cv: stdlib.sync.Condition = .{},
 
-    fn map(self: *Manager) !*libcxx.StringMap(?*Session) {
-        if (self.sessions == null) self.sessions = try libcxx.StringMap(?*Session).init(gpa);
+    fn map(self: *Manager) !*stdlib.libcxx.StringMap(?*Session) {
+        if (self.sessions == null) self.sessions = try stdlib.libcxx.StringMap(?*Session).init(gpa);
         return &self.sessions.?;
     }
 
@@ -346,7 +340,7 @@ const Manager = struct {
                 defer gpa.free(id_z);
                 const live_z = try gpa.dupeSentinel(u8, live.items, 0);
                 defer gpa.free(live_z);
-                srv(.wrn, "evict_and_cancel", "stop on unknown stream session, conv_id=%s matched nothing, %zu live: [%s]\n", .{ id_z.ptr, n, live_z.ptr });
+                mod.common.srv(.wrn, "evict_and_cancel", "stop on unknown stream session, conv_id=%s matched nothing, %zu live: [%s]\n", .{ id_z.ptr, n, live_z.ptr });
                 return;
             };
             s = v.*.?;
@@ -502,16 +496,16 @@ pub const Producer = struct {
 
 /// Ports `make_error_response` (server-stream.cpp:445 @b1b770d90): the
 /// standard error response in a new `server_http_res`.
-fn makeErrorResponse(status: c_int, message: []const u8, ty: common.ErrorType) !*http.Res {
-    const res = try http.Res.create(gpa);
+fn makeErrorResponse(status: c_int, message: []const u8, ty: mod.common.ErrorType) !*mod.http.Res {
+    const res = try mod.http.Res.create(gpa);
     errdefer res.destroy();
     const a = res.allocator();
-    var err = try common.formatErrorResponse(a, message, ty);
-    res.status = common.jsonValue(&err, "code", c_int, status);
+    var err = try mod.common.formatErrorResponse(a, message, ty);
+    res.status = mod.common.jsonValue(&err, "code", c_int, status);
     res.content_type = "application/json; charset=utf-8";
-    var outer = Value.emptyObject();
+    var outer = json.Value.emptyObject();
     try outer.set(a, "error", err);
-    try res.setData(try common.safeJsonToStr(a, &outer));
+    try res.setData(try mod.common.safeJsonToStr(a, &outer));
     return res;
 }
 
@@ -519,14 +513,14 @@ fn makeErrorResponse(status: c_int, message: []const u8, ty: common.ErrorType) !
 /// what its `next` lambda captures -- the consumer pipe (a session
 /// reference), the offset, and the request's `should_stop`.
 const ReplayRes = struct {
-    base: http.Res,
+    base: mod.http.Res,
     session: *Session,
     offset: usize,
-    should_stop: http.ShouldStop,
+    should_stop: mod.http.ShouldStop,
 
-    const vtable: http.Res.VTable = .{ .on_complete = http.Res.noComplete, .destroy = destroyReplay };
+    const vtable: mod.http.Res.VTable = .{ .on_complete = mod.http.Res.noComplete, .destroy = destroyReplay };
 
-    fn destroyReplay(res: *http.Res) void {
+    fn destroyReplay(res: *mod.http.Res) void {
         const self: *ReplayRes = @fieldParentPtr("base", res);
         self.session.release();
         self.base.arena.deinit();
@@ -559,7 +553,7 @@ const ReplayRes = struct {
 /// The handler `server_stream_make_get_handler` (server-stream.cpp:454
 /// @b1b770d90) makes: `GET /v1/stream?conv_id=<id>&from=N` replays the
 /// buffered SSE bytes, then blocks for live ones until the session ends.
-fn getHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
+fn getHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
     const conv_id = req.getParam("conv_id", "");
     if (conv_id.len == 0) {
         return makeErrorResponse(400, "Missing conversation id in path", .invalid_request);
@@ -594,15 +588,15 @@ fn getHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
 }
 
 /// Ports `server_stream_make_get_handler` (server-stream.cpp:454 @b1b770d90).
-pub fn makeGetHandler() http.Handler {
+pub fn makeGetHandler() mod.http.Handler {
     return .{ .ctx = null, .func = getHandler };
 }
 
 /// The handler `server_stream_make_lookup_handler` (server-stream.cpp:503
 /// @b1b770d90) makes: `POST /v1/streams/lookup` answers only for the ids
 /// asked about, each matching its exact key and any `<id>::<model>`.
-fn lookupHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
-    const res = try http.Res.create(gpa);
+fn lookupHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
+    const res = try mod.http.Res.create(gpa);
     errdefer res.destroy();
     const a = res.allocator();
     var requested: std.ArrayList([]const u8) = .empty;
@@ -611,14 +605,14 @@ fn lookupHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
             if (e == error.OutOfMemory) return e;
             res.status = 400;
             res.content_type = "application/json; charset=utf-8";
-            var err = common.Obj.init(a);
+            var err = mod.common.Obj.init(a);
             const msg = try std.mem.concat(a, u8, &.{ "invalid body: ", json.what() });
             try err.put("message", msg);
             try err.put("type", "invalid_request_error");
-            var outer = common.Obj.init(a);
+            var outer = mod.common.Obj.init(a);
             try outer.put("error", err.done());
             var v = outer.done();
-            try res.setData(try common.safeJsonToStr(a, &v));
+            try res.setData(try mod.common.safeJsonToStr(a, &v));
             return res;
         };
         if (body.contains("conversation_ids") and (try body.index(a, "conversation_ids")).isArray()) {
@@ -649,9 +643,9 @@ fn lookupHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
         }
     }
 
-    var arr = Value.emptyArray();
+    var arr = json.Value.emptyArray();
     for (sessions.items) |s| {
-        var o = common.Obj.init(a);
+        var o = mod.common.Obj.init(a);
         try o.put("conversation_id", s.conversation_id);
         try o.put("is_done", s.isDone());
         try o.put("total_bytes", s.totalSize());
@@ -661,19 +655,19 @@ fn lookupHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
     }
     res.status = 200;
     res.content_type = "application/json; charset=utf-8";
-    try res.setData(try common.safeJsonToStr(a, &arr));
+    try res.setData(try mod.common.safeJsonToStr(a, &arr));
     return res;
 }
 
 /// Ports `server_stream_make_lookup_handler` (server-stream.cpp:503 @b1b770d90).
-pub fn makeLookupHandler() http.Handler {
+pub fn makeLookupHandler() mod.http.Handler {
     return .{ .ctx = null, .func = lookupHandler };
 }
 
 /// The handler `server_stream_make_delete_handler` (server-stream.cpp:561
 /// @b1b770d90) makes: `DELETE /v1/stream?conv_id=<id>` is the explicit
 /// user Stop; idempotent, 204 even if the session was already gone.
-fn deleteHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
+fn deleteHandler(_: ?*anyopaque, req: *const mod.http.Req) anyerror!*mod.http.Res {
     const conv_id = req.getParam("conv_id", "");
     if (conv_id.len == 0) {
         return makeErrorResponse(400, "Missing conversation id in path", .invalid_request);
@@ -681,24 +675,24 @@ fn deleteHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
     {
         const z = try gpa.dupeSentinel(u8, conv_id, 0);
         defer gpa.free(z);
-        srv(.trc, "operator()", "DELETE /v1/stream conv_id=%s -> evict_and_cancel\n", .{z.ptr});
+        mod.common.srv(.trc, "operator()", "DELETE /v1/stream conv_id=%s -> evict_and_cancel\n", .{z.ptr});
     }
     try g_stream_sessions.evictAndCancel(conv_id);
-    const res = try http.Res.create(gpa);
+    const res = try mod.http.Res.create(gpa);
     res.status = 204;
     res.content_type = "application/json";
     return res;
 }
 
 /// Ports `server_stream_make_delete_handler` (server-stream.cpp:561 @b1b770d90).
-pub fn makeDeleteHandler() http.Handler {
+pub fn makeDeleteHandler() mod.http.Handler {
     return .{ .ctx = null, .func = deleteHandler };
 }
 
 /// Ports `server_stream_conv_id_from_headers` (server-stream.cpp:578
 /// @b1b770d90): the `X-Conversation-Id` header's value, its name compared
 /// without case; "" when absent.
-pub fn convIdFromHeaders(headers: *const http.StringMap) []const u8 {
+pub fn convIdFromHeaders(headers: *const mod.http.StringMap) []const u8 {
     // case-insensitive scan for x-conversation-id
     const target = "x-conversation-id";
     for (headers.entries.items) |e| {
@@ -711,12 +705,12 @@ pub fn convIdFromHeaders(headers: *const http.StringMap) []const u8 {
 }
 
 /// Ports `server_stream_create_spipe` (server-stream.cpp:597 @b1b770d90).
-fn createSpipe(headers: *const http.StringMap) !?*Producer {
+fn createSpipe(headers: *const mod.http.StringMap) !?*Producer {
     const conversation_id = convIdFromHeaders(headers);
     {
         const z = try gpa.dupeSentinel(u8, conversation_id, 0);
         defer gpa.free(z);
-        srv(.trc, "server_stream_create_spipe", "conv_id=%s (empty=%d)\n", .{ z.ptr, @as(c_int, @intFromBool(conversation_id.len == 0)) });
+        mod.common.srv(.trc, "server_stream_create_spipe", "conv_id=%s (empty=%d)\n", .{ z.ptr, @as(c_int, @intFromBool(conversation_id.len == 0)) });
     }
     if (conversation_id.len == 0) {
         return null;
@@ -736,8 +730,8 @@ fn createSpipe(headers: *const http.StringMap) !?*Producer {
 pub const Spipe = struct {
     spipe: ?*Producer = null,
     // if spipe is set, use this next_orig to implement tee-style pipe
-    next_orig: ?http.Res.Next = null,
-    req: ?*const http.Req = null,
+    next_orig: ?mod.http.Res.Next = null,
+    req: ?*const mod.http.Req = null,
     // set once next_orig reports no more data, so on_complete() doesn't re-drain a finished stream
     next_finished: bool = false,
 
@@ -750,7 +744,7 @@ pub const Spipe = struct {
     /// Ports `server_res_spipe`'s `set_req` (server-stream.cpp:611
     /// @b1b770d90): optionally attach a producer when `X-Conversation-Id`
     /// is present.
-    pub fn setReq(self: *Spipe, req: *const http.Req) !void {
+    pub fn setReq(self: *Spipe, req: *const mod.http.Req) !void {
         self.req = req;
         if (self.spipe) |p| p.destroy();
         self.spipe = null;
@@ -802,7 +796,7 @@ pub const Spipe = struct {
 
     /// Ports `server_res_spipe`'s `set_next` (server-stream.cpp:655
     /// @b1b770d90): `res.next` becomes the tee over `next_fn`.
-    pub fn setNext(self: *Spipe, res: *http.Res, next_fn: http.Res.Next) void {
+    pub fn setNext(self: *Spipe, res: *mod.http.Res, next_fn: mod.http.Res.Next) void {
         self.next_orig = next_fn;
         res.next = .{ .ctx = self, .func = tee };
     }

@@ -16,19 +16,17 @@
 //! Every string here belongs to the arena the analysis ran in.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
-const caps_mod = @import("../caps.zig");
-
-const Value = json.Value;
 
 /// Ports `template_params` (chat-auto-parser.h:22 @b1b770d90): a probe's
 /// render.
 pub const TemplateParams = struct {
-    messages: Value = .null,
-    tools: Value = .null,
+    messages: json.Value = .null,
+    tools: json.Value = .null,
     add_generation_prompt: bool = false,
     enable_thinking: bool = true,
-    extra_context: ?Value = null,
+    extra_context: ?json.Value = null,
 };
 
 /// Ports `diff_split` (chat-auto-parser.h:30 @b1b770d90).
@@ -177,7 +175,7 @@ pub const AnalyzeTools = struct {
 
 /// Ports `autoparser`'s fields (chat-auto-parser.h:381 @b1b770d90).
 pub const Autoparser = struct {
-    jinja_caps: caps_mod.Caps = .{},
+    jinja_caps: common_chat.caps.Caps = .{},
     user_start: []const u8 = "",
     assistant_start: []const u8 = "",
     reasoning: AnalyzeReasoning = .{},

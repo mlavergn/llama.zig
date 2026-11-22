@@ -9,21 +9,11 @@
 //! `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_gemma3`'s `load_arch_hparams` (models/gemma3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -33,12 +23,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         found_swa = true;
     }
     if (found_swa and hp.n_swa > 0) {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
         try self.loadSwaPattern(ml, 6, false, exc);
 
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     } else {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.none);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.none);
     }
 
     hp.f_final_logit_softcapping = 0.0;
@@ -57,16 +47,16 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // https://github.com/google/gemma_pytorch/blob/014acb7ac4563a5f77c76d7ff98f31b568c16508/gemma/config.py#L289
     hp.f_attention_scale = if (self.type == .@"27b")
-        1.0 / libm.sqrtfInt(hp.n_embd / hp.nHead(0))
+        1.0 / stdlib.libm.sqrtfInt(hp.n_embd / hp.nHead(0))
     else
-        1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
+        1.0 / stdlib.libm.sqrtfInt(hp.nEmbdHeadK(0));
 }
 
 /// Ports `llama_model_gemma3`'s `load_arch_tensors` (models/gemma3.cpp:34 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -76,7 +66,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     // Dense linear weights.
@@ -105,8 +95,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma3`'s `build_arch_graph` (models/gemma3.cpp:73 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    if (b.hparams.swa_type == @backingInt(llama.hparams.SwaType.standard)) {
         buildGraph(true, model, b);
     } else {
         buildGraph(false, model, b);
@@ -115,14 +105,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports the constructor of `llama_model_gemma3`'s `graph<iswa>`
 /// (models/gemma3.cpp:82 @b1b770d90).
-fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
     // Important: do not scale raw embeddings input (encoded image embeddings):
     // `build_inp_embd` scales the token rows only.
-    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -163,18 +153,18 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             b.cb(Vcur, "Vcur", il);
 
             // https://github.com/google/gemma_pytorch/blob/014acb7ac4563a5f77c76d7ff98f31b568c16508/gemma/model.py#L315
-            Qcur = c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
+            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const sa_out: *Tensor = c.ggml_add(ctx, cur, inpL);
+        const sa_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(sa_out, "sa_out", il);
 
         cur = b.buildNorm(sa_out, layer.ffn_norm, null, .rms, il);
@@ -188,7 +178,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -207,9 +197,9 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
     cur = b.buildLoraMm(model.output.?, cur, model.output_s);
 
     if (hp.f_final_logit_softcapping != 0.0) {
-        cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-        cur = c.ggml_tanh(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+        cur = llama.impl.c.ggml_tanh(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
     }
 
     b.cb(cur, "result_output", -1);

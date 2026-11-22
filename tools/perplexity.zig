@@ -27,19 +27,11 @@ const std = @import("std");
 const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const fit = @import("cli_fit");
-const libcxx = @import("stdlib").libcxx;
-const c = tc.c;
-const io = tc.io;
-const log = tc.log;
-const arg = tc.arg;
-const Params = tc.params.Params;
 
 comptime {
     // libllama, compiled in (see `build/tools.zig`).
-    _ = @import("llama");
+    _ = @import("llama").lib;
 }
-
-const libm = @import("stdlib").libm;
 
 const gpa = std.heap.c_allocator;
 
@@ -56,12 +48,12 @@ fn cint(v: anytype) c_int {
 fn softmax(a: std.mem.Allocator, logits: []const f32) ![]f32 {
     const probs = try a.alloc(f32, logits.len);
     var max_logit = logits[0];
-    for (logits) |v| max_logit = libcxx.max(f32, max_logit, v);
+    for (logits) |v| max_logit = stdlib.libcxx.max(f32, max_logit, v);
     var sum_exp: f64 = 0.0;
     for (logits, 0..) |l, i| {
         // Subtract the maximum logit value from the current logit value for numerical stability
         const logit = l - max_logit;
-        const exp_logit = libm.expf(logit);
+        const exp_logit = stdlib.libm.expf(logit);
         sum_exp += exp_logit;
         probs[i] = exp_logit;
     }
@@ -74,13 +66,13 @@ const LogSoftmax = struct { log_softmax: f64, logit: f32, prob: f32 };
 
 fn logSoftmax(n_vocab: usize, logits: [*]const f32, tok: usize) LogSoftmax {
     var max_logit = logits[0];
-    for (1..n_vocab) |i| max_logit = libcxx.max(f32, max_logit, logits[i]);
+    for (1..n_vocab) |i| max_logit = stdlib.libcxx.max(f32, max_logit, logits[i]);
     var sum_exp: f64 = 0.0;
-    for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
+    for (0..n_vocab) |i| sum_exp += stdlib.libm.expf(logits[i] - max_logit);
     return .{
-        .log_softmax = @as(f64, logits[tok] - max_logit) - libm.log(sum_exp),
+        .log_softmax = @as(f64, logits[tok] - max_logit) - stdlib.libm.log(sum_exp),
         .logit = logits[tok],
-        .prob = libm.expf(logits[tok] - max_logit) / @as(f32, @floatCast(sum_exp)),
+        .prob = stdlib.libm.expf(logits[tok] - max_logit) / @as(f32, @floatCast(sum_exp)),
     };
 }
 
@@ -97,13 +89,13 @@ fn logSoftmaxQ(n_vocab: usize, logits: [*]const f32, log_prob_in: [*]u16, tok: u
     var max_logit = logits[0];
     var min_logit = logits[0];
     for (1..n_vocab) |i| {
-        max_logit = libcxx.max(f32, max_logit, logits[i]);
-        min_logit = libcxx.min(f32, min_logit, logits[i]);
+        max_logit = stdlib.libcxx.max(f32, max_logit, logits[i]);
+        min_logit = stdlib.libcxx.min(f32, min_logit, logits[i]);
     }
-    min_logit = libcxx.max(f32, min_logit, max_logit - 16);
+    min_logit = stdlib.libcxx.max(f32, min_logit, max_logit - 16);
     var sum_exp: f64 = 0.0;
-    for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
-    const log_sum_exp: f32 = @floatCast(libm.log(sum_exp));
+    for (0..n_vocab) |i| sum_exp += stdlib.libm.expf(logits[i] - max_logit);
+    const log_sum_exp: f32 = @floatCast(stdlib.libm.log(sum_exp));
     const min_log_prob = min_logit - max_logit - log_sum_exp;
     const scale = (max_logit - min_logit) / 65535.0;
     const d: *[2]f32 = @ptrCast(@alignCast(log_prob_in));
@@ -126,7 +118,7 @@ fn logSoftmaxQ(n_vocab: usize, logits: [*]const f32, log_prob_in: [*]u16, tok: u
 const NllWork = struct {
     n_vocab: usize,
     logits: [*]const f32,
-    tokens: [*]const c.llama_token,
+    tokens: [*]const tc.c.llama_token,
     n_token: usize,
     /// The first form: per-token logit and probability.
     logit_history: ?[*]f32 = null,
@@ -202,8 +194,8 @@ fn logSoftmaxKld(n_vocab: usize, logits: [*]const f32, base_log_prob_in: [*]cons
         }
     }
     var sum_exp: f64 = 0.0;
-    for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
-    const log_sum_exp: f32 = @floatCast(libm.log(sum_exp));
+    for (0..n_vocab) |i| sum_exp += stdlib.libm.expf(logits[i] - max_logit);
+    const log_sum_exp: f32 = @floatCast(stdlib.libm.log(sum_exp));
     const d: *const [2]f32 = @ptrCast(@alignCast(base_log_prob_in));
     const scale = d[0];
     const min_log_prob = d[1];
@@ -230,7 +222,7 @@ fn logSoftmaxKld(n_vocab: usize, logits: [*]const f32, base_log_prob_in: [*]cons
             imax_base = @intCast(i);
         }
         if (p_log_base > -16.0) {
-            const p_base = libm.expf(p_log_base);
+            const p_base = stdlib.libm.expf(p_log_base);
             sum += p_base * (p_log_base - logits[i] + max_logit);
         }
     }
@@ -239,14 +231,14 @@ fn logSoftmaxKld(n_vocab: usize, logits: [*]const f32, base_log_prob_in: [*]cons
     kld.count += 1;
     if (@as(isize, @intCast(imax)) == imax_base) kld.n_same_top += 1;
 
-    const p_base = libm.expf(-nll_base);
-    const p = libm.expf(-nll);
+    const p_base = stdlib.libm.expf(-nll_base);
+    const p = stdlib.libm.expf(-nll);
     const p_diff = p - p_base;
     kld.sum_p_diff += p_diff;
     const p_diff2: f64 = p_diff * p_diff;
     kld.sum_p_diff2 += p_diff2;
     kld.sum_p_diff4 = @mulAdd(f64, p_diff2, p_diff2, kld.sum_p_diff4);
-    kld.max_p_diff = libcxx.max(f32, kld.max_p_diff, @abs(p_diff));
+    kld.max_p_diff = stdlib.libcxx.max(f32, kld.max_p_diff, @abs(p_diff));
 
     return .{ sum, p_diff };
 }
@@ -255,7 +247,7 @@ fn logSoftmaxKld(n_vocab: usize, logits: [*]const f32, base_log_prob_in: [*]cons
 const KldWork = struct {
     n_vocab: usize,
     logits: [*]const f32,
-    tokens: [*]const c.llama_token,
+    tokens: [*]const tc.c.llama_token,
     n_token: usize,
     base_log_probs: [*]const u16,
     nv: usize,
@@ -294,7 +286,7 @@ const KldWork = struct {
             kld.sum_p_diff2 += l.sum_p_diff2;
             kld.sum_p_diff4 += l.sum_p_diff4;
             kld.n_same_top += l.n_same_top;
-            kld.max_p_diff = libcxx.max(f32, kld.max_p_diff, l.max_p_diff);
+            kld.max_p_diff = stdlib.libcxx.max(f32, kld.max_p_diff, l.max_p_diff);
             kld.count += l.count;
         }
     }
@@ -304,33 +296,33 @@ const KldWork = struct {
 fn printEta(func: [*:0]const u8, t_start: i64, scale: f32) void {
     const t_end = stdlib.clock.steadyNs();
     const t_total: f32 = @floatCast(@as(f64, @floatFromInt(t_end - t_start)) / 1e9);
-    log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
+    tc.log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
     var total_seconds: c_int = @intFromFloat(t_total * scale);
     if (total_seconds >= 60 * 60) {
-        log.out("%d hours ", .{@divTrunc(total_seconds, 60 * 60)});
+        tc.log.out("%d hours ", .{@divTrunc(total_seconds, 60 * 60)});
         total_seconds = @rem(total_seconds, 60 * 60);
     }
-    log.out("%.2f minutes\n", .{@as(f64, @floatFromInt(total_seconds)) / 60.0});
+    tc.log.out("%.2f minutes\n", .{@as(f64, @floatFromInt(total_seconds)) / 60.0});
 }
 
 /// Ports `perplexity_v2` (perplexity.cpp:296 @b1b770d90): the strided form.
-fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params) !void {
+fn perplexityV2(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *const tc.params.Params) !void {
     const func = "perplexity_v2";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
-    const add_bos = c.llama_vocab_get_add_bos(vocab);
-    ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 306, "!llama_vocab_get_add_eos(vocab)");
+    const add_bos = tc.c.llama_vocab_get_add_bos(vocab);
+    ggmlAssert(!tc.c.llama_vocab_get_add_eos(vocab), 306, "!llama_vocab_get_add_eos(vocab)");
 
-    log.inf("%s: tokenizing the input ..\n", .{func});
+    tc.log.inf("%s: tokenizing the input ..\n", .{func});
 
     const tokens = try tc.common.tokenize(a, vocab, params.prompt, true, false);
 
-    const n_ctx: c_int = @intCast(c.llama_n_ctx(ctx));
+    const n_ctx: c_int = @intCast(tc.c.llama_n_ctx(ctx));
 
     if (cint(tokens.len) < 2 * n_ctx) {
-        log.err("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n", .{ func, 2 * n_ctx, n_ctx });
-        log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
+        tc.log.err("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n", .{ func, 2 * n_ctx, n_ctx });
+        tc.log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
         return;
     }
 
@@ -340,16 +332,16 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
     @memset(prob_history, 0);
 
     if (params.ppl_stride <= 0) {
-        log.err("%s: stride is %d but must be greater than zero!\n", .{ func, params.ppl_stride });
+        tc.log.err("%s: stride is %d but must be greater than zero!\n", .{ func, params.ppl_stride });
         return;
     }
 
     const calc_chunk = n_ctx;
 
-    log.inf("%s: have %zu tokens. Calculation chunk = %d\n", .{ func, tokens.len, calc_chunk });
+    tc.log.inf("%s: have %zu tokens. Calculation chunk = %d\n", .{ func, tokens.len, calc_chunk });
 
     if (cint(tokens.len) <= calc_chunk) {
-        log.err("%s: there are only %zu tokens, this is not enough for a context size of %d and stride %d\n", .{ func, tokens.len, n_ctx, params.ppl_stride });
+        tc.log.err("%s: there are only %zu tokens, this is not enough for a context size of %d and stride %d\n", .{ func, tokens.len, n_ctx, params.ppl_stride });
         return;
     }
 
@@ -358,13 +350,13 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
     const n_chunk = if (params.n_chunks < 0) n_chunk_max else @min(params.n_chunks, n_chunk_max);
     const n_batch = params.n_batch;
 
-    const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+    const n_vocab: usize = @intCast(tc.c.llama_vocab_n_tokens(vocab));
 
     var count: c_int = 0;
     var nll: f64 = 0.0;
 
     const n_seq: c_int = @max(1, @divTrunc(n_batch, n_ctx));
-    log.inf("%s: computing over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
+    tc.log.inf("%s: computing over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
     var logits: std.ArrayList(f32) = .empty;
     defer logits.deinit(gpa);
@@ -381,7 +373,7 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
         const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         var batch = tc.common.Batch.init(gpa, ctx);
         defer batch.deinit();
@@ -397,7 +389,7 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
                 _ = batch.add(tokens[@intCast(batch_start + k)], j * n_batch + k, 0, true);
             }
 
-            if (c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+            if (tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
                 return;
             }
 
@@ -405,9 +397,9 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
             const token_org = tokens[@intCast(batch_start)];
 
             // add BOS token for the first batch of each chunk
-            if (add_bos and j == 0) tokens[@intCast(batch_start)] = c.llama_vocab_bos(vocab);
+            if (add_bos and j == 0) tokens[@intCast(batch_start)] = tc.c.llama_vocab_bos(vocab);
 
-            const batch_logits = c.llama_get_logits(ctx);
+            const batch_logits = tc.c.llama_get_logits(ctx);
             try logits.appendSlice(gpa, batch_logits[0 .. @as(usize, @intCast(batch_size)) * n_vocab]);
 
             if (j == 0) tokens[@intCast(batch_start)] = token_org;
@@ -428,29 +420,29 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
             logit_history[next] = tok_logits[@intCast(tokens[next])];
             prob_history[next] = prob;
 
-            nll += -libm.logf(prob);
+            nll += -stdlib.libm.logf(prob);
             count += 1;
         }
         // perplexity is e^(average negative log-likelihood)
         if (params.ppl_output_type == 0) {
-            log.out("[%d]%.4lf,", .{ i + 1, libm.exp(nll / @as(f64, @floatFromInt(count))) });
+            tc.log.out("[%d]%.4lf,", .{ i + 1, stdlib.libm.exp(nll / @as(f64, @floatFromInt(count))) });
         } else {
-            log.out("%8d  %.4lf\n", .{ i * params.ppl_stride, libm.exp(nll / @as(f64, @floatFromInt(count))) });
+            tc.log.out("%8d  %.4lf\n", .{ i * params.ppl_stride, stdlib.libm.exp(nll / @as(f64, @floatFromInt(count))) });
         }
     }
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 }
 
 /// Ports `perplexity` (perplexity.cpp:442 @b1b770d90).
-fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, params: *const Params, n_ctx: i32) !void {
+fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*tc.c.llama_context, params: *const tc.params.Params, n_ctx: i32) !void {
     if (params.ppl_stride > 0) return perplexityV2(a, ctx, params);
 
     const func = "perplexity";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
-    const add_bos = c.llama_vocab_get_add_bos(vocab);
-    ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 456, "!llama_vocab_get_add_eos(vocab)");
+    const add_bos = tc.c.llama_vocab_get_add_bos(vocab);
+    ggmlAssert(!tc.c.llama_vocab_get_add_eos(vocab), 456, "!llama_vocab_get_add_eos(vocab)");
 
     var logits_stream: ?stdlib.file.Out = null;
     defer if (logits_stream) |*f| f.close(std_io);
@@ -463,25 +455,25 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
         const z = try a.dupeSentinel(u8, params.logits_file, 0);
         logits_stream = stdlib.file.Out.create(std_io, z) catch null;
         if (logits_stream == null) {
-            log.err("%s: failed to open %s for writing\n", .{ func, z.ptr });
+            tc.log.err("%s: failed to open %s for writing\n", .{ func, z.ptr });
             return;
         }
-        log.inf("%s: saving all logits to %s\n", .{ func, z.ptr });
+        tc.log.inf("%s: saving all logits to %s\n", .{ func, z.ptr });
         W.bytes(&logits_stream, "_logits_");
         W.bytes(&logits_stream, std.mem.asBytes(&n_ctx));
     }
 
     const tim1 = stdlib.clock.steadyNs();
-    log.inf("%s: tokenizing the input ..\n", .{func});
+    tc.log.inf("%s: tokenizing the input ..\n", .{func});
 
     const tokens = try tc.common.tokenize(a, vocab, params.prompt, true, false);
 
     const tim2 = stdlib.clock.steadyNs();
-    log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
+    tc.log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
 
     if (cint(tokens.len) < 2 * n_ctx) {
-        log.err("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n", .{ func, 2 * n_ctx, n_ctx });
-        log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
+        tc.log.err("%s: you need at least %d tokens to evaluate perplexity with a context of %d\n", .{ func, 2 * n_ctx, n_ctx });
+        tc.log.err("%s: the data file you provided tokenizes to only %zu tokens\n", .{ func, tokens.len });
         return;
     }
 
@@ -495,7 +487,7 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
     const n_chunk = if (params.n_chunks < 0) n_chunk_max else @min(params.n_chunks, n_chunk_max);
     const n_batch = params.n_batch;
 
-    const n_vocab: c_int = c.llama_vocab_n_tokens(vocab);
+    const n_vocab: c_int = tc.c.llama_vocab_n_tokens(vocab);
     const nvu: usize = @intCast(n_vocab);
 
     var count: c_int = 0;
@@ -515,7 +507,7 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
     defer logits.deinit(gpa);
     if (num_batches > 1) try logits.ensureTotalCapacity(gpa, @as(usize, @intCast(n_ctx)) * nvu);
 
-    log.inf("%s: calculating perplexity over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
+    tc.log.inf("%s: calculating perplexity over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
     const n_workers = @as(usize, stdlib.thread.hardwareConcurrency()) - 1;
 
@@ -544,7 +536,7 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
         const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         var j: c_int = 0;
         while (j < num_batches) : (j += 1) {
@@ -562,11 +554,11 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
                 const token_org = tokens[seq_start];
 
                 // add BOS token for the first batch of each chunk
-                if (add_bos and j == 0) tokens[seq_start] = c.llama_vocab_bos(vocab);
+                if (add_bos and j == 0) tokens[seq_start] = tc.c.llama_vocab_bos(vocab);
 
                 var k: c_int = 0;
                 while (k < batch_size) : (k += 1) {
-                    const pos: c.llama_pos = j * n_batch + k;
+                    const pos: tc.c.llama_pos = j * n_batch + k;
                     const need_logits = pos >= first;
                     _ = batch.add(tokens[seq_start + @as(usize, @intCast(k))], pos, seq, need_logits);
                     n_outputs += @intFromBool(need_logits);
@@ -576,25 +568,25 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
                 tokens[seq_start] = token_org;
             }
 
-            if (c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
-                log.inf("%s : failed to decode\n", .{func});
+            if (tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+                tc.log.inf("%s : failed to decode\n", .{func});
                 return;
             }
 
             if (num_batches > 1 and n_outputs > 0) {
-                const batch_logits = c.llama_get_logits(ctx);
+                const batch_logits = tc.c.llama_get_logits(ctx);
                 try logits.appendSlice(gpa, batch_logits[0 .. @as(usize, @intCast(n_outputs)) * nvu]);
             }
         }
 
         if (i == 0) {
-            c.llama_synchronize(ctx);
+            tc.c.llama_synchronize(ctx);
             printEta(func, t_start, @as(f32, @floatFromInt(n_chunk)) / @as(f32, @floatFromInt(n_seq)));
         }
 
         var seq: c_int = 0;
         while (seq < n_seq_batch) : (seq += 1) {
-            const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else c.llama_get_logits_ith(ctx, seq * n_ctx + first);
+            const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else tc.c.llama_get_logits_ith(ctx, seq * n_ctx + first);
 
             const base: usize = @intCast(start + seq * n_ctx + first);
             const n_token: usize = @intCast(n_ctx - 1 - first);
@@ -611,49 +603,49 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
             // perplexity is e^(average negative log-likelihood)
             const cnt: f64 = @floatFromInt(count);
             if (params.ppl_output_type == 0) {
-                log.out("[%d]%.4lf,", .{ i + seq + 1, libm.exp(nll / cnt) });
+                tc.log.out("[%d]%.4lf,", .{ i + seq + 1, stdlib.libm.exp(nll / cnt) });
             } else {
                 const av = nll / cnt;
                 var av2 = @mulAdd(f64, -av, av, nll2 / cnt);
-                if (av2 > 0) av2 = libm.sqrt(av2 / @as(f64, @floatFromInt(count - 1)));
-                log.out("%8d  %.4lf  %4lf  %4lf\n", .{ i * n_ctx, libm.exp(nll / cnt), av, av2 });
+                if (av2 > 0) av2 = @sqrt(@as(f64, av2 / @as(f64, @floatFromInt(count - 1))));
+                tc.log.out("%8d  %.4lf  %4lf  %4lf\n", .{ i * n_ctx, stdlib.libm.exp(nll / cnt), av, av2 });
             }
         }
 
         logits.clearRetainingCapacity();
     }
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 
     nll2 /= @floatFromInt(count);
     nll /= @floatFromInt(count);
-    const ppl = libm.exp(nll);
+    const ppl = stdlib.libm.exp(nll);
     nll2 = @mulAdd(f64, -nll, nll, nll2);
     if (nll2 > 0) {
-        nll2 = libm.sqrt(nll2 / @as(f64, @floatFromInt(count - 1)));
-        log.inf("Final estimate: PPL = %.4lf +/- %.5lf\n", .{ ppl, nll2 * ppl });
+        nll2 = @sqrt(@as(f64, nll2 / @as(f64, @floatFromInt(count - 1))));
+        tc.log.inf("Final estimate: PPL = %.4lf +/- %.5lf\n", .{ ppl, nll2 * ppl });
     } else {
-        log.err("Unexpected negative standard deviation of log(prob)\n", .{});
+        tc.log.err("Unexpected negative standard deviation of log(prob)\n", .{});
     }
 }
 
 /// Ports `decode_helper` (perplexity.cpp:656 @b1b770d90).
-fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, batch_logits: []f32, n_batch: c_int, n_vocab: usize) bool {
+fn decodeHelper(ctx: ?*tc.c.llama_context, batch: *tc.common.Batch, batch_logits: []f32, n_batch: c_int, n_vocab: usize) bool {
     var prev_outputs: usize = 0;
     var i: c_int = 0;
     while (i < batch.size()) : (i += n_batch) {
         const n_tokens = @min(n_batch, batch.size() - i);
         const iu: usize = @intCast(i);
 
-        const ret = c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
+        const ret = tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.getSubBatch(i, n_tokens));
         if (ret != 0) {
-            log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
+            tc.log.err("failed to decode the batch, n_batch = %d, ret = %d\n", .{ n_batch, ret });
             return false;
         }
 
         var n_outputs: usize = 0;
         for (iu..iu + @as(usize, @intCast(n_tokens))) |k| n_outputs += @intFromBool(batch.tokens.items[k].output);
 
-        const src = c.llama_get_logits(ctx);
+        const src = tc.c.llama_get_logits(ctx);
         @memcpy(batch_logits[prev_outputs * n_vocab ..][0 .. n_outputs * n_vocab], src[0 .. n_outputs * n_vocab]);
 
         prev_outputs += n_outputs;
@@ -664,7 +656,7 @@ fn decodeHelper(ctx: ?*c.llama_context, batch: *tc.common.Batch, batch_logits: [
 /// `K_TOKEN_CHUNK` (perplexity.cpp:680 @b1b770d90).
 const k_token_chunk = 4;
 
-const EvalPair = struct { i_logits: usize, token: c.llama_token };
+const EvalPair = struct { i_logits: usize, token: tc.c.llama_token };
 
 /// What `compute_logprobs`' threads share (perplexity.cpp:682 @b1b770d90).
 const LogprobWork = struct {
@@ -683,10 +675,10 @@ const LogprobWork = struct {
             for (first..last) |i| {
                 const logits = self.batch_logits + self.eval_pairs[i].i_logits * self.n_vocab;
                 var max_logit = logits[0];
-                for (1..self.n_vocab) |j| max_logit = libcxx.max(f32, max_logit, logits[j]);
+                for (1..self.n_vocab) |j| max_logit = stdlib.libcxx.max(f32, max_logit, logits[j]);
                 var sum_p: f32 = 0.0;
-                for (0..self.n_vocab) |j| sum_p += libm.expf(logits[j] - max_logit);
-                local_logprobs[i - first] = logits[@intCast(self.eval_pairs[i].token)] - max_logit - libm.logf(sum_p);
+                for (0..self.n_vocab) |j| sum_p += stdlib.libm.expf(logits[j] - max_logit);
+                local_logprobs[i - first] = logits[@intCast(self.eval_pairs[i].token)] - max_logit - stdlib.libm.logf(sum_p);
             }
             @memcpy(self.eval_results[first..last], local_logprobs[0 .. last - first]);
         }
@@ -724,11 +716,11 @@ fn stoiOrTerminate(a: std.mem.Allocator, s: []const u8) !c_int {
     return switch (stdlib.num.stoi(try a.dupeSentinel(u8, s, 0))) {
         .ok => |v| v,
         .no_conversion => {
-            io.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion\n", .{});
+            tc.io.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion\n", .{});
             std.process.abort();
         },
         .out_of_range => {
-            io.eprintf("libc++abi: terminating due to uncaught exception of type std::out_of_range: stoi: out of range\n", .{});
+            tc.io.eprintf("libc++abi: terminating due to uncaught exception of type std::out_of_range: stoi: out of range\n", .{});
             std.process.abort();
         },
     };
@@ -745,35 +737,35 @@ const HsData = struct {
     i_logits: usize = 0, // starting index of logits in the llama_batch
     common_prefix: usize = 0, // max number of initial tokens that are the same in all sentences
     required_tokens: usize = 0, // needed number of tokens to evaluate all 4 endings
-    seq_tokens: [4][]c.llama_token = .{ &.{}, &.{}, &.{}, &.{} },
+    seq_tokens: [4][]tc.c.llama_token = .{ &.{}, &.{}, &.{}, &.{} },
 };
 
 /// `seq[k]`, or a token no real one equals when `k` is past the end: the
 /// C++ reads past a shorter sequence there.
-fn at(seq: []const c.llama_token, k: usize) c.llama_token {
+fn at(seq: []const tc.c.llama_token, k: usize) tc.c.llama_token {
     return if (k < seq.len) seq[k] else -1;
 }
 
 /// Ports `hellaswag_score` (perplexity.cpp:726 @b1b770d90).
-fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params) !void {
+fn hellaswagScore(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *const tc.params.Params) !void {
     const func = "hellaswag_score";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
     // Datafile layout, 6 lines per task: the context, the gold ending's
     // index, and the four endings.
     var prompt_lines = try getLines(a, params.prompt);
 
     if (prompt_lines.items.len % 6 != 0) {
-        log.err("%s : number of lines in prompt not a multiple of 6.\n", .{func});
+        tc.log.err("%s : number of lines in prompt not a multiple of 6.\n", .{func});
         return;
     }
 
     var hs_task_count = prompt_lines.items.len / 6;
-    log.inf("%s : loaded %zu tasks from prompt.\n", .{ func, hs_task_count });
+    tc.log.inf("%s : loaded %zu tasks from prompt.\n", .{ func, hs_task_count });
 
-    const is_spm = c.llama_vocab_type(vocab) == c.LLAMA_VOCAB_TYPE_SPM;
-    log.inf("================================= is_spm = %d\n", .{@as(c_int, @intFromBool(is_spm))});
+    const is_spm = tc.c.llama_vocab_type(vocab) == tc.c.LLAMA_VOCAB_TYPE_SPM;
+    tc.log.inf("================================= is_spm = %d\n", .{@as(c_int, @intFromBool(is_spm))});
 
     // The tasks should be randomized so the score stabilizes quickly.
     const randomize_tasks = true;
@@ -782,16 +774,16 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
     if (params.hellaswag_tasks < hs_task_count) hs_task_count = params.hellaswag_tasks;
 
     // The random seed should not impact the final result if the computation is done over enough tasks, so kept hardcoded for now
-    var rng = libcxx.Mt19937.init(1);
+    var rng = stdlib.libcxx.Mt19937.init(1);
 
-    log.inf("%s : selecting %zu %s tasks.\n", .{ func, hs_task_count, @as([*:0]const u8, if (randomize_tasks) "randomized" else "the first") });
+    tc.log.inf("%s : selecting %zu %s tasks.\n", .{ func, hs_task_count, @as([*:0]const u8, if (randomize_tasks) "randomized" else "the first") });
 
     // Select and read data from prompt lines
     const hs_data = try a.alloc(HsData, hs_task_count);
     for (hs_data) |*hs_cur| {
         hs_cur.* = .{};
         // Select a random example of those left in the prompt
-        const idx = libcxx.uniformInt(usize, &rng, 0, prompt_lines.items.len / 6 - 1);
+        const idx = stdlib.libcxx.uniformInt(usize, &rng, 0, prompt_lines.items.len / 6 - 1);
 
         hs_cur.context = prompt_lines.items[idx * 6];
         hs_cur.gold_ending_idx = @bitCast(@as(isize, try stoiOrTerminate(a, prompt_lines.items[idx * 6 + 1])));
@@ -818,19 +810,19 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
         try prompt_lines.replaceRange(a, idx * 6, 6, &.{});
     }
 
-    log.inf("%s : calculating hellaswag score over selected tasks.\n", .{func});
+    tc.log.inf("%s : calculating hellaswag score over selected tasks.\n", .{func});
 
-    log.out("\ntask\tacc_norm\t95%% confidence interval\n", .{});
+    tc.log.out("\ntask\tacc_norm\t95%% confidence interval\n", .{});
 
     var acc: f64 = 0.0;
 
-    const n_ctx: c_int = @intCast(c.llama_n_ctx(ctx));
+    const n_ctx: c_int = @intCast(tc.c.llama_n_ctx(ctx));
     const n_batch = params.n_batch;
 
-    const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+    const n_vocab: usize = @intCast(tc.c.llama_vocab_n_tokens(vocab));
 
     const max_tasks_per_batch = 32;
-    const max_seq: c_int = @min(4 * max_tasks_per_batch, @as(c_int, @intCast(c.llama_n_seq_max(ctx))));
+    const max_seq: c_int = @min(4 * max_tasks_per_batch, @as(c_int, @intCast(tc.c.llama_n_seq_max(ctx))));
 
     var batch = tc.common.Batch.init(gpa, ctx);
     defer batch.deinit();
@@ -887,15 +879,15 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
         }
 
         if (j0 == j1) {
-            log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, hs_data[j0].required_tokens });
+            tc.log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, hs_data[j0].required_tokens });
             return;
         }
 
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         // decode all tasks [j0, j1)
         if (!decodeHelper(ctx, &batch, batch_logits, n_batch, n_vocab)) {
-            log.err("%s: llama_decode() failed\n", .{func});
+            tc.log.err("%s: llama_decode() failed\n", .{func});
             return;
         }
 
@@ -929,7 +921,7 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
             for (0..4) |s| {
                 hs_cur.ending_logprob_count[s] = 1;
-                hs_cur.ending_logprob[s] = libm.logf(first_probs[@intCast(hs_cur.seq_tokens[s][hs_cur.common_prefix])]);
+                hs_cur.ending_logprob[s] = stdlib.libm.logf(first_probs[@intCast(hs_cur.seq_tokens[s][hs_cur.common_prefix])]);
                 var j = hs_cur.common_prefix;
                 while (j < hs_cur.seq_tokens[s].len -% 1) : (j += 1) {
                     hs_cur.ending_logprob[s] += eval_results.items[ir];
@@ -960,18 +952,18 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
             // Wilson score interval, more accurate
             const z = za * za / n;
-            const cnf = z * libm.sqrt(n * @mulAdd(f64, 4.0 * freq, 1 - freq, z)) / (za + za);
+            const cnf = z * @sqrt(@as(f64, n * @mulAdd(f64, 4.0 * freq, 1 - freq, z))) / (za + za);
             const lo = (@mulAdd(f64, z, 0.5, freq) - cnf) / (1.0 + z);
             const hi = (@mulAdd(f64, z, 0.5, freq) + cnf) / (1.0 + z);
 
             // Print the accumulated accuracy mean x 100 and confidence interval
-            log.out("%zu\t%3.8lf%%\t[%3.4lf%%, %3.4lf%%]\n", .{ i + 1, freq * 100.0, lo * 100.0, hi * 100.0 });
+            tc.log.out("%zu\t%3.8lf%%\t[%3.4lf%%, %3.4lf%%]\n", .{ i + 1, freq * 100.0, lo * 100.0, hi * 100.0 });
         }
 
         j0 = j1 - 1;
     }
 
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 }
 
 /// Mirrors `winogrande_entry` (perplexity.cpp:998 @b1b770d90).
@@ -986,7 +978,7 @@ const WinograndeEntry = struct {
     required_tokens: usize = 0,
     n_base1: usize = 0, // number of tokens for context + choice 1
     n_base2: usize = 0, // number of tokens for context + choice 2
-    seq_tokens: [2][]c.llama_token = .{ &.{}, &.{} },
+    seq_tokens: [2][]tc.c.llama_token = .{ &.{}, &.{} },
 };
 
 /// `std::string::substr(pos, n)`: `n` past the end takes the rest.
@@ -1037,7 +1029,7 @@ fn loadWinograndeFromCsv(a: std.mem.Allocator, prompt: []const u8) !std.ArrayLis
         }
         const zl = try a.dupeSentinel(u8, line, 0);
         if (ipos != 4) {
-            log.err("%s: failed to find comma separators in <%s>\n", .{ func, zl.ptr });
+            tc.log.err("%s: failed to find comma separators in <%s>\n", .{ func, zl.ptr });
             continue;
         }
         const sentence = if (line[comma_pos[0] + 1] == '"')
@@ -1048,13 +1040,13 @@ fn loadWinograndeFromCsv(a: std.mem.Allocator, prompt: []const u8) !std.ArrayLis
         const choice2 = substr(line, comma_pos[2] + 1, comma_pos[3] - comma_pos[2] - 1);
         const answer = substr(line, comma_pos[3] + 1, line.len - comma_pos[3] - 1);
         const where = std.mem.indexOfScalar(u8, sentence, '_') orelse {
-            log.err("%s: no _ in <%s>\n", .{ func, (try a.dupeSentinel(u8, sentence, 0)).ptr });
+            tc.log.err("%s: no _ in <%s>\n", .{ func, (try a.dupeSentinel(u8, sentence, 0)).ptr });
             continue;
         };
         // `answer.c_str()`: the stream stops at an embedded NUL
         const i_answer = streamInt(std.mem.sliceTo(answer, 0));
         if (i_answer == null or i_answer.? < 1 or i_answer.? > 2) {
-            log.err("%s: failed to parse answer <%s>\n", .{ func, (try a.dupeSentinel(u8, answer, 0)).ptr });
+            tc.log.err("%s: failed to parse answer <%s>\n", .{ func, (try a.dupeSentinel(u8, answer, 0)).ptr });
             continue;
         }
         try result.append(a, .{
@@ -1068,24 +1060,24 @@ fn loadWinograndeFromCsv(a: std.mem.Allocator, prompt: []const u8) !std.ArrayLis
 }
 
 /// Ports `winogrande_score` (perplexity.cpp:1082 @b1b770d90).
-fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params) !void {
+fn winograndeScore(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *const tc.params.Params) !void {
     const func = "winogrande_score";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
     const k_min_trailing_ctx = 3;
 
     var data = try loadWinograndeFromCsv(a, params.prompt);
     if (data.items.len == 0) {
-        log.err("%s: no tasks\n", .{func});
+        tc.log.err("%s: no tasks\n", .{func});
         return;
     }
 
-    log.inf("%s : loaded %zu tasks from prompt.\n", .{ func, data.items.len });
+    tc.log.inf("%s : loaded %zu tasks from prompt.\n", .{ func, data.items.len });
 
     if (params.winogrande_tasks > 0 and params.winogrande_tasks < data.items.len) {
-        log.inf("%s : selecting %zu random tasks\n", .{ func, params.winogrande_tasks });
-        var rng = libcxx.Mt19937.init(1);
+        tc.log.inf("%s : selecting %zu random tasks\n", .{ func, params.winogrande_tasks });
+        var rng = stdlib.libcxx.Mt19937.init(1);
         var aux: std.ArrayList(c_int) = .empty;
         for (0..data.items.len) |i| try aux.append(a, @intCast(i));
         const scale: f32 = 1 / (1.0 + @as(f32, @floatFromInt(@as(u32, std.math.maxInt(u32)))));
@@ -1099,7 +1091,7 @@ fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const 
         data = selected;
     }
 
-    log.inf("%s : tokenizing selected tasks\n", .{func});
+    tc.log.inf("%s : tokenizing selected tasks\n", .{func});
 
     for (data.items) |*task| {
         task.seq_tokens[0] = try tc.common.tokenize(a, vocab, try std.mem.concat(a, u8, &.{ task.first, task.choices[0], task.second }), true, false);
@@ -1120,15 +1112,15 @@ fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const 
         task.n_base2 = (try tc.common.tokenize(a, vocab, try std.mem.concat(a, u8, &.{ task.first, task.choices[1] }), true, false)).len;
     }
 
-    log.inf("%s : calculating winogrande score over selected tasks.\n", .{func});
+    tc.log.inf("%s : calculating winogrande score over selected tasks.\n", .{func});
 
-    const n_ctx: c_int = @intCast(c.llama_n_ctx(ctx));
+    const n_ctx: c_int = @intCast(tc.c.llama_n_ctx(ctx));
     const n_batch = params.n_batch;
 
-    const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+    const n_vocab: usize = @intCast(tc.c.llama_vocab_n_tokens(vocab));
 
     const max_tasks_per_batch = 128;
-    const max_seq: c_int = @min(2 * max_tasks_per_batch, @as(c_int, @intCast(c.llama_n_seq_max(ctx))));
+    const max_seq: c_int = @min(2 * max_tasks_per_batch, @as(c_int, @intCast(tc.c.llama_n_seq_max(ctx))));
 
     var batch = tc.common.Batch.init(gpa, ctx);
     defer batch.deinit();
@@ -1183,15 +1175,15 @@ fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const 
         }
 
         if (j0 == j1) {
-            log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, tasks[j0].required_tokens });
+            tc.log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, tasks[j0].required_tokens });
             return;
         }
 
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         // decode all tasks [j0, j1)
         if (!decodeHelper(ctx, &batch, batch_logits, n_batch, n_vocab)) {
-            log.err("%s: llama_decode() failed\n", .{func});
+            tc.log.err("%s: llama_decode() failed\n", .{func});
             return;
         }
 
@@ -1255,20 +1247,20 @@ fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const 
             n_done += 1;
 
             // print the accumulated accuracy mean x 100
-            log.out("%zu\t%.4lf\t%10.6f  %10.6f  %d  %d\n", .{ i + 1, 100.0 * @as(f64, @floatFromInt(n_correct)) / @as(f64, @floatFromInt(n_done)), @as(f64, score_1st), @as(f64, score_2nd), result, task.answer });
+            tc.log.out("%zu\t%.4lf\t%10.6f  %10.6f  %d  %d\n", .{ i + 1, 100.0 * @as(f64, @floatFromInt(n_correct)) / @as(f64, @floatFromInt(n_done)), @as(f64, score_1st), @as(f64, score_2nd), result, task.answer });
         }
 
         j0 = j1 - 1;
     }
 
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 
     if (n_done < 100) return;
 
     const p: f32 = 1.0 * @as(f32, @floatFromInt(n_correct)) / @as(f32, @floatFromInt(n_done));
-    const sigma: f32 = 100.0 * libm.sqrtf(p * (1 - p) / @as(f32, @floatFromInt(n_done - 1)));
+    const sigma: f32 = 100.0 * @sqrt(@as(f32, p * (1 - p) / @as(f32, @floatFromInt(n_done - 1))));
 
-    log.inf("Final Winogrande score(%d tasks): %.4lf +/- %.4lf\n", .{ n_done, @as(f64, 100 * p), @as(f64, sigma) });
+    tc.log.inf("Final Winogrande score(%d tasks): %.4lf +/- %.4lf\n", .{ n_done, @as(f64, 100 * p), @as(f64, sigma) });
 }
 
 /// A `std::istringstream` over binary data, as far as `read` and `seekg`
@@ -1339,7 +1331,7 @@ const McTask = struct {
     i_logits: usize = 0,
     common_prefix: usize = 0,
     required_tokens: usize = 0,
-    seq_tokens: std.ArrayList([]c.llama_token) = .empty,
+    seq_tokens: std.ArrayList([]tc.c.llama_token) = .empty,
     log_probs: []f32 = &.{},
 
     fn deserialize(self: *McTask, a: std.mem.Allocator, in: *ByteStream) !bool {
@@ -1349,16 +1341,16 @@ const McTask = struct {
 };
 
 /// Ports `multiple_choice_prepare_one_task` (perplexity.cpp:1327 @b1b770d90).
-fn mcPrepareOneTask(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, task: *McTask, log_error: bool) !bool {
+fn mcPrepareOneTask(a: std.mem.Allocator, vocab: ?*const tc.c.llama_vocab, task: *McTask, log_error: bool) !bool {
     const func = "multiple_choice_prepare_one_task";
     if (task.question.len == 0 or task.mc1.answers.len == 0) {
-        if (log_error) log.err("%s: found bad task with empty question and/or answers\n", .{func});
+        if (log_error) tc.log.err("%s: found bad task with empty question and/or answers\n", .{func});
         return false;
     }
     try task.seq_tokens.ensureTotalCapacity(a, task.mc1.answers.len);
     for (task.mc1.answers) |answer| {
         if (answer.len == 0) {
-            if (log_error) log.err("%s: found empty answer\n", .{func});
+            if (log_error) tc.log.err("%s: found empty answer\n", .{func});
             return false;
         }
         try task.seq_tokens.append(a, try tc.common.tokenize(a, vocab, try std.mem.concat(a, u8, &.{ task.question, " ", answer }), true, false));
@@ -1385,7 +1377,7 @@ fn mcPrepareOneTask(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, task: *M
 
 /// What `multiple_choice_score`'s preparation threads share.
 const PrepareWork = struct {
-    vocab: ?*const c.llama_vocab,
+    vocab: ?*const tc.c.llama_vocab,
     tasks: []McTask,
     counter: std.atomic.Value(c_int) = .init(0),
     n_bad: std.atomic.Value(c_int) = .init(0),
@@ -1414,23 +1406,23 @@ const PrepareWork = struct {
 };
 
 /// Ports `multiple_choice_score` (perplexity.cpp:1386 @b1b770d90).
-fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params) !void {
+fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*tc.c.llama_context, params: *const tc.params.Params) !void {
     const func = "multiple_choice_score";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
     var strstream: ByteStream = .{ .data = params.prompt };
     var n_task = strstream.readInt(u32);
     if (strstream.failed or n_task == 0) {
-        log.err("%s: no tasks\n", .{func});
+        tc.log.err("%s: no tasks\n", .{func});
         return;
     }
-    log.inf("%s: there are %u tasks in prompt\n", .{ func, n_task });
+    tc.log.inf("%s: there are %u tasks in prompt\n", .{ func, n_task });
     const task_pos = try a.alloc(u32, n_task);
     @memset(task_pos, 0);
     strstream.read(std.mem.sliceAsBytes(task_pos));
     if (strstream.failed) {
-        log.err("%s: failed to read task positions from prompt\n", .{func});
+        tc.log.err("%s: failed to read task positions from prompt\n", .{func});
         return;
     }
 
@@ -1439,21 +1431,21 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
         // Use all tasks
         tasks = try a.alloc(McTask, n_task);
         for (tasks) |*t| t.* = .{};
-        log.inf("%s: reading tasks", .{func});
+        tc.log.inf("%s: reading tasks", .{func});
         const n_dot: c_int = @max(@as(c_int, @intCast(n_task / 100)), 1);
         var i: c_int = 0;
         for (tasks) |*task| {
             i += 1;
             if (!try task.deserialize(a, &strstream)) {
-                log.err("%s: failed to read task %d of %u\n", .{ func, i, n_task });
+                tc.log.err("%s: failed to read task %d of %u\n", .{ func, i, n_task });
                 return;
             }
-            if (@rem(i, n_dot) == 0) log.out(".", .{});
+            if (@rem(i, n_dot) == 0) tc.log.out(".", .{});
         }
-        log.out("done\n", .{});
+        tc.log.out("done\n", .{});
     } else {
-        log.inf("%s: selecting %zu random tasks from %u tasks available\n", .{ func, params.multiple_choice_tasks, n_task });
-        var rng = libcxx.Mt19937.init(1);
+        tc.log.inf("%s: selecting %zu random tasks from %u tasks available\n", .{ func, params.multiple_choice_tasks, n_task });
+        var rng = stdlib.libcxx.Mt19937.init(1);
         var aux: std.ArrayList(c_int) = .empty;
         for (0..n_task) |i| try aux.append(a, @intCast(i));
         const scale: f32 = 1.0 / (1.0 + @as(f32, @floatFromInt(@as(u32, std.math.maxInt(u32)))));
@@ -1466,16 +1458,16 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
             _ = aux.pop();
             strstream.seekg(task_pos[@intCast(idx)]);
             if (!try task.deserialize(a, &strstream)) {
-                log.err("%s: failed to read task %d at position %u\n", .{ func, idx, task_pos[@intCast(idx)] });
+                tc.log.err("%s: failed to read task %d at position %u\n", .{ func, idx, task_pos[@intCast(idx)] });
                 return;
             }
         }
         n_task = @intCast(params.multiple_choice_tasks);
     }
 
-    log.inf("%s: preparing task data", .{func});
+    tc.log.inf("%s: preparing task data", .{func});
     if (n_task > 500) {
-        log.out("...", .{});
+        tc.log.out("...", .{});
         var work: PrepareWork = .{ .vocab = vocab, .tasks = tasks };
         var max_thread: usize = stdlib.thread.hardwareConcurrency();
         max_thread = @min(max_thread, (tasks.len + k_token_chunk - 1) / k_token_chunk);
@@ -1484,10 +1476,10 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
         for (threads) |*w| w.* = try std.Thread.spawn(.{}, PrepareWork.prepare, .{&work});
         work.prepare();
         for (threads) |w| w.join();
-        log.out("done\n", .{});
+        tc.log.out("done\n", .{});
         const nbad = work.n_bad.load(.seq_cst);
         if (nbad > 0) {
-            log.err("%s: found %d malformed tasks\n", .{ func, nbad });
+            tc.log.err("%s: found %d malformed tasks\n", .{ func, nbad });
             return;
         }
     } else {
@@ -1496,22 +1488,22 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
         for (tasks) |*task| {
             i_task += 1;
             if (!try mcPrepareOneTask(a, vocab, task, true)) return;
-            if (@rem(i_task, n_dot) == 0) log.out(".", .{});
+            if (@rem(i_task, n_dot) == 0) tc.log.out(".", .{});
         }
-        log.out("done\n", .{});
+        tc.log.out("done\n", .{});
     }
 
-    log.inf("%s : calculating TruthfulQA score over %zu tasks.\n", .{ func, tasks.len });
+    tc.log.inf("%s : calculating TruthfulQA score over %zu tasks.\n", .{ func, tasks.len });
 
-    log.out("\ntask\tacc_norm\n", .{});
+    tc.log.out("\ntask\tacc_norm\n", .{});
 
-    const n_ctx: c_int = @intCast(c.llama_n_ctx(ctx));
+    const n_ctx: c_int = @intCast(tc.c.llama_n_ctx(ctx));
     const n_batch = params.n_batch;
 
-    const n_vocab: usize = @intCast(c.llama_vocab_n_tokens(vocab));
+    const n_vocab: usize = @intCast(tc.c.llama_vocab_n_tokens(vocab));
 
     const max_tasks_per_batch = 32;
-    const max_seq: c_int = @min(4 * max_tasks_per_batch, @as(c_int, @intCast(c.llama_n_seq_max(ctx))));
+    const max_seq: c_int = @min(4 * max_tasks_per_batch, @as(c_int, @intCast(tc.c.llama_n_seq_max(ctx))));
 
     var batch = tc.common.Batch.init(gpa, ctx);
     defer batch.deinit();
@@ -1524,7 +1516,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
     var eval_pairs: std.ArrayList(EvalPair) = .empty;
     var eval_results: std.ArrayList(f32) = .empty;
     const n_workers: usize = stdlib.thread.hardwareConcurrency();
-    var batch_indeces: std.ArrayList(c.llama_seq_id) = .empty;
+    var batch_indeces: std.ArrayList(tc.c.llama_seq_id) = .empty;
 
     var n_done: c_int = 0;
     var n_correct: c_int = 0;
@@ -1548,7 +1540,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
             const num_answers: c_int = @intCast(cur_task.seq_tokens.items.len);
             if (s0 + num_answers > max_seq) {
                 if (s0 == 0) {
-                    log.err("%s : task %zu requires a higher -np|--parallel value (at least %d)\n", .{ func, j0, num_answers });
+                    tc.log.err("%s : task %zu requires a higher -np|--parallel value (at least %d)\n", .{ func, j0, num_answers });
                     return;
                 }
                 break;
@@ -1584,15 +1576,15 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
         }
 
         if (j0 == j1) {
-            log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, tasks[j0].required_tokens });
+            tc.log.err("%s : task %zu does not fit in the context window (requires %zu tokens)\n", .{ func, j0, tasks[j0].required_tokens });
             return;
         }
 
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         // decode all tasks [j0, j1)
         if (!decodeHelper(ctx, &batch, batch_logits, n_batch, n_vocab)) {
-            log.err("%s: llama_decode() failed\n", .{func});
+            tc.log.err("%s: llama_decode() failed\n", .{func});
             return;
         }
 
@@ -1627,7 +1619,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
             cur_task.log_probs = try a.alloc(f32, cur_task.seq_tokens.items.len);
             for (cur_task.seq_tokens.items, 0..) |seq, s| {
                 var count: usize = 1;
-                var log_prob = libm.logf(first_probs[@intCast(seq[cur_task.common_prefix])]);
+                var log_prob = stdlib.libm.logf(first_probs[@intCast(seq[cur_task.common_prefix])]);
                 var j = cur_task.common_prefix;
                 while (j < seq.len - 1) : (j += 1) {
                     count += 1;
@@ -1653,7 +1645,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
             n_done += 1;
 
             // Print the accumulated accuracy mean x 100
-            log.out("%d\t%.8lf\n", .{ n_done, 100.0 * @as(f64, @floatFromInt(n_correct)) / @as(f64, @floatFromInt(n_done)) });
+            tc.log.out("%d\t%.8lf\n", .{ n_done, 100.0 * @as(f64, @floatFromInt(n_correct)) / @as(f64, @floatFromInt(n_done)) });
         }
 
         j0 = j1 - 1;
@@ -1662,14 +1654,14 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
     if (n_done < 100 and (params.multiple_choice_tasks != 0 and params.multiple_choice_tasks < n_task)) return;
 
     var p: f32 = 1.0 * @as(f32, @floatFromInt(n_correct)) / @as(f32, @floatFromInt(n_done));
-    var sigma = libm.sqrtf(p * (1 - p) / @as(f32, @floatFromInt(n_done - 1)));
-    log.out("\n", .{});
-    log.inf("Final result: %.4f +/- %.4f\n", .{ @as(f64, 100.0 * p), @as(f64, 100.0 * sigma) });
+    var sigma = @sqrt(@as(f32, p * (1 - p) / @as(f32, @floatFromInt(n_done - 1))));
+    tc.log.out("\n", .{});
+    tc.log.inf("Final result: %.4f +/- %.4f\n", .{ @as(f64, 100.0 * p), @as(f64, 100.0 * sigma) });
     p = 1.0 * @as(f32, @floatFromInt(n_done)) / @as(f32, @floatFromInt(n_tot_answers));
-    sigma = libm.sqrtf(p * (1 - p) / @as(f32, @floatFromInt(n_done - 1)));
-    log.inf("Random chance: %.4f +/- %.4f\n", .{ @as(f64, 100.0 * p), @as(f64, 100.0 * sigma) });
+    sigma = @sqrt(@as(f32, p * (1 - p) / @as(f32, @floatFromInt(n_done - 1))));
+    tc.log.inf("Random chance: %.4f +/- %.4f\n", .{ @as(f64, 100.0 * p), @as(f64, 100.0 * sigma) });
 
-    log.inf("\n", .{});
+    tc.log.inf("\n", .{});
 }
 
 /// `kl_divergence`'s `mean_and_uncertainty` (perplexity.cpp:1750 @b1b770d90).
@@ -1678,7 +1670,7 @@ fn meanAndUncertainty(sum: f64, sum2: f64, count: usize) struct { f64, f64 } {
     const n: f64 = @floatFromInt(count);
     const f = sum / n;
     var df = @mulAdd(f64, -f, f, sum2 / n);
-    df = if (df > 0 and count > 10) libm.sqrt(df / @as(f64, @floatFromInt(count - 1))) else 0.0;
+    df = if (df > 0 and count > 10) @sqrt(@as(f64, df / @as(f64, @floatFromInt(count - 1)))) else 0.0;
     return .{ f, df };
 }
 
@@ -1707,22 +1699,22 @@ fn lessF32(_: void, x: f32, y: f32) bool {
 
 /// `sqrt(a*a + b*b - 2.0*cov)` as clang contracts it.
 fn sqrtUnc(x: f64, y: f64, cov: f64) f64 {
-    return libm.sqrt(@mulAdd(f64, -2.0, cov, @mulAdd(f64, x, x, y * y)));
+    return @sqrt(@as(f64, @mulAdd(f64, -2.0, cov, @mulAdd(f64, x, x, y * y))));
 }
 
 /// Ports `kl_divergence` (perplexity.cpp:1675 @b1b770d90).
-fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, params: *const Params) !void {
+fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*tc.c.llama_context, params: *const tc.params.Params) !void {
     const func = "kl_divergence";
-    const model = c.llama_get_model(ctx);
-    const vocab = c.llama_model_get_vocab(model);
+    const model = tc.c.llama_get_model(ctx);
+    const vocab = tc.c.llama_model_get_vocab(model);
 
     if (params.logits_file.len == 0) {
-        log.err("%s: you must provide a name of a file containing the log probabilities of the base model\n", .{func});
+        tc.log.err("%s: you must provide a name of a file containing the log probabilities of the base model\n", .{func});
         return;
     }
     const fname = try a.dupeSentinel(u8, params.logits_file, 0);
     const f = stdlib.file.openIn(std_io, fname) catch {
-        log.err("%s: failed to open %s\n", .{ func, fname.ptr });
+        tc.log.err("%s: failed to open %s\n", .{ func, fname.ptr });
         return;
     };
     defer f.close(std_io);
@@ -1745,15 +1737,15 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
     {
         var check: [8]u8 = undefined;
         if (!in.read(&check) or !std.mem.eql(u8, &check, "_logits_")) {
-            log.err("%s: %s does not look like a file containing log-probabilities\n", .{ func, fname.ptr });
+            tc.log.err("%s: %s does not look like a file containing log-probabilities\n", .{ func, fname.ptr });
             return;
         }
     }
 
     var n_ctx: u32 = 0;
     _ = in.read(std.mem.asBytes(&n_ctx));
-    if (n_ctx > c.llama_n_ctx(ctx)) {
-        log.err("%s: %s has been computed with %u, while the current context is %d. Increase it with -c and retry\n", .{ func, fname.ptr, n_ctx, params.n_ctx });
+    if (n_ctx > tc.c.llama_n_ctx(ctx)) {
+        tc.log.err("%s: %s has been computed with %u, while the current context is %d. Increase it with -c and retry\n", .{ func, fname.ptr, n_ctx, params.n_ctx });
     }
 
     var n_vocab: c_int = 0;
@@ -1761,18 +1753,18 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
     _ = in.read(std.mem.asBytes(&n_vocab));
     _ = in.read(std.mem.asBytes(&n_chunk));
     if (in.failed) {
-        log.err("%s: failed reading n_vocab, n_chunk from %s\n", .{ func, fname.ptr });
+        tc.log.err("%s: failed reading n_vocab, n_chunk from %s\n", .{ func, fname.ptr });
         return;
     }
-    if (n_vocab != c.llama_vocab_n_tokens(vocab)) {
-        log.err("%s: inconsistent vocabulary (%d vs %d)\n", .{ func, n_vocab, c.llama_vocab_n_tokens(vocab) });
+    if (n_vocab != tc.c.llama_vocab_n_tokens(vocab)) {
+        tc.log.err("%s: inconsistent vocabulary (%d vs %d)\n", .{ func, n_vocab, tc.c.llama_vocab_n_tokens(vocab) });
     }
 
-    const tokens = try gpa.alloc(c.llama_token, @as(usize, n_ctx) * @as(usize, @intCast(n_chunk)));
+    const tokens = try gpa.alloc(tc.c.llama_token, @as(usize, n_ctx) * @as(usize, @intCast(n_chunk)));
     defer gpa.free(tokens);
     @memset(tokens, 0);
     if (!in.read(std.mem.sliceAsBytes(tokens))) {
-        log.err("%s: failed reading evaluation tokens from %s\n", .{ func, fname.ptr });
+        tc.log.err("%s: failed reading evaluation tokens from %s\n", .{ func, fname.ptr });
         return;
     }
 
@@ -1780,15 +1772,15 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
     const n_ctx_i: c_int = @intCast(n_ctx);
     const num_batches = @divTrunc(n_ctx_i + n_batch - 1, n_batch);
     // Calculate n_seq based on the logits file's n_ctx, but cap it at what the context supports
-    const n_seq_max: c_int = @intCast(c.llama_n_seq_max(ctx));
+    const n_seq_max: c_int = @intCast(tc.c.llama_n_seq_max(ctx));
     var n_seq: c_int = @max(1, @divTrunc(n_batch, n_ctx_i));
     if (n_seq > n_seq_max) {
-        log.wrn("%s: calculated n_seq=%d exceeds context's n_seq_max=%d, capping at %d\n", .{ func, n_seq, n_seq_max, n_seq_max });
+        tc.log.wrn("%s: calculated n_seq=%d exceeds context's n_seq_max=%d, capping at %d\n", .{ func, n_seq, n_seq_max, n_seq_max });
         n_seq = n_seq_max;
     }
     const nv: usize = @intCast(2 * @divTrunc(n_vocab + 1, 2) + 4);
-    const add_bos = c.llama_vocab_get_add_bos(vocab);
-    ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 1734, "!llama_vocab_get_add_eos(vocab)");
+    const add_bos = tc.c.llama_vocab_get_add_bos(vocab);
+    ggmlAssert(!tc.c.llama_vocab_get_add_eos(vocab), 1734, "!llama_vocab_get_add_eos(vocab)");
 
     var batch = tc.common.Batch.init(gpa, ctx);
     defer batch.deinit();
@@ -1808,7 +1800,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
     defer logits.deinit(gpa);
     if (num_batches > 1) try logits.ensureTotalCapacity(gpa, @as(usize, n_ctx) * nvu);
 
-    log.inf("%s: computing over %d chunks, n_ctx=%u, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
+    tc.log.inf("%s: computing over %d chunks, n_ctx=%u, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
     const n_workers = @as(usize, stdlib.thread.hardwareConcurrency()) - 1;
 
@@ -1827,7 +1819,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
         const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
-        c.llama_memory_clear(c.llama_get_memory(ctx), true);
+        tc.c.llama_memory_clear(tc.c.llama_get_memory(ctx), true);
 
         var j: c_int = 0;
         while (j < num_batches) : (j += 1) {
@@ -1845,7 +1837,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
                 const token_org = tokens[seq_start];
 
                 // add BOS token for the first batch of each chunk
-                if (add_bos and j == 0) tokens[seq_start] = c.llama_vocab_bos(vocab);
+                if (add_bos and j == 0) tokens[seq_start] = tc.c.llama_vocab_bos(vocab);
 
                 var k: c_int = 0;
                 while (k < batch_size) : (k += 1) {
@@ -1859,33 +1851,33 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
                 tokens[seq_start] = token_org;
             }
 
-            if (c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
-                log.err("%s : failed to decode\n", .{func});
+            if (tc.c.llama_process(ctx, tc.c.LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+                tc.log.err("%s : failed to decode\n", .{func});
                 return;
             }
 
             if (num_batches > 1 and n_outputs > 0) {
-                const batch_logits = c.llama_get_logits(ctx);
+                const batch_logits = tc.c.llama_get_logits(ctx);
                 try logits.appendSlice(gpa, batch_logits[0 .. @as(usize, @intCast(n_outputs)) * nvu]);
             }
         }
 
         if (i == 0) {
-            c.llama_synchronize(ctx);
+            tc.c.llama_synchronize(ctx);
             printEta(func, t_start, @as(f32, @floatFromInt(n_chunk)) / @as(f32, @floatFromInt(n_seq)));
-            log.out("\n", .{});
-            log.out("chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p\n", .{});
+            tc.log.out("\n", .{});
+            tc.log.out("chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p\n", .{});
         }
 
         // Read log probs for each sequence in the batch
         var seq: c_int = 0;
         while (seq < n_seq_batch) : (seq += 1) {
             if (!in.read(std.mem.sliceAsBytes(log_probs_uint16))) {
-                log.err("%s: failed reading log-probs for chunk %d\n", .{ func, i + seq });
+                tc.log.err("%s: failed reading log-probs for chunk %d\n", .{ func, i + seq });
                 return;
             }
 
-            const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else c.llama_get_logits_ith(ctx, seq * n_ctx_i + first);
+            const all_logits: [*]const f32 = if (num_batches > 1) logits.items.ptr else tc.c.llama_get_logits_ith(ctx, seq * n_ctx_i + first);
 
             var work: KldWork = .{
                 .n_vocab = nvu,
@@ -1900,78 +1892,78 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
             try work.run(n_workers, &kld);
             kld_off += n_tok_chunk;
 
-            log.out("%4d", .{i + seq + 1});
+            tc.log.out("%4d", .{i + seq + 1});
 
             const log_ppl = meanAndUncertainty(kld.sum_nll, kld.sum_nll2, kld.count);
-            const ppl_val = libm.exp(log_ppl[0]);
+            const ppl_val = stdlib.libm.exp(log_ppl[0]);
             const ppl_unc = ppl_val * log_ppl[1];
-            log.out("    %9.4lf ± %9.4lf", .{ ppl_val, ppl_unc });
+            tc.log.out("    %9.4lf ± %9.4lf", .{ ppl_val, ppl_unc });
 
             const log_ppl_base = meanAndUncertainty(kld.sum_nll_base, kld.sum_nll_base2, kld.count);
             const log_ppl_cov = covariance(kld.sum_nll, kld.sum_nll_base, kld.sum_nll_nll_base, kld.count);
             const log_ppl_ratio_val = log_ppl[0] - log_ppl_base[0];
             const log_ppl_ratio_unc = sqrtUnc(log_ppl[1], log_ppl_base[1], log_ppl_cov);
-            log.out("    %10.5lf ± %10.5lf", .{ log_ppl_ratio_val, log_ppl_ratio_unc });
+            tc.log.out("    %10.5lf ± %10.5lf", .{ log_ppl_ratio_val, log_ppl_ratio_unc });
 
             const kl_div = meanAndUncertainty(kld.sum_kld, kld.sum_kld2, kld.count);
-            log.out("    %10.5lf ± %10.5lf", .{ kl_div[0], kl_div[1] });
+            tc.log.out("    %10.5lf ± %10.5lf", .{ kl_div[0], kl_div[1] });
 
             const p_diff_mse = meanAndUncertainty(kld.sum_p_diff2, kld.sum_p_diff4, kld.count);
-            const p_diff_rms_val = libm.sqrt(p_diff_mse[0]);
+            const p_diff_rms_val = @sqrt(@as(f64, p_diff_mse[0]));
             const p_diff_rms_unc = 0.5 / p_diff_rms_val * p_diff_mse[1];
-            log.out("    %6.3lf ± %6.3lf %%", .{ 100.0 * p_diff_rms_val, 100.0 * p_diff_rms_unc });
+            tc.log.out("    %6.3lf ± %6.3lf %%", .{ 100.0 * p_diff_rms_val, 100.0 * p_diff_rms_unc });
 
             const p_top_val = 1.0 * @as(f64, @floatFromInt(kld.n_same_top)) / @as(f64, @floatFromInt(kld.count));
-            const p_top_unc = libm.sqrt(p_top_val * (1 - p_top_val) / @as(f64, @floatFromInt(kld.count -% 1)));
-            log.out("    %6.3lf ± %6.3lf %%", .{ 100.0 * p_top_val, 100.0 * p_top_unc });
+            const p_top_unc = @sqrt(@as(f64, p_top_val * (1 - p_top_val) / @as(f64, @floatFromInt(kld.count -% 1))));
+            tc.log.out("    %6.3lf ± %6.3lf %%", .{ 100.0 * p_top_val, 100.0 * p_top_unc });
 
-            log.out("\n", .{});
+            tc.log.out("\n", .{});
         }
 
         logits.clearRetainingCapacity();
     }
 
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 
     if (kld.count < 100) return; // we do not wish to do statistics on so few values
 
-    libcxx.sort(f32, kld_values, {}, lessF32);
-    libcxx.sort(f32, p_diff_values, {}, lessF32);
+    stdlib.libcxx.sort(f32, kld_values, {}, lessF32);
+    stdlib.libcxx.sort(f32, p_diff_values, {}, lessF32);
 
-    log.out("====== Perplexity statistics ======\n", .{});
+    tc.log.out("====== Perplexity statistics ======\n", .{});
 
     const log_ppl = meanAndUncertainty(kld.sum_nll, kld.sum_nll2, kld.count);
-    const ppl_val = libm.exp(log_ppl[0]);
+    const ppl_val = stdlib.libm.exp(log_ppl[0]);
     const ppl_unc = ppl_val * log_ppl[1];
-    log.out("Mean PPL(Q)                   : %10.6lf ± %10.6lf\n", .{ ppl_val, ppl_unc });
+    tc.log.out("Mean PPL(Q)                   : %10.6lf ± %10.6lf\n", .{ ppl_val, ppl_unc });
 
     const log_ppl_base = meanAndUncertainty(kld.sum_nll_base, kld.sum_nll_base2, kld.count);
-    const ppl_base_val = libm.exp(log_ppl_base[0]);
+    const ppl_base_val = stdlib.libm.exp(log_ppl_base[0]);
     const ppl_base_unc = ppl_base_val * log_ppl_base[1];
-    log.out("Mean PPL(base)                : %10.6lf ± %10.6lf\n", .{ ppl_base_val, ppl_base_unc });
+    tc.log.out("Mean PPL(base)                : %10.6lf ± %10.6lf\n", .{ ppl_base_val, ppl_base_unc });
 
     const log_ppl_cov = covariance(kld.sum_nll, kld.sum_nll_base, kld.sum_nll_nll_base, kld.count);
     const log_ppl_cor = log_ppl_cov / (log_ppl[1] * log_ppl_base[1]);
-    log.out("Cor(ln(PPL(Q)), ln(PPL(base))): %6.2lf%%\n", .{100.0 * log_ppl_cor});
+    tc.log.out("Cor(ln(PPL(Q)), ln(PPL(base))): %6.2lf%%\n", .{100.0 * log_ppl_cor});
 
     const log_ppl_ratio_val = log_ppl[0] - log_ppl_base[0];
     const log_ppl_ratio_unc = sqrtUnc(log_ppl[1], log_ppl_base[1], log_ppl_cov);
-    log.out("Mean ln(PPL(Q)/PPL(base))     : %10.6lf ± %10.6lf\n", .{ log_ppl_ratio_val, log_ppl_ratio_unc });
+    tc.log.out("Mean ln(PPL(Q)/PPL(base))     : %10.6lf ± %10.6lf\n", .{ log_ppl_ratio_val, log_ppl_ratio_unc });
 
-    const ppl_ratio_val = libm.exp(log_ppl_ratio_val);
+    const ppl_ratio_val = stdlib.libm.exp(log_ppl_ratio_val);
     const ppl_ratio_unc = ppl_ratio_val * log_ppl_ratio_unc;
-    log.out("Mean PPL(Q)/PPL(base)         : %10.6lf ± %10.6lf\n", .{ ppl_ratio_val, ppl_ratio_unc });
+    tc.log.out("Mean PPL(Q)/PPL(base)         : %10.6lf ± %10.6lf\n", .{ ppl_ratio_val, ppl_ratio_unc });
 
     const ppl_cov = ppl_val * ppl_base_val * log_ppl_cov;
     const ppl_diff_val = ppl_val - ppl_base_val;
     const ppl_diff_unc = sqrtUnc(ppl_unc, ppl_base_unc, ppl_cov);
-    log.out("Mean PPL(Q)-PPL(base)         : %10.6lf ± %10.6lf\n", .{ ppl_diff_val, ppl_diff_unc });
+    tc.log.out("Mean PPL(Q)-PPL(base)         : %10.6lf ± %10.6lf\n", .{ ppl_diff_val, ppl_diff_unc });
 
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 
-    log.out("====== KL divergence statistics ======\n", .{});
+    tc.log.out("====== KL divergence statistics ======\n", .{});
     const kl_div = meanAndUncertainty(kld.sum_kld, kld.sum_kld2, kld.count);
-    log.out("Mean    KLD: %10.6lf ± %10.6lf\n", .{ kl_div[0], kl_div[1] });
+    tc.log.out("Mean    KLD: %10.6lf ± %10.6lf\n", .{ kl_div[0], kl_div[1] });
     const kn = kld_values.len;
     const kld_median: f32 = if (kn % 2 == 0) 0.5 * (kld_values[kn / 2] + kld_values[kn / 2 - 1]) else kld_values[kn / 2];
 
@@ -1980,76 +1972,76 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
             return x;
         }
     };
-    log.out("Maximum KLD: %10.6f\n", .{D.d(kld_values[kn - 1])});
-    log.out("99.9%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.999))});
-    log.out("99.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.990))});
-    log.out("95.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.950))});
-    log.out("90.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.900))});
-    log.out("Median  KLD: %10.6f\n", .{D.d(kld_median)});
-    log.out("10.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.100))});
-    log.out(" 5.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.050))});
-    log.out(" 1.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.010))});
-    log.out(" 0.1%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.001))});
-    log.out("Minimum KLD: %10.6f\n", .{D.d(kld_values[0])});
+    tc.log.out("Maximum KLD: %10.6f\n", .{D.d(kld_values[kn - 1])});
+    tc.log.out("99.9%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.999))});
+    tc.log.out("99.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.990))});
+    tc.log.out("95.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.950))});
+    tc.log.out("90.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.900))});
+    tc.log.out("Median  KLD: %10.6f\n", .{D.d(kld_median)});
+    tc.log.out("10.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.100))});
+    tc.log.out(" 5.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.050))});
+    tc.log.out(" 1.0%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.010))});
+    tc.log.out(" 0.1%%   KLD: %10.6f\n", .{D.d(percentile(kld_values, 0.001))});
+    tc.log.out("Minimum KLD: %10.6f\n", .{D.d(kld_values[0])});
 
-    log.out("\n", .{});
+    tc.log.out("\n", .{});
 
-    log.out("====== Token probability statistics ======\n", .{});
+    tc.log.out("====== Token probability statistics ======\n", .{});
 
     const p_diff = meanAndUncertainty(kld.sum_p_diff, kld.sum_p_diff2, kld.count);
-    log.out("Mean    Δp: %6.3lf ± %5.3lf %%\n", .{ 100.0 * p_diff[0], 100.0 * p_diff[1] });
+    tc.log.out("Mean    Δp: %6.3lf ± %5.3lf %%\n", .{ 100.0 * p_diff[0], 100.0 * p_diff[1] });
 
     const pn = p_diff_values.len;
     const p_diff_median: f32 = if (pn % 2 == 0) 0.5 * (p_diff_values[pn / 2] + p_diff_values[pn / 2 - 1]) else p_diff_values[pn / 2];
 
-    log.out("Maximum Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_values[pn - 1])});
-    log.out("99.9%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.999))});
-    log.out("99.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.990))});
-    log.out("95.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.950))});
-    log.out("90.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.900))});
-    log.out("75.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.750))});
-    log.out("Median  Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_median)});
-    log.out("25.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.250))});
-    log.out("10.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.100))});
-    log.out(" 5.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.050))});
-    log.out(" 1.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.010))});
-    log.out(" 0.1%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.001))});
-    log.out("Minimum Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_values[0])});
+    tc.log.out("Maximum Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_values[pn - 1])});
+    tc.log.out("99.9%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.999))});
+    tc.log.out("99.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.990))});
+    tc.log.out("95.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.950))});
+    tc.log.out("90.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.900))});
+    tc.log.out("75.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.750))});
+    tc.log.out("Median  Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_median)});
+    tc.log.out("25.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.250))});
+    tc.log.out("10.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.100))});
+    tc.log.out(" 5.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.050))});
+    tc.log.out(" 1.0%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.010))});
+    tc.log.out(" 0.1%%   Δp: %6.3lf%%\n", .{100.0 * D.d(percentile(p_diff_values, 0.001))});
+    tc.log.out("Minimum Δp: %6.3lf%%\n", .{100.0 * D.d(p_diff_values[0])});
 
     const p_diff_mse = meanAndUncertainty(kld.sum_p_diff2, kld.sum_p_diff4, kld.count);
 
-    const p_diff_rms_val = libm.sqrt(p_diff_mse[0]);
+    const p_diff_rms_val = @sqrt(@as(f64, p_diff_mse[0]));
     const p_diff_rms_unc = 0.5 / p_diff_rms_val * p_diff_mse[1];
-    log.out("RMS Δp    : %6.3lf ± %5.3lf %%\n", .{ 100.0 * p_diff_rms_val, 100.0 * p_diff_rms_unc });
+    tc.log.out("RMS Δp    : %6.3lf ± %5.3lf %%\n", .{ 100.0 * p_diff_rms_val, 100.0 * p_diff_rms_unc });
 
     const same_top_p = 1.0 * @as(f64, @floatFromInt(kld.n_same_top)) / @as(f64, @floatFromInt(kld.count));
-    log.out("Same top p: %6.3lf ± %5.3lf %%\n", .{ 100.0 * same_top_p, 100.0 * libm.sqrt(same_top_p * (1.0 - same_top_p) / @as(f64, @floatFromInt(kld.count - 1))) });
+    tc.log.out("Same top p: %6.3lf ± %5.3lf %%\n", .{ 100.0 * same_top_p, 100.0 * @sqrt(@as(f64, same_top_p * (1.0 - same_top_p) / @as(f64, @floatFromInt(kld.count - 1)))) });
 }
 
 /// Ports `common_params_get_system_info` (common/common.cpp:442 @b1b770d90).
-fn systemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
+fn systemInfo(a: std.mem.Allocator, params: *const tc.params.Params) ![:0]u8 {
     var os: std.ArrayList(u8) = .empty;
     try os.print(a, "system_info: n_threads = {d}", .{params.cpuparams.n_threads});
     if (params.cpuparams_batch.n_threads != -1) try os.print(a, " (n_threads_batch = {d})", .{params.cpuparams_batch.n_threads});
-    try os.print(a, " / {d} | {s}", .{ @as(usize, stdlib.thread.hardwareConcurrency()), c.llama_print_system_info() });
+    try os.print(a, " / {d} | {s}", .{ @as(usize, stdlib.thread.hardwareConcurrency()), tc.c.llama_print_system_info() });
     return a.dupeSentinel(u8, os.items, 0);
 }
 
 /// Ports `llama_perplexity` (perplexity.cpp:1988 @b1b770d90).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_perplexity";
-    var params = try Params.init(a);
+    var params = try tc.params.Params.init(a);
 
     params.n_ctx = 512;
     params.escape = false;
 
     tc.common.init();
 
-    if (!try arg.parse(argv, &params, .perplexity, null)) return 1;
+    if (!try tc.arg.parse(argv, &params, .perplexity, null)) return 1;
 
     const n_ctx = params.n_ctx;
     if (n_ctx <= 0) {
-        log.err("%s: perplexity tool requires '--ctx-size' > 0\n", .{func});
+        tc.log.err("%s: perplexity tool requires '--ctx-size' > 0\n", .{func});
         return 1;
     }
 
@@ -2063,12 +2055,12 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     params.n_batch = @min(params.n_batch, params.n_ctx);
 
     if (params.ppl_stride > 0) {
-        log.inf("Will perform strided perplexity calculation -> adjusting context size from %d to %d\n", .{ params.n_ctx, params.n_ctx + @divTrunc(params.ppl_stride, 2) });
+        tc.log.inf("Will perform strided perplexity calculation -> adjusting context size from %d to %d\n", .{ params.n_ctx, params.n_ctx + @divTrunc(params.ppl_stride, 2) });
         params.n_ctx += @divTrunc(params.ppl_stride, 2);
     }
 
-    c.llama_backend_init();
-    c.llama_numa_init(params.numa);
+    tc.c.llama_backend_init();
+    tc.c.llama_numa_init(params.numa);
 
     // load the model and apply lora adapter, if any
     var llama_init = try tc.init.initFromParams(init.gpa, &params, false);
@@ -2078,25 +2070,25 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     const ctx = llama_init.context;
 
     if (model == null) {
-        log.err("%s: unable to load model\n", .{func});
+        tc.log.err("%s: unable to load model\n", .{func});
         return 1;
     }
 
     if (ctx == null) {
-        log.err("%s: failed to create context\n", .{func});
+        tc.log.err("%s: failed to create context\n", .{func});
         return 1;
     }
 
-    const n_ctx_train = c.llama_model_n_ctx_train(model);
+    const n_ctx_train = tc.c.llama_model_n_ctx_train(model);
 
     if (params.n_ctx > n_ctx_train) {
-        log.wrn("%s: model was trained on only %d context tokens (%d specified)\n", .{ func, n_ctx_train, params.n_ctx });
+        tc.log.wrn("%s: model was trained on only %d context tokens (%d specified)\n", .{ func, n_ctx_train, params.n_ctx });
     }
 
     // print system information
     {
-        log.inf("\n", .{});
-        log.inf("%s\n", .{(try systemInfo(a, &params)).ptr});
+        tc.log.inf("\n", .{});
+        tc.log.inf("%s\n", .{(try systemInfo(a, &params)).ptr});
     }
 
     if (params.hellaswag) {
@@ -2111,11 +2103,11 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         try perplexity(a, init.io, ctx, &params, n_ctx);
     }
 
-    log.out("\n", .{});
-    c.llama_perf_context_print(ctx);
+    tc.log.out("\n", .{});
+    tc.c.llama_perf_context_print(ctx);
     try fit.memoryBreakdownPrint(init.gpa, .{ .verbosity = std.math.maxInt(i32), .sink = tc.common.fitLogSink, .json = tc.common.fitLogJson }, @ptrCast(ctx));
 
-    c.llama_backend_free();
+    tc.c.llama_backend_free();
 
     return 0;
 }

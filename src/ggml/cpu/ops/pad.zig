@@ -37,22 +37,13 @@
 //! `j0`…`j3`, `j00`…`j03`, digit for digit.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const libcxx = @import("stdlib").libcxx;
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const vec = @import("vecinline.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
+const ggml = @import("../../module.zig");
+const stdlib = @import("stdlib");
 
 /// Stride as `i64`; see `common.sz`.
-const s = common.sz;
-
 /// Typed pointer to one `f32`; see `common.ref`.
 inline fn at(base: ?*anyopaque, off: i64) *f32 {
-    return common.ref(f32, base, off);
+    return ggml.cpu.ops.common.ref(f32, base, off);
 }
 
 /// `(float) i`, the C's implicit promotion of an `int64_t` operand.
@@ -71,7 +62,7 @@ inline fn trunc64(x: f32) i64 {
 /// Ports the `triangle_filter` lambda in `ggml_compute_forward_upscale_f32`
 /// (ops.cpp:8084 @b1b770d90): `std::max(1.0f - fabsf(x), 0.0f)`.
 inline fn triangleFilter(x: f32) f32 {
-    return libcxx.max(f32, 1.0 - @abs(x), 0.0);
+    return stdlib.libcxx.max(f32, 1.0 - @abs(x), 0.0);
 }
 
 /// `a` in the bicubic lambdas of `ggml_compute_forward_upscale_f32`: the
@@ -118,23 +109,23 @@ inline fn bicubic(p0: f32, p1: f32, p2: f32, p3: f32, x: f32) f32 {
 }
 
 /// Ports `ggml_compute_forward_upscale_f32` (ops.cpp:8084 @b1b770d90).
-fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn upscaleF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
-    const nb00 = s(l.nb00);
-    const nb01 = s(l.nb01);
-    const nb02 = s(l.nb02);
-    const nb03 = s(l.nb03);
-    const nb0 = s(l.nb0);
-    const nb1 = s(l.nb1);
-    const nb2 = s(l.nb2);
-    const nb3 = s(l.nb3);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
+    const nb00 = ggml.cpu.ops.common.sz(l.nb00);
+    const nb01 = ggml.cpu.ops.common.sz(l.nb01);
+    const nb02 = ggml.cpu.ops.common.sz(l.nb02);
+    const nb03 = ggml.cpu.ops.common.sz(l.nb03);
+    const nb0 = ggml.cpu.ops.common.sz(l.nb0);
+    const nb1 = ggml.cpu.ops.common.sz(l.nb1);
+    const nb2 = ggml.cpu.ops.common.sz(l.nb2);
+    const nb3 = ggml.cpu.ops.common.sz(l.nb3);
 
     var sf0 = f(l.ne0) / f(src0.ne[0]);
     var sf1 = f(l.ne1) / f(src0.ne[1]);
@@ -142,16 +133,16 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
     const sf3 = f(l.ne3) / f(src0.ne[3]);
     var pixel_offset: f32 = 0.5;
 
-    const mode_flags = impl.getOpParamsI32(dst, 0);
+    const mode_flags = ggml.impl.getOpParamsI32(dst, 0);
     const mode = mode_flags & 0xFF;
 
-    if ((mode_flags & c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
+    if ((mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ALIGN_CORNERS) != 0) {
         pixel_offset = 0.0;
         sf0 = if (l.ne0 > 1 and l.ne00 > 1) f(l.ne0 - 1) / f(l.ne00 - 1) else sf0;
         sf1 = if (l.ne1 > 1 and l.ne01 > 1) f(l.ne1 - 1) / f(l.ne01 - 1) else sf1;
     }
 
-    if (mode == c.GGML_SCALE_MODE_NEAREST) {
+    if (mode == ggml.impl.c.GGML_SCALE_MODE_NEAREST) {
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
             const j03 = trunc64(f(j3) / sf3);
@@ -173,14 +164,14 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                 }
             }
         }
-    } else if (mode == c.GGML_SCALE_MODE_BILINEAR and (mode_flags & c.GGML_SCALE_FLAG_ANTIALIAS) != 0) {
+    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BILINEAR and (mode_flags & ggml.impl.c.GGML_SCALE_FLAG_ANTIALIAS) != 0) {
         // Similar to F.interpolate(..., mode="bilinear", align_corners=False, antialias=True)
         // https://github.com/pytorch/pytorch/blob/8871ff29b743948d1225389d5b7068f37b22750b/aten/src/ATen/native/cpu/UpSampleKernel.cpp
 
         // support and invscale, minimum 1 pixel for bilinear
-        const support1 = libcxx.max(f32, 1.0, 1.0 / sf1);
+        const support1 = stdlib.libcxx.max(f32, 1.0, 1.0 / sf1);
         const invscale1 = 1.0 / support1;
-        const support0 = libcxx.max(f32, 1.0, 1.0 / sf0);
+        const support0 = stdlib.libcxx.max(f32, 1.0, 1.0 / sf0);
         const invscale0 = 1.0 / support0;
 
         var j3: i64 = 0;
@@ -233,7 +224,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                 }
             }
         }
-    } else if (mode == c.GGML_SCALE_MODE_BILINEAR) {
+    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BILINEAR) {
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
             const j03 = trunc64(f(j3) / sf3);
@@ -250,7 +241,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                     y1 = @max(0, @min(y1, l.ne01 - 1));
 
                     var dy = y - f(y0);
-                    dy = libcxx.max(f32, 0.0, libcxx.min(f32, dy, 1.0));
+                    dy = stdlib.libcxx.max(f32, 0.0, stdlib.libcxx.min(f32, dy, 1.0));
 
                     var j0: i64 = 0;
                     while (j0 < l.ne0) : (j0 += 1) {
@@ -262,7 +253,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                         x1 = @max(0, @min(x1, l.ne00 - 1));
 
                         var dx = x - f(x0);
-                        dx = libcxx.max(f32, 0.0, libcxx.min(f32, dx, 1.0));
+                        dx = stdlib.libcxx.max(f32, 0.0, stdlib.libcxx.min(f32, dx, 1.0));
 
                         // fetch the four surrounding pixel values and interpolate
                         // (`c` is renamed `cc`: `c` is the C import here.)
@@ -285,7 +276,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                 }
             }
         }
-    } else if (mode == c.GGML_SCALE_MODE_BICUBIC) {
+    } else if (mode == ggml.impl.c.GGML_SCALE_MODE_BICUBIC) {
         // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
         var j3: i64 = 0;
         while (j3 < l.ne3) : (j3 += 1) {
@@ -330,7 +321,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
             }
         }
     } else {
-        impl.abort("unsupported upscale mode");
+        ggml.impl.abort("unsupported upscale mode");
     }
 }
 
@@ -357,12 +348,12 @@ const BicubicTap = struct {
 };
 
 /// Ports `ggml_compute_forward_upscale` (ops.cpp:8280 @b1b770d90).
-pub export fn ggml_compute_forward_upscale(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_upscale(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => upscaleF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => upscaleF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -386,29 +377,29 @@ inline fn wrapAround(coord: i64, size: i64) i64 {
 /// non-circular row is zeroed whole when it lies in the padding, or filled
 /// with `memset`/`memcpy`/`memset` when the source row is contiguous and both
 /// pads along dimension 0 are non-negative.
-fn padF32(comptime circular: bool, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn padF32(comptime circular: bool, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     // assert(dst->nb[0] == sizeof(float)); -- compiled out under NDEBUG
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
-    const nb00 = s(l.nb00);
-    const nb01 = s(l.nb01);
-    const nb02 = s(l.nb02);
-    const nb03 = s(l.nb03);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
+    const nb00 = ggml.cpu.ops.common.sz(l.nb00);
+    const nb01 = ggml.cpu.ops.common.sz(l.nb01);
+    const nb02 = ggml.cpu.ops.common.sz(l.nb02);
+    const nb03 = ggml.cpu.ops.common.sz(l.nb03);
 
     const dst_ptr: [*]f32 = @ptrCast(@alignCast(dst.data.?));
-    const lp0: i64 = impl.getOpParamsI32(dst, 0);
-    const rp0: i64 = impl.getOpParamsI32(dst, 1);
-    const lp1: i64 = impl.getOpParamsI32(dst, 2);
-    const rp1: i64 = impl.getOpParamsI32(dst, 3);
-    const lp2: i64 = impl.getOpParamsI32(dst, 4);
-    const rp2: i64 = impl.getOpParamsI32(dst, 5);
-    const lp3: i64 = impl.getOpParamsI32(dst, 6);
-    const rp3: i64 = impl.getOpParamsI32(dst, 7);
+    const lp0: i64 = ggml.impl.getOpParamsI32(dst, 0);
+    const rp0: i64 = ggml.impl.getOpParamsI32(dst, 1);
+    const lp1: i64 = ggml.impl.getOpParamsI32(dst, 2);
+    const rp1: i64 = ggml.impl.getOpParamsI32(dst, 3);
+    const lp2: i64 = ggml.impl.getOpParamsI32(dst, 4);
+    const rp2: i64 = ggml.impl.getOpParamsI32(dst, 5);
+    const lp3: i64 = ggml.impl.getOpParamsI32(dst, 6);
+    const rp3: i64 = ggml.impl.getOpParamsI32(dst, 7);
 
     const nrows = l.ne1 * l.ne2 * l.ne3;
     const src_row_contig = src0.nb[0] == @sizeOf(f32);
@@ -467,12 +458,12 @@ fn padF32(comptime circular: bool, params: *const ComputeParams, dst: *Tensor) v
 }
 
 /// Ports `ggml_compute_forward_pad` (ops.cpp:8374 @b1b770d90).
-pub export fn ggml_compute_forward_pad(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const circular = impl.getOpParamsI32(dst, 8) != 0;
+pub export fn ggml_compute_forward_pad(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const circular = ggml.impl.getOpParamsI32(dst, 8) != 0;
     switch (src0.type) {
-        c.GGML_TYPE_F32 => if (circular) padF32(true, params, dst) else padF32(false, params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => if (circular) padF32(true, params, dst) else padF32(false, params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -480,26 +471,26 @@ pub export fn ggml_compute_forward_pad(params: *const ComputeParams, dst: *Tenso
 // pad_reflect_1d
 
 /// Ports `ggml_compute_forward_pad_reflect_1d` (ops.cpp:8397 @b1b770d90).
-pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const p0: i64 = impl.getOpParamsI32(dst, 0);
-    const p1: i64 = impl.getOpParamsI32(dst, 1);
+    const p0: i64 = ggml.impl.getOpParamsI32(dst, 0);
+    const p1: i64 = ggml.impl.getOpParamsI32(dst, 1);
 
-    const l = common.UnaryLocals.of(src0, dst);
-    const nb01 = s(l.nb01);
-    const nb02 = s(l.nb02);
-    const nb03 = s(l.nb03);
-    const nb0 = s(l.nb0);
-    const nb1 = s(l.nb1);
-    const nb2 = s(l.nb2);
-    const nb3 = s(l.nb3);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
+    const nb01 = ggml.cpu.ops.common.sz(l.nb01);
+    const nb02 = ggml.cpu.ops.common.sz(l.nb02);
+    const nb03 = ggml.cpu.ops.common.sz(l.nb03);
+    const nb0 = ggml.cpu.ops.common.sz(l.nb0);
+    const nb1 = ggml.cpu.ops.common.sz(l.nb1);
+    const nb2 = ggml.cpu.ops.common.sz(l.nb2);
+    const nb3 = ggml.cpu.ops.common.sz(l.nb3);
 
     var j3: i64 = 0;
     while (j3 < l.ne3) : (j3 += 1) {
@@ -510,7 +501,7 @@ pub export fn ggml_compute_forward_pad_reflect_1d(params: *const ComputeParams, 
                 const left: [*]f32 = @ptrCast(at(dst.data, j3 * nb3 + j2 * nb2 + j1 * nb1 + p0 * nb0));
                 const right: [*]f32 = @ptrCast(at(dst.data, j3 * nb3 + j2 * nb2 + j1 * nb1 + (l.ne0 - p1 - 1) * nb0));
 
-                vec.cpy_f32(l.ne00, left, @ptrCast(at(src0.data, j3 * nb03 + j2 * nb02 + j1 * nb01)));
+                ggml.cpu.ops.vecinline.cpy_f32(l.ne00, left, @ptrCast(at(src0.data, j3 * nb03 + j2 * nb02 + j1 * nb01)));
 
                 // `left[-i0]` and `right[-i0]`: pointer arithmetic below the
                 // row start, inside the padded row.
@@ -537,17 +528,17 @@ fn wrapIndex(i: i64, ne: i64) i64 {
 }
 
 /// Ports `ggml_compute_forward_roll_f32` (ops.cpp:8441 @b1b770d90).
-fn rollF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn rollF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
     const src_data: [*]const f32 = @ptrCast(@alignCast(src0.data.?));
     const dst_data: [*]f32 = @ptrCast(@alignCast(dst.data.?));
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const s0: i64 = impl.getOpParamsI32(dst, 0);
-    const s1: i64 = impl.getOpParamsI32(dst, 1);
-    const s2: i64 = impl.getOpParamsI32(dst, 2);
-    const s3: i64 = impl.getOpParamsI32(dst, 3);
+    const s0: i64 = ggml.impl.getOpParamsI32(dst, 0);
+    const s1: i64 = ggml.impl.getOpParamsI32(dst, 1);
+    const s2: i64 = ggml.impl.getOpParamsI32(dst, 2);
+    const s3: i64 = ggml.impl.getOpParamsI32(dst, 3);
 
     const total = l.ne1 * l.ne2 * l.ne3;
     // Note `+ nth`, not `+ nth - 1`: the C over-allocates by one row per
@@ -570,18 +561,18 @@ fn rollF32(params: *const ComputeParams, dst: *Tensor) void {
 
         const sh = wrapIndex(-s0, l.ne00);
         const n = l.ne00 - sh;
-        vec.cpy_f32(n, dst_row, src_row + @as(usize, @intCast(sh)));
-        vec.cpy_f32(sh, dst_row + @as(usize, @intCast(n)), src_row);
+        ggml.cpu.ops.vecinline.cpy_f32(n, dst_row, src_row + @as(usize, @intCast(sh)));
+        ggml.cpu.ops.vecinline.cpy_f32(sh, dst_row + @as(usize, @intCast(n)), src_row);
     }
 }
 
 /// Ports `ggml_compute_forward_roll` (ops.cpp:8479 @b1b770d90).
-pub export fn ggml_compute_forward_roll(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_roll(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => rollF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => rollF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -589,19 +580,19 @@ pub export fn ggml_compute_forward_roll(params: *const ComputeParams, dst: *Tens
 // arange
 
 /// Ports `ggml_compute_forward_arange_f32` (ops.cpp:8499 @b1b770d90).
-fn arangeF32(params: *const ComputeParams, dst: *Tensor) void {
-    impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
+fn arangeF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    ggml.impl.assert(dst.nb[0] == @sizeOf(f32), "dst->nb[0] == sizeof(float)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const start = impl.getOpParamsF32(dst, 0);
-    const stop = impl.getOpParamsF32(dst, 1);
-    const step = impl.getOpParamsF32(dst, 2);
+    const start = ggml.impl.getOpParamsF32(dst, 0);
+    const stop = ggml.impl.getOpParamsF32(dst, 1);
+    const step = ggml.impl.getOpParamsF32(dst, 2);
 
     const steps: i64 = @intFromFloat(@ceil((stop - start) / step));
 
-    impl.assert(c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
+    ggml.impl.assert(ggml.impl.c.ggml_nelements(dst) == steps, "ggml_nelements(dst) == steps");
 
     const d: [*]f32 = @ptrCast(@alignCast(dst.data.?));
     var i: i64 = ith;
@@ -614,10 +605,10 @@ fn arangeF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_arange` (ops.cpp:8522 @b1b770d90).
-pub export fn ggml_compute_forward_arange(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
+pub export fn ggml_compute_forward_arange(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
     switch (dst.type) {
-        c.GGML_TYPE_F32 => arangeF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => arangeF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -625,18 +616,18 @@ pub export fn ggml_compute_forward_arange(params: *const ComputeParams, dst: *Te
 // timestep_embedding
 
 /// Ports `ggml_compute_forward_timestep_embedding_f32` (ops.cpp:8537 @b1b770d90).
-fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn timestepEmbeddingF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const dim: i64 = impl.getOpParamsI32(dst, 0);
-    const max_period = impl.getOpParamsI32(dst, 1);
+    const dim: i64 = ggml.impl.getOpParamsI32(dst, 0);
+    const max_period = ggml.impl.getOpParamsI32(dst, 1);
 
     const half = @divTrunc(dim, 2);
 
@@ -644,18 +635,18 @@ fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
 
     var i: i64 = 0;
     while (i < l.ne00) : (i += 1) {
-        const embed_data: [*]f32 = @ptrCast(at(dst.data, i * s(l.nb1)));
+        const embed_data: [*]f32 = @ptrCast(at(dst.data, i * ggml.cpu.ops.common.sz(l.nb1)));
         var j: i64 = ith;
         while (j < half) : (j += nth) {
             const timestep = src[@intCast(i)];
             // `-libm.logf(max_period) * j / half`, each `int` promoted to `float`;
             // no add, so nothing to fuse.
-            const freq = libm.expf(-libm.logf(@floatFromInt(max_period)) * f(j) / f(half));
+            const freq = stdlib.libm.expf(-stdlib.libm.logf(@floatFromInt(max_period)) * f(j) / f(half));
             const arg = timestep * freq;
             // On Darwin clang folds this `cosf`/`sinf` pair into one
             // `__sincosf_stret` call, which rounds differently -- see
             // `stdlib.libm.sinCos`.
-            const sc = libm.sinCos(arg);
+            const sc = stdlib.libm.sinCos(arg);
             embed_data[@intCast(j)] = sc.cos;
             embed_data[@intCast(j + half)] = sc.sin;
         }
@@ -666,12 +657,12 @@ fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_timestep_embedding` (ops.cpp:8570 @b1b770d90).
-pub export fn ggml_compute_forward_timestep_embedding(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_timestep_embedding(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => timestepEmbeddingF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => timestepEmbeddingF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -685,11 +676,11 @@ test {
 test "std::min and std::max keep the C's NaN behaviour" {
     const nan = std.math.nan(f32);
     // `std::min(NaN, 1)` is `(1 < NaN) ? 1 : NaN`, so NaN; `@min` would say 1.
-    try std.testing.expect(std.math.isNan(libcxx.min(f32, nan, 1.0)));
+    try std.testing.expect(std.math.isNan(stdlib.libcxx.min(f32, nan, 1.0)));
     // `std::max(0, NaN)` is `(0 < NaN) ? NaN : 0`, so 0.
-    try std.testing.expectEqual(@as(f32, 0.0), libcxx.max(f32, 0.0, nan));
-    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 1.0, 2.0));
-    try std.testing.expectEqual(@as(f32, 1.0), libcxx.min(f32, 1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 0.0), stdlib.libcxx.max(f32, 0.0, nan));
+    try std.testing.expectEqual(@as(f32, 2.0), stdlib.libcxx.max(f32, 1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 1.0), stdlib.libcxx.min(f32, 1.0, 2.0));
 }
 
 test "the bicubic weights sum to one" {

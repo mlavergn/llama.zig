@@ -23,9 +23,8 @@
 //! read for anything but printing, which this port does not reach.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
+const llama = @import("../module.zig");
 
-const c = impl.c;
 const src = "llama-grammar.cpp";
 
 /// Ports `llama_gretype` (llama-grammar.h:13 @b1b770d90).
@@ -111,7 +110,7 @@ fn parseSpace(s: [*:0]const u8, start: usize, newline_ok: bool) usize {
 
 /// Ports `llama_grammar_parser` (llama-grammar.h:86 @b1b770d90).
 pub const Parser = struct {
-    vocab: ?*const c.struct_llama_vocab,
+    vocab: ?*const llama.impl.c.struct_llama_vocab,
     /// Owned keys.
     symbol_ids: std.StringHashMapUnmanaged(u32) = .empty,
     rules: std.ArrayList(Rule) = .empty,
@@ -125,7 +124,7 @@ pub const Parser = struct {
     /// - `vocab`: needed only for `<token>` references; may be null.
     ///
     /// Return: an empty parser.
-    pub fn init(vocab: ?*const c.struct_llama_vocab) Parser {
+    pub fn init(vocab: ?*const llama.impl.c.struct_llama_vocab) Parser {
         return .{ .vocab = vocab };
     }
 
@@ -134,27 +133,27 @@ pub const Parser = struct {
     /// Return: nothing.
     pub fn deinit(self: *Parser) void {
         var it = self.symbol_ids.keyIterator();
-        while (it.next()) |k| impl.allocator.free(k.*);
-        self.symbol_ids.deinit(impl.allocator);
+        while (it.next()) |k| std.heap.c_allocator.free(k.*);
+        self.symbol_ids.deinit(std.heap.c_allocator);
         self.clearRules();
-        self.rules.deinit(impl.allocator);
-        self.err.deinit(impl.allocator);
+        self.rules.deinit(std.heap.c_allocator);
+        self.err.deinit(std.heap.c_allocator);
     }
 
     fn clearRules(self: *Parser) void {
-        for (self.rules.items) |*r| r.deinit(impl.allocator);
+        for (self.rules.items) |*r| r.deinit(std.heap.c_allocator);
         self.rules.clearRetainingCapacity();
     }
 
     /// Records an exception's text and returns the error that stands for it.
     fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) ParseError {
         self.err.clearRetainingCapacity();
-        self.err.print(impl.allocator, fmt, args) catch impl.abort(src, 0, "out of memory");
+        self.err.print(std.heap.c_allocator, fmt, args) catch llama.impl.abort(src, 0, "out of memory");
         return error.Parse;
     }
 
     fn oom() noreturn {
-        impl.abort(src, 0, "out of memory");
+        llama.impl.abort(src, 0, "out of memory");
     }
 
     /// Ports `llama_grammar_parser`'s `get_symbol_id` (llama-grammar.cpp:422 @b1b770d90).
@@ -163,8 +162,8 @@ pub const Parser = struct {
     fn getSymbolId(self: *Parser, name: []const u8) u32 {
         const next_id: u32 = @intCast(self.symbol_ids.count());
         if (self.symbol_ids.get(name)) |id| return id;
-        const key = impl.allocator.dupe(u8, name) catch oom();
-        self.symbol_ids.put(impl.allocator, key, next_id) catch oom();
+        const key = std.heap.c_allocator.dupe(u8, name) catch oom();
+        self.symbol_ids.put(std.heap.c_allocator, key, next_id) catch oom();
         return next_id;
     }
 
@@ -175,10 +174,10 @@ pub const Parser = struct {
     /// already exists.
     fn generateSymbolId(self: *Parser, base_name: []const u8) u32 {
         const next_id: u32 = @intCast(self.symbol_ids.count());
-        const name = impl.allocator.print("{s}_{d}", .{ base_name, next_id }) catch oom();
-        const gop = self.symbol_ids.getOrPut(impl.allocator, name) catch oom();
+        const name = std.heap.c_allocator.print("{s}_{d}", .{ base_name, next_id }) catch oom();
+        const gop = self.symbol_ids.getOrPut(std.heap.c_allocator, name) catch oom();
         if (gop.found_existing) {
-            impl.allocator.free(name);
+            std.heap.c_allocator.free(name);
         }
         gop.value_ptr.* = next_id;
         return next_id;
@@ -187,11 +186,11 @@ pub const Parser = struct {
     /// Ports `llama_grammar_parser`'s `add_rule` (llama-grammar.cpp:434 @b1b770d90).
     fn addRule(self: *Parser, rule_id: u32, rule: []const Element) void {
         while (self.rules.items.len <= rule_id) {
-            self.rules.append(impl.allocator, .empty) catch oom();
+            self.rules.append(std.heap.c_allocator, .empty) catch oom();
         }
         const r = &self.rules.items[rule_id];
         r.clearRetainingCapacity();
-        r.appendSlice(impl.allocator, rule) catch oom();
+        r.appendSlice(std.heap.c_allocator, rule) catch oom();
     }
 
     /// Ports `parse_hex` (llama-grammar.cpp:104 @b1b770d90).
@@ -304,8 +303,8 @@ pub const Parser = struct {
         }
         pos += 1;
 
-        var tokens: [2]c.llama_token = undefined;
-        const n_tokens = c.llama_tokenize(self.vocab, s + start, @intCast(pos - start), &tokens, 2, false, true);
+        var tokens: [2]llama.impl.c.llama_token = undefined;
+        const n_tokens = llama.api.vocab.llama_tokenize(self.vocab, s + start, @intCast(pos - start), &tokens, 2, false, true);
         if (n_tokens != 1) {
             return self.fail("invalid token '{s}'", .{s[start..pos]});
         }
@@ -315,14 +314,14 @@ pub const Parser = struct {
     /// Ports `llama_grammar_parser`'s `parse_alternates` (llama-grammar.cpp:441 @b1b770d90).
     fn parseAlternates(self: *Parser, s: [*:0]const u8, start: usize, rule_name: []const u8, rule_id: u32, is_nested: bool, depth: u32) ParseError!usize {
         var rule: Rule = .empty;
-        defer rule.deinit(impl.allocator);
+        defer rule.deinit(std.heap.c_allocator);
         var pos = try self.parseSequence(s, start, rule_name, &rule, is_nested, depth);
         while (s[pos] == '|') {
-            rule.append(impl.allocator, .{ .type = .alt, .value = 0 }) catch oom();
+            rule.append(std.heap.c_allocator, .{ .type = .alt, .value = 0 }) catch oom();
             pos = parseSpace(s, pos + 1, true);
             pos = try self.parseSequence(s, pos, rule_name, &rule, is_nested, depth);
         }
-        rule.append(impl.allocator, .{ .type = .end, .value = 0 }) catch oom();
+        rule.append(std.heap.c_allocator, .{ .type = .end, .value = 0 }) catch oom();
         self.addRule(rule_id, rule.items);
         return pos;
     }
@@ -349,8 +348,8 @@ pub const Parser = struct {
         }
 
         var prev_rule: Rule = .empty;
-        defer prev_rule.deinit(impl.allocator);
-        prev_rule.appendSlice(impl.allocator, rule.items[last_sym_start..]) catch oom();
+        defer prev_rule.deinit(std.heap.c_allocator);
+        prev_rule.appendSlice(std.heap.c_allocator, rule.items[last_sym_start..]) catch oom();
 
         var total_rules: u64 = 1;
         if (!no_max and max_times > 0) {
@@ -368,7 +367,7 @@ pub const Parser = struct {
         } else {
             var i: u64 = 1;
             while (i < min_times) : (i += 1) {
-                rule.appendSlice(impl.allocator, prev_rule.items) catch oom();
+                rule.appendSlice(std.heap.c_allocator, prev_rule.items) catch oom();
             }
         }
 
@@ -376,25 +375,25 @@ pub const Parser = struct {
         const n_opt: u64 = if (no_max) 1 else max_times -% min_times;
 
         var rec_rule: Rule = .empty;
-        defer rec_rule.deinit(impl.allocator);
-        rec_rule.appendSlice(impl.allocator, prev_rule.items) catch oom();
+        defer rec_rule.deinit(std.heap.c_allocator);
+        rec_rule.appendSlice(std.heap.c_allocator, prev_rule.items) catch oom();
         var i: u64 = 0;
         while (i < n_opt) : (i += 1) {
             rec_rule.shrinkRetainingCapacity(prev_rule.items.len);
             const rec_rule_id = self.generateSymbolId(rule_name);
             if (i > 0 or no_max) {
-                rec_rule.append(impl.allocator, .{ .type = .rule_ref, .value = if (no_max) rec_rule_id else last_rec_rule_id }) catch oom();
+                rec_rule.append(std.heap.c_allocator, .{ .type = .rule_ref, .value = if (no_max) rec_rule_id else last_rec_rule_id }) catch oom();
             }
-            rec_rule.append(impl.allocator, .{ .type = .alt, .value = 0 }) catch oom();
-            rec_rule.append(impl.allocator, .{ .type = .end, .value = 0 }) catch oom();
+            rec_rule.append(std.heap.c_allocator, .{ .type = .alt, .value = 0 }) catch oom();
+            rec_rule.append(std.heap.c_allocator, .{ .type = .end, .value = 0 }) catch oom();
             self.addRule(rec_rule_id, rec_rule.items);
             last_rec_rule_id = rec_rule_id;
         }
         if (n_opt > 0) {
-            rule.append(impl.allocator, .{ .type = .rule_ref, .value = last_rec_rule_id }) catch oom();
+            rule.append(std.heap.c_allocator, .{ .type = .rule_ref, .value = last_rec_rule_id }) catch oom();
         }
         n_prev_rules.* *%= total_rules;
-        impl.assert(n_prev_rules.* >= 1, src, 535, "n_prev_rules >= 1");
+        llama.impl.assert(n_prev_rules.* >= 1, src, 535, "n_prev_rules >= 1");
     }
 
     /// Ports `llama_grammar_parser`'s `parse_sequence` (llama-grammar.cpp:459 @b1b770d90).
@@ -414,7 +413,7 @@ pub const Parser = struct {
                     }
                     const ch, const next = try self.parseChar(s, pos);
                     pos = next;
-                    rule.append(impl.allocator, .{ .type = .char, .value = ch }) catch oom();
+                    rule.append(std.heap.c_allocator, .{ .type = .char, .value = ch }) catch oom();
                 }
                 pos = parseSpace(s, pos + 1, is_nested);
             } else if (s[pos] == '[') { // char range(s)
@@ -434,14 +433,14 @@ pub const Parser = struct {
                     pos = next;
                     const ty: GreType = if (last_sym_start < rule.items.len) .char_alt else start_type;
 
-                    rule.append(impl.allocator, .{ .type = ty, .value = ch }) catch oom();
+                    rule.append(std.heap.c_allocator, .{ .type = ty, .value = ch }) catch oom();
                     if (s[pos] == '-' and s[pos + 1] != ']') {
                         if (s[pos + 1] == 0) {
                             return self.fail("unexpected end of input", .{});
                         }
                         const endch, const endnext = try self.parseChar(s, pos + 1);
                         pos = endnext;
-                        rule.append(impl.allocator, .{ .type = .char_rng_upper, .value = endch }) catch oom();
+                        rule.append(std.heap.c_allocator, .{ .type = .char_rng_upper, .value = endch }) catch oom();
                     }
                 }
                 pos = parseSpace(s, pos + 1, is_nested);
@@ -454,7 +453,7 @@ pub const Parser = struct {
                 const token_id, const token_end = try self.parseToken(s, pos);
                 last_sym_start = rule.items.len;
                 n_prev_rules = 1;
-                rule.append(impl.allocator, .{ .type = ty, .value = token_id }) catch oom();
+                rule.append(std.heap.c_allocator, .{ .type = ty, .value = token_id }) catch oom();
                 pos = parseSpace(s, token_end, is_nested);
             } else if (isWordChar(s[pos])) { // rule reference
                 const name_end = try self.parseName(s, pos);
@@ -462,7 +461,7 @@ pub const Parser = struct {
                 pos = parseSpace(s, name_end, is_nested);
                 last_sym_start = rule.items.len;
                 n_prev_rules = 1;
-                rule.append(impl.allocator, .{ .type = .rule_ref, .value = ref_rule_id }) catch oom();
+                rule.append(std.heap.c_allocator, .{ .type = .rule_ref, .value = ref_rule_id }) catch oom();
             } else if (s[pos] == '(') { // grouping
                 if (depth >= GRAMMAR_RECURSIVE_LIMIT) {
                     return self.fail("grammar recursion depth limit exceeded (max {d}), please reduce nesting depth", .{GRAMMAR_RECURSIVE_LIMIT});
@@ -475,7 +474,7 @@ pub const Parser = struct {
                 // unsigned.
                 n_prev_rules = @max(1, @as(u32, @intCast(self.symbol_ids.count())) -% n_rules_before);
                 last_sym_start = rule.items.len;
-                rule.append(impl.allocator, .{ .type = .rule_ref, .value = sub_rule_id }) catch oom();
+                rule.append(std.heap.c_allocator, .{ .type = .rule_ref, .value = sub_rule_id }) catch oom();
                 if (s[pos] != ')') {
                     return self.fail("expecting ')' at {s}", .{std.mem.span(s + pos)});
                 }
@@ -483,7 +482,7 @@ pub const Parser = struct {
             } else if (s[pos] == '.') { // any char
                 last_sym_start = rule.items.len;
                 n_prev_rules = 1;
-                rule.append(impl.allocator, .{ .type = .char_any, .value = 0 }) catch oom();
+                rule.append(std.heap.c_allocator, .{ .type = .char_any, .value = 0 }) catch oom();
                 pos = parseSpace(s, pos + 1, is_nested);
             } else if (s[pos] == '*') {
                 pos = parseSpace(s, pos + 1, is_nested);
@@ -597,7 +596,7 @@ pub const Parser = struct {
     /// to stderr, clears the rules, and returns false.
     pub fn parse(self: *Parser, s: [*:0]const u8) bool {
         self.parseAll(s) catch {
-            impl.writeStderr(&.{ "parse: error parsing grammar: ", self.err.items, "\n\n", std.mem.span(s), "\n" });
+            llama.impl.writeStderr(&.{ "parse: error parsing grammar: ", self.err.items, "\n\n", std.mem.span(s), "\n" });
             self.clearRules();
             return false;
         };

@@ -11,29 +11,18 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-const context_mod = @import("../context.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_hparams`
 /// (models/gemma4-assistant.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     hp.n_embd_inp_impl = hp.nEmbdOut();
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
 
     // Read and, as in the C++, not used.
@@ -50,10 +39,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_gemma4_assistant`'s `load_arch_tensors`
 /// (models/gemma4-assistant.cpp:21 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     if (l.n_embd_head_k != l.n_embd_head_v) {
         return exc.throw(.runtime_error, "Gemma 4 assistant requires n_embd_head_k == n_embd_head_v", .{});
@@ -66,7 +55,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     }
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
-    self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+    self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
 
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
 
@@ -102,7 +91,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         if (!hp.isSwa(iu)) {
             layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(n_embd_head, 2)}, rope_freqs_flag, exc);
-            rope_freqs_flag = loader.tensor_duplicated;
+            rope_freqs_flag = llama.loader.tensor_duplicated;
         }
 
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
@@ -115,34 +104,34 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// Ports `llama_model_gemma4_assistant`'s `build_arch_graph`
 /// (models/gemma4-assistant.cpp:80 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma4_assistant`'s `graph`
 /// (models/gemma4-assistant.cpp:84 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const cp = b.cparams;
     const n_embd_backbone: i64 = hp.nEmbdInp();
 
-    var inp_tokens: *Tensor = undefined;
-    var inp_embd: *Tensor = undefined;
-    var inp_h: *Tensor = undefined;
+    var inp_tokens: *llama.impl.c.ggml_tensor = undefined;
+    var inp_embd: *llama.impl.c.ggml_tensor = undefined;
+    var inp_h: *llama.impl.c.ggml_tensor = undefined;
     {
-        const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/gemma4-assistant.cpp", 92, "out of memory");
+        const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/gemma4-assistant.cpp", 92, "out of memory");
         inp.* = .{ .n_embd = n_embd_backbone, .n_embd_state = n_embd_backbone };
 
-        inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
+        inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.ubatch.n_tokens);
         b.cb(inp.tokens.?, "inp_tokens", -1);
-        c.ggml_set_input(inp.tokens);
+        llama.impl.c.ggml_set_input(inp.tokens);
         inp_tokens = inp.tokens.?;
         b.res.t_inp_tokens = inp.tokens;
 
-        inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_embd_backbone, b.ubatch.n_tokens);
+        inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, n_embd_backbone, b.ubatch.n_tokens);
         b.cb(inp.embd.?, "inp_embd", -1);
-        c.ggml_set_input(inp.embd);
+        llama.impl.c.ggml_set_input(inp.embd);
         inp_embd = inp.embd.?;
         b.res.t_inp_embd = inp.embd;
 
@@ -150,21 +139,21 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(inp.h.?, "inp_h", -1);
         inp_h = inp.h.?;
 
-        _ = b.res.addInput(graph.InpEmbdH, inp);
+        _ = b.res.addInput(llama.graph.InpEmbdH, inp);
     }
 
-    impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 113, "cparams.ctx_other != nullptr");
-    const ctx_other: *const context_mod.Context = @ptrCast(@alignCast(cp.ctx_other.?));
+    llama.impl.assert(cp.ctx_other != null, "models/gemma4-assistant.cpp", 113, "cparams.ctx_other != nullptr");
+    const ctx_other: *const llama.context.Context = @ptrCast(@alignCast(cp.ctx_other.?));
     const model_other = ctx_other.getModel();
 
-    var x: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, model_other.tok_embd, inp_tokens) else inp_embd;
-    x = c.ggml_scale(ctx, x, libm.sqrtfInt(n_embd_backbone));
+    var x: *llama.impl.c.ggml_tensor = if (b.ubatch.token != null) llama.impl.c.ggml_get_rows(ctx, model_other.tok_embd, inp_tokens) else inp_embd;
+    x = llama.impl.c.ggml_scale(ctx, x, stdlib.libm.sqrtfInt(n_embd_backbone));
     b.cb(x, "inp_embd_target", -1);
 
-    const xh: *Tensor = c.ggml_concat(ctx, x, inp_h, 0);
+    const xh: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, x, inp_h, 0);
     b.cb(xh, "inp_xh", -1);
 
-    var cur: *Tensor = c.ggml_mul_mat(ctx, model.nextn_proj_pre, xh);
+    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, model.nextn_proj_pre, xh);
     b.cb(cur, "pre_proj", -1);
 
     const inp_attn = b.buildAttnInpKvIswa();
@@ -185,7 +174,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur_norm, "attn_norm", il);
 
         var Qcur = b.buildLoraMm(layer.wq.?, cur_norm, null);
-        Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, b.n_tokens);
+        Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, b.n_tokens);
         Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
         b.cb(Qcur, "Qcur_normed", il);
 
@@ -195,14 +184,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildAttn(inp_attn, layer.wo, null, null, Qcur, null, null, null, null, null, hp.f_attention_scale, il);
 
         if (il == b.n_layer_nextn - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const attn_out: *Tensor = c.ggml_add(ctx, cur, inpL);
+        const attn_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(attn_out, "attn_out", il);
 
         cur = b.buildNorm(attn_out, layer.ffn_norm, null, .rms, il);
@@ -214,9 +203,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, attn_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, attn_out);
 
-        cur = c.ggml_mul(ctx, cur, layer.out_scale);
+        cur = llama.impl.c.ggml_mul(ctx, cur, layer.out_scale);
         b.cb(cur, "out_scaled", il);
 
         inpL = cur;
@@ -230,11 +219,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     b.cb(logits, "result_output", -1);
     b.res.t_logits = logits;
 
-    const h_next: *Tensor = c.ggml_mul_mat(ctx, model.nextn_proj_post, cur);
+    const h_next: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, model.nextn_proj_post, cur);
     b.cb(h_next, "h_nextn", -1);
     b.res.t_h_nextn = h_next;
 
-    c.ggml_build_forward_expand(b.gf, h_next);
+    llama.impl.c.ggml_build_forward_expand(b.gf, h_next);
 }
 
 // -----------------------------------------------------------------------------

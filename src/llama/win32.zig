@@ -126,7 +126,3 @@ pub extern "kernel32" fn AcquireSRWLockExclusive(lock: *SRWLOCK) callconv(.winap
 pub extern "kernel32" fn ReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winapi) void;
 
 // The UCRT.
-pub extern "c" fn _fileno(stream: *anyopaque) c_int;
-pub extern "c" fn _get_osfhandle(fd: c_int) isize;
-pub extern "c" fn _ftelli64(stream: *anyopaque) i64;
-pub extern "c" fn _fseeki64(stream: *anyopaque, offset: i64, whence: c_int) c_int;

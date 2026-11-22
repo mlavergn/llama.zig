@@ -60,16 +60,9 @@
 //! `vec_golden.zig` captures a second length that leaves a remainder.
 
 const std = @import("std");
-const vecinline = @import("ops/vecinline.zig");
-const libm = @import("stdlib").libm;
+const ggml = @import("../module.zig");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const simd = @import("simd.zig");
-const neon = simd.neon;
-const c = impl.c;
-
-const F32 = simd.F32;
-const F16 = simd.F16;
 
 /// Mirrors `ggml_float` (vec.h:15 @b1b770d90), the `double` the
 /// reductions accumulate in. Named rather than written as `f64` so the C's
@@ -171,8 +164,8 @@ inline fn fms_f32(a: VF, b: VF, cc: VF) VF {
 /// is visible in the last bit. AVX-512: `_mm512_reduce_add_ps`, in
 /// `simd.reduceAdd512`'s tree.
 inline fn hsum(v: VF) f32 {
-    if (comptime lanes == 4) return neon.addvq_f32(v);
-    if (comptime lanes == 16) return simd.reduceAdd512(v);
+    if (comptime lanes == 4) return ggml.cpu.simd.neon.addvq_f32(v);
+    if (comptime lanes == 16) return ggml.cpu.simd.reduceAdd512(v);
     const lo: @Vector(4, f32) = .{ v[0], v[1], v[2], v[3] };
     const hi: @Vector(4, f32) = .{ v[4], v[5], v[6], v[7] };
     const h = hi + lo;
@@ -188,10 +181,10 @@ inline fn hsum(v: VF) f32 {
 // against `vec.o`. 65,536 entries each, one per `f16` bit pattern.
 
 /// Ports `ggml_table_gelu_f16` (vec.cpp:6 @b1b770d90).
-pub export var ggml_table_gelu_f16: [1 << 16]c.ggml_fp16_t = undefined;
+pub export var ggml_table_gelu_f16: [1 << 16]ggml.impl.c.ggml_fp16_t = undefined;
 
 /// Ports `ggml_table_gelu_quick_f16` (vec.cpp:9 @b1b770d90).
-pub export var ggml_table_gelu_quick_f16: [1 << 16]c.ggml_fp16_t = undefined;
+pub export var ggml_table_gelu_quick_f16: [1 << 16]ggml.impl.c.ggml_fp16_t = undefined;
 
 // -----------------------------------------------------------------------------
 // Dot products
@@ -218,33 +211,33 @@ pub export fn ggml_vec_dot_f32(
     by: usize,
     nrc: c_int,
 ) callconv(.c) void {
-    impl.assert(nrc == 1, "nrc == 1");
+    ggml.impl.assert(nrc == 1, "nrc == 1");
     _ = bs;
     _ = bx;
     _ = by;
 
     var sumf: f32 = 0.0;
-    const np = n & ~@as(c_int, F32.step - 1);
+    const np = n & ~@as(c_int, ggml.cpu.simd.F32.step - 1);
 
-    var sum: [F32.arr]F32.Vec = @splat(F32.zero);
-    var ax: [F32.arr]F32.Vec = undefined;
-    var ay: [F32.arr]F32.Vec = undefined;
+    var sum: [ggml.cpu.simd.F32.arr]ggml.cpu.simd.F32.Vec = @splat(ggml.cpu.simd.F32.zero);
+    var ax: [ggml.cpu.simd.F32.arr]ggml.cpu.simd.F32.Vec = undefined;
+    var ay: [ggml.cpu.simd.F32.arr]ggml.cpu.simd.F32.Vec = undefined;
 
     var i: c_int = 0;
-    while (i < np) : (i += F32.step) {
-        for (0..F32.arr) |j| {
-            const off: usize = @as(usize, @intCast(i)) + j * F32.epr;
-            ax[j] = F32.load(x + off);
-            ay[j] = F32.load(y + off);
-            sum[j] = F32.fma(sum[j], ax[j], ay[j]);
+    while (i < np) : (i += ggml.cpu.simd.F32.step) {
+        for (0..ggml.cpu.simd.F32.arr) |j| {
+            const off: usize = @as(usize, @intCast(i)) + j * ggml.cpu.simd.F32.epr;
+            ax[j] = ggml.cpu.simd.F32.load(x + off);
+            ay[j] = ggml.cpu.simd.F32.load(y + off);
+            sum[j] = ggml.cpu.simd.F32.fma(sum[j], ax[j], ay[j]);
         }
     }
 
     // reduce sum0..sum3 to sum0
-    sumf = F32.reduce(&sum);
+    sumf = ggml.cpu.simd.F32.reduce(&sum);
 
     // leftovers
-    sumf = simd.strictDot(x, y, @intCast(np), @intCast(n), sumf);
+    sumf = ggml.cpu.simd.strictDot(x, y, @intCast(np), @intCast(n), sumf);
 
     s.* = sumf;
 }
@@ -266,13 +259,13 @@ pub export fn ggml_vec_dot_bf16(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]c.ggml_bf16_t,
+    x: [*]ggml.impl.c.ggml_bf16_t,
     bx: usize,
-    y: [*]c.ggml_bf16_t,
+    y: [*]ggml.impl.c.ggml_bf16_t,
     by: usize,
     nrc: c_int,
 ) callconv(.c) void {
-    impl.assert(nrc == 1, "nrc == 1");
+    ggml.impl.assert(nrc == 1, "nrc == 1");
     _ = bs;
     _ = bx;
     _ = by;
@@ -284,7 +277,7 @@ pub export fn ggml_vec_dot_bf16(
         const V16 = @Vector(16, f32);
         // `LOAD`: widen sixteen `bf16` by a 16-bit shift, exactly.
         const load = struct {
-            inline fn f(p: [*]c.ggml_bf16_t) V16 {
+            inline fn f(p: [*]ggml.impl.c.ggml_bf16_t) V16 {
                 const p16: [*]const u16 = @ptrCast(p);
                 const h: @Vector(16, u16) = p16[0..16].*;
                 return @bitCast(@as(@Vector(16, u32), h) << @splat(16));
@@ -296,14 +289,14 @@ pub export fn ggml_vec_dot_bf16(
             c1 = load(x + i) * load(y + i) + c1;
             c2 = load(x + i + 16) * load(y + i + 16) + c2;
         }
-        sumf += @as(GgmlFloat, simd.reduceAdd512(c1));
-        sumf += @as(GgmlFloat, simd.reduceAdd512(c2));
+        sumf += @as(GgmlFloat, ggml.cpu.simd.reduceAdd512(c1));
+        sumf += @as(GgmlFloat, ggml.cpu.simd.reduceAdd512(c2));
     }
     if (comptime x86_arm == .avx2) {
         const V8 = @Vector(8, f32);
         // `LOAD`: widen eight `bf16` by a 16-bit shift, exactly.
         const load = struct {
-            inline fn f(p: [*]c.ggml_bf16_t) V8 {
+            inline fn f(p: [*]ggml.impl.c.ggml_bf16_t) V8 {
                 const p16: [*]const u16 = @ptrCast(p);
                 const h: @Vector(8, u16) = p16[0..8].*;
                 return @bitCast(@as(@Vector(8, u32), h) << @splat(16));
@@ -323,7 +316,7 @@ pub export fn ggml_vec_dot_bf16(
         sumf += @as(GgmlFloat, hsum(c1));
     }
     while (i < nn) : (i += 1) {
-        sumf += @as(GgmlFloat, impl.bf16ToFp32(x[i].bits) * impl.bf16ToFp32(y[i].bits));
+        sumf += @as(GgmlFloat, ggml.impl.bf16ToFp32(x[i].bits) * ggml.impl.bf16ToFp32(y[i].bits));
     }
 
     s.* = @floatCast(sumf);
@@ -346,18 +339,18 @@ pub export fn ggml_vec_dot_f16(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]c.ggml_fp16_t,
+    x: [*]ggml.impl.c.ggml_fp16_t,
     bx: usize,
-    y: [*]c.ggml_fp16_t,
+    y: [*]ggml.impl.c.ggml_fp16_t,
     by: usize,
     nrc: c_int,
 ) callconv(.c) void {
-    impl.assert(nrc == 1, "nrc == 1");
+    ggml.impl.assert(nrc == 1, "nrc == 1");
     _ = bs;
     _ = bx;
     _ = by;
 
-    const D = simd.F16Dot;
+    const D = ggml.cpu.simd.F16Dot;
     var sumf: GgmlFloat = 0.0;
     const np = n & ~@as(c_int, D.step - 1);
 
@@ -381,7 +374,7 @@ pub export fn ggml_vec_dot_f16(
     // leftovers
     var k: usize = @intCast(np);
     while (k < @as(usize, @intCast(n))) : (k += 1) {
-        sumf += @as(GgmlFloat, impl.fp16ToFp32(x[k]) * impl.fp16ToFp32(y[k]));
+        sumf += @as(GgmlFloat, ggml.impl.fp16ToFp32(x[k]) * ggml.impl.fp16ToFp32(y[k]));
     }
 
     s.* = @floatCast(sumf);
@@ -408,7 +401,7 @@ pub export fn ggml_vec_dot_f16_f32(
     n: c_int,
     s: *f32,
     bs: usize,
-    x: [*]const c.ggml_fp16_t,
+    x: [*]const ggml.impl.c.ggml_fp16_t,
     bx: usize,
     y: [*]const f32,
     by: usize,
@@ -428,9 +421,9 @@ pub export fn ggml_vec_dot_f16_f32(
         const L = if (x86_arm == .avx512) 16 else 8;
         const V = @Vector(L, f32);
         const load = struct {
-            inline fn h(p: [*]const c.ggml_fp16_t) V {
+            inline fn h(p: [*]const ggml.impl.c.ggml_fp16_t) V {
                 var r: V = undefined;
-                inline for (0..L) |k| r[k] = impl.fp16ToFp32(p[k]);
+                inline for (0..L) |k| r[k] = ggml.impl.fp16ToFp32(p[k]);
                 return r;
             }
             inline fn f(p: [*]const f32) V {
@@ -451,18 +444,18 @@ pub export fn ggml_vec_dot_f16_f32(
             acc0 = @mulAdd(V, load.h(x + i), load.f(y + i), acc0);
         }
         const acc = (acc0 + acc1) + (acc2 + acc3);
-        sumf = if (comptime L == 16) simd.reduceAdd512(acc) else hsum(acc);
+        sumf = if (comptime L == 16) ggml.cpu.simd.reduceAdd512(acc) else hsum(acc);
     } else {
         var tx: [64]f32 = undefined;
         while (i + 64 <= nn) : (i += 64) {
-            for (0..64) |j| tx[j] = impl.fp16ToFp32(x[i + j]);
+            for (0..64) |j| tx[j] = ggml.impl.fp16ToFp32(x[i + j]);
             var v: f32 = undefined;
             ggml_vec_dot_f32(64, &v, 0, &tx, 0, y + i, 0, 1);
             sumf += v;
         }
         if (i < nn) {
             const nr = nn - i;
-            for (0..nr) |j| tx[j] = impl.fp16ToFp32(x[i + j]);
+            for (0..nr) |j| tx[j] = ggml.impl.fp16ToFp32(x[i + j]);
             var v: f32 = undefined;
             ggml_vec_dot_f32(@intCast(nr), &v, 0, &tx, 0, y + i, 0, 1);
             sumf += v;
@@ -470,7 +463,7 @@ pub export fn ggml_vec_dot_f16_f32(
         }
     }
     while (i < nn) : (i += 1) {
-        sumf += @as(GgmlFloat, impl.fp16ToFp32(x[i]) * y[i]);
+        sumf += @as(GgmlFloat, ggml.impl.fp16ToFp32(x[i]) * y[i]);
     }
 
     s.* = @floatCast(sumf);
@@ -605,7 +598,7 @@ inline fn vSilu(x: VF) VF {
 /// `x / (1 + exp(-1.702 x))`, with `x` the numerator so it cannot overflow.
 inline fn vGeluQuick(x: VF) VF {
     const one = dup_n_f32(1.0);
-    const exp_cx = vExpf(mul_f32(x, dup_n_f32(vecinline.gelu_quick_coef)));
+    const exp_cx = vExpf(mul_f32(x, dup_n_f32(ggml.cpu.ops.vecinline.gelu_quick_coef)));
     return div_f32(x, add_f32(one, exp_cx));
 }
 
@@ -629,7 +622,7 @@ pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = vecinline.siluScalarF32(x[off]);
+        y[off] = ggml.cpu.ops.vecinline.siluScalarF32(x[off]);
     }
 }
 
@@ -644,7 +637,7 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = vecinline.siluScalarF32(x[off]) * g[off];
+        y[off] = ggml.cpu.ops.vecinline.siluScalarF32(x[off]) * g[off];
     }
 }
 
@@ -660,7 +653,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = vecinline.geluQuickScalarF32(x[off]);
+        y[off] = ggml.cpu.ops.vecinline.geluQuickScalarF32(x[off]);
     }
 }
 
@@ -674,7 +667,7 @@ pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: 
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = vecinline.geluQuickScalarF32(x[off]) * g[off];
+        y[off] = ggml.cpu.ops.vecinline.geluQuickScalarF32(x[off]) * g[off];
     }
 }
 
@@ -729,7 +722,7 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        const val = libm.expf(x[off] - max);
+        const val = stdlib.libm.expf(x[off] - max);
         sum += @as(GgmlFloat, val);
         y[off] = val;
     }
@@ -746,7 +739,7 @@ pub export fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, ma
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const val = x[i] - max;
         y[i] = val;
-        sum += @as(GgmlFloat, libm.expf(val));
+        sum += @as(GgmlFloat, stdlib.libm.expf(val));
     }
-    return @floatCast(libm.logf(@floatCast(sum)));
+    return @floatCast(stdlib.libm.logf(@floatCast(sum)));
 }

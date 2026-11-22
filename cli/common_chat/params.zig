@@ -14,9 +14,8 @@
 //! that built it took, an arena: nothing here is freed singly.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const peg = @import("peg");
-const msg_mod = @import("msg.zig");
-const prompt_mod = @import("prompt.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -33,8 +32,8 @@ pub const GrammarTrigger = struct {
 
 /// Ports `common_chat_params` (chat.h:304 @b1b770d90).
 pub const ChatParams = struct {
-    format: msg_mod.Format = .content_only,
-    prompt: prompt_mod.Prompt = .{},
+    format: mod.msg.Format = .content_only,
+    prompt: mod.prompt.Prompt = .{},
     grammar: []const u8 = "",
     grammar_lazy: bool = false,
     generation_prompt: []const u8 = "",
@@ -50,7 +49,7 @@ pub const ChatParams = struct {
     /// allocator as everything else here, so it needs no `deinit` of its
     /// own when that allocator is an arena.
     parser: ?peg.Arena = null,
-    message_delimiters: msg_mod.MsgDelimiters = .{},
+    message_delimiters: mod.msg.MsgDelimiters = .{},
 
     /// `push_back` of each of `items` onto `list`.
     pub fn appendAll(a: Allocator, list: *std.ArrayList([]const u8), items: []const []const u8) !void {

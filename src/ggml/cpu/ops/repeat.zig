@@ -22,31 +22,23 @@
 //! renumber them.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const vec = @import("vecinline.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
+const ggml = @import("../../module.zig");
 
 /// Byte offset `i*nb`; see `common.byteOff`.
-const at = common.byteOff;
-
 /// Ports `ggml_compute_forward_repeat_f32` (ops.cpp:1728 @b1b770d90) and
 /// `ggml_compute_forward_repeat_f16` (ops.cpp:1772 @b1b770d90).
 ///
 /// The two are the same loop nest over a different element width; the `f16`
 /// one inlines the row copy where the `f32` one calls `ggml_vec_cpy_f32`. Both
 /// are a plain element copy, so one comptime function covers them.
-fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn repeatT(comptime T: type, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
-    impl.assert(c.ggml_can_repeat(src0, dst), "ggml_can_repeat(src0, dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_can_repeat(src0, dst), "ggml_can_repeat(src0, dst)");
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     // guaranteed to be an integer due to the check in ggml_can_repeat
     const nr0: i64 = @divTrunc(l.ne0, l.ne00);
@@ -55,8 +47,8 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
     const nr3: i64 = @divTrunc(l.ne3, l.ne03);
 
     // TODO: support for transposed / permuted tensors
-    impl.assert(l.nb0 == @sizeOf(T), "nb0 == sizeof(T)");
-    impl.assert(l.nb00 == @sizeOf(T), "nb00 == sizeof(T)");
+    ggml.impl.assert(l.nb0 == @sizeOf(T), "nb0 == sizeof(T)");
+    ggml.impl.assert(l.nb00 == @sizeOf(T), "nb00 == sizeof(T)");
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -76,10 +68,10 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
                         while (k1 < l.ne01) : (k1 += 1) {
                             var j0: i64 = 0;
                             while (j0 < nr0) : (j0 += 1) {
-                                const y: [*]T = @ptrCast(@alignCast(dd + at(j3 * l.ne03 + k3, l.nb3) + at(j2 * l.ne02 + k2, l.nb2) + at(j1 * l.ne01 + k1, l.nb1) + at(j0 * l.ne00, l.nb0)));
-                                const x: [*]const T = @ptrCast(@alignCast(s0 + at(k3, l.nb03) + at(k2, l.nb02) + at(k1, l.nb01)));
+                                const y: [*]T = @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(j3 * l.ne03 + k3, l.nb3) + ggml.cpu.ops.common.byteOff(j2 * l.ne02 + k2, l.nb2) + ggml.cpu.ops.common.byteOff(j1 * l.ne01 + k1, l.nb1) + ggml.cpu.ops.common.byteOff(j0 * l.ne00, l.nb0)));
+                                const x: [*]const T = @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(k3, l.nb03) + ggml.cpu.ops.common.byteOff(k2, l.nb02) + ggml.cpu.ops.common.byteOff(k1, l.nb01)));
                                 if (T == f32) {
-                                    vec.cpy_f32(l.ne00, y, x);
+                                    ggml.cpu.ops.vecinline.cpy_f32(l.ne00, y, x);
                                 } else {
                                     // ggml_vec_cpy_f16(ne00, y, x)
                                     var i: usize = 0;
@@ -95,25 +87,25 @@ fn repeatT(comptime T: type, params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_repeat` (ops.cpp:1819 @b1b770d90).
-pub export fn ggml_compute_forward_repeat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_repeat(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F16, c.GGML_TYPE_BF16, c.GGML_TYPE_I16 => repeatT(c.ggml_fp16_t, params, dst),
-        c.GGML_TYPE_F32, c.GGML_TYPE_I32 => repeatT(f32, params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16, ggml.impl.c.GGML_TYPE_I16 => repeatT(ggml.impl.c.ggml_fp16_t, params, dst),
+        ggml.impl.c.GGML_TYPE_F32, ggml.impl.c.GGML_TYPE_I32 => repeatT(f32, params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_repeat_back_f32` (ops.cpp:1852 @b1b770d90).
-fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn repeatBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     if (params.ith != 0) return;
 
-    impl.assert(c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
+    ggml.impl.assert(ggml.impl.c.ggml_can_repeat(dst, src0), "ggml_can_repeat(dst, src0)");
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     // guaranteed to be an integer due to the check in ggml_can_repeat
     const nr0: i64 = @divTrunc(l.ne00, l.ne0);
@@ -122,14 +114,14 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
     const nr3: i64 = @divTrunc(l.ne03, l.ne3);
 
     // TODO: support for transposed / permuted tensors
-    impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
-    impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
+    ggml.impl.assert(l.nb0 == @sizeOf(f32), "nb0 == sizeof(float)");
+    ggml.impl.assert(l.nb00 == @sizeOf(f32), "nb00 == sizeof(float)");
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
 
-    if (c.ggml_is_contiguous(dst)) {
-        vec.set_f32(l.ne0 * l.ne1 * l.ne2 * l.ne3, @ptrCast(@alignCast(dd)), 0);
+    if (ggml.impl.c.ggml_is_contiguous(dst)) {
+        ggml.cpu.ops.vecinline.set_f32(l.ne0 * l.ne1 * l.ne2 * l.ne3, @ptrCast(@alignCast(dd)), 0);
     } else {
         var k3: i64 = 0;
         while (k3 < l.ne3) : (k3 += 1) {
@@ -137,7 +129,7 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
             while (k2 < l.ne2) : (k2 += 1) {
                 var k1: i64 = 0;
                 while (k1 < l.ne1) : (k1 += 1) {
-                    vec.set_f32(l.ne0, @ptrCast(@alignCast(dd + at(k1, l.nb1) + at(k2, l.nb2) + at(k3, l.nb3))), 0);
+                    ggml.cpu.ops.vecinline.set_f32(l.ne0, @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(k1, l.nb1) + ggml.cpu.ops.common.byteOff(k2, l.nb2) + ggml.cpu.ops.common.byteOff(k3, l.nb3))), 0);
                 }
             }
         }
@@ -158,10 +150,10 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
                         while (k1 < l.ne1) : (k1 += 1) {
                             var j0: i64 = 0;
                             while (j0 < nr0) : (j0 += 1) {
-                                vec.acc_f32(
+                                ggml.cpu.ops.vecinline.acc_f32(
                                     l.ne0,
-                                    @ptrCast(@alignCast(dd + at(k3, l.nb3) + at(k2, l.nb2) + at(k1, l.nb1))),
-                                    @ptrCast(@alignCast(s0 + at(j3 * l.ne3 + k3, l.nb03) + at(j2 * l.ne2 + k2, l.nb02) + at(j1 * l.ne1 + k1, l.nb01) + at(j0 * l.ne0, l.nb00))),
+                                    @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(k3, l.nb3) + ggml.cpu.ops.common.byteOff(k2, l.nb2) + ggml.cpu.ops.common.byteOff(k1, l.nb1))),
+                                    @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(j3 * l.ne3 + k3, l.nb03) + ggml.cpu.ops.common.byteOff(j2 * l.ne2 + k2, l.nb02) + ggml.cpu.ops.common.byteOff(j1 * l.ne1 + k1, l.nb01) + ggml.cpu.ops.common.byteOff(j0 * l.ne0, l.nb00))),
                                 );
                             }
                         }
@@ -173,12 +165,12 @@ fn repeatBackF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_repeat_back` (ops.cpp:1910 @b1b770d90).
-pub export fn ggml_compute_forward_repeat_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_repeat_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => repeatBackF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => repeatBackF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -194,8 +186,8 @@ fn concatCopyStrided(comptime es: usize, y: [*]u8, nby: usize, x: [*]const u8, n
     while (j0 < n) : (j0 += 1) {
         var r: i64 = 0;
         while (r < n_rows) : (r += 1) {
-            const d = y + at(r, nby) + at(j0, es);
-            const s = x + at(r, nbx) + at(j0, nb0);
+            const d = y + ggml.cpu.ops.common.byteOff(r, nby) + ggml.cpu.ops.common.byteOff(j0, es);
+            const s = x + ggml.cpu.ops.common.byteOff(r, nbx) + ggml.cpu.ops.common.byteOff(j0, nb0);
             @memcpy(d[0..es], s[0..es]);
         }
     }
@@ -204,15 +196,15 @@ fn concatCopyStrided(comptime es: usize, y: [*]u8, nby: usize, x: [*]const u8, n
 /// Ports `ggml_concat_copy_rows` (ops.cpp:1944 @b1b770d90): `n_rows` rows of
 /// `n` elements of `src` into `dst`, rows `nbx` bytes apart in `src` and
 /// `nby` bytes apart in `dst`.
-fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx: usize, n: i64, n_rows: i64) void {
-    const es = c.ggml_type_size(src.type);
+fn concatCopyRows(y: [*]u8, nby: usize, src: *const ggml.impl.c.ggml_tensor, x: [*]const u8, nbx: usize, n: i64, n_rows: i64) void {
+    const es = ggml.impl.c.ggml_type_size(src.type);
 
     if (src.nb[0] == es) {
-        const row_size = c.ggml_row_size(src.type, n);
+        const row_size = ggml.impl.c.ggml_row_size(src.type, n);
         var r: i64 = 0;
         while (r < n_rows) : (r += 1) {
-            const d = y + at(r, nby);
-            const s = x + at(r, nbx);
+            const d = y + ggml.cpu.ops.common.byteOff(r, nby);
+            const s = x + ggml.cpu.ops.common.byteOff(r, nbx);
             @memcpy(d[0..row_size], s[0..row_size]);
         }
         return;
@@ -223,7 +215,7 @@ fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx:
         2 => concatCopyStrided(2, y, nby, x, nbx, src.nb[0], n, n_rows),
         4 => concatCopyStrided(4, y, nby, x, nbx, src.nb[0], n, n_rows),
         8 => concatCopyStrided(8, y, nby, x, nbx, src.nb[0], n, n_rows),
-        else => impl.abort("unsupported element size"),
+        else => ggml.impl.abort("unsupported element size"),
     }
 }
 
@@ -233,22 +225,22 @@ fn concatCopyRows(y: [*]u8, nby: usize, src: *const Tensor, x: [*]const u8, nbx:
 /// `src0` followed by the row of `src1`. The rows of `dst` are split evenly
 /// across threads and walked in tiles of consecutive rows that share `i2`,
 /// `i3` and their source.
-pub export fn ggml_compute_forward_concat(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+pub export fn ggml_compute_forward_concat(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
-    const l = common.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-    const dim = impl.getOpParamsI32(dst, 0);
+    const dim = ggml.impl.getOpParamsI32(dst, 0);
 
-    impl.assert(dim >= 0 and dim < 4, "dim >= 0 && dim < 4");
-    impl.assert(l.nb0 == c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
-    impl.assert(!c.ggml_is_quantized(dst.type) or (l.nb00 == l.nb0 and l.nb10 == l.nb0), "!ggml_is_quantized(dst->type) || (nb00 == nb0 && nb10 == nb0)");
-    impl.assert(dim != 0 or (@rem(l.ne00, c.ggml_blck_size(dst.type)) == 0 and @rem(l.ne10, c.ggml_blck_size(dst.type)) == 0), "dim != 0 || (ne00 % ggml_blck_size(dst->type) == 0 && ne10 % ggml_blck_size(dst->type) == 0)");
+    ggml.impl.assert(dim >= 0 and dim < 4, "dim >= 0 && dim < 4");
+    ggml.impl.assert(l.nb0 == ggml.impl.c.ggml_type_size(dst.type), "nb0 == ggml_type_size(dst->type)");
+    ggml.impl.assert(!ggml.impl.c.ggml_is_quantized(dst.type) or (l.nb00 == l.nb0 and l.nb10 == l.nb0), "!ggml_is_quantized(dst->type) || (nb00 == nb0 && nb10 == nb0)");
+    ggml.impl.assert(dim != 0 or (@rem(l.ne00, ggml.impl.c.ggml_blck_size(dst.type)) == 0 and @rem(l.ne10, ggml.impl.c.ggml_blck_size(dst.type)) == 0), "dim != 0 || (ne00 % ggml_blck_size(dst->type) == 0 && ne10 % ggml_blck_size(dst->type) == 0)");
 
     const d: usize = @intCast(dim);
 
-    const y1: usize = if (dim == 0) c.ggml_row_size(dst.type, l.ne00) else 0;
+    const y1: usize = if (dim == 0) ggml.impl.c.ggml_row_size(dst.type, l.ne00) else 0;
 
     const nr = l.ne1 * l.ne2 * l.ne3;
     const dr = @divTrunc(nr + params.nth - 1, params.nth);
@@ -270,15 +262,15 @@ pub export fn ggml_compute_forward_concat(params: *const ComputeParams, dst: *Te
             nt = @min(nt, l.ne01 - i[1]);
         }
 
-        const y = dd + at(i[1], l.nb1) + at(i[2], l.nb2) + at(i[3], l.nb3);
+        const y = dd + ggml.cpu.ops.common.byteOff(i[1], l.nb1) + ggml.cpu.ops.common.byteOff(i[2], l.nb2) + ggml.cpu.ops.common.byteOff(i[3], l.nb3);
 
         if (dim == 0 or i[d] < src0.ne[d]) {
-            concatCopyRows(y, l.nb1, src0, s0 + at(i[1], l.nb01) + at(i[2], l.nb02) + at(i[3], l.nb03), l.nb01, l.ne00, nt);
+            concatCopyRows(y, l.nb1, src0, s0 + ggml.cpu.ops.common.byteOff(i[1], l.nb01) + ggml.cpu.ops.common.byteOff(i[2], l.nb02) + ggml.cpu.ops.common.byteOff(i[3], l.nb03), l.nb01, l.ne00, nt);
         }
 
         if (dim == 0 or i[d] >= src0.ne[d]) {
             i[d] -= src0.ne[d]; // i[0] does not address rows
-            concatCopyRows(y + y1, l.nb1, src1, s1 + at(i[1], l.nb11) + at(i[2], l.nb12) + at(i[3], l.nb13), l.nb11, l.ne10, nt);
+            concatCopyRows(y + y1, l.nb1, src1, s1 + ggml.cpu.ops.common.byteOff(i[1], l.nb11) + ggml.cpu.ops.common.byteOff(i[2], l.nb12) + ggml.cpu.ops.common.byteOff(i[3], l.nb13), l.nb11, l.ne10, nt);
         }
 
         ir += nt;

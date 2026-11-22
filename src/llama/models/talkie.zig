@@ -10,20 +10,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_talkie`'s `load_arch_hparams` (models/talkie.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try ml.meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
     hp.f_logit_scale = (try ml.meta.getKey(f32, .logit_scale, true, exc)).?;
@@ -35,7 +26,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_talkie`'s `load_arch_tensors` (models/talkie.cpp:13 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
@@ -62,13 +53,13 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// Ports `llama_model_talkie`'s `build_arch_graph` (models/talkie.cpp:36
 /// @b1b770d90) and the constructor of its `graph` (models/talkie.cpp:40
 /// @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/talkie.cpp", 43, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/talkie.cpp", 44, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/talkie.cpp", 43, "n_embd_head == hparams.n_embd_head_v()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/talkie.cpp", 44, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     inpL = b.buildNorm(inpL, null, null, .rms, -1);
@@ -83,7 +74,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -118,12 +109,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
-            inp_skip = c.ggml_get_rows(ctx, inp_skip, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            inp_skip = llama.impl.c.ggml_get_rows(ctx, inp_skip, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, null, null, .rms, il);
@@ -132,12 +123,12 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
-        const skip: *Tensor = c.ggml_mul(ctx, inp_skip, layer.out_scale);
+        const skip: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, inp_skip, layer.out_scale);
         b.cb(skip, "embd_skip", il);
 
-        cur = c.ggml_add(ctx, cur, skip);
+        cur = llama.impl.c.ggml_add(ctx, cur, skip);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -154,7 +145,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     b.res.t_embd = cur;
 
     cur = b.buildLoraMm(model.output.?, cur, null);
-    cur = c.ggml_scale(ctx, cur, hp.f_logit_scale);
+    cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_logit_scale);
     b.cb(cur, "result_output", -1);
 
     b.res.t_logits = cur;

@@ -16,26 +16,14 @@
 //! `graph` and `graph_mtp`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-const deepseek32 = @import("deepseek32.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
+const llama = @import("../module.zig");
 
 /// Mirrors `GLM_5_2_DEFAULT_INDEXER_TYPES` (models/glm-dsa.cpp:6 @b1b770d90):
 /// GLM-5.2's indexer types, a full indexer every fourth layer after the
 /// first two
 /// (https://huggingface.co/zai-org/GLM-5.2/blob/main/config.json#L26).
-const glm_5_2_default_indexer_types: [hparams_mod.max_layers]u32 = blk: {
-    var t: [hparams_mod.max_layers]u32 = @splat(0);
+const glm_5_2_default_indexer_types: [llama.hparams.max_layers]u32 = blk: {
+    var t: [llama.hparams.max_layers]u32 = @splat(0);
     t[0] = 1;
     t[1] = 1;
     var i: usize = 2;
@@ -44,7 +32,7 @@ const glm_5_2_default_indexer_types: [hparams_mod.max_layers]u32 = blk: {
 };
 
 /// Ports `llama_model_glm_dsa`'s `load_arch_hparams` (models/glm-dsa.cpp:29 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -73,8 +61,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // The expert gating function; GLM-4.5 uses sigmoid.
     if (try meta.getKey(u32, .expert_gating_func, false, exc)) |v| hp.expert_gating_func = v;
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
     }
 
     // Backwards compatibility for GLM 5 and 5.1, whose indexers are all
@@ -94,11 +82,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_glm_dsa`'s `load_arch_tensors` (models/glm-dsa.cpp:74 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     const nf = self.nextnFlags(ml, .attn_norm);
     const trunk_flags = nf.trunk;
@@ -132,7 +120,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     // The output, or failing that the token embeddings (tied embeddings).
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -218,10 +206,10 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 /// - `il`: the layer.
 ///
 /// Return: the layer's indexer RoPE parameters.
-pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParamsIndexer(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsIndexerBase(cparams, il);
 
-    res.type = c.LLAMA_ROPE_TYPE_NORM;
+    res.type = llama.impl.c.LLAMA_ROPE_TYPE_NORM;
 
     return res;
 }
@@ -230,7 +218,7 @@ pub fn getRopeParamsIndexer(model: *const Model, cparams: *const Cparams, il: u3
 // The graph
 
 /// What GLM-DSA's graphs change in DeepSeek V3.2's.
-const variant: deepseek32.Variant = .{
+const variant: llama.models.deepseek32.Variant = .{
     .file = "models/glm-dsa.cpp",
     .name = "GLM_DSA",
     .shared_indexers = true,
@@ -248,7 +236,7 @@ const variant: deepseek32.Variant = .{
 /// Ports `llama_model_glm_dsa`'s `build_arch_graph` (models/glm-dsa.cpp:187
 /// @b1b770d90): the MTP draft head for that graph type, the main model
 /// otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
     return buildGraph(model, b);
 }
@@ -257,15 +245,15 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 /// (models/glm-dsa.cpp:194 @b1b770d90): DeepSeek V3.2's, with the indexer
 /// roped in the normal layout and the shared indexer layers reusing the
 /// previous full layer's top-k.
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
-    deepseek32.buildGraph(variant, model, b);
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
+    llama.models.deepseek32.buildGraph(variant, model, b);
 }
 
 /// Ports the constructor of `llama_model_glm_dsa`'s `graph_mtp`
 /// (models/glm-dsa.cpp:529 @b1b770d90): DeepSeek V3.2's, whose DSA indexer
 /// does not run either.
-fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
-    deepseek32.buildGraphMtp(variant, model, b);
+fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
+    llama.models.deepseek32.buildGraphMtp(variant, model, b);
 }
 
 // -----------------------------------------------------------------------------

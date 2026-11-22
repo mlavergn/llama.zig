@@ -26,14 +26,8 @@
 //! digit — the `cpu/mulmat.zig` convention. Do not renumber them.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const vec = @import("vecinline.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
+const ggml = @import("../../module.zig");
+const stdlib = @import("stdlib");
 
 /// Mirrors `ggml_float` (vec.h:15 @b1b770d90).
 const GgmlFloat = f64;
@@ -44,24 +38,22 @@ extern fn vDSP_vsadd(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic:
 extern fn vDSP_measqv(a: [*]const f32, ia: Stride, cc: *f32, n: Length) void;
 
 /// Byte offset `i*nb`; see `common.byteOff`.
-const at = common.byteOff;
-
 /// Ports `ggml_compute_forward_norm_f32` (ops.cpp:3985 @b1b770d90), both arms
 /// of its contiguous path: vDSP under `GGML_USE_ACCELERATE`, otherwise
 /// `ggml_vec_cvar_f32`, which centres `y` and returns the variance.
-fn normF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn normF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const eps = impl.getOpParamsF32(dst, 0);
+    const eps = ggml.impl.getOpParamsF32(dst, 0);
 
-    impl.assert(eps >= 0.0, "eps >= 0.0f");
+    ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -73,42 +65,42 @@ fn normF32(params: *const ComputeParams, dst: *Tensor) void {
         while (j02 < l.ne02) : (j02 += 1) {
             var j01: i64 = ith;
             while (j01 < l.ne01) : (j01 += nth) {
-                const x = s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03);
-                const y = dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3);
+                const x = s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03);
+                const y = dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3);
 
                 if (l.nb00 == @sizeOf(f32) and l.nb0 == @sizeOf(f32)) {
                     const xf: [*]const f32 = @ptrCast(@alignCast(x));
 
                     var sum: f32 = 0.0;
-                    vec.sum_f32(l.ne00, &sum, xf);
+                    ggml.cpu.ops.vecinline.sum_f32(l.ne00, &sum, xf);
                     var mean: f32 = sum / ne00f;
 
                     const yf: [*]f32 = @ptrCast(@alignCast(y));
                     var variance: f32 = 0;
 
-                    if (comptime impl.use_accelerate) {
+                    if (comptime ggml.impl.use_accelerate) {
                         mean = -mean;
                         vDSP_vsadd(xf, 1, &mean, yf, 1, @intCast(l.ne00));
                         vDSP_measqv(yf, 1, &variance, @intCast(l.ne00));
                     } else {
-                        variance = @floatCast(vec.cvar_f32(@intCast(l.ne00), yf, xf, mean));
+                        variance = @floatCast(ggml.cpu.vec.ggml_vec_cvar_f32(@intCast(l.ne00), yf, xf, mean));
                     }
 
                     const scale = 1.0 / @sqrt(variance + eps);
-                    vec.scale_f32(l.ne00, yf, scale);
+                    ggml.cpu.ops.vecinline.scale_f32(l.ne00, yf, scale);
                 } else {
                     var sum: f32 = 0.0;
                     var j00: i64 = 0;
                     while (j00 < l.ne00) : (j00 += 1) {
-                        sum += @as(*const f32, @ptrCast(@alignCast(x + at(j00, l.nb00)))).*;
+                        sum += @as(*const f32, @ptrCast(@alignCast(x + ggml.cpu.ops.common.byteOff(j00, l.nb00)))).*;
                     }
                     const mean = sum / ne00f;
 
                     var variance: f32 = 0.0;
                     j00 = 0;
                     while (j00 < l.ne00) : (j00 += 1) {
-                        const v = @as(*const f32, @ptrCast(@alignCast(x + at(j00, l.nb00)))).* - mean;
-                        @as(*f32, @ptrCast(@alignCast(y + at(j00, l.nb0)))).* = v;
+                        const v = @as(*const f32, @ptrCast(@alignCast(x + ggml.cpu.ops.common.byteOff(j00, l.nb00)))).* - mean;
+                        @as(*f32, @ptrCast(@alignCast(y + ggml.cpu.ops.common.byteOff(j00, l.nb0)))).* = v;
                         // `variance += v * v` is one expression; clang fuses it.
                         variance = @mulAdd(f32, v, v, variance);
                     }
@@ -117,7 +109,7 @@ fn normF32(params: *const ComputeParams, dst: *Tensor) void {
                     const scale = 1.0 / @sqrt(variance + eps);
                     j00 = 0;
                     while (j00 < l.ne00) : (j00 += 1) {
-                        @as(*f32, @ptrCast(@alignCast(y + at(j00, l.nb0)))).* *= scale;
+                        @as(*f32, @ptrCast(@alignCast(y + ggml.cpu.ops.common.byteOff(j00, l.nb0)))).* *= scale;
                     }
                 }
             }
@@ -126,12 +118,12 @@ fn normF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_norm` (ops.cpp:4054 @b1b770d90).
-pub export fn ggml_compute_forward_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => normF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => normF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -149,10 +141,10 @@ const RmsNormFuseOp = enum { none, mul };
 ///
 /// The C's `assert(scale > 0.0f)` is the `<cassert>` one, compiled out under
 /// `NDEBUG`, so it is not reproduced.
-fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst_rms_norm: *Tensor, dst_fused: ?*Tensor) void {
-    const src0 = impl.one(Tensor, dst_rms_norm.src[0]);
-    var src1: ?*const Tensor = null;
-    var dst: *Tensor = dst_rms_norm;
+fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.c.ggml_tensor, dst_fused: ?*ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst_rms_norm.src[0]);
+    var src1: ?*const ggml.impl.c.ggml_tensor = null;
+    var dst: *ggml.impl.c.ggml_tensor = dst_rms_norm;
 
     if (fuse_op == .mul) {
         const f = dst_fused.?;
@@ -160,17 +152,17 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
         dst = f;
     }
 
-    impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const eps = impl.getOpParamsF32(dst_rms_norm, 0);
-    impl.assert(eps >= 0.0, "eps >= 0.0f");
+    const eps = ggml.impl.getOpParamsF32(dst_rms_norm, 0);
+    ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -183,7 +175,7 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
         while (j02 < l.ne02) : (j02 += 1) {
             var j01: i64 = ith;
             while (j01 < l.ne01) : (j01 += nth) {
-                const x: [*]const f32 = @ptrCast(@alignCast(s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03)));
+                const x: [*]const f32 = @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03)));
 
                 var sum: GgmlFloat = 0.0;
                 // worth switching to explicit SIMD?
@@ -195,14 +187,14 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
                 const mean: f32 = @floatCast(sum / ne00d);
                 const scale = 1.0 / @sqrt(mean + eps);
 
-                const y: [*]f32 = @ptrCast(@alignCast(dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3)));
+                const y: [*]f32 = @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3)));
 
                 if (fuse_op == .mul) {
                     const s1 = src1.?;
                     const j11 = @rem(j01, s1.ne[1]);
                     const j12 = @rem(j02, s1.ne[2]);
                     const j13 = @rem(j03, s1.ne[3]);
-                    const w: [*]const f32 = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(s1.data.?)) + at(j11, s1.nb[1]) + at(j12, s1.nb[2]) + at(j13, s1.nb[3])));
+                    const w: [*]const f32 = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(s1.data.?)) + ggml.cpu.ops.common.byteOff(j11, s1.nb[1]) + ggml.cpu.ops.common.byteOff(j12, s1.nb[2]) + ggml.cpu.ops.common.byteOff(j13, s1.nb[3])));
 
                     j00 = 0;
                     while (j00 < @as(usize, @intCast(l.ne00))) : (j00 += 1) {
@@ -214,7 +206,7 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
                     // here, so `y == x`: a self-`memcpy` the C tolerates and
                     // Zig's `@memcpy` rejects in a safe build.
                     if (y != x) @memcpy(y[0..n], x[0..n]);
-                    vec.scale_f32(l.ne00, y, scale);
+                    ggml.cpu.ops.vecinline.scale_f32(l.ne00, y, scale);
                 }
             }
         }
@@ -222,28 +214,28 @@ fn rmsNormF32(comptime fuse_op: RmsNormFuseOp, params: *const ComputeParams, dst
 }
 
 /// Ports `ggml_compute_forward_rms_norm` (ops.cpp:4147 @b1b770d90).
-pub export fn ggml_compute_forward_rms_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_rms_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => rmsNormF32(.none, params, dst, null),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => rmsNormF32(.none, params, dst, null),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_rms_norm_mul_fused` (ops.cpp:4167 @b1b770d90):
 /// `dst_mul = rms_norm(src0) * src1` in one pass, without materialising the
 /// `rms_norm` result.
-pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ComputeParams, dst_rms_norm: *Tensor, dst_mul: ?*Tensor) callconv(.c) void {
-    impl.assert(dst_mul != null, "dst_mul != nullptr");
+pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ggml.cpu.defs.ComputeParams, dst_rms_norm: *ggml.impl.c.ggml_tensor, dst_mul: ?*ggml.impl.c.ggml_tensor) callconv(.c) void {
+    ggml.impl.assert(dst_mul != null, "dst_mul != nullptr");
     const m = dst_mul.?;
-    impl.assert(m.src[0] == dst_rms_norm or m.src[1] == dst_rms_norm, "dst_mul->src[0] == dst_rms_norm || dst_mul->src[1] == dst_rms_norm");
+    ggml.impl.assert(m.src[0] == dst_rms_norm or m.src[1] == dst_rms_norm, "dst_mul->src[0] == dst_rms_norm || dst_mul->src[1] == dst_rms_norm");
 
-    const src0 = impl.one(Tensor, dst_rms_norm.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst_rms_norm.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => rmsNormF32(.mul, params, dst_rms_norm, m),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => rmsNormF32(.mul, params, dst_rms_norm, m),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -252,21 +244,21 @@ pub export fn ggml_compute_forward_rms_norm_mul_fused(params: *const ComputePara
 /// The C's long derivation comment ends at
 /// `dx = (dz + x*(-sum_xdz/sum_eps)) * rrms`; see ggml-org/ggml#1491 for why
 /// `sum_eps` rather than `mean_eps` is the divisor.
-fn rmsNormBackF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]); // gradients from forward pass output
-    const src1 = impl.one(Tensor, dst.src[1]); // src1 from forward pass
+fn rmsNormBackF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // gradients from forward pass output
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // src1 from forward pass
 
-    impl.assert(c.ggml_are_same_shape(src0, dst) and c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst) and ggml.impl.c.ggml_are_same_shape(src0, src1), "ggml_are_same_shape(src0, dst) && ggml_are_same_shape(src0, src1)");
 
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
-    impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.BinaryLocals.of(src0, src1, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src1, dst);
 
-    const eps = impl.getOpParamsF32(dst, 0);
+    const eps = ggml.impl.getOpParamsF32(dst, 0);
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const s1: [*]const u8 = @ptrCast(src1.data.?);
@@ -285,8 +277,8 @@ fn rmsNormBackF32(params: *const ComputeParams, dst: *Tensor) void {
                 const j12 = j02;
                 const j13 = j03;
 
-                const dz: [*]const f32 = @ptrCast(@alignCast(s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03)));
-                const x: [*]const f32 = @ptrCast(@alignCast(s1 + at(j11, l.nb11) + at(j12, l.nb12) + at(j13, l.nb13)));
+                const dz: [*]const f32 = @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03)));
+                const x: [*]const f32 = @ptrCast(@alignCast(s1 + ggml.cpu.ops.common.byteOff(j11, l.nb11) + ggml.cpu.ops.common.byteOff(j12, l.nb12) + ggml.cpu.ops.common.byteOff(j13, l.nb13)));
 
                 var sum_xx: GgmlFloat = 0.0;
                 var sum_xdz: GgmlFloat = 0.0;
@@ -304,7 +296,7 @@ fn rmsNormBackF32(params: *const ComputeParams, dst: *Tensor) void {
                 const sum_eps = @mulAdd(f32, eps, ne00f, sum_xx_f);
                 const rrms = 1.0 / @sqrt(mean_eps);
 
-                const dx: [*]f32 = @ptrCast(@alignCast(dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3)));
+                const dx: [*]f32 = @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3)));
 
                 // dx[i00] = (dz + x*(-sum_xdz/sum_eps)) * rrms
                 // note: https://github.com/ggml-org/ggml/issues/1491
@@ -320,12 +312,12 @@ fn rmsNormBackF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_rms_norm_back` (ops.cpp:4346 @b1b770d90).
-pub export fn ggml_compute_forward_rms_norm_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_rms_norm_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => rmsNormBackF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => rmsNormBackF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -333,24 +325,24 @@ pub export fn ggml_compute_forward_rms_norm_back(params: *const ComputeParams, d
 ///
 /// Threads split over groups, not rows. The mean and variance are divided in
 /// `double` and only then narrowed, as the C's `float = double / int64_t` is.
-fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn groupNormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
 
     const ith: c_int = params.ith;
     const nth: c_int = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     // TODO: optimize
 
-    const eps = impl.getOpParamsF32(dst, 1);
+    const eps = ggml.impl.getOpParamsF32(dst, 1);
 
     const n_channels: c_int = @intCast(src0.ne[2]);
-    const n_groups: c_int = impl.getOpParamsI32(dst, 0);
+    const n_groups: c_int = ggml.impl.getOpParamsI32(dst, 0);
     const n_channels_per_group = @divTrunc(n_channels + n_groups - 1, n_groups);
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
@@ -373,7 +365,7 @@ fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
             while (j02 < end) : (j02 += 1) {
                 var j01: i64 = 0;
                 while (j01 < l.ne01) : (j01 += 1) {
-                    const x: [*]const f32 = @ptrCast(@alignCast(s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03)));
+                    const x: [*]const f32 = @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03)));
 
                     var sumr: GgmlFloat = 0.0;
                     var j00: usize = 0;
@@ -390,9 +382,9 @@ fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
             while (j02 < end) : (j02 += 1) {
                 var j01: i64 = 0;
                 while (j01 < l.ne01) : (j01 += 1) {
-                    const x: [*]const f32 = @ptrCast(@alignCast(s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03)));
+                    const x: [*]const f32 = @ptrCast(@alignCast(s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03)));
 
-                    const y: [*]f32 = @ptrCast(@alignCast(dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3)));
+                    const y: [*]f32 = @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3)));
 
                     var sumr: GgmlFloat = 0.0;
                     var j00: usize = 0;
@@ -411,8 +403,8 @@ fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
             while (j02 < end) : (j02 += 1) {
                 var j01: i64 = 0;
                 while (j01 < l.ne01) : (j01 += 1) {
-                    const y: [*]f32 = @ptrCast(@alignCast(dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3)));
-                    vec.scale_f32(l.ne00, y, scale);
+                    const y: [*]f32 = @ptrCast(@alignCast(dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3)));
+                    ggml.cpu.ops.vecinline.scale_f32(l.ne00, y, scale);
                 }
             }
         }
@@ -420,12 +412,12 @@ fn groupNormF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_group_norm` (ops.cpp:4441 @b1b770d90).
-pub export fn ggml_compute_forward_group_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_group_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => groupNormF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => groupNormF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -433,19 +425,19 @@ pub export fn ggml_compute_forward_group_norm(params: *const ComputeParams, dst:
 ///
 /// `sqrtf(sum)` takes a `float`, so the `double` sum is narrowed **before**
 /// the square root, not after.
-fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn l2NormF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
+    ggml.impl.assert(ggml.impl.c.ggml_are_same_shape(src0, dst), "ggml_are_same_shape(src0, dst)");
 
     const ith: i64 = params.ith;
     const nth: i64 = params.nth;
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const eps = impl.getOpParamsF32(dst, 0);
+    const eps = ggml.impl.getOpParamsF32(dst, 0);
 
-    impl.assert(eps >= 0.0, "eps >= 0.0f");
+    ggml.impl.assert(eps >= 0.0, "eps >= 0.0f");
 
     const s0: [*]const u8 = @ptrCast(src0.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -457,29 +449,29 @@ fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
         while (j02 < l.ne02) : (j02 += 1) {
             var j01: i64 = ith;
             while (j01 < l.ne01) : (j01 += nth) {
-                const x = s0 + at(j01, l.nb01) + at(j02, l.nb02) + at(j03, l.nb03);
+                const x = s0 + ggml.cpu.ops.common.byteOff(j01, l.nb01) + ggml.cpu.ops.common.byteOff(j02, l.nb02) + ggml.cpu.ops.common.byteOff(j03, l.nb03);
 
                 var sum: GgmlFloat = 0.0;
                 var j00: i64 = 0;
                 while (j00 < l.ne00) : (j00 += 1) {
-                    const xi = @as(*const f32, @ptrCast(@alignCast(x + at(j00, l.nb00)))).*;
+                    const xi = @as(*const f32, @ptrCast(@alignCast(x + ggml.cpu.ops.common.byteOff(j00, l.nb00)))).*;
                     sum += @as(GgmlFloat, xi * xi);
                 }
 
-                const scale = 1.0 / libm.fmaxf(@sqrt(@as(f32, @floatCast(sum))), eps);
+                const scale = 1.0 / stdlib.libm.fmaxf(@sqrt(@as(f32, @floatCast(sum))), eps);
 
-                const y = dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3);
+                const y = dd + ggml.cpu.ops.common.byteOff(j01, l.nb1) + ggml.cpu.ops.common.byteOff(j02, l.nb2) + ggml.cpu.ops.common.byteOff(j03, l.nb3);
 
                 if (l.nb00 == @sizeOf(f32) and l.nb0 == @sizeOf(f32)) {
                     const n = @as(usize, @intCast(l.ne00)) * @sizeOf(f32);
                     // In place when the allocator reuses the source; see above.
                     if (y != x) @memcpy(y[0..n], x[0..n]);
-                    vec.scale_f32(l.ne00, @ptrCast(@alignCast(y)), scale);
+                    ggml.cpu.ops.vecinline.scale_f32(l.ne00, @ptrCast(@alignCast(y)), scale);
                 } else {
                     j00 = 0;
                     while (j00 < l.ne00) : (j00 += 1) {
-                        const xi = @as(*const f32, @ptrCast(@alignCast(x + at(j00, l.nb00)))).*;
-                        @as(*f32, @ptrCast(@alignCast(y + at(j00, l.nb0)))).* = xi * scale;
+                        const xi = @as(*const f32, @ptrCast(@alignCast(x + ggml.cpu.ops.common.byteOff(j00, l.nb00)))).*;
+                        @as(*f32, @ptrCast(@alignCast(y + ggml.cpu.ops.common.byteOff(j00, l.nb0)))).* = xi * scale;
                     }
                 }
             }
@@ -488,12 +480,12 @@ fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_l2_norm` (ops.cpp:4509 @b1b770d90).
-pub export fn ggml_compute_forward_l2_norm(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_l2_norm(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => l2NormF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => l2NormF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 

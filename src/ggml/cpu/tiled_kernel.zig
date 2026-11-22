@@ -48,10 +48,8 @@
 //! `i0` and `i1` are Zig integer type names; the C's `i0` is `ri0` here.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const qblocks = @import("../quants/blocks.zig");
-const c = impl.c;
 
 /// Ports `TILED_TILE_K` (tiled-kernel.h:22 @b1b770d90): one `QK_K` block.
 pub const tile_k = 256;
@@ -117,7 +115,7 @@ comptime {
     std.debug.assert(@offsetOf(Ws, "src1") % 64 == 0);
     std.debug.assert(@offsetOf(Ws, "acc") % 64 == 0);
     // tiled-kernel.cpp's: the repacks read `q8_K` in 4-byte words.
-    std.debug.assert(@sizeOf(qblocks.Q8_K) == 292 and @offsetOf(qblocks.Q8_K, "qs") == 4);
+    std.debug.assert(@sizeOf(ggml.quants.blocks.Q8_K) == 292 and @offsetOf(ggml.quants.blocks.Q8_K, "qs") == 4);
 }
 
 // -----------------------------------------------------------------------------

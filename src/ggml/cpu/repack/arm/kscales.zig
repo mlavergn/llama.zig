@@ -19,10 +19,7 @@
 //! *original* `sm[0]`. Writing to `sm` in between would break it.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const neon = @import("../../quants/arm/neon.zig");
-
-const i16x8 = neon.i16x8;
+const ggml = @import("../../../module.zig");
 
 const kmask1: u32 = 0x3f3f3f3f;
 const kmask2: u32 = 0x0f0f0f0f;
@@ -35,7 +32,7 @@ const scales_size: usize = 12;
 /// - `scales_in`: the twelve packed bytes for one sub-block.
 /// - `out_mins`: receives the eight mins, widened to `i16`.
 /// - `out_scales`: receives the eight scales as bytes.
-pub inline fn decodeQKx86BitScales(scales_in: [*]const u8, out_mins: *i16x8, out_scales: *[8]i8) void {
+pub inline fn decodeQKx86BitScales(scales_in: [*]const u8, out_mins: *ggml.cpu.quants.arch.neon.i16x8, out_scales: *[8]i8) void {
     var sm: [3]u32 = undefined;
     @memcpy(@as([*]u8, @ptrCast(&sm))[0..scales_size], scales_in[0..scales_size]);
 
@@ -44,7 +41,7 @@ pub inline fn decodeQKx86BitScales(scales_in: [*]const u8, out_mins: *i16x8, out
     const mins_u32: @Vector(2, u32) = .{ mins_0_3, mins_4_7 };
 
     const mins_u8: @Vector(8, u8) = @bitCast(mins_u32);
-    out_mins.* = @bitCast(neon.movl_u8(mins_u8));
+    out_mins.* = @bitCast(ggml.cpu.quants.arch.neon.movl_u8(mins_u8));
 
     var scales_u32: [2]u32 = undefined;
     scales_u32[0] = sm[0] & kmask1;
@@ -54,5 +51,5 @@ pub inline fn decodeQKx86BitScales(scales_in: [*]const u8, out_mins: *i16x8, out
 
 comptime {
     _ = std;
-    _ = impl;
+    _ = ggml.impl;
 }

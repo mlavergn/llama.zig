@@ -10,21 +10,11 @@
 //! `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_plamo3`'s `load_arch_hparams` (models/plamo3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -35,11 +25,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         found_swa = true;
     }
     if (found_swa and hp.n_swa > 0) {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
         try self.loadSwaPattern(ml, 8, false, exc);
     } else {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.none);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.none);
     }
 
     self.type = switch (hp.nLayer()) {
@@ -49,7 +39,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_plamo3`'s `load_arch_tensors` (models/plamo3.cpp:20 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -59,9 +49,9 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
-    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
+    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_not_required, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -91,8 +81,8 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_plamo3`'s `build_arch_graph` (models/plamo3.cpp:60 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    if (b.hparams.swa_type != @backingInt(hparams_mod.SwaType.none)) {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    if (b.hparams.swa_type != @backingInt(llama.hparams.SwaType.none)) {
         buildGraph(true, model, b);
     } else {
         buildGraph(false, model, b);
@@ -101,13 +91,13 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports the constructor of `llama_model_plamo3`'s `graph<iswa>`
 /// (models/plamo3.cpp:69 @b1b770d90).
-fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const head_dim_q: i64 = hp.nEmbdHeadK(0);
     const head_dim_v: i64 = hp.nEmbdHeadV(0);
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
 
     const inp_attn = if (iswa) b.buildAttnInpKvIswa() else b.buildAttnInpKv();
@@ -133,10 +123,10 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         const k_offset: i64 = head_dim_q * n_head;
         const v_offset: i64 = k_offset + head_dim_q * n_head_kv;
 
-        const elt: usize = c.ggml_element_size(qkv);
-        var Qcur: *Tensor = c.ggml_view_3d(ctx, qkv, head_dim_q, n_head, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * elt);
-        var Kcur: *Tensor = c.ggml_view_3d(ctx, qkv, head_dim_q, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * elt);
-        const Vcur: *Tensor = c.ggml_view_3d(ctx, qkv, head_dim_v, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * elt);
+        const elt: usize = llama.impl.c.ggml_element_size(qkv);
+        var Qcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_q, n_head, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(q_offset)) * elt);
+        var Kcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_q, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_q)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(k_offset)) * elt);
+        const Vcur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, qkv, head_dim_v, n_head_kv, b.n_tokens, @as(usize, @intCast(head_dim_v)) * @sizeOf(f32), qkv.nb[1], @as(usize, @intCast(v_offset)) * elt);
 
         b.cb(Qcur, "Qcur", il);
         b.cb(Kcur, "Kcur", il);
@@ -150,20 +140,20 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         Qcur = b.buildRope(Qcur, inp_pos, il);
         Kcur = b.buildRope(Kcur, inp_pos, il);
 
-        const attn_scale: f32 = 1.0 / libm.sqrtfInt(head_dim_q);
+        const attn_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(head_dim_q);
 
         cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, attn_scale, il);
         b.cb(cur, "attn_out", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            residual = c.ggml_get_rows(ctx, residual, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            residual = llama.impl.c.ggml_get_rows(ctx, residual, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(cur, "attn_residual", il);
 
         residual = cur;
@@ -177,7 +167,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, residual);
+        cur = llama.impl.c.ggml_add(ctx, cur, residual);
         b.cb(cur, "ffn_residual", il);
 
         cur = b.buildCvec(cur, il);

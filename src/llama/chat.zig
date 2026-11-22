@@ -36,18 +36,8 @@
 //! calls `detectTemplate`, `applyTemplate` and `builtinTemplates`.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-
-extern "c" fn isspace(ch: c_int) c_int;
-extern "c" fn toupper(ch: c_int) c_int;
-
-/// `llama_chat_message`: a role and its content, both NUL-terminated and
-/// borrowed for the duration of a call. Neither may be null; the C++ builds
-/// a `std::string` from each.
-pub const Message = c.llama_chat_message;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llm_chat_template` (llama-chat.h:7 @b1b770d90).
 ///
@@ -205,8 +195,8 @@ const templates: [declared.len]Entry = blk: {
 fn trim(s: []const u8) []const u8 {
     var start: usize = 0;
     var end: usize = s.len;
-    while (start < end and isspace(s[start]) != 0) start += 1;
-    while (end > start and isspace(s[end - 1]) != 0) end -= 1;
+    while (start < end and stdlib.libc.isspace(s[start]) != 0) start += 1;
+    while (end > start and stdlib.libc.isspace(s[end - 1]) != 0) end -= 1;
     return s[start..end];
 }
 
@@ -215,7 +205,7 @@ fn trim(s: []const u8) []const u8 {
 /// -- signed on Darwin, unsigned on aarch64 Linux, as `c_char` is -- widened
 /// to `int`, and the result narrowed back to `char`.
 fn upper(b: u8) u8 {
-    const r = toupper(@as(c_char, @bitCast(b)));
+    const r = stdlib.libc.toupper(@as(c_char, @bitCast(b)));
     return @truncate(@as(u32, @bitCast(r)));
 }
 
@@ -396,7 +386,7 @@ const Stream = struct {
     list: *std.ArrayList(u8),
 
     fn put(self: Stream, s: []const u8) error{OutOfMemory}!void {
-        try self.list.appendSlice(allocator, s);
+        try self.list.appendSlice(std.heap.c_allocator, s);
     }
 
     /// `ss << a << b << ...`: every element of the tuple, in order.
@@ -438,15 +428,15 @@ fn eql(a: []const u8, b: []const u8) bool {
 ///
 /// Return: the prompt's length in bytes, narrowed to `int32_t` as the C++'s
 /// `return dest.size()` does; or -1 for `.unknown`.
-pub fn applyTemplate(tmpl: Template, chat: []const Message, out: *std.ArrayList(u8), add_ass: bool) i32 {
+pub fn applyTemplate(tmpl: Template, chat: []const mod.impl.c.llama_chat_message, out: *std.ArrayList(u8), add_ass: bool) i32 {
     if (tmpl == .unknown) return -1;
     out.clearRetainingCapacity();
-    format(tmpl, chat, .{ .list = out }, add_ass) catch impl.abort("llama-chat.cpp", 249, "std::bad_alloc");
+    format(tmpl, chat, .{ .list = out }, add_ass) catch mod.impl.abort("llama-chat.cpp", 249, "std::bad_alloc");
     return @bitCast(@as(u32, @truncate(out.items.len)));
 }
 
 /// The body of `llm_chat_apply_template`, one branch per template family.
-fn format(tmpl: Template, chat: []const Message, ss: Stream, add_ass: bool) error{OutOfMemory}!void {
+fn format(tmpl: Template, chat: []const mod.impl.c.llama_chat_message, ss: Stream, add_ass: bool) error{OutOfMemory}!void {
     switch (tmpl) {
         .unknown => unreachable,
         .chatml => {
@@ -544,12 +534,12 @@ fn format(tmpl: Template, chat: []const Message, ss: Stream, add_ass: bool) erro
         },
         .gemma => {
             var system_prompt: std.ArrayList(u8) = .empty;
-            defer system_prompt.deinit(allocator);
+            defer system_prompt.deinit(std.heap.c_allocator);
             for (chat) |m| {
                 var role = str(m.role);
                 if (eql(role, "system")) {
                     // Gemma has no system message; it is merged into the next user turn.
-                    try system_prompt.appendSlice(allocator, trim(str(m.content)));
+                    try system_prompt.appendSlice(std.heap.c_allocator, trim(str(m.content)));
                     continue;
                 }
                 // in gemma, "assistant" is "model"
@@ -565,12 +555,12 @@ fn format(tmpl: Template, chat: []const Message, ss: Stream, add_ass: bool) erro
         },
         .orion => {
             var system_prompt: std.ArrayList(u8) = .empty;
-            defer system_prompt.deinit(allocator);
+            defer system_prompt.deinit(std.heap.c_allocator);
             for (chat) |m| {
                 const role = str(m.role);
                 if (eql(role, "system")) {
                     // No system message support; it is merged into the next user turn.
-                    try system_prompt.appendSlice(allocator, str(m.content));
+                    try system_prompt.appendSlice(std.heap.c_allocator, str(m.content));
                     continue;
                 } else if (eql(role, "user")) {
                     try ss.put("Human: ");
@@ -1042,9 +1032,9 @@ test "a name wins over the substring cascade" {
 
 test "chatml applies, and unknown leaves the output alone" {
     var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    try out.appendSlice(allocator, "kept");
-    const chat = [_]Message{
+    defer out.deinit(std.heap.c_allocator);
+    try out.appendSlice(std.heap.c_allocator, "kept");
+    const chat = [_]mod.impl.c.llama_chat_message{
         .{ .role = "system", .content = "be brief" },
         .{ .role = "user", .content = "hi" },
     };
@@ -1057,8 +1047,8 @@ test "chatml applies, and unknown leaves the output alone" {
 
 test "trim and the openchat role go through the C library" {
     var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    const chat = [_]Message{.{ .role = "user", .content = " \t hi \n" }};
+    defer out.deinit(std.heap.c_allocator);
+    const chat = [_]mod.impl.c.llama_chat_message{.{ .role = "user", .content = " \t hi \n" }};
     _ = applyTemplate(.openchat, &chat, &out, false);
     try std.testing.expectEqualStrings("GPT4 Correct User:  \t hi \n<|end_of_turn|>", out.items);
     _ = applyTemplate(.llama_3, &chat, &out, false);

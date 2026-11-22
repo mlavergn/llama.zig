@@ -9,7 +9,7 @@
 //! unlock that saw contention pays for a wake.
 
 const std = @import("std");
-const futex = @import("futex.zig");
+const mod = @import("module.zig");
 
 /// A non-recursive mutex. `.{}` is unlocked and needs no setup or teardown,
 /// as `PTHREAD_MUTEX_INITIALIZER` and `std::mutex`'s `constexpr` constructor
@@ -37,9 +37,9 @@ pub const Mutex = extern struct {
         // From here on the lock is marked contended, so whoever releases it
         // wakes a sleeper; a thread that takes it this way cannot know
         // there is no one else waiting.
-        if (self.state.load(.monotonic) == contended) _ = futex.wait(&self.state, contended, null);
+        if (self.state.load(.monotonic) == contended) _ = mod.futex.wait(&self.state, contended, null);
         while (self.state.swap(contended, .acquire) != unlocked) {
-            _ = futex.wait(&self.state, contended, null);
+            _ = mod.futex.wait(&self.state, contended, null);
         }
     }
 
@@ -54,7 +54,7 @@ pub const Mutex = extern struct {
     ///
     /// Return: nothing.
     pub fn unlock(self: *Mutex) void {
-        if (self.state.swap(unlocked, .release) == contended) futex.wake(&self.state, 1);
+        if (self.state.swap(unlocked, .release) == contended) mod.futex.wake(&self.state, 1);
     }
 };
 

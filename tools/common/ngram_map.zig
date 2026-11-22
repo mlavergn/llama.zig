@@ -23,8 +23,8 @@
 //! The hash is `uint32_t`, wrapping.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const c = @import("tools_h");
-const log = @import("log.zig");
 
 /// Ports `LCG_FACTOR` (ngram-map.cpp:11 @b1b770d90): the multiplier, near
 /// `(sqrt(5) - 1) / 2 * 2^32`. `unsigned long` in the C++; only its low 32
@@ -130,7 +130,7 @@ pub fn simpleDraft(allocator: std.mem.Allocator, config: SimpleConfig, tokens: [
     if (copy_max < n_draft_min) {
         return draft_tokens;
     }
-    log.dbg("%s: #tokens = %zu: found matching pattern at pos %zu, length %zu, draft length %zu\n", .{ @as([*:0]const u8, "common_ngram_simple_draft"), cur_len, match_pos, pattern.items.len, copy_max });
+    mod.log.dbg("%s: #tokens = %zu: found matching pattern at pos %zu, length %zu, draft length %zu\n", .{ @as([*:0]const u8, "common_ngram_simple_draft"), cur_len, match_pos, pattern.items.len, copy_max });
 
     try draft_tokens.ensureTotalCapacity(allocator, copy_max);
     for (0..copy_max) |k| {
@@ -267,7 +267,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
     const func: [*:0]const u8 = "common_ngram_map_begin";
     const size_begin = tokens.len;
 
-    log.dbg("%s: begin, idx_last_draft=%zu, new begin=%zu, #keys=%zu\n", .{ func, map.idx_last_check, size_begin, map.keys.items.len });
+    mod.log.dbg("%s: begin, idx_last_draft=%zu, new begin=%zu, #keys=%zu\n", .{ func, map.idx_last_check, size_begin, map.keys.items.len });
 
     var idx_begin_cleanup = map.size_last_begin;
     if (idx_begin_cleanup > size_begin) {
@@ -276,7 +276,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
         } else {
             idx_begin_cleanup = 0;
         }
-        log.inf("%s: shrink cleanup begin: %zu -> %zu\n", .{ func, map.size_last_begin, idx_begin_cleanup });
+        mod.log.inf("%s: shrink cleanup begin: %zu -> %zu\n", .{ func, map.size_last_begin, idx_begin_cleanup });
     }
 
     var count_map_entries_upd: usize = 0;
@@ -296,7 +296,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
             if (count_nonzero == 0) {
                 min_idx = 0;
             }
-            log.inf("%s: key_map stats: entries=%zu, min_idx=%u, max_idx=%u, key_map_last_idx=%u\n", .{ func, count_nonzero, min_idx, max_idx, map.key_map_last_idx });
+            mod.log.inf("%s: key_map stats: entries=%zu, min_idx=%u, max_idx=%u, key_map_last_idx=%u\n", .{ func, count_nonzero, min_idx, max_idx, map.key_map_last_idx });
         }
 
         // Update the map from hash to key index (clear outdated entries).
@@ -318,7 +318,7 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
             const key = &map.keys.items[@intCast(i)];
             if (key.key_idx >= idx_begin_cleanup) {
                 // Delete the key.
-                log.dbg("%s: delete key %d at index %zu (>= idx_begin_cleanup=%zu)\n", .{ func, i, key.key_idx, idx_begin_cleanup });
+                mod.log.dbg("%s: delete key %d at index %zu (>= idx_begin_cleanup=%zu)\n", .{ func, i, key.key_idx, idx_begin_cleanup });
                 _ = map.keys.orderedRemove(@intCast(i));
                 count_keys_del += 1;
                 continue;
@@ -347,13 +347,13 @@ pub fn begin(map: *Map, tokens: []const c.llama_token) void {
             }
             if (key.values[0].value_idx == 0) {
                 // No values left, delete the key.
-                log.dbg("%s: delete key %d at index %zu (no values left)\n", .{ func, i, key.key_idx });
+                mod.log.dbg("%s: delete key %d at index %zu (no values left)\n", .{ func, i, key.key_idx });
                 _ = map.keys.orderedRemove(@intCast(i));
                 count_keys_del += 1;
             }
         }
 
-        log.inf("%s: refresh map: idx_last_draft=%zu, new begin=%zu, #keys_checked=%zu, #keys_del=%zu, #values_del=%zu, #hashes_upd=%zu\n", .{ func, map.idx_last_check, size_begin, count_keys, count_keys_del, count_values_del, count_map_entries_upd });
+        mod.log.inf("%s: refresh map: idx_last_draft=%zu, new begin=%zu, #keys_checked=%zu, #keys_del=%zu, #values_del=%zu, #hashes_upd=%zu\n", .{ func, map.idx_last_check, size_begin, count_keys, count_keys_del, count_values_del, count_map_entries_upd });
     }
 
     map.idx_last_check = size_begin;
@@ -423,7 +423,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
                     break;
                 }
             }
-            log.dbg("%s: key hash %x -> idx_key %d: match %d\n", .{ func, idx_hash, idx_key, @as(c_int, if (match) 1 else 0) });
+            mod.log.dbg("%s: key hash %x -> idx_key %d: match %d\n", .{ func, idx_hash, idx_key, @as(c_int, if (match) 1 else 0) });
             if (match) {
                 match_pos = idx_key;
             }
@@ -453,7 +453,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
         }
     }
     if (match_pos > 0) {
-        log.dbg("%s: cur_len = %zu, n = %d, m = %d, sz_tkns = %zu, sampled = %d, match_pos = %zu\n", .{ func, cur_len, @as(c_int, n), @as(c_int, m), key_tokens.items.len, @as(c_int, sampled), match_pos });
+        mod.log.dbg("%s: cur_len = %zu, n = %d, m = %d, sz_tkns = %zu, sampled = %d, match_pos = %zu\n", .{ func, cur_len, @as(c_int, n), @as(c_int, m), key_tokens.items.len, @as(c_int, sampled), match_pos });
     }
 
     if (map.key_map.len != 0) {
@@ -522,7 +522,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
             try draft_out.append(map.allocator, inp[match_pos + n + @as(usize, @intCast(i))]);
         }
 
-        log.dbg("%s: key_idx = %zu, key_offset = %zu, key_num = %d, draft.size = %zu\n", .{ func, curr_key.key_idx, key_offset, @as(c_int, curr_key.key_num), draft_out.items.len });
+        mod.log.dbg("%s: key_idx = %zu, key_offset = %zu, key_num = %d, draft.size = %zu\n", .{ func, curr_key.key_idx, key_offset, @as(c_int, curr_key.key_num), draft_out.items.len });
 
         map.last_draft_created = true;
         map.last_draft_key_idx = key_offset;
@@ -532,7 +532,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
 
     if (curr_key.key_num < map.min_hits) {
         // not enough hits to consider this a good draft
-        log.dbg("%s: key_offset = %zu, key_num = %d, min_hits = %d, no draft\n", .{ func, key_offset, @as(c_int, curr_key.key_num), @as(c_int, map.min_hits) });
+        mod.log.dbg("%s: key_offset = %zu, key_num = %d, min_hits = %d, no draft\n", .{ func, key_offset, @as(c_int, curr_key.key_num), @as(c_int, map.min_hits) });
         return;
     }
 
@@ -603,18 +603,18 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
     }
 
     const vs = &curr_key.values;
-    log.dbg("%s: key_offset = %zu, max_occur = %d, sum_occur = %d, slot_max = %d [%zu/%d, %zu/%d, %zu/%d, %zu/%d]\n", .{
+    mod.log.dbg("%s: key_offset = %zu, max_occur = %d, sum_occur = %d, slot_max = %d [%zu/%d, %zu/%d, %zu/%d, %zu/%d]\n", .{
         func,                        key_offset,                  @as(c_int, max_occur),       sum_occur,                   slot_max,
         vs[0].value_idx,             @as(c_int, vs[0].value_num), vs[1].value_idx,             @as(c_int, vs[1].value_num), vs[2].value_idx,
         @as(c_int, vs[2].value_num), vs[3].value_idx,             @as(c_int, vs[3].value_num),
     });
     // Print the tokens of the four values (if idx != 0), use LOG_INF
-    if (log.verbosity_thold >= log.level_debug) {
+    if (mod.log.verbosity_thold >= mod.log.level_debug) {
         for (0..max_values) |v| {
             if (curr_key.values[v].value_idx != 0) {
                 const s = try tokensToStr(map.allocator, inp, curr_key.values[v].value_idx, m);
                 defer map.allocator.free(s);
-                log.dbg("%s: value[%d] = %s\n", .{ func, @as(c_int, @intCast(v)), s.ptr });
+                mod.log.dbg("%s: value[%d] = %s\n", .{ func, @as(c_int, @intCast(v)), s.ptr });
             }
         }
     }
@@ -634,7 +634,7 @@ pub fn draft(map: *Map, inp: []const c.llama_token, sampled: c.llama_token, draf
         try draft_out.append(map.allocator, inp[match_pos + n + @as(usize, @intCast(k))]);
     }
 
-    log.dbg("%s: key_offset = %zu, slot_max = %d, key_num = %d, draft.size = %zu\n", .{ func, key_offset, slot_max, @as(c_int, curr_key.key_num), draft_out.items.len });
+    mod.log.dbg("%s: key_offset = %zu, slot_max = %d, key_num = %d, draft.size = %zu\n", .{ func, key_offset, slot_max, @as(c_int, curr_key.key_num), draft_out.items.len });
 
     map.last_draft_created = true;
     map.last_draft_key_idx = key_offset;
@@ -663,7 +663,7 @@ pub fn accept(map: *Map, n_accepted: u16) void {
     const curr_value = &curr_key.values[val_idx]; // value used for draft generation.
 
     // update the value statistics
-    log.dbg("common_ngram_map_send_accepted: n_accepted = %d, prev value_num = %d\n", .{ @as(c_int, n_accepted), @as(c_int, curr_value.n_accepted) });
+    mod.log.dbg("common_ngram_map_send_accepted: n_accepted = %d, prev value_num = %d\n", .{ @as(c_int, n_accepted), @as(c_int, curr_value.n_accepted) });
     curr_value.n_accepted = @bitCast(n_accepted);
 }
 

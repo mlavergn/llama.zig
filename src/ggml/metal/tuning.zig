@@ -36,13 +36,7 @@
 //! same register and was measured correct.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const table = @import("tuning_table.zig");
-
-const c = impl.c;
-
-pub const Cfg = table.Cfg;
-pub const Key = table.Key;
+const ggml = @import("../module.zig");
 
 /// Mirrors `FA_VEC_NE11_BUCKETS` (ggml-metal-tuning.h:14 @b1b770d90): KV
 /// length buckets. The Q>1 crossover is head-size dependent, so the KV
@@ -117,12 +111,12 @@ pub fn baselineNe(dk: c_int, dv: c_int) c_int {
 }
 
 /// Ports `fa_vec_baseline_cfg` (ggml-metal-tuning.cpp:67 @b1b770d90).
-pub fn baselineCfg(dk: c_int, dv: c_int) Cfg {
+pub fn baselineCfg(dk: c_int, dv: c_int) ggml.metal.tuning_table.Cfg {
     return .{ .Q = 1, .NE = @intCast(baselineNe(dk, dv)) };
 }
 
 var g_override_set: bool = false;
-var g_override_cfg: Cfg = .{ .Q = 1, .NE = 4 };
+var g_override_cfg: ggml.metal.tuning_table.Cfg = .{ .Q = 1, .NE = 4 };
 
 /// Ports `fa_vec_set_override` (ggml-metal-tuning.cpp:1122 @b1b770d90).
 ///
@@ -133,7 +127,7 @@ var g_override_cfg: Cfg = .{ .Q = 1, .NE = 4 };
 ///
 /// Parameters:
 /// - `cfg`: the `(Q, NE)` every `pick` will return until cleared.
-pub fn setOverride(cfg: Cfg) void {
+pub fn setOverride(cfg: ggml.metal.tuning_table.Cfg) void {
     g_override_cfg = cfg;
     g_override_set = true;
 }
@@ -148,9 +142,9 @@ pub fn clearOverride() void {
 /// The C compares keys with `memcmp` over all eight bytes, which its own
 /// `static_assert(sizeof(fa_vec_key_t) == 8)` exists to license. The key
 /// has no padding, so one `u64` comparison is the same test.
-fn findCfg(k: Key) ?Cfg {
+fn findCfg(k: ggml.metal.tuning_table.Key) ?ggml.metal.tuning_table.Cfg {
     const want: u64 = @bitCast(std.mem.toBytes(k));
-    for (table.fa_vec_tuned_table) |entry| {
+    for (ggml.metal.tuning_table.fa_vec_tuned_table) |entry| {
         if (@as(u64, @bitCast(std.mem.toBytes(entry.key))) == want) return entry.cfg;
     }
     return null;
@@ -178,7 +172,7 @@ pub fn pick(
     dv: c_int,
     ne11: i64,
     ne01: i64,
-) Cfg {
+) ggml.metal.tuning_table.Cfg {
     if (g_override_set) return g_override_cfg;
 
     const baseline = baselineCfg(dk, dv);
@@ -189,7 +183,7 @@ pub fn pick(
 
     const ne01_b = ne01Bucket(ne01);
 
-    var k: Key = .{
+    var k: ggml.metal.tuning_table.Key = .{
         .family = @truncate(gpu_family),
         .dtype = @truncate(dtype),
         .dk = @truncate(dk),
@@ -224,7 +218,7 @@ fn abiNe01Bucket(ne01: i64) callconv(.c) c_int {
 fn abiBaselineNe(dk: c_int, dv: c_int) callconv(.c) c_int {
     return baselineNe(dk, dv);
 }
-fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) Cfg {
+fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) ggml.metal.tuning_table.Cfg {
     return baselineCfg(dk, dv);
 }
 
@@ -233,7 +227,7 @@ fn abiBaselineCfg(dk: c_int, dv: c_int) callconv(.c) Cfg {
 /// `u16` instead; the caller is unchanged, since that is what the register
 /// holds either way.
 fn abiSetOverride(bits: u16) callconv(.c) void {
-    setOverride(std.mem.bytesToValue(Cfg, std.mem.asBytes(&bits)));
+    setOverride(std.mem.bytesToValue(ggml.metal.tuning_table.Cfg, std.mem.asBytes(&bits)));
 }
 fn abiClearOverride() callconv(.c) void {
     clearOverride();
@@ -245,7 +239,7 @@ fn abiPick(
     dv: c_int,
     ne11: i64,
     ne01: i64,
-) callconv(.c) Cfg {
+) callconv(.c) ggml.metal.tuning_table.Cfg {
     return pick(gpu_family, dtype, dk, dv, ne11, ne01);
 }
 
@@ -270,13 +264,13 @@ test "the key is eight bytes with no padding, which the lookup depends on" {
     // The C's own `static_assert(sizeof(fa_vec_key_t) == 8, "must be
     // tightly packed for memcmp")`. `findCfg` compares one `u64`, which is
     // only the same test while that holds.
-    try std.testing.expectEqual(@as(usize, 8), @sizeOf(Key));
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(Key, "family"));
-    try std.testing.expectEqual(@as(usize, 1), @offsetOf(Key, "dtype"));
-    try std.testing.expectEqual(@as(usize, 2), @offsetOf(Key, "dk"));
-    try std.testing.expectEqual(@as(usize, 4), @offsetOf(Key, "dv"));
-    try std.testing.expectEqual(@as(usize, 6), @offsetOf(Key, "ne11_b"));
-    try std.testing.expectEqual(@as(usize, 7), @offsetOf(Key, "ne01_b"));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(ggml.metal.tuning_table.Key));
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(ggml.metal.tuning_table.Key, "family"));
+    try std.testing.expectEqual(@as(usize, 1), @offsetOf(ggml.metal.tuning_table.Key, "dtype"));
+    try std.testing.expectEqual(@as(usize, 2), @offsetOf(ggml.metal.tuning_table.Key, "dk"));
+    try std.testing.expectEqual(@as(usize, 4), @offsetOf(ggml.metal.tuning_table.Key, "dv"));
+    try std.testing.expectEqual(@as(usize, 6), @offsetOf(ggml.metal.tuning_table.Key, "ne11_b"));
+    try std.testing.expectEqual(@as(usize, 7), @offsetOf(ggml.metal.tuning_table.Key, "ne01_b"));
 }
 
 test "the bucket edges are half-open on the low side" {
@@ -291,25 +285,25 @@ test "the bucket edges are half-open on the low side" {
 
 test "a short KV always takes the baseline, whatever the table says" {
     // ne11 < FA_VEC_NE11_BUCKETS[0] short-circuits before any lookup.
-    const got = pick(9, c.GGML_TYPE_F16, 128, 128, 512, 1);
+    const got = pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 512, 1);
     try std.testing.expectEqual(baselineCfg(128, 128), got);
 }
 
 test "the override wins over everything, and clearing restores the table" {
     defer abiClearOverride();
-    const before = pick(9, c.GGML_TYPE_F16, 128, 128, 8192, 1);
+    const before = pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1);
 
-    const forced: Cfg = .{ .Q = 7, .NE = 3 };
+    const forced: ggml.metal.tuning_table.Cfg = .{ .Q = 7, .NE = 3 };
     abiSetOverride(@bitCast(std.mem.toBytes(forced)));
-    try std.testing.expectEqual(forced, pick(9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(forced, pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
 
     abiClearOverride();
-    try std.testing.expectEqual(before, pick(9, c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(before, pick(9, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }
 
 test "an untuned family gets the baseline" {
     // Family 0 means unknown; family 6 predates the table. Neither has a
     // row, and there is no fallback to a representative.
-    try std.testing.expectEqual(baselineCfg(128, 128), pick(0, c.GGML_TYPE_F16, 128, 128, 8192, 1));
-    try std.testing.expectEqual(baselineCfg(128, 128), pick(6, c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(baselineCfg(128, 128), pick(0, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
+    try std.testing.expectEqual(baselineCfg(128, 128), pick(6, ggml.impl.c.GGML_TYPE_F16, 128, 128, 8192, 1));
 }

@@ -36,6 +36,8 @@ pub const legacy = @import("legacy.zig");
 pub const golden = @import("golden.zig");
 pub const testing = @import("testing.zig");
 
+pub const iq_test = @import("iq_test.zig");
+
 comptime {
     // Ported translation units export C symbols nothing in Zig references, so
     // they need forcing into the compilation.
@@ -57,18 +59,18 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("blocks.zig");
-    _ = @import("helpers.zig");
-    _ = @import("k.zig");
-    _ = @import("ternary.zig");
-    _ = @import("iq_dequant.zig");
-    _ = @import("iq4.zig");
-    _ = @import("chunks.zig");
-    _ = @import("codebook.zig");
-    _ = @import("validate.zig");
-    _ = @import("iq1.zig");
-    _ = @import("iq_test.zig");
-    _ = @import("iq2.zig");
-    _ = @import("iq3.zig");
-    _ = @import("legacy.zig");
+    _ = blocks;
+    _ = helpers;
+    _ = k;
+    _ = ternary;
+    _ = iq_dequant;
+    _ = iq4;
+    _ = chunks;
+    _ = codebook;
+    _ = validate;
+    _ = iq1;
+    _ = iq_test;
+    _ = iq2;
+    _ = iq3;
+    _ = legacy;
 }

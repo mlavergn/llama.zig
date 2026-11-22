@@ -24,19 +24,8 @@
 //! `scripts/libcxx-diff`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
+const llama = @import("../module.zig");
 const stdlib = @import("stdlib");
-const builtin = @import("builtin");
-const impl = @import("../impl.zig");
-const libcxx = @import("stdlib").libcxx;
-
-const c = impl.c;
-
-pub const TokenData = c.llama_token_data;
-pub const TokenDataArray = c.llama_token_data_array;
-pub const Sampler = c.struct_llama_sampler;
-pub const SamplerI = c.struct_llama_sampler_i;
-pub const Token = c.llama_token;
 
 /// The C++ file every citation and assertion in this directory names.
 pub const src = "llama-sampler.cpp";
@@ -48,7 +37,7 @@ pub const src = "llama-sampler.cpp";
 /// - `smpl`: the sampler.
 ///
 /// Return: the context, borrowed for the sampler's lifetime.
-pub inline fn ctxOf(comptime T: type, smpl: [*c]const Sampler) *T {
+pub inline fn ctxOf(comptime T: type, smpl: [*c]const llama.impl.c.struct_llama_sampler) *T {
     return @ptrCast(@alignCast(smpl.*.ctx.?));
 }
 
@@ -60,7 +49,7 @@ pub inline fn ctxOf(comptime T: type, smpl: [*c]const Sampler) *T {
 /// Return: the heap copy, freed with `destroy`. Allocation failure aborts,
 /// as an uncaught `std::bad_alloc` would.
 pub fn create(comptime T: type, value: T) *T {
-    const p = impl.allocator.create(T) catch impl.abort(src, 0, "out of memory");
+    const p = std.heap.c_allocator.create(T) catch llama.impl.abort(src, 0, "out of memory");
     p.* = value;
     return p;
 }
@@ -72,7 +61,7 @@ pub fn create(comptime T: type, value: T) *T {
 ///
 /// Return: nothing.
 pub fn destroy(comptime T: type, p: *T) void {
-    impl.allocator.destroy(p);
+    std.heap.c_allocator.destroy(p);
 }
 
 /// The candidate array's live elements as a slice.
@@ -81,7 +70,7 @@ pub fn destroy(comptime T: type, p: *T) void {
 /// - `cur_p`: the array.
 ///
 /// Return: a slice over `data[0..size]`, borrowed from the array.
-pub inline fn items(cur_p: *const TokenDataArray) []TokenData {
+pub inline fn items(cur_p: *const llama.impl.c.llama_token_data_array) []llama.impl.c.llama_token_data {
     if (cur_p.size == 0) return &.{};
     return cur_p.data[0..cur_p.size];
 }
@@ -129,7 +118,7 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// Return: an empty buffer owning `cap` slots, value-initialised.
         pub fn init(cap: usize) Self {
-            const d = impl.allocator.alloc(T, cap) catch impl.abort(src, 26, "out of memory");
+            const d = std.heap.c_allocator.alloc(T, cap) catch llama.impl.abort(src, 26, "out of memory");
             @memset(d, std.mem.zeroes(T));
             return .{ .capacity = cap, .data = d };
         }
@@ -138,7 +127,7 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// Return: nothing.
         pub fn deinit(self: *Self) void {
-            impl.allocator.free(self.data);
+            std.heap.c_allocator.free(self.data);
             self.* = .{};
         }
 
@@ -151,8 +140,8 @@ pub fn RingBuffer(comptime T: type) type {
         /// Return: nothing.
         pub fn assign(self: *Self, other: *const Self) void {
             if (self.data.len != other.data.len) {
-                impl.allocator.free(self.data);
-                self.data = impl.allocator.alloc(T, other.data.len) catch impl.abort(src, 25, "out of memory");
+                std.heap.c_allocator.free(self.data);
+                self.data = std.heap.c_allocator.alloc(T, other.data.len) catch llama.impl.abort(src, 25, "out of memory");
             }
             @memcpy(self.data, other.data);
             self.capacity = other.capacity;
@@ -165,7 +154,7 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// Return: the oldest element.
         pub fn front(self: *const Self) T {
-            if (self.sz == 0) impl.throwRuntime(src, 30, "ring buffer is empty");
+            if (self.sz == 0) llama.impl.throwRuntime(src, 30, "ring buffer is empty");
             return self.data[self.first];
         }
 
@@ -176,7 +165,7 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// Return: nothing.
         pub fn pushBack(self: *Self, value: T) void {
-            if (self.capacity == 0) impl.throwRuntime(src, 58, "ring buffer: capacity is zero");
+            if (self.capacity == 0) llama.impl.throwRuntime(src, 58, "ring buffer: capacity is zero");
             if (self.sz == self.capacity) {
                 self.first = (self.first + 1) % self.capacity;
             } else {
@@ -194,7 +183,7 @@ pub fn RingBuffer(comptime T: type) type {
         ///
         /// Return: the element.
         pub fn rat(self: *const Self, i: usize) T {
-            if (i >= self.sz) impl.throwRuntime(src, 97, "ring buffer: index out of bounds");
+            if (i >= self.sz) llama.impl.throwRuntime(src, 97, "ring buffer: index out of bounds");
             return self.data[(self.first + self.sz - i - 1) % self.capacity];
         }
 
@@ -219,7 +208,7 @@ pub fn RingBuffer(comptime T: type) type {
 // -----------------------------------------------------------------------------
 // Sorting and normalisation
 
-fn greaterLogit(_: void, a: TokenData, b: TokenData) bool {
+fn greaterLogit(_: void, a: llama.impl.c.llama_token_data, b: llama.impl.c.llama_token_data) bool {
     return a.logit > b.logit;
 }
 
@@ -240,7 +229,7 @@ fn greaterLogit(_: void, a: TokenData, b: TokenData) bool {
 /// - `res`: overwritten with the kept candidates, best first.
 ///
 /// Return: nothing.
-pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.ArrayList(TokenData)) void {
+pub fn partialSortInto(cur: *const llama.impl.c.llama_token_data_array, npartial: c_int, res: *std.ArrayList(llama.impl.c.llama_token_data)) void {
     const nbuckets = 128;
     const bucket_low: f32 = -10.0;
     const bucket_high: f32 = 10.0;
@@ -248,14 +237,14 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
     const bucket_inter: f32 = -bucket_low * bucket_scale;
 
     const n: usize = cur.size;
-    const bucket_idx = impl.allocator.alloc(c_int, n) catch impl.abort(src, 146, "out of memory");
-    defer impl.allocator.free(bucket_idx);
+    const bucket_idx = std.heap.c_allocator.alloc(c_int, n) catch llama.impl.abort(src, 146, "out of memory");
+    defer std.heap.c_allocator.free(bucket_idx);
     var histo: [nbuckets]c_int = @splat(0);
 
     for (0..n) |i| {
         const val = cur.data[i].logit;
         var ib = cvtzs(@mulAdd(f32, val, bucket_scale, bucket_inter));
-        ib = libcxx.max(c_int, 0, libcxx.min(c_int, nbuckets - 1, ib));
+        ib = stdlib.libcxx.max(c_int, 0, stdlib.libcxx.min(c_int, nbuckets - 1, ib));
         bucket_idx[i] = ib;
         histo[@intCast(ib)] += 1;
     }
@@ -268,9 +257,9 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
     }
     // Every caller passes at most `cur.size`, so the loop always breaks; the
     // C++ would index `histo[-1]` otherwise.
-    impl.assert(ib >= 0, src, 163, "ib >= 0");
+    llama.impl.assert(ib >= 0, src, 163, "ib >= 0");
 
-    res.resize(impl.allocator, @intCast(nhave)) catch impl.abort(src, 168, "out of memory");
+    res.resize(std.heap.c_allocator, @intCast(nhave)) catch llama.impl.abort(src, 168, "out of memory");
     const out = res.items;
 
     var bucket_ptrs: [nbuckets]usize = undefined;
@@ -296,12 +285,12 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
     var j: c_int = nbuckets - 1;
     while (j > ib) : (j -= 1) {
         const h: usize = @intCast(histo[@intCast(j)]);
-        libcxx.sort(TokenData, out[ptr .. ptr + h], {}, greaterLogit);
+        stdlib.libcxx.sort(llama.impl.c.llama_token_data, out[ptr .. ptr + h], {}, greaterLogit);
         ptr += h;
         ndone += histo[@intCast(j)];
     }
     const last: usize = @intCast(histo[@intCast(ib)]);
-    libcxx.partialSort(TokenData, out[ptr .. ptr + last], @intCast(npartial - ndone), {}, greaterLogit);
+    stdlib.libcxx.partialSort(llama.impl.c.llama_token_data, out[ptr .. ptr + last], @intCast(npartial - ndone), {}, greaterLogit);
 }
 
 /// Ports `llama_token_data_array_partial_sort_inplace` (llama-sampler.cpp:194 @b1b770d90).
@@ -313,16 +302,16 @@ pub fn partialSortInto(cur: *const TokenDataArray, npartial: c_int, res: *std.Ar
 /// - `npartial`: how many to keep; at most `cur_p.size`.
 ///
 /// Return: nothing.
-pub fn partialSortInplace(cur_p: *TokenDataArray, npartial: c_int) void {
+pub fn partialSortInplace(cur_p: *llama.impl.c.llama_token_data_array, npartial: c_int) void {
     if (npartial <= 128) {
-        libcxx.partialSort(TokenData, items(cur_p), @intCast(npartial), {}, greaterLogit);
+        stdlib.libcxx.partialSort(llama.impl.c.llama_token_data, items(cur_p), @intCast(npartial), {}, greaterLogit);
         cur_p.size = @intCast(npartial);
         cur_p.sorted = true;
         return;
     }
 
-    var tmp: std.ArrayList(TokenData) = .empty;
-    defer tmp.deinit(impl.allocator);
+    var tmp: std.ArrayList(llama.impl.c.llama_token_data) = .empty;
+    defer tmp.deinit(std.heap.c_allocator);
 
     partialSortInto(cur_p, npartial, &tmp);
 
@@ -335,7 +324,7 @@ pub fn partialSortInplace(cur_p: *TokenDataArray, npartial: c_int) void {
 /// The `p` fields of a candidate array, as libc++'s `discrete_distribution`
 /// reads them through `probs_iterator`.
 const ProbWeights = struct {
-    data: [*c]const TokenData,
+    data: [*c]const llama.impl.c.llama_token_data,
     len: usize,
 
     pub fn get(self: ProbWeights, i: usize) f64 {
@@ -353,9 +342,9 @@ const ProbWeights = struct {
 /// - `rng`: the engine; advanced twice.
 ///
 /// Return: the drawn index.
-pub fn sampleDist(cur_p: *const TokenDataArray, rng: *libcxx.Mt19937) c_int {
+pub fn sampleDist(cur_p: *const llama.impl.c.llama_token_data_array, rng: *stdlib.libcxx.Mt19937) c_int {
     const w: ProbWeights = .{ .data = cur_p.data, .len = cur_p.size };
-    const idx = libcxx.discreteDraw(impl.allocator, w, rng) catch impl.abort(src, 244, "out of memory");
+    const idx = stdlib.libcxx.discreteDraw(std.heap.c_allocator, w, rng) catch llama.impl.abort(src, 244, "out of memory");
     return @intCast(idx);
 }
 
@@ -369,7 +358,7 @@ pub fn sampleDist(cur_p: *const TokenDataArray, rng: *libcxx.Mt19937) c_int {
 /// - `temp`: the temperature.
 ///
 /// Return: nothing.
-pub fn tempImpl(cur_p: *TokenDataArray, temp: f32) void {
+pub fn tempImpl(cur_p: *llama.impl.c.llama_token_data_array, temp: f32) void {
     if (cur_p.size == 0) return;
 
     if (temp <= 0.0) {
@@ -398,8 +387,8 @@ pub fn tempImpl(cur_p: *TokenDataArray, temp: f32) void {
 /// - `do_sort`: sort descending first, when not already sorted.
 ///
 /// Return: nothing.
-pub fn softmaxImpl(cur_p: *TokenDataArray, do_sort: bool) void {
-    impl.assert(cur_p.size > 0, src, 295, "cur_p->size > 0");
+pub fn softmaxImpl(cur_p: *llama.impl.c.llama_token_data_array, do_sort: bool) void {
+    llama.impl.assert(cur_p.size > 0, src, 295, "cur_p->size > 0");
 
     if (do_sort and !cur_p.sorted) {
         partialSortInplace(cur_p, @intCast(cur_p.size));
@@ -407,12 +396,12 @@ pub fn softmaxImpl(cur_p: *TokenDataArray, do_sort: bool) void {
 
     var max_l = cur_p.data[0].logit;
     if (!cur_p.sorted) {
-        for (1..cur_p.size) |i| max_l = libcxx.max(f32, max_l, cur_p.data[i].logit);
+        for (1..cur_p.size) |i| max_l = stdlib.libcxx.max(f32, max_l, cur_p.data[i].logit);
     }
 
     var cum_sum: f32 = 0.0;
     for (items(cur_p)) |*d| {
-        const p = libm.expf(d.logit - max_l);
+        const p = stdlib.libm.expf(d.logit - max_l);
         d.p = p;
         cum_sum += p;
     }
@@ -428,10 +417,10 @@ pub fn softmaxImpl(cur_p: *TokenDataArray, do_sort: bool) void {
 ///   `k <= 0`.
 ///
 /// Return: nothing.
-pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
+pub fn topKImpl(cur_p: *llama.impl.c.llama_token_data_array, k_in: i32) void {
     if (k_in <= 0) return;
 
-    const k = libcxx.min(c_int, k_in, @intCast(cur_p.size));
+    const k = stdlib.libcxx.min(c_int, k_in, @intCast(cur_p.size));
 
     if (!cur_p.sorted) {
         partialSortInplace(cur_p, k);
@@ -461,11 +450,11 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 ///
 /// Return: `seed`, or a random one for `LLAMA_DEFAULT_SEED`.
 pub fn getRngSeed(seed: u32) u32 {
-    if (seed == c.LLAMA_DEFAULT_SEED) {
+    if (seed == llama.impl.c.LLAMA_DEFAULT_SEED) {
         // use system clock if std::random_device is not a true RNG
         if (randomDeviceIsPrng()) return @truncate(@as(u64, @bitCast(systemClockCount())));
 
-        var rd = libcxx.RandomDevice.open() catch |e| rdFail(e);
+        var rd = stdlib.libcxx.RandomDevice.open() catch |e| rdFail(e);
         defer rd.close();
         return rd.next() catch |e| rdFail(e);
     }
@@ -485,7 +474,7 @@ fn randomDeviceIsPrng() bool {
         2 => return true,
         else => {},
     }
-    var rd = libcxx.RandomDevice.open() catch |e| rdFail(e);
+    var rd = stdlib.libcxx.RandomDevice.open() catch |e| rdFail(e);
     defer rd.close();
     const is_prng = rd.entropy() == 0;
     rd_prng_state.store(if (is_prng) 2 else 1, .release);
@@ -495,8 +484,8 @@ fn randomDeviceIsPrng() bool {
 /// A `std::system_error` from the device: nothing in `get_rng_seed`'s callers
 /// catches it, so it terminates -- here, through `ggml_abort` with libc++'s
 /// message.
-fn rdFail(err: libcxx.RandomDevice.Error) noreturn {
-    c.ggml_abort("llama-sampler.cpp", 341, "terminating due to uncaught exception of type std::system_error: %s: %s", libcxx.RandomDevice.what(err).ptr, stdlib.errno.strerror(std.c._errno().*));
+fn rdFail(err: stdlib.libcxx.RandomDevice.Error) noreturn {
+    llama.impl.c.ggml_abort("llama-sampler.cpp", 341, "terminating due to uncaught exception of type std::system_error: %s: %s", stdlib.libcxx.RandomDevice.what(err).ptr, stdlib.errno.strerror(std.c._errno().*));
 }
 
 /// `std::chrono::system_clock::now().time_since_epoch().count()` in libc++
@@ -520,14 +509,14 @@ fn systemClockCount() i64 {
 /// - `ctx`: the sampler's state; owned by the sampler.
 ///
 /// Return: the sampler, freed with `llama_sampler_free`.
-pub export fn llama_sampler_init(iface: [*c]SamplerI, ctx: c.llama_sampler_context_t) callconv(.c) [*c]Sampler {
-    return create(Sampler, .{ .iface = iface, .ctx = ctx });
+pub export fn llama_sampler_init(iface: [*c]llama.impl.c.struct_llama_sampler_i, ctx: llama.impl.c.llama_sampler_context_t) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return create(llama.impl.c.struct_llama_sampler, .{ .iface = iface, .ctx = ctx });
 }
 
 /// Ports `llama_sampler_name` (llama-sampler.cpp:365 @b1b770d90).
 ///
 /// Return: the sampler's name, borrowed from the sampler.
-pub export fn llama_sampler_name(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+pub export fn llama_sampler_name(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     if (smpl.*.iface == null) {
         return "(null)";
     }
@@ -537,7 +526,7 @@ pub export fn llama_sampler_name(smpl: [*c]const Sampler) callconv(.c) [*c]const
 /// Ports `llama_sampler_accept` (llama-sampler.cpp:373 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_sampler_accept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
+pub export fn llama_sampler_accept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
     if (smpl == null) return;
 
     if (smpl.*.iface.*.accept) |f| f(smpl, token);
@@ -546,17 +535,17 @@ pub export fn llama_sampler_accept(smpl: [*c]Sampler, token: Token) callconv(.c)
 /// Ports `llama_sampler_apply` (llama-sampler.cpp:383 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_sampler_apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
+pub export fn llama_sampler_apply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
     if (smpl == null) return;
 
-    impl.assert(smpl.*.iface.*.apply != null, src, 388, "smpl->iface->apply");
+    llama.impl.assert(smpl.*.iface.*.apply != null, src, 388, "smpl->iface->apply");
     smpl.*.iface.*.apply.?(smpl, cur_p);
 }
 
 /// Ports `llama_sampler_reset` (llama-sampler.cpp:392 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_sampler_reset(smpl: [*c]Sampler) callconv(.c) void {
+pub export fn llama_sampler_reset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     if (smpl == null) return;
 
     if (smpl.*.iface.*.reset) |f| f(smpl);
@@ -565,7 +554,7 @@ pub export fn llama_sampler_reset(smpl: [*c]Sampler) callconv(.c) void {
 /// Ports `llama_sampler_clone` (llama-sampler.cpp:402 @b1b770d90).
 ///
 /// Return: a new sampler with the same state, or null for a null input.
-pub export fn llama_sampler_clone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
+pub export fn llama_sampler_clone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     if (smpl == null) return null;
 
     if (smpl.*.iface.*.clone) |f| return f(smpl);
@@ -574,18 +563,18 @@ pub export fn llama_sampler_clone(smpl: [*c]const Sampler) callconv(.c) [*c]Samp
         return llama_sampler_init(smpl.*.iface, null);
     }
 
-    impl.abort(src, 418, "the sampler does not support cloning");
+    llama.impl.abort(src, 418, "the sampler does not support cloning");
 }
 
 /// Ports `llama_sampler_free` (llama-sampler.cpp:421 @b1b770d90).
 ///
 /// Return: nothing.
-pub export fn llama_sampler_free(smpl: [*c]Sampler) callconv(.c) void {
+pub export fn llama_sampler_free(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     if (smpl == null) return;
 
     if (smpl.*.iface.*.free) |f| f(smpl);
 
-    destroy(Sampler, smpl);
+    destroy(llama.impl.c.struct_llama_sampler, smpl);
 }
 
 // -----------------------------------------------------------------------------
@@ -601,39 +590,39 @@ const Empty = struct {
 };
 
 /// Ports `llama_sampler_empty_name` (llama-sampler.cpp:441 @b1b770d90).
-fn emptyName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn emptyName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     return ctxOf(Empty, smpl).name;
 }
 
 /// Ports `llama_sampler_empty_accept` (llama-sampler.cpp:446 @b1b770d90).
-fn emptyAccept(smpl: [*c]Sampler, token: Token) callconv(.c) void {
+fn emptyAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, token: llama.impl.c.llama_token) callconv(.c) void {
     _ = smpl;
     _ = token;
 }
 
 /// Ports `llama_sampler_empty_apply` (llama-sampler.cpp:451 @b1b770d90).
-fn emptyApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
+fn emptyApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
     _ = smpl;
     _ = cur_p;
 }
 
 /// Ports `llama_sampler_empty_reset` (llama-sampler.cpp:456 @b1b770d90).
-fn emptyReset(smpl: [*c]Sampler) callconv(.c) void {
+fn emptyReset(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     _ = smpl;
 }
 
 /// Ports `llama_sampler_empty_clone` (llama-sampler.cpp:460 @b1b770d90).
-fn emptyClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
+fn emptyClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
     return initEmpty(ctxOf(Empty, smpl).name);
 }
 
 /// Ports `llama_sampler_empty_free` (llama-sampler.cpp:465 @b1b770d90).
-fn emptyFree(smpl: [*c]Sampler) callconv(.c) void {
+fn emptyFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     destroy(Empty, ctxOf(Empty, smpl));
 }
 
 /// Ports `llama_sampler_empty_backend_init` (llama-sampler.cpp:469 @b1b770d90).
-fn emptyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
+fn emptyBackendInit(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t, n_outputs_max_per_seq: u32) callconv(.c) bool {
     _ = smpl;
     _ = buft;
     _ = n_outputs_max_per_seq;
@@ -641,7 +630,7 @@ fn emptyBackendInit(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t, n_out
 }
 
 /// Ports `llama_sampler_empty_backend_accept` (llama-sampler.cpp:480 @b1b770d90).
-fn emptyBackendAccept(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, selected: [*c]c.struct_ggml_tensor) callconv(.c) void {
+fn emptyBackendAccept(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, selected: [*c]llama.impl.c.struct_ggml_tensor) callconv(.c) void {
     _ = smpl;
     _ = ctx;
     _ = gf;
@@ -649,7 +638,7 @@ fn emptyBackendAccept(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.s
 }
 
 /// Ports `llama_sampler_empty_backend_apply` (llama-sampler.cpp:491 @b1b770d90).
-fn emptyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.struct_ggml_cgraph, data: [*c]c.struct_llama_sampler_data) callconv(.c) void {
+fn emptyBackendApply(smpl: [*c]llama.impl.c.struct_llama_sampler, ctx: ?*llama.impl.c.struct_ggml_context, gf: ?*llama.impl.c.struct_ggml_cgraph, data: [*c]llama.impl.c.struct_llama_sampler_data) callconv(.c) void {
     _ = smpl;
     _ = ctx;
     _ = gf;
@@ -657,12 +646,12 @@ fn emptyBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.st
 }
 
 /// Ports `llama_sampler_empty_backend_set_input` (llama-sampler.cpp:502 @b1b770d90).
-fn emptyBackendSetInput(smpl: [*c]Sampler) callconv(.c) void {
+fn emptyBackendSetInput(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
     _ = smpl;
 }
 
 /// Ports `llama_sampler_empty_i` (llama-sampler.cpp:506 @b1b770d90).
-var empty_iface: SamplerI = .{
+var empty_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = emptyName,
     .accept = emptyAccept,
     .apply = emptyApply,
@@ -683,7 +672,7 @@ var empty_iface: SamplerI = .{
 /// - `name`: the placeholder's name; borrowed, usually a literal.
 ///
 /// Return: the sampler.
-pub fn initEmpty(name: [*c]const u8) [*c]Sampler {
+pub fn initEmpty(name: [*c]const u8) [*c]llama.impl.c.struct_llama_sampler {
     return llama_sampler_init(&empty_iface, create(Empty, .{ .name = name }));
 }
 
@@ -730,7 +719,7 @@ pub const Backend = struct {
     ///
     /// Return: nothing.
     pub fn initBackend(self: *Backend, support: bool) void {
-        impl.assert(self.is_init == false, src, 553, "this->is_init == false");
+        llama.impl.assert(self.is_init == false, src, 553, "this->is_init == false");
         self.is_init = true;
         self.support = support;
     }
@@ -738,14 +727,14 @@ pub const Backend = struct {
 
 /// The graph `llama_sampler_backend_probe_graph` builds.
 pub const Probe = struct {
-    ctx: ?*c.struct_ggml_context,
-    gf: ?*c.struct_ggml_cgraph,
+    ctx: ?*llama.impl.c.struct_ggml_context,
+    gf: ?*llama.impl.c.struct_ggml_cgraph,
 
     /// Frees the probe's context, as `ggml_context_ptr`'s destructor does.
     ///
     /// Return: nothing.
     pub fn deinit(self: Probe) void {
-        c.ggml_free(self.ctx);
+        llama.impl.c.ggml_free(self.ctx);
     }
 };
 
@@ -761,29 +750,29 @@ pub const Probe = struct {
 /// - `with_candidates`: whether to supply a candidate-id tensor too.
 ///
 /// Return: the probe; free with `deinit`.
-pub fn probeGraph(sampler: [*c]Sampler, n_candidates: i64, max_nodes: u32, with_candidates: bool) Probe {
-    const params: c.struct_ggml_init_params = .{
-        .mem_size = @as(usize, max_nodes) * c.ggml_tensor_overhead() + c.ggml_graph_overhead_custom(max_nodes, false),
+pub fn probeGraph(sampler: [*c]llama.impl.c.struct_llama_sampler, n_candidates: i64, max_nodes: u32, with_candidates: bool) Probe {
+    const params: llama.impl.c.struct_ggml_init_params = .{
+        .mem_size = @as(usize, max_nodes) * llama.impl.c.ggml_tensor_overhead() + llama.impl.c.ggml_graph_overhead_custom(max_nodes, false),
         .mem_buffer = null,
         .no_alloc = true,
     };
 
-    const ctx = c.ggml_init(params) orelse impl.throwRuntime(src, 596, "failed to create ggml context");
+    const ctx = llama.impl.c.ggml_init(params) orelse llama.impl.throwRuntime(src, 596, "failed to create ggml context");
 
-    const gf = c.ggml_new_graph_custom(ctx, max_nodes, false);
+    const gf = llama.impl.c.ggml_new_graph_custom(ctx, max_nodes, false);
 
-    var data: c.struct_llama_sampler_data = .{
-        .logits = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_F32, n_candidates),
+    var data: llama.impl.c.struct_llama_sampler_data = .{
+        .logits = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_F32, n_candidates),
         .probs = null,
         .sampled = null,
-        .candidates = if (with_candidates) c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, n_candidates) else null,
+        .candidates = if (with_candidates) llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, n_candidates) else null,
     };
 
     if (sampler.*.iface.*.backend_reset) |f| f(sampler);
     sampler.*.iface.*.backend_apply.?(sampler, ctx, gf, &data);
 
-    for ([_][*c]c.struct_ggml_tensor{ data.logits, data.probs, data.sampled, data.candidates }) |output| {
-        if (output != null) c.ggml_build_forward_expand(gf, output);
+    for ([_][*c]llama.impl.c.struct_ggml_tensor{ data.logits, data.probs, data.sampled, data.candidates }) |output| {
+        if (output != null) llama.impl.c.ggml_build_forward_expand(gf, output);
     }
 
     if (sampler.*.iface.*.backend_reset) |f| f(sampler);
@@ -799,11 +788,11 @@ pub fn probeGraph(sampler: [*c]Sampler, n_candidates: i64, max_nodes: u32, with_
 /// Return: the larger of its node count and its tensor count.
 pub fn probeNNodes(probe: Probe) u32 {
     var n_tensors: u32 = 0;
-    var tensor = c.ggml_get_first_tensor(probe.ctx);
-    while (tensor != null) : (tensor = c.ggml_get_next_tensor(probe.ctx, tensor)) {
+    var tensor = llama.impl.c.ggml_get_first_tensor(probe.ctx);
+    while (tensor != null) : (tensor = llama.impl.c.ggml_get_next_tensor(probe.ctx, tensor)) {
         n_tensors += 1;
     }
-    return libcxx.max(u32, @intCast(c.ggml_graph_n_nodes(probe.gf)), n_tensors);
+    return stdlib.libcxx.max(u32, @intCast(llama.impl.c.ggml_graph_n_nodes(probe.gf)), n_tensors);
 }
 
 /// Ports `llama_sampler_backend_support` (llama-sampler.cpp:639 @b1b770d90).
@@ -814,22 +803,22 @@ pub fn probeNNodes(probe: Probe) u32 {
 ///
 /// Return: whether the device supports every op in the sampler's graph; the
 /// CPU, which has no device here, always does.
-pub fn backendSupport(smpl: [*c]Sampler, buft: c.ggml_backend_buffer_type_t) bool {
-    const device = c.ggml_backend_buft_get_device(buft);
+pub fn backendSupport(smpl: [*c]llama.impl.c.struct_llama_sampler, buft: llama.impl.c.ggml_backend_buffer_type_t) bool {
+    const device = llama.impl.c.ggml_backend_buft_get_device(buft);
     if (device == null) {
         return true;
     }
 
-    const probe = probeGraph(smpl, 128 * 1024, c.GGML_DEFAULT_GRAPH_SIZE, true);
+    const probe = probeGraph(smpl, 128 * 1024, llama.impl.c.GGML_DEFAULT_GRAPH_SIZE, true);
     defer probe.deinit();
 
     var i: c_int = 0;
-    while (i < c.ggml_graph_n_nodes(probe.gf)) : (i += 1) {
-        const op = c.ggml_graph_node(probe.gf, i);
+    while (i < llama.impl.c.ggml_graph_n_nodes(probe.gf)) : (i += 1) {
+        const op = llama.impl.c.ggml_graph_node(probe.gf, i);
 
-        if (!c.ggml_backend_dev_supports_op(device, op)) {
-            impl.logWarn("%s: device '%s' does not have support for op %s needed for sampler '%s'\n", .{
-                "llama_sampler_backend_support", c.ggml_backend_dev_name(device), c.ggml_op_name(op.*.op), smpl.*.iface.*.name.?(smpl),
+        if (!llama.impl.c.ggml_backend_dev_supports_op(device, op)) {
+            llama.impl.logWarn("%s: device '%s' does not have support for op %s needed for sampler '%s'\n", .{
+                "llama_sampler_backend_support", llama.impl.c.ggml_backend_dev_name(device), llama.impl.c.ggml_op_name(op.*.op), smpl.*.iface.*.name.?(smpl),
             });
             return false;
         }

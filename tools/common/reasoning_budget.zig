@@ -21,17 +21,15 @@
 //! upstream builds a `common_trie` from `std::vector<uint32_t>`.
 
 const std = @import("std");
-const ggml = @import("ggml.zig");
+const mod = @import("module.zig");
+const cli_fit = @import("cli_fit");
 const c = @import("tools_h");
-const log = @import("log.zig");
-const common = @import("common.zig");
-const trie = @import("cli_fit").json.trie;
 
 const gpa = std.heap.c_allocator;
 
 /// What upstream's `new` does when it fails: `std::bad_alloc`, uncaught.
 fn oom() noreturn {
-    ggml.oom("reasoning-budget.cpp");
+    mod.ggml.oom("reasoning-budget.cpp");
 }
 
 /// Ports `common_reasoning_budget_state` (reasoning-budget.h:10 @b1b770d90).
@@ -45,7 +43,7 @@ pub const State = enum(c_int) {
 
 /// `COM_TRC`: `LOG_TRC` with the calling function's name, as `cmn  %12.*s: `.
 fn comTrc(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.trc("cmn  %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.trc("cmn  %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 
 /// Ports `common_utf8_is_complete` (common/unicode.cpp:77 @b1b770d90): whether `s`
@@ -67,7 +65,7 @@ pub fn utf8IsComplete(s: []const u8) bool {
 /// trie already built: failure links in breadth-first order, the longest
 /// pattern ending at each state, the alphabet. `cli/json/trie.zig`'s
 /// `AhoCorasick.init` takes strings; the matchers here insert token ids.
-fn ahoFromTrie(t: trie.Trie) !trie.AhoCorasick {
+fn ahoFromTrie(t: cli_fit.json.trie.Trie) !cli_fit.json.trie.AhoCorasick {
     const nodes = t.nodes.items;
     const n = nodes.len;
 
@@ -115,7 +113,7 @@ fn ahoFromTrie(t: trie.Trie) !trie.AhoCorasick {
     return .{ .t = t, .fail = fail, .order = try order.toOwnedSlice(gpa), .match = match, .alphabet = try alphabet.toOwnedSlice(gpa) };
 }
 
-fn findChild(node: trie.Trie.Node, cpt: u32) ?usize {
+fn findChild(node: cli_fit.json.trie.Trie.Node, cpt: u32) ?usize {
     for (node.children.items) |e| {
         if (e.cpt == cpt) return e.child;
     }
@@ -126,14 +124,14 @@ fn findChild(node: trie.Trie.Node, cpt: u32) ?usize {
 /// sequence at once, through one automaton.
 const TokenMatcher = struct {
     seqs: [][]c.llama_token,
-    ac: trie.AhoCorasick,
+    ac: cli_fit.json.trie.AhoCorasick,
     state: usize = 0,
 
     /// Ports `token_matcher` (reasoning-budget.cpp:19 @b1b770d90), the
     /// constructor: `collect` then `build_trie`.
     fn init(seqs_in: []const []const c.llama_token) !TokenMatcher {
         const seqs = try collect(seqs_in);
-        var t = try trie.Trie.init(gpa, &.{});
+        var t = try cli_fit.json.trie.Trie.init(gpa, &.{});
         for (seqs) |seq| {
             const syms = try gpa.alloc(u32, seq.len);
             defer gpa.free(syms);
@@ -245,7 +243,7 @@ fn accept(smpl: ?*c.llama_sampler, token: c.llama_token) callconv(.c) void {
 
             var utf8_complete = true;
             if (ctx.vocab != null) {
-                const piece = common.tokenToPiece(gpa, ctx.vocab, token, false) catch oom();
+                const piece = mod.common.tokenToPiece(gpa, ctx.vocab, token, false) catch oom();
                 defer gpa.free(piece[0 .. piece.len + 1]);
                 utf8_complete = utf8IsComplete(piece);
             }

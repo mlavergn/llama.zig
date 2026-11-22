@@ -8,7 +8,7 @@
 //! imports it; `harness_root.zig`, the harnesses' root, must not.
 
 const std = @import("std");
-const api = @import("api/module.zig");
+const mod = @import("module.zig");
 
 /// Entry points `api/` ports from `llama-ext.h`, which declares them with
 /// C++ linkage: they are no part of `llama.h`'s C contract, and the
@@ -42,8 +42,8 @@ fn isExtOnly(name: []const u8) bool {
 
 comptime {
     @setEvalBranchQuota(100_000);
-    for (@typeInfo(api).@"struct".decl_names) |file_name| {
-        const file = @field(api, file_name);
+    for (@typeInfo(mod.api).@"struct".decl_names) |file_name| {
+        const file = @field(mod.api, file_name);
         if (@TypeOf(file) != type) continue;
         for (@typeInfo(file).@"struct".decl_names) |name| {
             if (!std.mem.startsWith(u8, name, "llama_")) continue;

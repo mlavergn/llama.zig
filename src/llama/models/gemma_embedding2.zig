@@ -13,26 +13,16 @@
 //! `build_inp_per_layer`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_gemma_embedding2`'s `load_arch_hparams`
 /// (models/gemma-embedding2.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.symmetric);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.symmetric);
     try self.loadSwaPattern(ml, 6, false, exc);
 
     hp.causal_attn = false; // Embeddings do not use causal attention.
@@ -51,7 +41,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
 /// Ports `llama_model_gemma_embedding2`'s `load_arch_tensors`
 /// (models/gemma-embedding2.cpp:21 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -110,21 +100,21 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
 /// Ports `llama_model_gemma_embedding2`'s `build_arch_graph`
 /// (models/gemma-embedding2.cpp:75 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding2`'s `graph`
 /// (models/gemma-embedding2.cpp:79 @b1b770d90). `t_embd` is not expanded
 /// here: `build_pooling` expands what it reads.
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_tokens = b.n_tokens;
 
     // Important: do not normalize weights for raw embeddings input (i.e.
     // encoded image embeddings): `build_inp_embd` scales the token rows only.
-    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -158,13 +148,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, n_head_kv, n_tokens);
 
             Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
-            Vcur = c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
+            Vcur = llama.impl.c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
             b.cb(Qcur, "Qcur_normed", il);
             b.cb(Kcur, "Kcur_normed", il);
             b.cb(Vcur, "Vcur_normed", il);
@@ -178,14 +168,14 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const attn_out: *Tensor = c.ggml_add(ctx, cur, inpL);
+        const attn_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(attn_out, "attn_out", il);
 
         // The feed-forward network.
@@ -198,7 +188,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, attn_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, attn_out);
 
         // The per-layer embedding.
         {
@@ -206,24 +196,24 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "pe_in", il);
 
             cur = b.buildLoraMm(layer.per_layer_inp_gate.?, cur, null); // [n_embd_per_layer, n_tokens]
-            cur = c.ggml_gelu(ctx, cur);
+            cur = llama.impl.c.ggml_gelu(ctx, cur);
 
-            var inp_this_layer: *Tensor = c.ggml_view_2d(ctx, inp_per_layer, inp_per_layer.ne[0], inp_per_layer.ne[1], inp_per_layer.nb[1], @as(usize, @intCast(il)) * inp_per_layer.nb[2]);
+            var inp_this_layer: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, inp_per_layer, inp_per_layer.ne[0], inp_per_layer.ne[1], inp_per_layer.nb[1], @as(usize, @intCast(il)) * inp_per_layer.nb[2]);
 
             if (il == b.n_layer - 1) {
-                inp_this_layer = c.ggml_get_rows(ctx, inp_this_layer, inp_out_ids);
+                inp_this_layer = llama.impl.c.ggml_get_rows(ctx, inp_this_layer, inp_out_ids);
             }
 
-            cur = c.ggml_mul(ctx, cur, inp_this_layer);
+            cur = llama.impl.c.ggml_mul(ctx, cur, inp_this_layer);
             cur = b.buildLoraMm(layer.per_layer_proj.?, cur, null); // [n_embd, n_tokens]
             cur = b.buildNorm(cur, layer.per_layer_post_norm, null, .rms, il);
             b.cb(cur, "per_layer_embd_out", il);
 
-            cur = c.ggml_add(ctx, pe_in, cur);
+            cur = llama.impl.c.ggml_add(ctx, pe_in, cur);
         }
 
         // layer_scalar
-        cur = c.ggml_mul(ctx, cur, layer.out_scale);
+        cur = llama.impl.c.ggml_mul(ctx, cur, layer.out_scale);
         b.cb(cur, "out_scaled", il);
 
         cur = b.buildCvec(cur, il);
@@ -251,19 +241,19 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 /// - `inpL`: `[n_embd, n_tokens]`.
 ///
 /// Return: `[n_embd_per_layer, n_tokens, n_layer]`.
-fn buildInpPerLayer(model: *const Model, b: *const graph.Builder, inpL: *Tensor) *Tensor {
+fn buildInpPerLayer(model: *const llama.model.Model, b: *const llama.graph.Builder, inpL: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const n_embd_per_layer: i64 = b.hparams.n_embd_per_layer;
 
-    var cur: *Tensor = c.ggml_mul_mat(ctx, model.per_layer_model_proj, inpL); // [n_embd_per_layer * n_layer, n_tokens]
-    cur = c.ggml_scale(ctx, cur, 1.0 / libm.sqrtfInt(b.n_embd));
-    cur = c.ggml_reshape_3d(ctx, cur, n_embd_per_layer, b.n_layer, b.n_tokens);
+    var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, model.per_layer_model_proj, inpL); // [n_embd_per_layer * n_layer, n_tokens]
+    cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / stdlib.libm.sqrtfInt(b.n_embd));
+    cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_per_layer, b.n_layer, b.n_tokens);
 
     cur = b.buildNorm(cur, model.per_layer_proj_norm, null, .rms, -1);
     b.cb(cur, "inp_per_layer", -1);
 
     // Permute to [n_embd_per_layer, n_tokens, n_layer].
-    cur = c.ggml_cont(ctx, c.ggml_permute(ctx, cur, 0, 2, 1, 3));
+    cur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, cur, 0, 2, 1, 3));
     return cur;
 }
 

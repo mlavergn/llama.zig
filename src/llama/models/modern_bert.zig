@@ -19,18 +19,8 @@
 //! only this architecture calls.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `N_DECISION_TYPES` (models/modern-bert.cpp:4 @b1b770d90): the
 /// question types of a decision model -- choice, score and noul.
@@ -39,7 +29,7 @@ const n_decision_types: u32 = 3;
 /// Ports `LLM_FFN_OP_TYPES_FROM_STRING` (llama-model.cpp:1210 @b1b770d90):
 /// the GGUF activation names, mapped to the gated feed-forward op the graph
 /// builders use. `"gelu"` is the exact (erf) variant.
-const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
+const ffn_op_types_from_string = [_]struct { []const u8, llama.graph.FfnOp }{
     .{ "gelu", .geglu_erf },
     .{ "gelu_python", .geglu_erf },
     .{ "gelu_pytorch_tanh", .geglu },
@@ -62,44 +52,44 @@ const ffn_op_types_from_string = [_]struct { []const u8, graph.FfnOp }{
 /// - `fallback`: the op for a name the map lacks.
 ///
 /// Return: the op.
-fn ffnOpTypeFromString(name: []const u8, fallback: graph.FfnOp) graph.FfnOp {
+fn ffnOpTypeFromString(name: []const u8, fallback: llama.graph.FfnOp) llama.graph.FfnOp {
     for (ffn_op_types_from_string) |e| if (std.mem.eql(u8, e[0], name)) return e[1];
     return fallback;
 }
 
 /// Ports `llama_model_modern_bert`'s `load_arch_hparams` (models/modern-bert.cpp:6 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     const found_swa = try meta.getKey(u32, .attention_sliding_window, false, exc);
     if (found_swa) |v| hp.n_swa = v;
     if (found_swa != null and hp.n_swa > 0) {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.symmetric);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.symmetric);
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
         try self.loadSwaPattern(ml, 3, true, exc);
     } else {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.none);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.none);
     }
 
     hp.f_norm_eps = (try meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
 
     // Some ModernBert derivatives (e.g. IBM Granite Embedding 97m R2) use
     // SiLU/SwiGLU in the FFN instead of the default GELU/GeGLU.
-    hp.llm_ffn_op = @backingInt(graph.FfnOp.geglu_erf);
+    hp.llm_ffn_op = @backingInt(llama.graph.FfnOp.geglu_erf);
     if (try meta.getKey([]const u8, .hidden_act, false, exc)) |hidden_act| {
         hp.llm_ffn_op = @backingInt(ffnOpTypeFromString(hidden_act, .geglu_erf));
     }
 
     // GGUFs without a classifier pooling type use mean (gte-reranker-modernbert-base).
-    if (hp.pooling_type_cls == c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
-        hp.pooling_type_cls = c.LLAMA_POOLING_TYPE_MEAN;
+    if (hp.pooling_type_cls == llama.impl.c.LLAMA_POOLING_TYPE_UNSPECIFIED) {
+        hp.pooling_type_cls = llama.impl.c.LLAMA_POOLING_TYPE_MEAN;
     }
 
     // GGUFs without a classifier activation use gelu, the transformers
     // default.
     if (try meta.getKey([]const u8, .classifier_activation, false, exc) == null) {
-        hp.act_cls = c.GGML_UNARY_OP_GELU_ERF;
+        hp.act_cls = llama.impl.c.GGML_UNARY_OP_GELU_ERF;
     }
 
     if (try meta.getKey(u32, .decision_block_count, false, exc)) |v| hp.n_layer_decision = v;
@@ -123,10 +113,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_modern_bert`'s `load_arch_tensors` (models/modern-bert.cpp:61 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
     self.tok_norm = try self.createTensor(.{ .tensor = .token_embd_norm, .suffix = "weight", .bid = 0 }, &.{l.n_embd}, 0, exc);
@@ -197,18 +187,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_modern_bert`'s `build_arch_graph` (models/modern-bert.cpp:134 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_modern_bert`'s `graph`
 /// (models/modern-bert.cpp:138 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 141, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/modern-bert.cpp", 141, "n_embd_head == hparams.n_embd_head_k()");
 
     const inp_pos = b.buildInpPos();
 
@@ -254,16 +244,16 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(Kcur, "Kcur", il);
         b.cb(Vcur, "Vcur", il);
 
-        cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+        cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
         b.cb(cur, "kqv_out", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // Re-add the layer input.
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpL);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward's layer norm.
@@ -273,7 +263,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, null, null, null, null, layer.ffn_down, null, null, null, @fromBackingInt(hp.llm_ffn_op), .seq, il);
 
         // The attention output bypasses the feed-forward.
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         // The next layer's input.
         inpL = cur;
@@ -289,7 +279,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     }
 
     b.res.t_embd = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_modern_bert::graph`'s `build_decision_head`
@@ -297,7 +287,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 /// each output token, read at the option markers by the caller. The
 /// question type is not a graph input, so the head is evaluated once per
 /// type.
-fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor, inp_attn: *graph.InpAttnNoCache, inp_out_ids: *Tensor) *Tensor {
+fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -305,12 +295,12 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
     const n_layer_enc: c_int = n_layer - @as(c_int, @intCast(hp.n_layer_decision));
     const type_embd = model.type_embd.?;
 
-    var scores: ?*Tensor = null;
+    var scores: ?*llama.impl.c.ggml_tensor = null;
 
     var it: u32 = 0;
     while (it < n_decision_types) : (it += 1) {
-        const type_row = c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
-        var inpL: *Tensor = c.ggml_add(ctx, inp, type_row);
+        const type_row = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
+        var inpL: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inp, type_row);
 
         var il: c_int = n_layer_enc;
         while (il < n_layer) : (il += 1) {
@@ -322,15 +312,15 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
             // No positional encoding in the head.
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, b.n_head_kv, il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "kqv_out", il);
 
             if (il == n_layer - 1) {
-                cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
 
-            const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpL);
+            const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
             b.cb(ffn_inp, "ffn_inp", il);
 
             cur = b.buildNorm(ffn_inp, layer.ffn_norm, layer.ffn_norm_b, .norm, il);
@@ -338,16 +328,16 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
 
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .relu, .seq, il);
 
-            inpL = c.ggml_add(ctx, cur, ffn_inp);
+            inpL = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         }
 
         // The scorer.
         var cur = b.buildNorm(inpL, model.cls_norm, model.cls_norm_b, .norm, -1);
-        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
-        cur = c.ggml_gelu_erf(ctx, cur);
-        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
+        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
+        cur = llama.impl.c.ggml_gelu_erf(ctx, cur);
+        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
 
-        scores = if (scores) |s| c.ggml_concat(ctx, s, cur, 0) else cur;
+        scores = if (scores) |s| llama.impl.c.ggml_concat(ctx, s, cur, 0) else cur;
     }
     b.cb(scores.?, "decision_scores", -1);
 
@@ -362,6 +352,6 @@ test {
 }
 
 test "an unknown activation falls back" {
-    try std.testing.expectEqual(graph.FfnOp.swiglu, ffnOpTypeFromString("silu", .geglu));
-    try std.testing.expectEqual(graph.FfnOp.geglu, ffnOpTypeFromString("tanh", .geglu));
+    try std.testing.expectEqual(llama.graph.FfnOp.swiglu, ffnOpTypeFromString("silu", .geglu));
+    try std.testing.expectEqual(llama.graph.FfnOp.geglu, ffnOpTypeFromString("tanh", .geglu));
 }

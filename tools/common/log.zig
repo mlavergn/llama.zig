@@ -20,10 +20,8 @@
 //! the last digit of a rounded float.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const cli_fit = @import("cli_fit");
 const stdlib = @import("stdlib");
-const file_mod = @import("stdlib").file;
-const json = @import("cli_fit").json;
 
 /// `ggml_log_level`.
 pub const Level = enum(c_int) { none = 0, debug = 1, info = 2, warn = 3, err = 4, cont = 5 };
@@ -129,7 +127,7 @@ pub fn unpause() void {
 /// also written to `path`.
 pub fn setFile(path: ?[*:0]const u8) void {
     main();
-    const std_io = file_mod.defaultIo();
+    const std_io = stdlib.file.defaultIo();
     if (file) |f| f.close(std_io);
     file = if (path) |p| std.Io.Dir.cwd().createFile(std_io, std.mem.span(p), .{}) catch null else null;
     if (file) |f| file_stream = .{ .target = .{ .file = f }, .buffering = .full };
@@ -177,13 +175,13 @@ pub fn add(level: Level, comptime fmt: [*:0]const u8, args: anytype) void {
     main();
     if (paused) return;
     var stack: [256]u8 = undefined;
-    const n: usize = @intCast(@call(.auto, libc.snprintf, .{ &stack, stack.len, fmt } ++ args));
+    const n: usize = @intCast(@call(.auto, stdlib.libc.snprintf, .{ &stack, stack.len, fmt } ++ args));
     var heap: ?[]u8 = null;
     defer if (heap) |h| std.heap.c_allocator.free(h);
     const msg: [*:0]const u8 = if (n < stack.len) @ptrCast(&stack) else blk: {
         const h = std.heap.c_allocator.alloc(u8, n + 1) catch return;
         heap = h;
-        _ = @call(.auto, libc.snprintf, .{ h.ptr, n + 1, fmt } ++ args);
+        _ = @call(.auto, stdlib.libc.snprintf, .{ h.ptr, n + 1, fmt } ++ args);
         break :blk @ptrCast(h.ptr);
     };
     const timestamp: i64 = if (timestamps) tUs() - t_start else 0;
@@ -209,7 +207,7 @@ pub fn addJson(kind: [*:0]const u8, data: []const u8) void {
     const a = std.heap.c_allocator;
     var text: std.ArrayList(u8) = .empty;
     defer text.deinit(a);
-    var full = json.Object.begin(&text, a) catch return;
+    var full = cli_fit.json.Object.begin(&text, a) catch return;
     full.string("type", std.mem.span(kind)) catch return;
     full.raw("data", data) catch return;
     full.end() catch return;
@@ -281,7 +279,7 @@ fn print(entry: Entry, to: ?*stdlib.stdio.Stream) void {
         defer text.deinit(a);
         (struct {
             fn build(t: *std.ArrayList(u8), al: std.mem.Allocator, e: Entry) !void {
-                var obj = try json.Object.begin(t, al);
+                var obj = try cli_fit.json.Object.begin(t, al);
                 try obj.string("type", "log");
                 try obj.int("time", e.timestamp);
                 try obj.string("level", levelStr(e.level));
@@ -305,14 +303,14 @@ fn print(entry: Entry, to: ?*stdlib.stdio.Stream) void {
     var n_head: usize = 0;
     if (level != .none and level != .cont and prefix) {
         if (timestamp != 0) {
-            n_head = @min(head.len - 1, @as(usize, @intCast(@max(0, libc.snprintf(&head, head.len, "%s%d.%02d.%03d.%03d%s ", col(col_blue), @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))), @as(c_int, @intCast(@mod(timestamp, 1000))), col(col_default))))));
+            n_head = @min(head.len - 1, @as(usize, @intCast(@max(0, stdlib.libc.snprintf(&head, head.len, "%s%d.%02d.%03d.%03d%s ", col(col_blue), @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))), @as(c_int, @intCast(@mod(timestamp, 1000))), col(col_default))))));
         }
         const rest = head[n_head..];
         const n: c_int = switch (level) {
-            .info => libc.snprintf(rest.ptr, rest.len, "%sI %s", col(col_green), col(col_default)),
-            .warn => libc.snprintf(rest.ptr, rest.len, "%sW %s", col(col_magenta), @as([*:0]const u8, "")),
-            .err => libc.snprintf(rest.ptr, rest.len, "%sE %s", col(col_red), @as([*:0]const u8, "")),
-            .debug => libc.snprintf(rest.ptr, rest.len, "%sD %s", col(col_yellow), @as([*:0]const u8, "")),
+            .info => stdlib.libc.snprintf(rest.ptr, rest.len, "%sI %s", col(col_green), col(col_default)),
+            .warn => stdlib.libc.snprintf(rest.ptr, rest.len, "%sW %s", col(col_magenta), @as([*:0]const u8, "")),
+            .err => stdlib.libc.snprintf(rest.ptr, rest.len, "%sE %s", col(col_red), @as([*:0]const u8, "")),
+            .debug => stdlib.libc.snprintf(rest.ptr, rest.len, "%sD %s", col(col_yellow), @as([*:0]const u8, "")),
             else => 0,
         };
         n_head = @min(head.len - 1, n_head + @as(usize, @intCast(@max(0, n))));

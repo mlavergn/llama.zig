@@ -29,22 +29,8 @@
 //! message in `what_buf` and returns `error.Runtime`.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
-const libm = @import("stdlib").libm;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const builtin = @import("builtin");
-const impl = @import("impl.zig");
-const names = @import("names.zig");
-const model_mod = @import("model.zig");
-const graph_mod = @import("graph.zig");
-const arms_hparams = @import("arms_hparams.zig");
-const arms_tensors = @import("arms_tensors.zig");
-const arms_inputs = @import("arms_inputs.zig");
-const models = @import("models/module.zig");
-const libcxx = @import("stdlib").libcxx;
-const c = impl.c;
-const gpa = impl.gpa;
-const T = graph_mod.T;
 
 pub const Error = error{ Runtime, OutOfMemory };
 
@@ -54,7 +40,7 @@ pub var what_len: usize = 0;
 
 /// `throw std::runtime_error(mtmd_format(fmt, args...))`.
 pub fn throwErr(comptime fmt: [*:0]const u8, args: anytype) Error {
-    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
     return error.Runtime;
 }
@@ -74,9 +60,6 @@ pub fn what() [:0]const u8 {
 /// Ports `mtmd_model_caps` (mtmd-model.h:1326 @b1b770d90).
 pub const ModelCaps = struct { has_vision: bool, has_audio: bool, has_gen_audio: bool };
 
-/// A `std::map<ggml_backend_dev_t, size_t>`: by device pointer, ascending.
-pub const DevSizeMap = model_mod.DevSizeMap;
-
 /// Ports `mtmd_subctx_enc_state` (mtmd-subcontext.h:76 @b1b770d90): the
 /// persistent state of a causal audio encoder, for streaming input (one per
 /// stream); see `Ctx.encStateInit`.
@@ -87,13 +70,13 @@ pub const EncState = struct {
     slot_pos: std.ArrayList(i32) = .empty, // absolute position held by each slot, -1 if empty
     stem_tail: std.ArrayList(f32) = .empty, // last conv stem output frame, empty on a cold start
 
-    ctx_data: ?*c.ggml_context = null,
-    buf: c.ggml_backend_buffer_t = null,
-    k: std.ArrayList(*c.ggml_tensor) = .empty, // per layer [n_embd_kv, n_ctx]
-    v: std.ArrayList(*c.ggml_tensor) = .empty,
+    ctx_data: ?*mod.impl.c.ggml_context = null,
+    buf: mod.impl.c.ggml_backend_buffer_t = null,
+    k: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty, // per layer [n_embd_kv, n_ctx]
+    v: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
 
     // lfm3a: same order as list_lfm3a_state_slots(), F32 [ne0, ne1], updated in place
-    slots: std.ArrayList(*c.ggml_tensor) = .empty,
+    slots: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
 
     // nemotron transcribe: the window's normalized log-mel, cache and FIFO rows in; its speaker rows and predictions out
     mel_norm: std.ArrayList(f32) = .empty,
@@ -103,18 +86,18 @@ pub const EncState = struct {
 
     /// The C++'s destructor (`delete`), members in reverse order.
     pub fn destroy(self: *EncState) void {
-        self.spk_preds.deinit(gpa);
-        self.spk_chunk.deinit(gpa);
-        self.spk_prev.deinit(gpa);
-        self.mel_norm.deinit(gpa);
-        self.slots.deinit(gpa);
-        self.v.deinit(gpa);
-        self.k.deinit(gpa);
-        if (self.buf != null) c.ggml_backend_buffer_free(self.buf);
-        if (self.ctx_data != null) c.ggml_free(self.ctx_data);
-        self.stem_tail.deinit(gpa);
-        self.slot_pos.deinit(gpa);
-        gpa.destroy(self);
+        self.spk_preds.deinit(std.heap.c_allocator);
+        self.spk_chunk.deinit(std.heap.c_allocator);
+        self.spk_prev.deinit(std.heap.c_allocator);
+        self.mel_norm.deinit(std.heap.c_allocator);
+        self.slots.deinit(std.heap.c_allocator);
+        self.v.deinit(std.heap.c_allocator);
+        self.k.deinit(std.heap.c_allocator);
+        if (self.buf != null) mod.impl.c.ggml_backend_buffer_free(self.buf);
+        if (self.ctx_data != null) mod.impl.c.ggml_free(self.ctx_data);
+        self.stem_tail.deinit(std.heap.c_allocator);
+        self.slot_pos.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 };
 
@@ -122,40 +105,35 @@ pub const EncState = struct {
 /// per-sequence state of audio generation, the RNG and the slots kept
 /// between GEN_WAV calls; see `Ctx.genStateInit`.
 pub const GenState = struct {
-    rng: libcxx.Mt19937 = undefined,
+    rng: stdlib.libcxx.Mt19937 = undefined,
 
-    ctx_data: ?*c.ggml_context = null,
-    buf: c.ggml_backend_buffer_t = null,
-    slots: std.ArrayList(*c.ggml_tensor) = .empty, // same order as list_gen_state_slots(), F32 [ne0, ne1]
+    ctx_data: ?*mod.impl.c.ggml_context = null,
+    buf: mod.impl.c.ggml_backend_buffer_t = null,
+    slots: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty, // same order as list_gen_state_slots(), F32 [ne0, ne1]
 
     /// Ports `reset` (mtmd-subcontext.h:106 @b1b770d90), a member of
     /// `mtmd_subctx_gen_state`: clears the slots and keeps the RNG stream.
     pub fn reset(self: *GenState) void {
-        if (self.buf != null) c.ggml_backend_buffer_clear(self.buf, 0);
+        if (self.buf != null) mod.impl.c.ggml_backend_buffer_clear(self.buf, 0);
     }
 
     /// The C++'s destructor (`delete`), members in reverse order.
     pub fn destroy(self: *GenState) void {
-        self.slots.deinit(gpa);
-        if (self.buf != null) c.ggml_backend_buffer_free(self.buf);
-        if (self.ctx_data != null) c.ggml_free(self.ctx_data);
-        gpa.destroy(self);
+        self.slots.deinit(std.heap.c_allocator);
+        if (self.buf != null) mod.impl.c.ggml_backend_buffer_free(self.buf);
+        if (self.ctx_data != null) mod.impl.c.ggml_free(self.ctx_data);
+        std.heap.c_allocator.destroy(self);
     }
 };
-
-/// Ports `mtmd_gen_ref` (mtmd-model.h:22 @b1b770d90).
-pub const GenRef = impl.GenRef;
-/// Ports `mtmd_gen_voice` (mtmd-model.h:29 @b1b770d90).
-pub const GenVoice = impl.GenVoice;
 
 /// Ports `mtmd_subctx_encode_params` (mtmd-subcontext.h:113 @b1b770d90).
 pub const EncodeParams = struct {
     n_threads: c_int = 1,
-    imgs: ?*const impl.ImageF32Batch = null,
+    imgs: ?*const mod.impl.ImageF32Batch = null,
     out_embd: ?*std.ArrayList(f32) = null,
 
     // for audio gen, imgs has exactly one entry: hidden state from backbone (GEN_CODE) or unused (GEN_WAV)
-    gen_process: impl.GenProcessType = .unknown,
+    gen_process: mod.impl.GenProcessType = .unknown,
 
     // GEN_CODE: out_embd receives the embd to feed back to the backbone
     code0: i32 = 0, // semantic code sampled by the backbone
@@ -173,7 +151,7 @@ pub const EncodeParams = struct {
     codes: ?*const std.ArrayList(i32) = null, // this frame's 16 RVQ codes
     feats: ?*const std.ArrayList(f32) = null, // continuous counterpart of codes
     out_audio: ?*std.ArrayList(f32) = null, // decoded PCM samples, F32
-    ref: ?*const GenRef = null, // TTS reference conditioning of the voice
+    ref: ?*const mod.impl.GenRef = null, // TTS reference conditioning of the voice
     // TTS_VOCODE internal stage inputs
     mel_in: ?*const std.ArrayList(f32) = null,
     sstft_in: ?*const std.ArrayList(f32) = null,
@@ -190,7 +168,7 @@ pub const EncodeParams = struct {
 
 /// Ports `mtmd_subctx_params` (mtmd-subcontext.h:27 @b1b770d90).
 pub const SubctxParams = struct {
-    flash_attn_type: impl.FlashAttnType,
+    flash_attn_type: mod.impl.FlashAttnType,
     warmup: bool,
 };
 
@@ -200,13 +178,13 @@ pub const SubctxParams = struct {
 /// Ports `mtmd_backend_cpu_set_n_threads` (mtmd-subcontext.cpp:24
 /// @b1b770d90): `ggml_backend_cpu_set_n_threads(backend_cpu, n_threads)`
 /// through the registry.
-pub fn backendCpuSetNThreads(backend_cpu: c.ggml_backend_t, n_threads: c_int) void {
-    const dev = c.ggml_backend_get_device(backend_cpu);
-    const reg = if (dev != null) c.ggml_backend_dev_backend_reg(dev) else null;
+pub fn backendCpuSetNThreads(backend_cpu: mod.impl.c.ggml_backend_t, n_threads: c_int) void {
+    const dev = mod.impl.c.ggml_backend_get_device(backend_cpu);
+    const reg = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg != null) {
-        const fn_ptr = c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
+        const fn_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
         if (fn_ptr != null) {
-            const set_n_threads: c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(fn_ptr));
+            const set_n_threads: mod.impl.c.ggml_backend_set_n_threads_t = @ptrCast(@alignCast(fn_ptr));
             set_n_threads.?(backend_cpu, n_threads);
         }
     }
@@ -216,16 +194,16 @@ pub fn backendCpuSetNThreads(backend_cpu: c.ggml_backend_t, n_threads: c_int) vo
 /// threadpool for two threads or more, through the registry; null if the
 /// CPU backend has none to give. The `shared_ptr`'s deleter is `free_fn`,
 /// kept beside the pool.
-fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (c.ggml_threadpool_t) callconv(.c) void) Error!c.ggml_threadpool_t {
-    const dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU);
-    const reg = if (dev != null) c.ggml_backend_dev_backend_reg(dev) else null;
+fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void) Error!mod.impl.c.ggml_threadpool_t {
+    const dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU);
+    const reg = if (dev != null) mod.impl.c.ggml_backend_dev_backend_reg(dev) else null;
     if (reg == null or n_threads < 2) return null;
-    const new_ptr = c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
-    const free_ptr = c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
+    const new_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
+    const free_ptr = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
     if (new_ptr == null or free_ptr == null) return null;
-    const new_fn: *const fn ([*c]c.ggml_threadpool_params) callconv(.c) c.ggml_threadpool_t = @ptrCast(@alignCast(new_ptr));
-    const free_fn: *const fn (c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(free_ptr));
-    var tpp = c.ggml_threadpool_params_default(n_threads);
+    const new_fn: *const fn ([*c]mod.impl.c.ggml_threadpool_params) callconv(.c) mod.impl.c.ggml_threadpool_t = @ptrCast(@alignCast(new_ptr));
+    const free_fn: *const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(free_ptr));
+    var tpp = mod.impl.c.ggml_threadpool_params_default(n_threads);
     tpp.poll = 0; // the pool is idle most of the time, don't take CPU away from the text model
     const threadpool = new_fn(&tpp);
     if (threadpool == null) return throwErr("failed to create threadpool", .{});
@@ -235,82 +213,82 @@ fn threadpoolInit(n_threads: c_int, free_out: *?*const fn (c.ggml_threadpool_t) 
 
 /// Ports `mtmd_select_device` (mtmd-subcontext.cpp:55 @b1b770d90): the
 /// device the weights and the graphs are placed on, null for the CPU.
-pub fn selectDevice(use_gpu: bool, device: c.ggml_backend_dev_t) c.ggml_backend_dev_t {
+pub fn selectDevice(use_gpu: bool, device: mod.impl.c.ggml_backend_dev_t) mod.impl.c.ggml_backend_dev_t {
     if (!use_gpu) return null;
     if (device != null) return device;
-    const dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_GPU);
-    return if (dev != null) dev else c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_IGPU);
+    const dev = mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_GPU);
+    return if (dev != null) dev else mod.impl.c.ggml_backend_dev_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_IGPU);
 }
 
 /// Ports `mtmd_backends` (mtmd-subcontext.h:36 @b1b770d90): the backends and
 /// the scheduler every subcontext of one `mtmd_context` shares (a591cbe17), so its compute buffers fit the largest graph any of them
 /// reserved. Not thread-safe.
 pub const Backends = struct {
-    backend: c.ggml_backend_t = null, // backend_cpu if no accelerator
-    backend_cpu: c.ggml_backend_t = null,
+    backend: mod.impl.c.ggml_backend_t = null, // backend_cpu if no accelerator
+    backend_cpu: mod.impl.c.ggml_backend_t = null,
 
     // for ggml_backend_sched_new(), backend_cpu last
-    ptrs: std.ArrayList(c.ggml_backend_t) = .empty,
-    bufts: std.ArrayList(c.ggml_backend_buffer_type_t) = .empty,
+    ptrs: std.ArrayList(mod.impl.c.ggml_backend_t) = .empty,
+    bufts: std.ArrayList(mod.impl.c.ggml_backend_buffer_type_t) = .empty,
 
-    threadpool: c.ggml_threadpool_t = null, // can be null
-    threadpool_free: ?*const fn (c.ggml_threadpool_t) callconv(.c) void = null,
+    threadpool: mod.impl.c.ggml_threadpool_t = null, // can be null
+    threadpool_free: ?*const fn (mod.impl.c.ggml_threadpool_t) callconv(.c) void = null,
 
     // its buffers fit the largest graph reserved by the subcontexts
-    sched: c.ggml_backend_sched_t = null,
+    sched: mod.impl.c.ggml_backend_sched_t = null,
 
     /// Ports `mtmd_backends` (mtmd-subcontext.cpp:66 @b1b770d90), its
     /// constructor; `device` null means the CPU.
-    pub fn create(device: c.ggml_backend_dev_t, n_threads: c_int, max_nodes: c_int, cb_eval: c.ggml_backend_sched_eval_callback, cb_eval_user_data: ?*anyopaque) Error!*Backends {
+    pub fn create(device: mod.impl.c.ggml_backend_dev_t, n_threads: c_int, max_nodes: c_int, cb_eval: mod.impl.c.ggml_backend_sched_eval_callback, cb_eval_user_data: ?*anyopaque) Error!*Backends {
         const func = "mtmd_backends";
-        const self = try gpa.create(Backends);
+        const self = try std.heap.c_allocator.create(Backends);
         self.* = .{};
         // a throwing constructor runs the destructors of the members built so far
         errdefer self.destroyMembers();
         self.threadpool = try threadpoolInit(n_threads, &self.threadpool_free);
 
-        self.backend_cpu = c.ggml_backend_init_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
+        self.backend_cpu = mod.impl.c.ggml_backend_init_by_type(mod.impl.c.GGML_BACKEND_DEVICE_TYPE_CPU, null);
         if (self.backend_cpu == null) return throwErr("failed to initialize CPU backend", .{});
         if (self.threadpool != null) {
-            const reg = c.ggml_backend_dev_backend_reg(c.ggml_backend_get_device(self.backend_cpu));
-            const p = c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool");
+            const reg = mod.impl.c.ggml_backend_dev_backend_reg(mod.impl.c.ggml_backend_get_device(self.backend_cpu));
+            const p = mod.impl.c.ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool");
             if (p != null) {
-                const set_threadpool_fn: *const fn (c.ggml_backend_t, c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(p));
+                const set_threadpool_fn: *const fn (mod.impl.c.ggml_backend_t, mod.impl.c.ggml_threadpool_t) callconv(.c) void = @ptrCast(@alignCast(p));
                 set_threadpool_fn(self.backend_cpu, self.threadpool);
             }
         }
         if (device != null) {
-            self.backend = c.ggml_backend_dev_init(device, null);
+            self.backend = mod.impl.c.ggml_backend_dev_init(device, null);
             if (self.backend == null) {
-                c.ggml_backend_free(self.backend_cpu);
+                mod.impl.c.ggml_backend_free(self.backend_cpu);
                 self.backend_cpu = null;
-                return throwErr("%s: failed to initialize \"%s\" backend\n", .{ func, c.ggml_backend_dev_name(device) });
+                return throwErr("%s: failed to initialize \"%s\" backend\n", .{ func, mod.impl.c.ggml_backend_dev_name(device) });
             }
         }
 
         if (self.backend != null) {
-            impl.logInf("%s: using %s backend\n", .{ func, c.ggml_backend_name(self.backend) });
-            try self.ptrs.append(gpa, self.backend);
-            try self.bufts.append(gpa, c.ggml_backend_get_default_buffer_type(self.backend));
+            mod.impl.logInf("%s: using %s backend\n", .{ func, mod.impl.c.ggml_backend_name(self.backend) });
+            try self.ptrs.append(std.heap.c_allocator, self.backend);
+            try self.bufts.append(std.heap.c_allocator, mod.impl.c.ggml_backend_get_default_buffer_type(self.backend));
         } else {
             self.backend = self.backend_cpu;
-            impl.logInf("%s: using CPU backend\n", .{func});
+            mod.impl.logInf("%s: using CPU backend\n", .{func});
         }
 
-        try self.ptrs.append(gpa, self.backend_cpu);
-        try self.bufts.append(gpa, c.ggml_backend_get_default_buffer_type(self.backend_cpu));
+        try self.ptrs.append(std.heap.c_allocator, self.backend_cpu);
+        try self.bufts.append(std.heap.c_allocator, mod.impl.c.ggml_backend_get_default_buffer_type(self.backend_cpu));
 
-        self.sched = c.ggml_backend_sched_new(self.ptrs.items.ptr, self.bufts.items.ptr, @intCast(self.ptrs.items.len), @intCast(max_nodes), false, true);
-        if (cb_eval != null) c.ggml_backend_sched_set_eval_callback(self.sched, cb_eval, cb_eval_user_data);
+        self.sched = mod.impl.c.ggml_backend_sched_new(self.ptrs.items.ptr, self.bufts.items.ptr, @intCast(self.ptrs.items.len), @intCast(max_nodes), false, true);
+        if (cb_eval != null) mod.impl.c.ggml_backend_sched_set_eval_callback(self.sched, cb_eval, cb_eval_user_data);
         return self;
     }
 
     fn destroyMembers(self: *Backends) void {
-        if (self.sched != null) c.ggml_backend_sched_free(self.sched);
+        if (self.sched != null) mod.impl.c.ggml_backend_sched_free(self.sched);
         if (self.threadpool != null) self.threadpool_free.?(self.threadpool);
-        self.bufts.deinit(gpa);
-        self.ptrs.deinit(gpa);
-        gpa.destroy(self);
+        self.bufts.deinit(std.heap.c_allocator);
+        self.ptrs.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `mtmd_backends` (mtmd-subcontext.cpp:108 @b1b770d90), its destructor: the
@@ -318,19 +296,19 @@ pub const Backends = struct {
     /// order (the threadpool after the CPU backend that ran on it).
     pub fn destroy(self: *Backends) void {
         // before the backends it uses
-        if (self.sched != null) c.ggml_backend_sched_free(self.sched);
+        if (self.sched != null) mod.impl.c.ggml_backend_sched_free(self.sched);
         self.sched = null;
-        c.ggml_backend_free(self.backend);
-        if (self.backend != self.backend_cpu) c.ggml_backend_free(self.backend_cpu);
+        mod.impl.c.ggml_backend_free(self.backend);
+        if (self.backend != self.backend_cpu) mod.impl.c.ggml_backend_free(self.backend_cpu);
         self.destroyMembers();
     }
 
     /// Ports `get_mem_compute` (mtmd-subcontext.cpp:117 @b1b770d90), a member
     /// of `mtmd_backends`. The caller owns the map.
-    pub fn getMemCompute(self: *const Backends) Error!DevSizeMap {
-        var res: DevSizeMap = .{};
+    pub fn getMemCompute(self: *const Backends) Error!mod.model.DevSizeMap {
+        var res: mod.model.DevSizeMap = .{};
         errdefer res.deinit();
-        for (self.ptrs.items) |b| try res.add(c.ggml_backend_get_device(b), c.ggml_backend_sched_get_buffer_size(self.sched, b));
+        for (self.ptrs.items) |b| try res.add(mod.impl.c.ggml_backend_get_device(b), mod.impl.c.ggml_backend_sched_get_buffer_size(self.sched, b));
         return res;
     }
 };
@@ -341,13 +319,13 @@ pub const Backends = struct {
 /// Ports `mtmd_subcontext` (mtmd-subcontext.h:152 @b1b770d90): runs the graphs
 /// of one `mtmd_model` on the shared backends and scheduler.
 pub const Ctx = struct {
-    model: *const model_mod.Model,
+    model: *const mod.model.Model,
     backends: *Backends,
 
     buf_compute_meta: std.ArrayList(u8) = .empty,
 
     max_nodes: c_int = 8192,
-    flash_attn_type: impl.FlashAttnType = .auto,
+    flash_attn_type: mod.impl.FlashAttnType = .auto,
     is_allocated: bool = false,
 
     debug_output_embeddings: bool = false,
@@ -356,8 +334,8 @@ pub const Ctx = struct {
 
     /// Ports `mtmd_subcontext` (mtmd-subcontext.cpp:125 @b1b770d90), its
     /// constructor. `model` and `backends` must outlive the subcontext.
-    pub fn create(model: *const model_mod.Model, backends: *Backends, params: SubctxParams) Error!*Ctx {
-        const self = try gpa.create(Ctx);
+    pub fn create(model: *const mod.model.Model, backends: *Backends, params: SubctxParams) Error!*Ctx {
+        const self = try std.heap.c_allocator.create(Ctx);
         self.* = .{ .model = model, .backends = backends, .max_nodes = model.max_nodes, .flash_attn_type = params.flash_attn_type };
         errdefer self.destroy();
         if (self.flash_attn_type == .auto and !model.flash_attn_auto) {
@@ -366,14 +344,14 @@ pub const Ctx = struct {
 
         self.debug_output_embeddings = stdlib.env.getenv("MTMD_DEBUG_EMBEDDINGS") != null;
 
-        try self.buf_compute_meta.resize(gpa, @as(usize, @intCast(self.max_nodes)) * c.ggml_tensor_overhead() + c.ggml_graph_overhead_custom(@intCast(self.max_nodes), false));
+        try self.buf_compute_meta.resize(std.heap.c_allocator, @as(usize, @intCast(self.max_nodes)) * mod.impl.c.ggml_tensor_overhead() + mod.impl.c.ggml_graph_overhead_custom(@intCast(self.max_nodes), false));
 
         var batch = try self.getDummyBatch();
         defer batch.deinit();
         if (model.modality != .gen_audio) {
             // check batching support: the C++ constructs a builder for the
             // dummy batch and asks it, without building
-            self.support_batch = models.supportBatch(self.projType()) orelse impl.abort("mtmd-graph.cpp", 1056, "missing cgraph builder");
+            self.support_batch = mod.models.supportBatch(self.projType()) orelse mod.impl.abort("mtmd-graph.cpp", 1056, "missing cgraph builder");
         }
         if (params.warmup) {
             try self.warmup(&batch);
@@ -383,16 +361,16 @@ pub const Ctx = struct {
 
     /// The C++'s destructor.
     pub fn destroy(self: *Ctx) void {
-        self.buf_compute_meta.deinit(gpa);
-        gpa.destroy(self);
+        self.buf_compute_meta.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
-    pub fn projType(self: *const Ctx) names.ProjectorType {
+    pub fn projType(self: *const Ctx) mod.names.ProjectorType {
         return self.model.proj_type;
     }
 
     /// What a `graph.Graph` is built from.
-    pub fn graphSource(self: *Ctx) graph_mod.Source {
+    pub fn graphSource(self: *Ctx) mod.graph.Source {
         return .{
             .model = self.model,
             .buf_compute_meta = self.buf_compute_meta.items,
@@ -404,23 +382,23 @@ pub const Ctx = struct {
 
     /// Ports `get_dummy_batch` (mtmd-subcontext.cpp:148 @b1b770d90), a member
     /// of `mtmd_subcontext`: a fake batch.
-    pub fn getDummyBatch(self: *const Ctx) Error!impl.ImageF32Batch {
+    pub fn getDummyBatch(self: *const Ctx) Error!mod.impl.ImageF32Batch {
         const func = "get_dummy_batch";
         const model = self.model;
         const hparams = &model.hparams;
-        var batch: impl.ImageF32Batch = .{};
+        var batch: mod.impl.ImageF32Batch = .{};
         errdefer batch.deinit();
-        var img: impl.ImageF32 = .{};
+        var img: mod.impl.ImageF32 = .{};
         errdefer img.deinit();
         if (model.modality == .vision) {
             const sz = hparams.warmup_image_size;
             try img.setSize(.{ .width = sz, .height = sz }, false, false);
-            impl.logInf("%s: warmup with image size = %d x %d\n", .{ func, sz, sz });
+            mod.impl.logInf("%s: warmup with image size = %d x %d\n", .{ func, sz, sz });
         } else if (model.modality == .gen_audio) {
             // TODO: improve this, move to per-model impl
             const n_embd = nMmprojEmbd(model);
             try img.setSize(.{ .width = n_embd, .height = 1 }, false, true);
-            impl.logInf("%s: warmup with one gen-audio step\n", .{func});
+            mod.impl.logInf("%s: warmup with one gen-audio step\n", .{func});
         } else {
             // GEMMA4UA uses n_mel_bins as a raw-waveform frame size (640), not a mel-bin count,
             // so the [1, 256] bound only applies to FFT-based models.
@@ -429,14 +407,14 @@ pub const Ctx = struct {
                 return throwErr("%s: invalid n_mel_bins (%d), must be in [1, 256]\n", .{ func, hparams.n_mel_bins });
             }
             try img.setSize(.{ .width = hparams.warmup_audio_size, .height = hparams.n_mel_bins }, false, false);
-            impl.logInf("%s: warmup with audio size = %d\n", .{ func, hparams.warmup_audio_size });
+            mod.impl.logInf("%s: warmup with audio size = %d\n", .{ func, hparams.warmup_audio_size });
         }
-        try batch.entries.append(gpa, img);
+        try batch.entries.append(std.heap.c_allocator, img);
         return batch;
     }
 
     const SupportInfoOp = struct {
-        op: T,
+        op: mod.graph.T,
         // true if the op runs on the accelerated backend
         is_accel: bool = true,
     };
@@ -444,17 +422,17 @@ pub const Ctx = struct {
     const SupportInfoGraph = struct {
         // whether the backend supports flash attention
         fattn: bool = true,
-        fattn_op: T = null, // for debugging
+        fattn_op: mod.graph.T = null, // for debugging
         ops: std.ArrayList(SupportInfoOp) = .empty,
 
         fn deinit(self: *SupportInfoGraph) void {
-            self.ops.deinit(gpa);
+            self.ops.deinit(std.heap.c_allocator);
         }
     };
 
     /// Ports `warmup` (mtmd-subcontext.cpp:176 @b1b770d90), a member of
     /// `mtmd_subcontext`: reserve the compute buffers for `batch`.
-    pub fn warmup(self: *Ctx, batch: *const impl.ImageF32Batch) Error!void {
+    pub fn warmup(self: *Ctx, batch: *const mod.impl.ImageF32Batch) Error!void {
         const func = "warmup";
         const backends = self.backends;
         var info: SupportInfoGraph = .{};
@@ -467,15 +445,15 @@ pub const Ctx = struct {
             info = try self.reserveComputeMeta(batch);
             if (!info.fattn and info.fattn_op != null) {
                 const op = info.fattn_op;
-                impl.logWrn("%s: *****************************************************************\n", .{func});
-                impl.logWrn("%s: WARNING: flash attention not supported by %s, memory usage will increase\n", .{ func, c.ggml_backend_name(backends.backend) });
-                impl.logWrn("%s: op params: \n", .{func});
+                mod.impl.logWrn("%s: *****************************************************************\n", .{func});
+                mod.impl.logWrn("%s: WARNING: flash attention not supported by %s, memory usage will increase\n", .{ func, mod.impl.c.ggml_backend_name(backends.backend) });
+                mod.impl.logWrn("%s: op params: \n", .{func});
                 printShape(func, " dst", op);
                 printShape(func, "src0", op.?.src[0]);
                 printShape(func, "src1", op.?.src[1]);
                 printShape(func, "src2", op.?.src[2]);
-                impl.logWrn("%s: please report this on github as an issue\n", .{func});
-                impl.logWrn("%s: *****************************************************************\n", .{func});
+                mod.impl.logWrn("%s: please report this on github as an issue\n", .{func});
+                mod.impl.logWrn("%s: *****************************************************************\n", .{func});
                 self.flash_attn_type = .disabled;
                 var info2 = try self.reserveComputeMeta(batch);
                 info2.deinit();
@@ -484,38 +462,38 @@ pub const Ctx = struct {
             info.deinit();
             info = try self.reserveComputeMeta(batch);
             if (!info.fattn and self.flash_attn_type == .enabled) {
-                impl.logWrn("%s: flash attention is not supported by the current backend; falling back to CPU (performance will be degraded)\n", .{func});
+                mod.impl.logWrn("%s: flash attention is not supported by the current backend; falling back to CPU (performance will be degraded)\n", .{func});
             }
         }
 
         self.is_allocated = true; // mark buffers as allocated
 
-        impl.logInf("%s: flash attention is %s\n", .{ func, @as([*:0]const u8, if (self.flash_attn_type == .enabled) "enabled" else "disabled") });
+        mod.impl.logInf("%s: flash attention is %s\n", .{ func, @as([*:0]const u8, if (self.flash_attn_type == .enabled) "enabled" else "disabled") });
 
         // print ops that are not supported by the GPU backend (if there is one)
         if (backends.backend != backends.backend_cpu) {
             var unsupported_ops: std.ArrayList(SupportInfoOp) = .empty;
-            defer unsupported_ops.deinit(gpa);
+            defer unsupported_ops.deinit(std.heap.c_allocator);
             for (info.ops.items) |op| {
-                if (!op.is_accel) try unsupported_ops.append(gpa, op);
+                if (!op.is_accel) try unsupported_ops.append(std.heap.c_allocator, op);
             }
             if (unsupported_ops.items.len != 0) {
-                impl.logWrn("%s: *****************************************************************\n", .{func});
-                impl.logWrn("%s: WARNING: the mmproj graph uses unsupported operators by the backend\n", .{func});
-                impl.logWrn("%s:          the performance will be suboptimal                      \n", .{func});
-                impl.logWrn("%s:          list of unsupported ops (backend=%s):\n", .{ func, c.ggml_backend_name(backends.backend) });
+                mod.impl.logWrn("%s: *****************************************************************\n", .{func});
+                mod.impl.logWrn("%s: WARNING: the mmproj graph uses unsupported operators by the backend\n", .{func});
+                mod.impl.logWrn("%s:          the performance will be suboptimal                      \n", .{func});
+                mod.impl.logWrn("%s:          list of unsupported ops (backend=%s):\n", .{ func, mod.impl.c.ggml_backend_name(backends.backend) });
                 for (unsupported_ops.items) |op| {
                     const t = op.op.?;
-                    impl.logWrn("%s: %16s: type = %s, ne = [%d %d %d %d]\n", .{
-                        func,                           c.ggml_op_name(t.op),           c.ggml_type_name(t.type),
+                    mod.impl.logWrn("%s: %16s: type = %s, ne = [%d %d %d %d]\n", .{
+                        func,                           mod.impl.c.ggml_op_name(t.op),  mod.impl.c.ggml_type_name(t.type),
                         @as(c_int, @truncate(t.ne[0])), @as(c_int, @truncate(t.ne[1])), @as(c_int, @truncate(t.ne[2])),
                         @as(c_int, @truncate(t.ne[3])),
                     });
                 }
-                impl.logWrn("%s: flash attention is %s\n", .{ func, @as([*:0]const u8, if (self.flash_attn_type == .enabled) "enabled" else "disabled") });
-                impl.logWrn("%s: please report this on github as an issue\n", .{func});
-                impl.logWrn("%s: ref: https://github.com/ggml-org/llama.cpp/pull/16837#issuecomment-3461676118\n", .{func});
-                impl.logWrn("%s: *****************************************************************\n", .{func});
+                mod.impl.logWrn("%s: flash attention is %s\n", .{ func, @as([*:0]const u8, if (self.flash_attn_type == .enabled) "enabled" else "disabled") });
+                mod.impl.logWrn("%s: please report this on github as an issue\n", .{func});
+                mod.impl.logWrn("%s: ref: https://github.com/ggml-org/llama.cpp/pull/16837#issuecomment-3461676118\n", .{func});
+                mod.impl.logWrn("%s: *****************************************************************\n", .{func});
             }
         }
     }
@@ -523,10 +501,10 @@ pub const Ctx = struct {
     /// The `print_shape` lambda of `warmup` (mtmd-subcontext.cpp:176
     /// @b1b770d90): `%d` over `int64_t` and `size_t`, which the C++ passes as
     /// 64-bit values and `printf` reads as their low 32 bits on this ABI.
-    fn printShape(func: [*:0]const u8, name: [*:0]const u8, t: T) void {
+    fn printShape(func: [*:0]const u8, name: [*:0]const u8, t: mod.graph.T) void {
         const x = t.?;
-        impl.logWrn("%s:   %s: type = %s, ne = [%d %d %d %d], nb = [%d %d %d %d]\n", .{
-            func,                                               name,                                               c.ggml_type_name(x.type),
+        mod.impl.logWrn("%s:   %s: type = %s, ne = [%d %d %d %d], nb = [%d %d %d %d]\n", .{
+            func,                                               name,                                               mod.impl.c.ggml_type_name(x.type),
             @as(c_int, @truncate(x.ne[0])),                     @as(c_int, @truncate(x.ne[1])),                     @as(c_int, @truncate(x.ne[2])),
             @as(c_int, @truncate(x.ne[3])),                     @as(c_int, @truncate(@as(i64, @bitCast(x.nb[0])))), @as(c_int, @truncate(@as(i64, @bitCast(x.nb[1])))),
             @as(c_int, @truncate(@as(i64, @bitCast(x.nb[2])))), @as(c_int, @truncate(@as(i64, @bitCast(x.nb[3])))),
@@ -537,30 +515,30 @@ pub const Ctx = struct {
     /// member of `mtmd_subcontext`: initialize the backend buffers, without
     /// allocating them. The scheduler is shared, so the compute
     /// buffer sizes are logged once, by `mtmd_context`, not per reservation.
-    fn reserveComputeMeta(self: *Ctx, batch: *const impl.ImageF32Batch) Error!SupportInfoGraph {
+    fn reserveComputeMeta(self: *Ctx, batch: *const mod.impl.ImageF32Batch) Error!SupportInfoGraph {
         const func = "reserve_compute_meta";
         const sched = self.backends.sched;
-        var built = try models.buildGraph(self, batch, null);
+        var built = try mod.models.buildGraph(self, batch, null);
         defer built.deinit();
         const gf = built.gf;
-        _ = c.ggml_backend_sched_reserve(sched, gf);
+        _ = mod.impl.c.ggml_backend_sched_reserve(sched, gf);
 
-        const n_splits = c.ggml_backend_sched_get_n_splits(sched);
-        const n_nodes = c.ggml_graph_n_nodes(gf);
+        const n_splits = mod.impl.c.ggml_backend_sched_get_n_splits(sched);
+        const n_nodes = mod.impl.c.ggml_graph_n_nodes(gf);
 
-        impl.logInf("%s: graph splits = %d, nodes = %d\n", .{ func, n_splits, n_nodes });
+        mod.impl.logInf("%s: graph splits = %d, nodes = %d\n", .{ func, n_splits, n_nodes });
 
         var res: SupportInfoGraph = .{};
         errdefer res.deinit();
 
         // check op support
         var i: c_int = 0;
-        while (i < c.ggml_graph_n_nodes(gf)) : (i += 1) {
-            const node = c.ggml_graph_node(gf, i);
-            try res.ops.append(gpa, .{ .op = node, .is_accel = true });
-            if (!c.ggml_backend_supports_op(self.backends.backend, node)) {
+        while (i < mod.impl.c.ggml_graph_n_nodes(gf)) : (i += 1) {
+            const node = mod.impl.c.ggml_graph_node(gf, i);
+            try res.ops.append(std.heap.c_allocator, .{ .op = node, .is_accel = true });
+            if (!mod.impl.c.ggml_backend_supports_op(self.backends.backend, node)) {
                 res.ops.items[res.ops.items.len - 1].is_accel = false;
-                if (node.*.op == c.GGML_OP_FLASH_ATTN_EXT) {
+                if (node.*.op == mod.impl.c.GGML_OP_FLASH_ATTN_EXT) {
                     res.fattn = false;
                     res.fattn_op = node;
                 }
@@ -571,19 +549,19 @@ pub const Ctx = struct {
 
     /// Ports `encode_image` (mtmd-subcontext.cpp:368 @b1b770d90), a member of
     /// `mtmd_subcontext`.
-    pub fn encodeImage(self: *Ctx, n_threads: c_int, img: *const impl.ImageF32, out_vec: *std.ArrayList(f32)) Error!bool {
-        var imgs: impl.ImageF32Batch = .{};
+    pub fn encodeImage(self: *Ctx, n_threads: c_int, img: *const mod.impl.ImageF32, out_vec: *std.ArrayList(f32)) Error!bool {
+        var imgs: mod.impl.ImageF32Batch = .{};
         defer imgs.deinit();
-        try imgs.entries.append(gpa, try img.clone());
+        try imgs.entries.append(std.heap.c_allocator, try img.clone());
         return self.encodeBatch(n_threads, &imgs, out_vec);
     }
 
     /// Ports `encode_batch` (mtmd-subcontext.cpp:376 @b1b770d90), a member of
     /// `mtmd_subcontext`.
-    pub fn encodeBatch(self: *Ctx, n_threads: c_int, imgs: *const impl.ImageF32Batch, out_batch_embd: *std.ArrayList(f32)) Error!bool {
+    pub fn encodeBatch(self: *Ctx, n_threads: c_int, imgs: *const mod.impl.ImageF32Batch, out_batch_embd: *std.ArrayList(f32)) Error!bool {
         var params: EncodeParams = .{ .imgs = imgs, .n_threads = n_threads, .out_embd = out_batch_embd };
         if (self.projType() == .nemotron_transcribe) {
-            return models.nemotron_transcribe.encodeWindows(self, self.model, &params);
+            return mod.models.nemotron_transcribe.encodeWindows(self, self.model, &params);
         }
         return encode(self, &params);
     }
@@ -594,8 +572,8 @@ pub const Ctx = struct {
 
 /// Ports `mtmd_model_loader` (mtmd-model.cpp:32 @b1b770d90).
 pub const Loader = struct {
-    ctx_meta: ?*c.ggml_context = null,
-    ctx_gguf: ?*c.gguf_context = null,
+    ctx_meta: ?*mod.impl.c.ggml_context = null,
+    ctx_gguf: ?*mod.impl.c.gguf_context = null,
 
     fname: [:0]const u8,
 
@@ -612,56 +590,56 @@ pub const Loader = struct {
     pub fn init(fname: [:0]const u8, skip_tensors: bool, progress_cb: ?*const fn (f32, ?*anyopaque) callconv(.c) bool, progress_user_data: ?*anyopaque) Error!Loader {
         const func = "mtmd_model_loader";
         var self: Loader = .{ .fname = fname, .progress_callback = progress_cb, .progress_callback_user_data = progress_user_data };
-        var meta: ?*c.ggml_context = null;
-        const params: c.gguf_init_params = .{ .no_alloc = true, .ctx = &meta };
+        var meta: ?*mod.impl.c.ggml_context = null;
+        const params: mod.impl.c.gguf_init_params = .{ .no_alloc = true, .ctx = &meta };
 
-        self.ctx_gguf = c.gguf_init_from_file(fname.ptr, params);
+        self.ctx_gguf = mod.impl.c.gguf_init_from_file(fname.ptr, params);
         if (self.ctx_gguf == null) return throwErr("%s: failed to load mmproj model from %s. Does this file exist?\n", .{ func, fname.ptr });
 
         self.ctx_meta = meta;
 
-        const n_tensors: c_int = @intCast(c.gguf_get_n_tensors(self.ctx_gguf));
+        const n_tensors: c_int = @intCast(mod.impl.c.gguf_get_n_tensors(self.ctx_gguf));
 
         // print gguf info
         {
             var name_buf: ?[*:0]const u8 = "";
             var desc_buf: ?[*:0]const u8 = "";
-            try self.getStringPtr(names.KEY_NAME, &name_buf, false);
-            try self.getStringPtr(names.KEY_DESCRIPTION, &desc_buf, false);
-            impl.logInf("%s: model name:   %s\n", .{ func, name_buf.? });
-            impl.logInf("%s: description:  %s\n", .{ func, desc_buf.? });
-            impl.logInf("%s: GGUF version: %d\n", .{ func, @as(c_int, @intCast(c.gguf_get_version(self.ctx_gguf))) });
-            impl.logInf("%s: alignment:    %zu\n", .{ func, c.gguf_get_alignment(self.ctx_gguf) });
-            impl.logInf("%s: n_tensors:    %d\n", .{ func, n_tensors });
-            impl.logInf("%s: n_kv:         %d\n", .{ func, @as(c_int, @intCast(c.gguf_get_n_kv(self.ctx_gguf))) });
-            impl.logInf("\n", .{});
+            try self.getStringPtr(mod.names.KEY_NAME, &name_buf, false);
+            try self.getStringPtr(mod.names.KEY_DESCRIPTION, &desc_buf, false);
+            mod.impl.logInf("%s: model name:   %s\n", .{ func, name_buf.? });
+            mod.impl.logInf("%s: description:  %s\n", .{ func, desc_buf.? });
+            mod.impl.logInf("%s: GGUF version: %d\n", .{ func, @as(c_int, @intCast(mod.impl.c.gguf_get_version(self.ctx_gguf))) });
+            mod.impl.logInf("%s: alignment:    %zu\n", .{ func, mod.impl.c.gguf_get_alignment(self.ctx_gguf) });
+            mod.impl.logInf("%s: n_tensors:    %d\n", .{ func, n_tensors });
+            mod.impl.logInf("%s: n_kv:         %d\n", .{ func, @as(c_int, @intCast(mod.impl.c.gguf_get_n_kv(self.ctx_gguf))) });
+            mod.impl.logInf("\n", .{});
         }
 
         // modalities
         {
-            try self.getBool(names.KEY_HAS_VISION_ENC, &self.has_vision, false);
-            try self.getBool(names.KEY_HAS_AUDIO_ENC, &self.has_audio, false);
-            try self.getBool(names.KEY_HAS_GEN_AUDIO_ENC, &self.has_gen_audio, false);
+            try self.getBool(mod.names.KEY_HAS_VISION_ENC, &self.has_vision, false);
+            try self.getBool(mod.names.KEY_HAS_AUDIO_ENC, &self.has_audio, false);
+            try self.getBool(mod.names.KEY_HAS_GEN_AUDIO_ENC, &self.has_gen_audio, false);
 
-            if (self.has_vision) impl.logInf("%s: has vision encoder\n", .{func});
-            if (self.has_audio) impl.logInf("%s: has audio encoder\n", .{func});
-            if (self.has_gen_audio) impl.logInf("%s: has audio generation (gen) encoder\n", .{func});
+            if (self.has_vision) mod.impl.logInf("%s: has vision encoder\n", .{func});
+            if (self.has_audio) mod.impl.logInf("%s: has audio encoder\n", .{func});
+            if (self.has_gen_audio) mod.impl.logInf("%s: has audio generation (gen) encoder\n", .{func});
         }
 
         // tensors
         if (!skip_tensors) {
             var i: c_int = 0;
             while (i < n_tensors) : (i += 1) {
-                const tname = c.gguf_get_tensor_name(self.ctx_gguf, i);
-                const offset = c.gguf_get_tensor_offset(self.ctx_gguf, i);
-                const ttype = c.gguf_get_tensor_type(self.ctx_gguf, i);
-                const cur = c.ggml_get_tensor(meta, tname);
-                const tensor_size = c.ggml_nbytes(cur);
+                const tname = mod.impl.c.gguf_get_tensor_name(self.ctx_gguf, i);
+                const offset = mod.impl.c.gguf_get_tensor_offset(self.ctx_gguf, i);
+                const ttype = mod.impl.c.gguf_get_tensor_type(self.ctx_gguf, i);
+                const cur = mod.impl.c.ggml_get_tensor(meta, tname);
+                const tensor_size = mod.impl.c.ggml_nbytes(cur);
                 self.model_size += tensor_size;
-                impl.logDbg("%s: tensor[%d]: n_dims = %d, name = %s, tensor_size=%zu, offset=%zu, shape:[%llu, %llu, %llu, %llu], type = %s\n", .{
-                    func,                                    i,                                       c.ggml_n_dims(cur),                      @as([*:0]const u8, @ptrCast(&cur.*.name)),
+                mod.impl.logDbg("%s: tensor[%d]: n_dims = %d, name = %s, tensor_size=%zu, offset=%zu, shape:[%llu, %llu, %llu, %llu], type = %s\n", .{
+                    func,                                    i,                                       mod.impl.c.ggml_n_dims(cur),             @as([*:0]const u8, @ptrCast(&cur.*.name)),
                     tensor_size,                             offset,                                  @as(c_ulonglong, @bitCast(cur.*.ne[0])), @as(c_ulonglong, @bitCast(cur.*.ne[1])),
-                    @as(c_ulonglong, @bitCast(cur.*.ne[2])), @as(c_ulonglong, @bitCast(cur.*.ne[3])), c.ggml_type_name(ttype),
+                    @as(c_ulonglong, @bitCast(cur.*.ne[2])), @as(c_ulonglong, @bitCast(cur.*.ne[3])), mod.impl.c.ggml_type_name(ttype),
                 });
             }
         }
@@ -670,12 +648,12 @@ pub const Loader = struct {
 
     /// The smart pointers' destructors.
     pub fn deinit(self: *Loader) void {
-        if (self.ctx_gguf != null) c.gguf_free(self.ctx_gguf);
-        if (self.ctx_meta != null) c.ggml_free(self.ctx_meta);
+        if (self.ctx_gguf != null) mod.impl.c.gguf_free(self.ctx_gguf);
+        if (self.ctx_meta != null) mod.impl.c.ggml_free(self.ctx_meta);
     }
 
     fn findKey(self: *const Loader, key: [*:0]const u8) i64 {
-        return c.gguf_find_key(self.ctx_gguf, key);
+        return mod.impl.c.gguf_find_key(self.ctx_gguf, key);
     }
 
     /// Ports `get_bool` (mtmd-model.cpp:3572 @b1b770d90), a member of `mtmd_model_loader`.
@@ -685,7 +663,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = c.gguf_get_val_bool(self.ctx_gguf, i);
+        output.* = mod.impl.c.gguf_get_val_bool(self.ctx_gguf, i);
     }
 
     /// Ports `get_i32` (mtmd-model.cpp:3583 @b1b770d90), a member of `mtmd_model_loader`.
@@ -695,7 +673,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = c.gguf_get_val_i32(self.ctx_gguf, i);
+        output.* = mod.impl.c.gguf_get_val_i32(self.ctx_gguf, i);
     }
 
     /// Ports `get_u32` (mtmd-model.cpp:3594 @b1b770d90), a member of `mtmd_model_loader`.
@@ -705,7 +683,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        const val = c.gguf_get_val_u32(self.ctx_gguf, i);
+        const val = mod.impl.c.gguf_get_val_u32(self.ctx_gguf, i);
         // sanity check
         if (val > @as(u32, std.math.maxInt(i32))) {
             return throwErr("%s: value %u for key '%s' exceeds INT32_MAX\n", .{ "get_u32", val, key });
@@ -720,7 +698,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = c.gguf_get_val_f32(self.ctx_gguf, i);
+        output.* = mod.impl.c.gguf_get_val_f32(self.ctx_gguf, i);
     }
 
     /// Ports `get_arr_f32` (mtmd-model.cpp:3622 @b1b770d90), a member of `mtmd_model_loader`.
@@ -731,13 +709,13 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        if (c.gguf_get_kv_type(self.ctx_gguf, i) != c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
-        const t = c.gguf_get_arr_type(self.ctx_gguf, i);
-        if (t != c.GGUF_TYPE_FLOAT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_FLOAT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, c.GGUF_TYPE_FLOAT32) });
-        const n = c.gguf_get_arr_n(self.ctx_gguf, i);
+        if (mod.impl.c.gguf_get_kv_type(self.ctx_gguf, i) != mod.impl.c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
+        const t = mod.impl.c.gguf_get_arr_type(self.ctx_gguf, i);
+        if (t != mod.impl.c.GGUF_TYPE_FLOAT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_FLOAT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, mod.impl.c.GGUF_TYPE_FLOAT32) });
+        const n = mod.impl.c.gguf_get_arr_n(self.ctx_gguf, i);
         if (n > @as(usize, std.math.maxInt(c_int))) return throwErr("%s: array '%s' is too large (%zu elements)\n", .{ func, key, n });
-        try output.resize(gpa, n);
-        const values: [*]align(1) const f32 = @ptrCast(c.gguf_get_arr_data(self.ctx_gguf, i));
+        try output.resize(std.heap.c_allocator, n);
+        const values: [*]align(1) const f32 = @ptrCast(mod.impl.c.gguf_get_arr_data(self.ctx_gguf, i));
         for (0..n) |j| output.items[j] = values[j];
     }
 
@@ -749,7 +727,7 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        output.* = c.gguf_get_val_str(self.ctx_gguf, i);
+        output.* = mod.impl.c.gguf_get_val_str(self.ctx_gguf, i);
     }
 
     /// `get_string` into an owned copy, the C++'s `std::string` output.
@@ -757,7 +735,7 @@ pub const Loader = struct {
     pub fn getString(self: *const Loader, key: [*:0]const u8, output: *[]const u8, required: bool) Error!void {
         var p: ?[*:0]const u8 = null;
         try self.getStringPtr(key, &p, required);
-        if (p) |s| output.* = try gpa.dupeSentinel(u8, std.mem.span(s), 0);
+        if (p) |s| output.* = try std.heap.c_allocator.dupeSentinel(u8, std.mem.span(s), 0);
     }
 
     /// Ports `get_arr_int` (mtmd-model.cpp:3659 @b1b770d90), a member of `mtmd_model_loader`.
@@ -768,13 +746,13 @@ pub const Loader = struct {
             if (required) return keyNotFound(key);
             return;
         }
-        if (c.gguf_get_kv_type(self.ctx_gguf, i) != c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
-        const t = c.gguf_get_arr_type(self.ctx_gguf, i);
-        if (t != c.GGUF_TYPE_INT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_INT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, c.GGUF_TYPE_INT32) });
-        const n = c.gguf_get_arr_n(self.ctx_gguf, i);
+        if (mod.impl.c.gguf_get_kv_type(self.ctx_gguf, i) != mod.impl.c.GGUF_TYPE_ARRAY) return throwErr("%s: key '%s' is not an array\n", .{ func, key });
+        const t = mod.impl.c.gguf_get_arr_type(self.ctx_gguf, i);
+        if (t != mod.impl.c.GGUF_TYPE_INT32) return throwErr("%s: array '%s' has type %d, expected %d (GGUF_TYPE_INT32)\n", .{ func, key, @as(c_int, @intCast(t)), @as(c_int, mod.impl.c.GGUF_TYPE_INT32) });
+        const n = mod.impl.c.gguf_get_arr_n(self.ctx_gguf, i);
         if (n > @as(usize, std.math.maxInt(c_int))) return throwErr("%s: array '%s' is too large (%zu elements)\n", .{ func, key, n });
-        try output.resize(gpa, n);
-        const values: [*]align(1) const i32 = @ptrCast(c.gguf_get_arr_data(self.ctx_gguf, i));
+        try output.resize(std.heap.c_allocator, n);
+        const values: [*]align(1) const i32 = @ptrCast(mod.impl.c.gguf_get_arr_data(self.ctx_gguf, i));
         for (0..n) |j| output.items[j] = values[j];
     }
 
@@ -783,20 +761,20 @@ pub const Loader = struct {
     }
 
     /// Ports `set_llava_uhd_res_candidates` (mtmd-model.cpp:3685 @b1b770d90), a member of `mtmd_model_loader`.
-    pub fn setLlavaUhdResCandidates(model: *model_mod.Model, max_patches_per_side: c_int) Error!void {
+    pub fn setLlavaUhdResCandidates(model: *mod.model.Model, max_patches_per_side: c_int) Error!void {
         const hparams = &model.hparams;
         var x: c_int = 1;
         while (x <= max_patches_per_side) : (x += 1) {
             var y: c_int = 1;
             while (y <= max_patches_per_side) : (y += 1) {
                 if (x == 1 and y == 1) continue; // skip the first point
-                try hparams.image_res_candidates.append(gpa, .{ .width = x * hparams.image_size, .height = y * hparams.image_size });
+                try hparams.image_res_candidates.append(std.heap.c_allocator, .{ .width = x * hparams.image_size, .height = y * hparams.image_size });
             }
         }
     }
 
     /// Ports `set_internvl_dhr_res_candidates` (mtmd-model.cpp:3700 @b1b770d90), a member of `mtmd_model_loader`.
-    pub fn setInternvlDhrResCandidates(model: *model_mod.Model) Error!void {
+    pub fn setInternvlDhrResCandidates(model: *mod.model.Model) Error!void {
         const hparams = &model.hparams;
         const min_num = hparams.preproc_min_tiles;
         const max_num = hparams.preproc_max_tiles;
@@ -809,23 +787,23 @@ pub const Loader = struct {
             b_hi = @min(b_hi, max_num);
             var b = b_lo;
             while (b <= b_hi) : (b += 1) {
-                try hparams.image_res_candidates.append(gpa, .{ .width = a * hparams.image_size, .height = b * hparams.image_size });
+                try hparams.image_res_candidates.append(std.heap.c_allocator, .{ .width = a * hparams.image_size, .height = b * hparams.image_size });
             }
         }
     }
 
     /// Ports `load_hparams` (mtmd-model.cpp:117 @b1b770d90), a member of `mtmd_model_loader`;
     /// the model-specific switch is `arms_hparams.load`.
-    pub fn loadHparams(self: *Loader, model: *model_mod.Model, modality: impl.Modality) Error!void {
+    pub fn loadHparams(self: *Loader, model: *mod.model.Model, modality: mod.impl.Modality) Error!void {
         const func = "load_hparams";
         const hparams = &model.hparams;
         var log_ffn_op: [*:0]const u8 = ""; // for logging
 
         // sanity check
         switch (modality) {
-            .vision => impl.ggmlAssert(self.has_vision, "mtmd-model.cpp", 123, "has_vision"),
-            .audio => impl.ggmlAssert(self.has_audio, "mtmd-model.cpp", 125, "has_audio"),
-            .gen_audio => impl.ggmlAssert(self.has_gen_audio, "mtmd-model.cpp", 127, "has_gen_audio"),
+            .vision => mod.impl.ggmlAssert(self.has_vision, "mtmd-model.cpp", 123, "has_vision"),
+            .audio => mod.impl.ggmlAssert(self.has_audio, "mtmd-model.cpp", 125, "has_audio"),
+            .gen_audio => mod.impl.ggmlAssert(self.has_gen_audio, "mtmd-model.cpp", 127, "has_gen_audio"),
         }
         model.modality = modality;
 
@@ -833,19 +811,19 @@ pub const Loader = struct {
         var proj_type: ?[*:0]const u8 = null;
         {
             // default key
-            try self.getStringPtr(names.KEY_PROJ_TYPE, &proj_type, false);
+            try self.getStringPtr(mod.names.KEY_PROJ_TYPE, &proj_type, false);
 
             // for models with mixed modalities
             if (proj_type == null or proj_type.?[0] == 0) {
                 switch (modality) {
-                    .vision => try self.getStringPtr(names.KEY_VISION_PROJ_TYPE, &proj_type, false),
-                    .audio => try self.getStringPtr(names.KEY_AUDIO_PROJ_TYPE, &proj_type, false),
-                    .gen_audio => try self.getStringPtr(names.KEY_GEN_AUDIO_PROJ_TYPE, &proj_type, false),
+                    .vision => try self.getStringPtr(mod.names.KEY_VISION_PROJ_TYPE, &proj_type, false),
+                    .audio => try self.getStringPtr(mod.names.KEY_AUDIO_PROJ_TYPE, &proj_type, false),
+                    .gen_audio => try self.getStringPtr(mod.names.KEY_GEN_AUDIO_PROJ_TYPE, &proj_type, false),
                 }
             }
             if (proj_type == null) proj_type = "";
 
-            model.proj_type = names.projectorTypeFromString(std.mem.span(proj_type.?));
+            model.proj_type = mod.names.projectorTypeFromString(std.mem.span(proj_type.?));
 
             if (model.proj_type == .unknown) return throwErr("%s: unknown projector type: %s\n", .{ func, proj_type.? });
 
@@ -863,24 +841,24 @@ pub const Loader = struct {
         {
             const prefix: [*:0]const u8 = if (is_vision) "vision" else (if (is_audio) "audio" else "gen.audio");
             var kb: [256]u8 = undefined;
-            try self.getU32(fmtKey(&kb, names.KEY_N_EMBD, prefix), &hparams.n_embd, true);
-            try self.getU32(fmtKey(&kb, names.KEY_N_HEAD, prefix), &hparams.n_head, true);
-            try self.getU32(fmtKey(&kb, names.KEY_N_EMBD_HEAD, prefix), &hparams.n_embd_head, false);
-            try self.getU32(fmtKey(&kb, names.KEY_N_FF, prefix), &hparams.n_ff, true);
-            try self.getU32(fmtKey(&kb, names.KEY_N_BLOCK, prefix), &hparams.n_layer, true);
-            try self.getU32(fmtKey(&kb, names.KEY_PROJ_DIM, prefix), &hparams.projection_dim, true);
-            try self.getF32(fmtKey(&kb, names.KEY_LAYER_NORM_EPS, prefix), &hparams.eps, true);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_EMBD, prefix), &hparams.n_embd, true);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_HEAD, prefix), &hparams.n_head, true);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_EMBD_HEAD, prefix), &hparams.n_embd_head, false);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_FF, prefix), &hparams.n_ff, true);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_BLOCK, prefix), &hparams.n_layer, true);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_PROJ_DIM, prefix), &hparams.projection_dim, true);
+            try self.getF32(fmtKey(&kb, mod.names.KEY_LAYER_NORM_EPS, prefix), &hparams.eps, true);
 
             // n_head_kv is optional (for GQA), default to n_head
             hparams.n_head_kv = hparams.n_head;
-            try self.getU32(fmtKey(&kb, names.KEY_N_HEAD_KV, prefix), &hparams.n_head_kv, false);
+            try self.getU32(fmtKey(&kb, mod.names.KEY_N_HEAD_KV, prefix), &hparams.n_head_kv, false);
 
             if (is_vision) {
-                try self.getU32(names.KEY_IMAGE_SIZE, &hparams.image_size, true);
-                try self.getU32(names.KEY_PATCH_SIZE, &hparams.patch_size, true);
-                try self.getU32(names.KEY_MAX_SLICE_NUMS, &hparams.max_slice_nums, false);
-                try self.getI32(names.KEY_MINICPMV_VERSION, &hparams.minicpmv_version, false); // legacy
-                try self.getU32(names.KEY_MINICPMV_QUERY_NUM, &hparams.minicpmv_query_num, false);
+                try self.getU32(mod.names.KEY_IMAGE_SIZE, &hparams.image_size, true);
+                try self.getU32(mod.names.KEY_PATCH_SIZE, &hparams.patch_size, true);
+                try self.getU32(mod.names.KEY_MAX_SLICE_NUMS, &hparams.max_slice_nums, false);
+                try self.getI32(mod.names.KEY_MINICPMV_VERSION, &hparams.minicpmv_version, false); // legacy
+                try self.getU32(mod.names.KEY_MINICPMV_QUERY_NUM, &hparams.minicpmv_query_num, false);
                 if (hparams.minicpmv_query_num == 0) {
                     // Fallback to hardcoded values for legacy models
                     hparams.minicpmv_query_num = switch (hparams.minicpmv_version) {
@@ -889,7 +867,7 @@ pub const Loader = struct {
                     };
                 }
             } else if (is_audio) {
-                try self.getU32(names.KEY_A_NUM_MEL_BINS, &hparams.n_mel_bins, true);
+                try self.getU32(mod.names.KEY_A_NUM_MEL_BINS, &hparams.n_mel_bins, true);
                 // some hparams are unused, but still need to set to avoid issues
                 hparams.image_size = 0;
                 hparams.patch_size = 1;
@@ -897,22 +875,22 @@ pub const Loader = struct {
                 // these are unused, but still need to be set to avoid issues
                 hparams.image_size = 0;
                 hparams.patch_size = 1;
-                try self.getString(names.KEY_GEN_AUDIO_VARIANT, &hparams.gen_model_variant, false);
+                try self.getString(mod.names.KEY_GEN_AUDIO_VARIANT, &hparams.gen_model_variant, false);
             } else {
-                impl.ggmlAssert(false, "mtmd-model.cpp", 219, "false && \"unknown modality\"");
+                mod.impl.ggmlAssert(false, "mtmd-model.cpp", 219, "false && \"unknown modality\"");
             }
 
             // for pinpoints, we need to convert it into a list of resolution candidates
             {
                 var pinpoints: std.ArrayList(i32) = .empty;
-                defer pinpoints.deinit(gpa);
-                try self.getArrInt(names.KEY_IMAGE_GRID_PINPOINTS, &pinpoints, false);
+                defer pinpoints.deinit(std.heap.c_allocator);
+                try self.getArrInt(mod.names.KEY_IMAGE_GRID_PINPOINTS, &pinpoints, false);
                 if (pinpoints.items.len % 2 != 0) {
                     return throwErr("%s: image_grid_pinpoints must have an even number of elements, got %zu\n", .{ func, pinpoints.items.len });
                 }
                 var i: usize = 0;
                 while (i < pinpoints.items.len) : (i += 2) {
-                    try hparams.image_res_candidates.append(gpa, .{ .width = pinpoints.items[i], .height = pinpoints.items[i + 1] });
+                    try hparams.image_res_candidates.append(std.heap.c_allocator, .{ .width = pinpoints.items[i], .height = pinpoints.items[i + 1] });
                 }
             }
 
@@ -922,8 +900,8 @@ pub const Loader = struct {
             {
                 var use_gelu = false;
                 var use_silu = false;
-                try self.getBool(names.KEY_USE_GELU, &use_gelu, false);
-                try self.getBool(names.KEY_USE_SILU, &use_silu, false);
+                try self.getBool(mod.names.KEY_USE_GELU, &use_gelu, false);
+                try self.getBool(mod.names.KEY_USE_SILU, &use_silu, false);
                 if (use_gelu and use_silu) return throwErr("%s: both use_gelu and use_silu are set to true\n", .{func});
                 if (use_gelu) {
                     hparams.ffn_op = .gelu;
@@ -939,7 +917,7 @@ pub const Loader = struct {
 
             {
                 var mm_patch_merge_type: ?[*:0]const u8 = null;
-                try self.getStringPtr(names.KEY_MM_PATCH_MERGE_TYPE, &mm_patch_merge_type, false);
+                try self.getStringPtr(mod.names.KEY_MM_PATCH_MERGE_TYPE, &mm_patch_merge_type, false);
                 if (mm_patch_merge_type != null and std.mem.eql(u8, std.mem.span(mm_patch_merge_type.?), "spatial_unpad")) {
                     hparams.mm_patch_merge_type = .spatial_unpad;
                 }
@@ -947,11 +925,11 @@ pub const Loader = struct {
 
             if (is_vision) {
                 var image_mean: std.ArrayList(f32) = .empty;
-                defer image_mean.deinit(gpa);
+                defer image_mean.deinit(std.heap.c_allocator);
                 var image_std: std.ArrayList(f32) = .empty;
-                defer image_std.deinit(gpa);
-                try self.getArrF32(names.KEY_IMAGE_MEAN, &image_mean, false);
-                try self.getArrF32(names.KEY_IMAGE_STD, &image_std, false);
+                defer image_std.deinit(std.heap.c_allocator);
+                try self.getArrF32(mod.names.KEY_IMAGE_MEAN, &image_mean, false);
+                try self.getArrF32(mod.names.KEY_IMAGE_STD, &image_std, false);
                 if (image_mean.items.len < 3 or image_std.items.len < 3) {
                     return throwErr("%s: image_mean/image_std arrays must have at least 3 elements, got %zu and %zu\n", .{ func, image_mean.items.len, image_std.items.len });
                 }
@@ -962,7 +940,7 @@ pub const Loader = struct {
             }
 
             // Load the vision/audio feature layer indices if they are explicitly provided
-            try self.getArrInt(fmtKey(&kb, names.KEY_FEATURE_LAYERS, prefix), &hparams.feature_layers, false);
+            try self.getArrInt(fmtKey(&kb, mod.names.KEY_FEATURE_LAYERS, prefix), &hparams.feature_layers, false);
             for (hparams.feature_layers.items) |v| {
                 if (v > hparams.n_layer) {
                     return throwErr("%s: feature layer index %d is out of range (n_layer: %d)", .{ func, @as(c_int, v), @as(c_int, hparams.n_layer) });
@@ -970,7 +948,7 @@ pub const Loader = struct {
             }
 
             // model-specific params
-            try arms_hparams.load(self, model, .{
+            try mod.arms_hparams.load(self, model, .{
                 .proj_type = proj_type.?,
                 .is_vision = is_vision,
                 .is_audio = is_audio,
@@ -1003,44 +981,44 @@ pub const Loader = struct {
                 }
             }
 
-            impl.logInf("%s: projector:          %s\n", .{ func, proj_type.? });
-            impl.logInf("%s: n_embd:             %d\n", .{ func, hparams.n_embd });
-            impl.logInf("%s: n_head:             %d\n", .{ func, hparams.n_head });
-            impl.logInf("%s: n_ff:               %d\n", .{ func, hparams.n_ff });
-            impl.logInf("%s: n_layer:            %d\n", .{ func, hparams.n_layer });
-            impl.logInf("%s: ffn_op:             %s\n", .{ func, log_ffn_op });
-            impl.logInf("%s: projection_dim:     %d\n", .{ func, hparams.projection_dim });
+            mod.impl.logInf("%s: projector:          %s\n", .{ func, proj_type.? });
+            mod.impl.logInf("%s: n_embd:             %d\n", .{ func, hparams.n_embd });
+            mod.impl.logInf("%s: n_head:             %d\n", .{ func, hparams.n_head });
+            mod.impl.logInf("%s: n_ff:               %d\n", .{ func, hparams.n_ff });
+            mod.impl.logInf("%s: n_layer:            %d\n", .{ func, hparams.n_layer });
+            mod.impl.logInf("%s: ffn_op:             %s\n", .{ func, log_ffn_op });
+            mod.impl.logInf("%s: projection_dim:     %d\n", .{ func, hparams.projection_dim });
             if (is_vision) {
-                impl.logInf("\n--- vision hparams ---\n", .{});
-                impl.logInf("%s: image_size:         %d\n", .{ func, hparams.image_size });
-                impl.logInf("%s: patch_size:         %d\n", .{ func, hparams.patch_size });
-                impl.logInf("%s: has_llava_proj:     %d\n", .{ func, @as(c_int, @intFromBool(hparams.has_llava_projector)) });
-                impl.logInf("%s: minicpmv_version:   %d\n", .{ func, hparams.minicpmv_version });
-                impl.logInf("%s: n_merge:            %d\n", .{ func, hparams.n_merge });
-                impl.logInf("%s: n_wa_pattern: %d\n", .{ func, hparams.n_wa_pattern });
+                mod.impl.logInf("\n--- vision hparams ---\n", .{});
+                mod.impl.logInf("%s: image_size:         %d\n", .{ func, hparams.image_size });
+                mod.impl.logInf("%s: patch_size:         %d\n", .{ func, hparams.patch_size });
+                mod.impl.logInf("%s: has_llava_proj:     %d\n", .{ func, @as(c_int, @intFromBool(hparams.has_llava_projector)) });
+                mod.impl.logInf("%s: minicpmv_version:   %d\n", .{ func, hparams.minicpmv_version });
+                mod.impl.logInf("%s: n_merge:            %d\n", .{ func, hparams.n_merge });
+                mod.impl.logInf("%s: n_wa_pattern: %d\n", .{ func, hparams.n_wa_pattern });
                 if (hparams.wa_layer_indexes.count() != 0) {
-                    impl.logInf("%s: wa_layer_indexes:  ", .{func});
-                    for (try arms_hparams.waLayerIndexesInSetOrder(hparams)) |layer| impl.logInf("%d ", .{layer});
-                    impl.logInf("\n", .{});
+                    mod.impl.logInf("%s: wa_layer_indexes:  ", .{func});
+                    for (try mod.arms_hparams.waLayerIndexesInSetOrder(hparams)) |layer| mod.impl.logInf("%d ", .{layer});
+                    mod.impl.logInf("\n", .{});
                 }
                 if (hparams.image_min_pixels > 0) {
-                    impl.logInf("%s: image_min_pixels:   %d%s\n", .{ func, hparams.image_min_pixels, @as([*:0]const u8, if (hparams.custom_image_min_tokens > 0) " (custom value)" else "") });
+                    mod.impl.logInf("%s: image_min_pixels:   %d%s\n", .{ func, hparams.image_min_pixels, @as([*:0]const u8, if (hparams.custom_image_min_tokens > 0) " (custom value)" else "") });
                 }
                 if (hparams.image_max_pixels > 0) {
-                    impl.logInf("%s: image_max_pixels:   %d%s\n", .{ func, hparams.image_max_pixels, @as([*:0]const u8, if (hparams.custom_image_max_tokens > 0) " (custom value)" else "") });
+                    mod.impl.logInf("%s: image_max_pixels:   %d%s\n", .{ func, hparams.image_max_pixels, @as([*:0]const u8, if (hparams.custom_image_max_tokens > 0) " (custom value)" else "") });
                 }
                 if (hparams.preproc_max_tiles > 0) {
-                    impl.logInf("%s: preproc_tiles:      %d - %d\n", .{ func, hparams.preproc_min_tiles, hparams.preproc_max_tiles });
+                    mod.impl.logInf("%s: preproc_tiles:      %d - %d\n", .{ func, hparams.preproc_min_tiles, hparams.preproc_max_tiles });
                 }
             } else if (is_audio) {
-                impl.logInf("\n--- audio hparams ---\n", .{});
-                impl.logInf("%s: n_mel_bins:         %d\n", .{ func, hparams.n_mel_bins });
-                impl.logInf("%s: proj_stack_factor:  %d\n", .{ func, hparams.proj_stack_factor });
-                impl.logInf("%s: audio_chunk_len:    %d\n", .{ func, hparams.audio_chunk_len });
-                impl.logInf("%s: audio_sample_rate:  %d\n", .{ func, hparams.audio_sample_rate });
-                impl.logInf("%s: audio_n_fft:        %d\n", .{ func, hparams.audio_n_fft });
-                impl.logInf("%s: audio_window_len:   %d\n", .{ func, hparams.audio_window_len });
-                impl.logInf("%s: audio_hop_len:      %d\n", .{ func, hparams.audio_hop_len });
+                mod.impl.logInf("\n--- audio hparams ---\n", .{});
+                mod.impl.logInf("%s: n_mel_bins:         %d\n", .{ func, hparams.n_mel_bins });
+                mod.impl.logInf("%s: proj_stack_factor:  %d\n", .{ func, hparams.proj_stack_factor });
+                mod.impl.logInf("%s: audio_chunk_len:    %d\n", .{ func, hparams.audio_chunk_len });
+                mod.impl.logInf("%s: audio_sample_rate:  %d\n", .{ func, hparams.audio_sample_rate });
+                mod.impl.logInf("%s: audio_n_fft:        %d\n", .{ func, hparams.audio_n_fft });
+                mod.impl.logInf("%s: audio_window_len:   %d\n", .{ func, hparams.audio_window_len });
+                mod.impl.logInf("%s: audio_hop_len:      %d\n", .{ func, hparams.audio_hop_len });
 
                 // GEMMA4UA and pocket-tts are encoder-free: no FFT/filterbank
                 // Muse Spark is encoder-free in the same sense: its conv pyramid reads the raw waveform, one channel takes the place of the mel bins
@@ -1054,15 +1032,15 @@ pub const Loader = struct {
                     return throwErr("%s: audio hparams invalid: sample_rate=%d n_fft=%d window_len=%d hop_len=%d\n", .{ func, hparams.audio_sample_rate, hparams.audio_n_fft, hparams.audio_window_len, hparams.audio_hop_len });
                 }
             }
-            impl.logInf("\n", .{});
-            impl.logInf("%s: model size:         %.2f MiB\n", .{ func, @as(f64, @floatFromInt(self.model_size)) / 1024.0 / 1024.0 });
-            impl.logInf("%s: metadata size:      %.2f MiB\n", .{ func, @as(f64, @floatFromInt(c.ggml_get_mem_size(self.ctx_meta))) / 1024.0 / 1024.0 });
+            mod.impl.logInf("\n", .{});
+            mod.impl.logInf("%s: model size:         %.2f MiB\n", .{ func, @as(f64, @floatFromInt(self.model_size)) / 1024.0 / 1024.0 });
+            mod.impl.logInf("%s: metadata size:      %.2f MiB\n", .{ func, @as(f64, @floatFromInt(mod.impl.c.ggml_get_mem_size(self.ctx_meta))) / 1024.0 / 1024.0 });
         }
     }
 
     /// Ports `load_tensors` (mtmd-model.cpp:1321 @b1b770d90), a member of `mtmd_model_loader`;
     /// the model-specific switch is `arms_tensors.load`.
-    pub fn loadTensors(self: *Loader, model: *model_mod.Model, buft: c.ggml_backend_buffer_type_t, no_alloc: bool) Error!void {
+    pub fn loadTensors(self: *Loader, model: *mod.model.Model, buft: mod.impl.c.ggml_backend_buffer_type_t, no_alloc: bool) Error!void {
         const func = "load_tensors";
         const hparams = &model.hparams;
 
@@ -1078,29 +1056,29 @@ pub const Loader = struct {
         // get offsets
         {
             var i: i64 = 0;
-            while (i < c.gguf_get_n_tensors(self.ctx_gguf)) : (i += 1) {
-                const tname = std.mem.span(c.gguf_get_tensor_name(self.ctx_gguf, i));
-                try tl.tensor_offset.put(gpa, tname, c.gguf_get_data_offset(self.ctx_gguf) + c.gguf_get_tensor_offset(self.ctx_gguf, i));
+            while (i < mod.impl.c.gguf_get_n_tensors(self.ctx_gguf)) : (i += 1) {
+                const tname = std.mem.span(mod.impl.c.gguf_get_tensor_name(self.ctx_gguf, i));
+                try tl.tensor_offset.put(std.heap.c_allocator, tname, mod.impl.c.gguf_get_data_offset(self.ctx_gguf) + mod.impl.c.gguf_get_tensor_offset(self.ctx_gguf, i));
             }
         }
 
         // create data context
-        const params: c.ggml_init_params = .{
-            .mem_size = @as(usize, @intCast(c.gguf_get_n_tensors(self.ctx_gguf) + 1)) * c.ggml_tensor_overhead(),
+        const params: mod.impl.c.ggml_init_params = .{
+            .mem_size = @as(usize, @intCast(mod.impl.c.gguf_get_n_tensors(self.ctx_gguf) + 1)) * mod.impl.c.ggml_tensor_overhead(),
             .mem_buffer = null,
             .no_alloc = true,
         };
-        model.ctx_data = c.ggml_init(params);
+        model.ctx_data = mod.impl.c.ggml_init(params);
         if (model.ctx_data == null) return throwErr("%s: failed to init ggml context\n", .{func});
 
         var nb: [256]u8 = undefined;
-        model.class_embedding = try tl.getTensor(names.TN_CLASS_EMBD, false);
+        model.class_embedding = try tl.getTensor(mod.names.TN_CLASS_EMBD, false);
 
-        model.pre_ln_w = try tl.getTensor(fmtKey2(&nb, names.TN_LN_PRE, prefix, "weight"), false);
-        model.pre_ln_b = try tl.getTensor(fmtKey2(&nb, names.TN_LN_PRE, prefix, "bias"), false);
+        model.pre_ln_w = try tl.getTensor(fmtKey2(&nb, mod.names.TN_LN_PRE, prefix, "weight"), false);
+        model.pre_ln_b = try tl.getTensor(fmtKey2(&nb, mod.names.TN_LN_PRE, prefix, "bias"), false);
 
-        model.post_ln_w = try tl.getTensor(fmtKey2(&nb, names.TN_LN_POST, prefix, "weight"), false);
-        model.post_ln_b = try tl.getTensor(fmtKey2(&nb, names.TN_LN_POST, prefix, "bias"), false);
+        model.post_ln_w = try tl.getTensor(fmtKey2(&nb, mod.names.TN_LN_POST, prefix, "weight"), false);
+        model.post_ln_b = try tl.getTensor(fmtKey2(&nb, mod.names.TN_LN_POST, prefix, "bias"), false);
 
         // every vision encoder starts with a patch embedding, except the ones with their own stem
         const has_patch_embd = (model.modality == .vision and
@@ -1108,140 +1086,140 @@ pub const Loader = struct {
             model.proj_type != .deepseekocr and
             model.proj_type != .deepseekocr2);
 
-        model.patch_bias = try tl.getTensor(names.TN_PATCH_BIAS, false);
-        model.patch_embeddings_0 = try tl.getTensor(names.TN_PATCH_EMBD, has_patch_embd);
-        model.patch_embeddings_1 = try tl.getTensor(names.TN_PATCH_EMBD_1, false);
+        model.patch_bias = try tl.getTensor(mod.names.TN_PATCH_BIAS, false);
+        model.patch_embeddings_0 = try tl.getTensor(mod.names.TN_PATCH_EMBD, has_patch_embd);
+        model.patch_embeddings_1 = try tl.getTensor(mod.names.TN_PATCH_EMBD_1, false);
 
-        model.norm_embd_w = try tl.getTensor(fmtKey(&nb, names.TN_NORM_EMBD, "weight"), false);
-        model.norm_embd_b = try tl.getTensor(fmtKey(&nb, names.TN_NORM_EMBD, "bias"), false);
+        model.norm_embd_w = try tl.getTensor(fmtKey(&nb, mod.names.TN_NORM_EMBD, "weight"), false);
+        model.norm_embd_b = try tl.getTensor(fmtKey(&nb, mod.names.TN_NORM_EMBD, "bias"), false);
 
-        model.position_embeddings = try tl.getTensor(fmtKey(&nb, names.TN_POS_EMBD, prefix), false);
+        model.position_embeddings = try tl.getTensor(fmtKey(&nb, mod.names.TN_POS_EMBD, prefix), false);
 
         // lfm3vl
-        model.lfm3vl_embedding_norm_w = try tl.getTensor(fmtKey2(&nb, names.TN_LFM3VL_EMBEDDING_NORM, prefix, "weight"), false);
+        model.lfm3vl_embedding_norm_w = try tl.getTensor(fmtKey2(&nb, mod.names.TN_LFM3VL_EMBEDDING_NORM, prefix, "weight"), false);
 
         const has_standard_layers = model.proj_type != .gemma3nv and model.proj_type != .qwen3tts_spkenc and model.proj_type != .pockettts_gen and model.proj_type != .soprano and model.proj_type != .muse_spark_audio and
             model.proj_type != .chatterbox and model.proj_type != .chatterbox_spkenc;
 
         // layers
         const n_layers_to_load: usize = if (has_standard_layers) @intCast(hparams.n_layer) else 0;
-        try model.layers.resize(gpa, n_layers_to_load);
+        try model.layers.resize(std.heap.c_allocator, n_layers_to_load);
         for (model.layers.items) |*l| l.* = .{};
         for (0..n_layers_to_load) |ilu| {
             const il: c_int = @intCast(ilu);
             const layer = &model.layers.items[ilu];
-            layer.k_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_K, prefix, il, "weight"), false);
-            layer.q_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_Q, prefix, il, "weight"), false);
-            layer.v_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_V, prefix, il, "weight"), false);
+            layer.k_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_K, prefix, il, "weight"), false);
+            layer.q_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_Q, prefix, il, "weight"), false);
+            layer.v_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_V, prefix, il, "weight"), false);
             // lfm3vl / lfm3a conv layers have no attention tensors
             const o_w_required = model.proj_type != .lfm3vl and model.proj_type != .lfm3a;
-            layer.o_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_OUTPUT, prefix, il, "weight"), o_w_required);
-            layer.qkv_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_QKV, prefix, il, "weight"), false);
-            layer.k_norm = try tl.getTensor(fmtL(&nb, names.TN_ATTN_K_NORM, prefix, il, "weight"), false);
-            layer.q_norm = try tl.getTensor(fmtL(&nb, names.TN_ATTN_Q_NORM, prefix, il, "weight"), false);
-            layer.ln_1_w = try tl.getTensor(fmtL(&nb, names.TN_LN_1, prefix, il, "weight"), false);
-            layer.ln_2_w = try tl.getTensor(fmtL(&nb, names.TN_LN_2, prefix, il, "weight"), false);
-            layer.ls_1_w = try tl.getTensor(fmtL(&nb, names.TN_LS_1, prefix, il, "weight"), false); // no bias
-            layer.ls_2_w = try tl.getTensor(fmtL(&nb, names.TN_LS_2, prefix, il, "weight"), false); // no bias
-            layer.ls_out_w = try tl.getTensor(fmtL(&nb, names.TN_LS_OUT, prefix, il, "weight"), false); // no bias
-            layer.attn_post_norm_w = try tl.getTensor(fmtL(&nb, names.TN_ATTN_POST_NORM, prefix, il, "weight"), false); // no bias
-            layer.ff_post_norm_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_POST_NORM, prefix, il, "weight"), false); // no bias
+            layer.o_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_OUTPUT, prefix, il, "weight"), o_w_required);
+            layer.qkv_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_QKV, prefix, il, "weight"), false);
+            layer.k_norm = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_K_NORM, prefix, il, "weight"), false);
+            layer.q_norm = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_Q_NORM, prefix, il, "weight"), false);
+            layer.ln_1_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LN_1, prefix, il, "weight"), false);
+            layer.ln_2_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LN_2, prefix, il, "weight"), false);
+            layer.ls_1_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LS_1, prefix, il, "weight"), false); // no bias
+            layer.ls_2_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LS_2, prefix, il, "weight"), false); // no bias
+            layer.ls_out_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LS_OUT, prefix, il, "weight"), false); // no bias
+            layer.attn_post_norm_w = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_POST_NORM, prefix, il, "weight"), false); // no bias
+            layer.ff_post_norm_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_POST_NORM, prefix, il, "weight"), false); // no bias
 
-            layer.k_b = try tl.getTensor(fmtL(&nb, names.TN_ATTN_K, prefix, il, "bias"), false);
-            layer.q_b = try tl.getTensor(fmtL(&nb, names.TN_ATTN_Q, prefix, il, "bias"), false);
-            layer.v_b = try tl.getTensor(fmtL(&nb, names.TN_ATTN_V, prefix, il, "bias"), false);
-            layer.o_b = try tl.getTensor(fmtL(&nb, names.TN_ATTN_OUTPUT, prefix, il, "bias"), false);
-            layer.qkv_b = try tl.getTensor(fmtL(&nb, names.TN_ATTN_QKV, prefix, il, "bias"), false);
-            layer.ln_1_b = try tl.getTensor(fmtL(&nb, names.TN_LN_1, prefix, il, "bias"), false);
-            layer.ln_2_b = try tl.getTensor(fmtL(&nb, names.TN_LN_2, prefix, il, "bias"), false);
+            layer.k_b = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_K, prefix, il, "bias"), false);
+            layer.q_b = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_Q, prefix, il, "bias"), false);
+            layer.v_b = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_V, prefix, il, "bias"), false);
+            layer.o_b = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_OUTPUT, prefix, il, "bias"), false);
+            layer.qkv_b = try tl.getTensor(fmtL(&nb, mod.names.TN_ATTN_QKV, prefix, il, "bias"), false);
+            layer.ln_1_b = try tl.getTensor(fmtL(&nb, mod.names.TN_LN_1, prefix, il, "bias"), false);
+            layer.ln_2_b = try tl.getTensor(fmtL(&nb, mod.names.TN_LN_2, prefix, il, "bias"), false);
 
             // MoE ffn (dots3note vision pyramid blocks); replaces the dense ffn when present
-            layer.ff_gate_inp_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_GATE_INP, prefix, il, "weight"), false);
-            layer.ff_gate_exps_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_GATE_EXPS, prefix, il, "weight"), false);
-            layer.ff_up_exps_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_UP_EXPS, prefix, il, "weight"), false);
-            layer.ff_down_exps_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_DOWN_EXPS, prefix, il, "weight"), false);
-            layer.ff_exp_probs_b = try tl.getTensor(fmtL(&nb, names.TN_FFN_EXP_PROBS_B, prefix, il, "weight"), false);
+            layer.ff_gate_inp_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_GATE_INP, prefix, il, "weight"), false);
+            layer.ff_gate_exps_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_GATE_EXPS, prefix, il, "weight"), false);
+            layer.ff_up_exps_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_UP_EXPS, prefix, il, "weight"), false);
+            layer.ff_down_exps_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_DOWN_EXPS, prefix, il, "weight"), false);
+            layer.ff_exp_probs_b = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_EXP_PROBS_B, prefix, il, "weight"), false);
             const is_moe = layer.ff_gate_exps_w != null;
 
             // ffn
-            layer.ff_up_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_UP, prefix, il, "weight"), !is_moe);
-            layer.ff_up_b = try tl.getTensor(fmtL(&nb, names.TN_FFN_UP, prefix, il, "bias"), false);
-            layer.ff_gate_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_GATE, prefix, il, "weight"), false);
-            layer.ff_gate_b = try tl.getTensor(fmtL(&nb, names.TN_FFN_GATE, prefix, il, "bias"), false);
-            layer.ff_down_w = try tl.getTensor(fmtL(&nb, names.TN_FFN_DOWN, prefix, il, "weight"), !is_moe);
-            layer.ff_down_b = try tl.getTensor(fmtL(&nb, names.TN_FFN_DOWN, prefix, il, "bias"), false);
+            layer.ff_up_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_UP, prefix, il, "weight"), !is_moe);
+            layer.ff_up_b = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_UP, prefix, il, "bias"), false);
+            layer.ff_gate_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_GATE, prefix, il, "weight"), false);
+            layer.ff_gate_b = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_GATE, prefix, il, "bias"), false);
+            layer.ff_down_w = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_DOWN, prefix, il, "weight"), !is_moe);
+            layer.ff_down_b = try tl.getTensor(fmtL(&nb, mod.names.TN_FFN_DOWN, prefix, il, "bias"), false);
 
             // mimovl per-head attention sink bias
-            layer.attn_sinks = try tl.getTensor(fmtPI(&nb, names.TN_ATTN_SINKS, prefix, il), false);
+            layer.attn_sinks = try tl.getTensor(fmtPI(&nb, mod.names.TN_ATTN_SINKS, prefix, il), false);
 
             // qwen3vl deepstack layer
-            layer.deepstack_norm_w = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_NORM, il, "weight"), false);
-            layer.deepstack_norm_b = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_NORM, il, "bias"), false);
-            layer.deepstack_fc1_w = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_FC1, il, "weight"), false);
-            layer.deepstack_fc1_b = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_FC1, il, "bias"), false);
-            layer.deepstack_fc2_w = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_FC2, il, "weight"), false);
-            layer.deepstack_fc2_b = try tl.getTensor(fmtIS(&nb, names.TN_DEEPSTACK_FC2, il, "bias"), false);
+            layer.deepstack_norm_w = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_NORM, il, "weight"), false);
+            layer.deepstack_norm_b = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_NORM, il, "bias"), false);
+            layer.deepstack_fc1_w = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_FC1, il, "weight"), false);
+            layer.deepstack_fc1_b = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_FC1, il, "bias"), false);
+            layer.deepstack_fc2_w = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_FC2, il, "weight"), false);
+            layer.deepstack_fc2_b = try tl.getTensor(fmtIS(&nb, mod.names.TN_DEEPSTACK_FC2, il, "bias"), false);
             if (layer.hasDeepstack()) model.n_deepstack_layers += 1;
 
             // lfm3vl conv layers
-            layer.conv2d_in_proj_w = try tl.getTensor(fmtL(&nb, names.TN_LFM3VL_CONV2D_IN_PROJ, prefix, il, "weight"), false);
-            layer.conv2d_spatial_w = try tl.getTensor(fmtL(&nb, names.TN_LFM3VL_CONV2D_SPATIAL, prefix, il, "weight"), false);
-            layer.conv2d_out_proj_w = try tl.getTensor(fmtL(&nb, names.TN_LFM3VL_CONV2D_OUT_PROJ, prefix, il, "weight"), false);
+            layer.conv2d_in_proj_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LFM3VL_CONV2D_IN_PROJ, prefix, il, "weight"), false);
+            layer.conv2d_spatial_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LFM3VL_CONV2D_SPATIAL, prefix, il, "weight"), false);
+            layer.conv2d_out_proj_w = try tl.getTensor(fmtL(&nb, mod.names.TN_LFM3VL_CONV2D_OUT_PROJ, prefix, il, "weight"), false);
 
             // some models already exported with legacy (incorrect) naming which is quite messy, let's fix it here
             // note: Qwen model converted from the old surgery script has n_ff = 0, so we cannot use n_ff to check!
             const pt = model.proj_type;
             const is_ffn_swapped = (pt == .mlp or pt == .mlp_norm or pt == .ldp or pt == .ldpv2 or pt == .qwen2vl or pt == .qwen25vl or
                 pt == .exaone4_5 or pt == .glm_edge or pt == .gemma3 or pt == .idefics3 or pt == .minicpmv or pt == .minicpmv4_6 or pt == .minicpmv4_7 or pt == .minicpm_ocr_1_0) and
-                layer.ff_up_w != null and layer.ff_down_w != null and graph_mod.ne(layer.ff_down_w, 0) == hparams.n_embd;
+                layer.ff_up_w != null and layer.ff_down_w != null and mod.graph.ne(layer.ff_down_w, 0) == hparams.n_embd;
             if (is_ffn_swapped) {
                 // swap up and down weights
-                std.mem.swap(T, &layer.ff_up_w, &layer.ff_down_w);
+                std.mem.swap(mod.graph.T, &layer.ff_up_w, &layer.ff_down_w);
                 // swap up and down biases
-                std.mem.swap(T, &layer.ff_up_b, &layer.ff_down_b);
-                if (il == 0) impl.logWrn("%s: ffn up/down are swapped\n", .{func});
+                std.mem.swap(mod.graph.T, &layer.ff_up_b, &layer.ff_down_b);
+                if (il == 0) mod.impl.logWrn("%s: ffn up/down are swapped\n", .{func});
             }
         }
 
         // model-specific tensors
-        try arms_tensors.load(&tl);
+        try mod.arms_tensors.load(&tl);
 
         // load data
         {
             var read_buf: std.ArrayList(u8) = .empty;
-            defer read_buf.deinit(gpa);
+            defer read_buf.deinit(std.heap.c_allocator);
 
             // start loading event
             if (self.progress_callback) |cb| _ = cb(0.0, self.progress_callback_user_data);
 
             // compute total tensor data size for progress reporting
             var total_data_size: usize = 0;
-            for (tl.tensors_to_load.items) |t| total_data_size += c.ggml_nbytes(t);
+            for (tl.tensors_to_load.items) |t| total_data_size += mod.impl.c.ggml_nbytes(t);
 
             // alloc memory and offload data
-            model.buf = c.ggml_backend_alloc_ctx_tensors_from_buft(model.ctx_data, buft);
-            c.ggml_backend_buffer_set_usage(model.buf, c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            model.buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(model.ctx_data, buft);
+            mod.impl.c.ggml_backend_buffer_set_usage(model.buf, mod.impl.c.GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
             // read the weight from file
             if (!no_alloc) {
                 var data_loaded: usize = 0;
                 for (tl.tensors_to_load.items) |t| {
                     const tname: [*:0]const u8 = @ptrCast(&t.?.name);
-                    const cur = c.ggml_get_tensor(model.ctx_data, tname);
-                    impl.ggmlAssert(cur != null, "mtmd-model.cpp", 3537, "cur && \"tensor not found in ctx_data\"");
+                    const cur = mod.impl.c.ggml_get_tensor(model.ctx_data, tname);
+                    mod.impl.ggmlAssert(cur != null, "mtmd-model.cpp", 3537, "cur && \"tensor not found in ctx_data\"");
                     const off = tl.tensor_offset.get(std.mem.span(tname));
-                    impl.ggmlAssert(off != null, "mtmd-model.cpp", 3539, "it_off != tensor_offset.end() && \"no offset for tensor\"");
-                    if (libc.fseeko(tl.fin, @intCast(off.?), 0) != 0) {
+                    mod.impl.ggmlAssert(off != null, "mtmd-model.cpp", 3539, "it_off != tensor_offset.end() && \"no offset for tensor\"");
+                    if (stdlib.libc.fseeko(tl.fin, @intCast(off.?), 0) != 0) {
                         return throwErr("%s: failed to seek for tensor %s\n", .{ func, tname });
                     }
-                    const num_bytes = c.ggml_nbytes(cur);
-                    if (c.ggml_backend_buft_is_host(buft)) {
+                    const num_bytes = mod.impl.c.ggml_nbytes(cur);
+                    if (mod.impl.c.ggml_backend_buft_is_host(buft)) {
                         // for the CPU and Metal backend, we can read directly into the tensor
                         _ = std.c.fread(@ptrCast(cur.*.data), 1, num_bytes, tl.fin.?);
                     } else {
                         // read into a temporary buffer first, then copy to device memory
-                        try read_buf.resize(gpa, num_bytes);
+                        try read_buf.resize(std.heap.c_allocator, num_bytes);
                         _ = std.c.fread(read_buf.items.ptr, 1, num_bytes, tl.fin.?);
-                        c.ggml_backend_tensor_set(cur, read_buf.items.ptr, 0, num_bytes);
+                        mod.impl.c.ggml_backend_tensor_set(cur, read_buf.items.ptr, 0, num_bytes);
                     }
                     data_loaded += num_bytes;
                     if (self.progress_callback) |cb| {
@@ -1253,9 +1231,9 @@ pub const Loader = struct {
                         }
                     }
                 }
-                impl.logDbg("%s: loaded %zu tensors from %s\n", .{ func, tl.tensors_to_load.items.len, self.fname.ptr });
+                mod.impl.logDbg("%s: loaded %zu tensors from %s\n", .{ func, tl.tensors_to_load.items.len, self.fname.ptr });
             } else {
-                impl.logDbg("%s: no_alloc is set, skipping tensor data loading (%zu tensors)\n", .{ func, tl.tensors_to_load.items.len });
+                mod.impl.logDbg("%s: no_alloc is set, skipping tensor data loading (%zu tensors)\n", .{ func, tl.tensors_to_load.items.len });
             }
         }
     }
@@ -1264,40 +1242,40 @@ pub const Loader = struct {
 /// `load_tensors`'s locals and lambdas, handed to `arms_tensors.load`.
 pub const TensorLoader = struct {
     loader: *Loader,
-    model: *model_mod.Model,
-    buft: c.ggml_backend_buffer_type_t,
+    model: *mod.model.Model,
+    buft: mod.impl.c.ggml_backend_buffer_type_t,
     prefix: [*:0]const u8 = "v",
     fin: ?*std.c.FILE = null,
     tensor_offset: std.StringHashMapUnmanaged(usize) = .empty,
-    tensors_to_load: std.ArrayList(T) = .empty,
+    tensors_to_load: std.ArrayList(mod.graph.T) = .empty,
     loaded_tensor_names: std.StringHashMapUnmanaged(void) = .empty,
 
     fn deinit(self: *TensorLoader) void {
         if (self.fin) |f| _ = std.c.fclose(f);
-        self.tensor_offset.deinit(gpa);
-        self.tensors_to_load.deinit(gpa);
+        self.tensor_offset.deinit(std.heap.c_allocator);
+        self.tensors_to_load.deinit(std.heap.c_allocator);
         var it = self.loaded_tensor_names.keyIterator();
-        while (it.next()) |k| gpa.free(k.*);
-        self.loaded_tensor_names.deinit(gpa);
+        while (it.next()) |k| std.heap.c_allocator.free(k.*);
+        self.loaded_tensor_names.deinit(std.heap.c_allocator);
     }
 
     /// The `get_tensor` lambda (mtmd-model.cpp:1355 @b1b770d90).
-    pub fn getTensor(self: *TensorLoader, name: [*:0]const u8, required: bool) Error!T {
+    pub fn getTensor(self: *TensorLoader, name: [*:0]const u8, required: bool) Error!mod.graph.T {
         // `__func__` inside a lambda is the closure's call operator's name
         const func = "operator()";
         const key = std.mem.span(name);
         // Each tensor should only be loaded once; duplicates indicate a bug
         if (self.loaded_tensor_names.contains(key)) return throwErr("%s: tensor already loaded: %s\n", .{ func, name });
-        var cur: T = c.ggml_get_tensor(self.loader.ctx_meta, name);
+        var cur: mod.graph.T = mod.impl.c.ggml_get_tensor(self.loader.ctx_meta, name);
         if (cur == null and required) return throwErr("%s: unable to find tensor %s\n", .{ func, name });
         if (cur != null) {
-            try self.tensors_to_load.append(gpa, cur);
-            const data_tensor = c.ggml_dup_tensor(self.model.ctx_data, cur);
-            _ = c.ggml_set_name(data_tensor, @ptrCast(&cur.?.name));
-            try self.loaded_tensor_names.put(gpa, try gpa.dupe(u8, key), {});
+            try self.tensors_to_load.append(std.heap.c_allocator, cur);
+            const data_tensor = mod.impl.c.ggml_dup_tensor(self.model.ctx_data, cur);
+            _ = mod.impl.c.ggml_set_name(data_tensor, @ptrCast(&cur.?.name));
+            try self.loaded_tensor_names.put(std.heap.c_allocator, try std.heap.c_allocator.dupe(u8, key), {});
             cur = data_tensor;
             // add to weight memory counter
-            try self.model.mem_weights.add(c.ggml_backend_buft_get_device(self.buft), c.ggml_nbytes(cur));
+            try self.model.mem_weights.add(mod.impl.c.ggml_backend_buft_get_device(self.buft), mod.impl.c.ggml_nbytes(cur));
         }
         return cur;
     }
@@ -1309,18 +1287,18 @@ pub const TensorLoader = struct {
         var result: std.ArrayList(f32) = .empty;
         const off = self.tensor_offset.get(std.mem.span(name)) orelse return result;
 
-        const idx = c.gguf_find_tensor(self.loader.ctx_gguf, name);
+        const idx = mod.impl.c.gguf_find_tensor(self.loader.ctx_gguf, name);
         if (idx < 0) return throwErr("%s: failed to find tensor %s\n", .{ func, name });
 
-        const t = c.gguf_get_tensor_type(self.loader.ctx_gguf, idx);
-        if (t != c.GGML_TYPE_F32) return throwErr("%s: %s must be %s, was %s\n", .{ func, name, c.ggml_type_name(c.GGML_TYPE_F32), c.ggml_type_name(t) });
+        const t = mod.impl.c.gguf_get_tensor_type(self.loader.ctx_gguf, idx);
+        if (t != mod.impl.c.GGML_TYPE_F32) return throwErr("%s: %s must be %s, was %s\n", .{ func, name, mod.impl.c.ggml_type_name(mod.impl.c.GGML_TYPE_F32), mod.impl.c.ggml_type_name(t) });
 
-        const n_bytes = c.gguf_get_tensor_size(self.loader.ctx_gguf, idx);
+        const n_bytes = mod.impl.c.gguf_get_tensor_size(self.loader.ctx_gguf, idx);
         if (n_bytes == 0) return throwErr("%s: tensor %s is empty\n", .{ func, name });
 
         const n_elems = n_bytes / @sizeOf(f32);
-        try result.resize(gpa, n_elems);
-        _ = libc.fseeko(self.fin, @intCast(off), 0);
+        try result.resize(std.heap.c_allocator, n_elems);
+        _ = stdlib.libc.fseeko(self.fin, @intCast(off), 0);
         _ = std.c.fread(@ptrCast(result.items.ptr), 1, n_bytes, self.fin.?);
         return result;
     }
@@ -1329,15 +1307,15 @@ pub const TensorLoader = struct {
     /// as `load_tensors` reads a voice tensor: false if the read came up short. `at` throwing
     /// `std::out_of_range` cannot happen for a tensor the file lists.
     pub fn readTensorBytes(self: *TensorLoader, name: []const u8, dst: []u8) bool {
-        const off = self.tensor_offset.get(name) orelse impl.abortUncaught("std::out_of_range", "unordered_map::at: key not found");
-        if (libc.fseeko(self.fin, @intCast(off), 0) != 0) return false;
+        const off = self.tensor_offset.get(name) orelse mod.impl.abortUncaught("std::out_of_range", "unordered_map::at: key not found");
+        if (stdlib.libc.fseeko(self.fin, @intCast(off), 0) != 0) return false;
         return std.c.fread(dst.ptr, 1, dst.len, self.fin.?) == dst.len;
     }
 
     /// The `get_scalar` lambda (mtmd-model.cpp:1430 @b1b770d90).
     pub fn getScalar(self: *TensorLoader, name: [*:0]const u8, default_val: f32) Error!f32 {
         var v = try self.getVector(name);
-        defer v.deinit(gpa);
+        defer v.deinit(std.heap.c_allocator);
         if (v.items.len == 0) return default_val;
         if (v.items.len != 1) return throwErr("%s: expected scalar tensor '%s' but got %d elements\n", .{ "load_tensors", name, @as(c_int, @intCast(v.items.len)) });
         return v.items[0];
@@ -1345,13 +1323,13 @@ pub const TensorLoader = struct {
 
     /// The `load_seanet` lambda (mtmd-model.cpp:1377 @b1b770d90): pocket-tts's
     /// encoder and decoder share a layout under different prefixes.
-    pub fn loadSeanet(self: *TensorLoader, seanet: *model_mod.Seanet, is_decoder: bool) Error!void {
+    pub fn loadSeanet(self: *TensorLoader, seanet: *mod.model.Seanet, is_decoder: bool) Error!void {
         const hparams = &self.model.hparams;
-        const conv_in: [*:0]const u8 = if (is_decoder) names.TN_A_GEN_WAV_SEANET_CONV_IN else names.TN_A_SEANET_CONV_IN;
-        const conv_out: [*:0]const u8 = if (is_decoder) names.TN_A_GEN_WAV_SEANET_CONV_OUT else names.TN_A_SEANET_CONV_OUT;
-        const res1: [*:0]const u8 = if (is_decoder) names.TN_A_GEN_WAV_SEANET_RES_CONV1 else names.TN_A_SEANET_RES_CONV1;
-        const res2: [*:0]const u8 = if (is_decoder) names.TN_A_GEN_WAV_SEANET_RES_CONV2 else names.TN_A_SEANET_RES_CONV2;
-        const scale: [*:0]const u8 = if (is_decoder) names.TN_A_GEN_WAV_SEANET_SCALE_CONV else names.TN_A_SEANET_SCALE_CONV;
+        const conv_in: [*:0]const u8 = if (is_decoder) mod.names.TN_A_GEN_WAV_SEANET_CONV_IN else mod.names.TN_A_SEANET_CONV_IN;
+        const conv_out: [*:0]const u8 = if (is_decoder) mod.names.TN_A_GEN_WAV_SEANET_CONV_OUT else mod.names.TN_A_SEANET_CONV_OUT;
+        const res1: [*:0]const u8 = if (is_decoder) mod.names.TN_A_GEN_WAV_SEANET_RES_CONV1 else mod.names.TN_A_SEANET_RES_CONV1;
+        const res2: [*:0]const u8 = if (is_decoder) mod.names.TN_A_GEN_WAV_SEANET_RES_CONV2 else mod.names.TN_A_SEANET_RES_CONV2;
+        const scale: [*:0]const u8 = if (is_decoder) mod.names.TN_A_GEN_WAV_SEANET_SCALE_CONV else mod.names.TN_A_SEANET_SCALE_CONV;
 
         var nb: [256]u8 = undefined;
         seanet.conv_in_w = try self.getTensor(fmtRt(&nb, conv_in, .{@as([*:0]const u8, "weight")}), true);
@@ -1359,7 +1337,7 @@ pub const TensorLoader = struct {
         seanet.conv_out_w = try self.getTensor(fmtRt(&nb, conv_out, .{@as([*:0]const u8, "weight")}), true);
         seanet.conv_out_b = try self.getTensor(fmtRt(&nb, conv_out, .{@as([*:0]const u8, "bias")}), true);
 
-        try seanet.stages.resize(gpa, @intCast(hparams.seanet_n_stage));
+        try seanet.stages.resize(std.heap.c_allocator, @intCast(hparams.seanet_n_stage));
         for (seanet.stages.items, 0..) |*stage, iu| {
             const i: c_int = @intCast(iu);
             stage.res_conv1_w = try self.getTensor(fmtRt(&nb, res1, .{ i, @as([*:0]const u8, "weight") }), true);
@@ -1377,37 +1355,37 @@ pub const TensorLoader = struct {
 
 /// `mtmd_format(fmt, s)`.
 pub fn fmtKey(buf: *[256]u8, comptime fmt: [*:0]const u8, s: [*:0]const u8) [*:0]const u8 {
-    _ = libc.snprintf(buf, buf.len, fmt, s);
+    _ = stdlib.libc.snprintf(buf, buf.len, fmt, s);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, s1, s2)`.
 pub fn fmtKey2(buf: *[256]u8, comptime fmt: [*:0]const u8, s1: [*:0]const u8, s2: [*:0]const u8) [*:0]const u8 {
-    _ = libc.snprintf(buf, buf.len, fmt, s1, s2);
+    _ = stdlib.libc.snprintf(buf, buf.len, fmt, s1, s2);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, prefix, il, suffix)`: a layer tensor.
 pub fn fmtL(buf: *[256]u8, comptime fmt: [*:0]const u8, prefix: [*:0]const u8, il: c_int, suffix: [*:0]const u8) [*:0]const u8 {
-    _ = libc.snprintf(buf, buf.len, fmt, prefix, il, suffix);
+    _ = stdlib.libc.snprintf(buf, buf.len, fmt, prefix, il, suffix);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, prefix, il)`.
 pub fn fmtPI(buf: *[256]u8, comptime fmt: [*:0]const u8, prefix: [*:0]const u8, il: c_int) [*:0]const u8 {
-    _ = libc.snprintf(buf, buf.len, fmt, prefix, il);
+    _ = stdlib.libc.snprintf(buf, buf.len, fmt, prefix, il);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, il, suffix)`.
 pub fn fmtIS(buf: *[256]u8, comptime fmt: [*:0]const u8, il: c_int, suffix: [*:0]const u8) [*:0]const u8 {
-    _ = libc.snprintf(buf, buf.len, fmt, il, suffix);
+    _ = stdlib.libc.snprintf(buf, buf.len, fmt, il, suffix);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format` with a format known only at run time.
 pub fn fmtRt(buf: *[256]u8, fmt: [*:0]const u8, args: anytype) [*:0]const u8 {
-    _ = @call(.auto, libc.snprintf, .{ buf, buf.len, fmt } ++ args);
+    _ = @call(.auto, stdlib.libc.snprintf, .{ buf, buf.len, fmt } ++ args);
     return @ptrCast(buf);
 }
 
@@ -1427,9 +1405,9 @@ pub const ModelParams = struct {
 /// Ports `mtmd_models` (mtmd-model.h:1317 @b1b770d90): the modalities of an
 /// mmproj file, a missing one is null.
 pub const Models = struct {
-    v: ?*model_mod.Model = null,
-    a: ?*model_mod.Model = null,
-    gen_a: ?*model_mod.Model = null,
+    v: ?*mod.model.Model = null,
+    a: ?*mod.model.Model = null,
+    gen_a: ?*mod.model.Model = null,
 
     /// The `unique_ptr`s' destructors, in reverse member order.
     pub fn deinit(self: *Models) void {
@@ -1441,14 +1419,14 @@ pub const Models = struct {
 };
 
 /// `delete` of an `mtmd_model`.
-pub fn destroyModel(m: *model_mod.Model) void {
+pub fn destroyModel(m: *mod.model.Model) void {
     m.deinit();
-    gpa.destroy(m);
+    std.heap.c_allocator.destroy(m);
 }
 
 /// Ports `mtmd_model_load` (mtmd-model.cpp:3726 @b1b770d90): every modality
 /// of `fname`, the weights allocated in `buft`. Throws on error.
-pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: c.ggml_backend_buffer_type_t) Error!Models {
+pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: mod.impl.c.ggml_backend_buffer_type_t) Error!Models {
     var loader = try Loader.init(fname, false, params.progress_callback, params.progress_callback_user_data);
     defer loader.deinit();
 
@@ -1473,8 +1451,8 @@ pub fn modelLoad(fname: [:0]const u8, params: *const ModelParams, buft: c.ggml_b
 }
 
 /// Ports the `load` lambda (mtmd-model.cpp:3732 @b1b770d90) of `mtmd_model_load`.
-fn loadModality(loader: *Loader, params: *const ModelParams, buft: c.ggml_backend_buffer_type_t, modality: impl.Modality) Error!*model_mod.Model {
-    const model = try gpa.create(model_mod.Model);
+fn loadModality(loader: *Loader, params: *const ModelParams, buft: mod.impl.c.ggml_backend_buffer_type_t, modality: mod.impl.Modality) Error!*mod.model.Model {
+    const model = try std.heap.c_allocator.create(mod.model.Model);
     model.* = .{};
     errdefer destroyModel(model);
     model.hparams.custom_image_min_tokens = params.image_min_tokens;
@@ -1499,7 +1477,7 @@ pub fn modelGetCaps(fname: [:0]const u8) Error!ModelCaps {
 /// Ports `image_max_tokens` (mtmd-model.cpp:3773 @b1b770d90), a member of
 /// `mtmd_model`: the most output tokens one image can take, -1 where the size
 /// is not dynamic.
-pub fn imageMaxTokens(model: *const model_mod.Model) c_int {
+pub fn imageMaxTokens(model: *const mod.model.Model) c_int {
     const hparams = &model.hparams;
     if (model.proj_type == .deepseek4v or model.proj_type == .deepseek41v) {
         return hparams.dsv4_max_n_token;
@@ -1513,7 +1491,7 @@ pub fn imageMaxTokens(model: *const model_mod.Model) c_int {
 
 /// Ports `n_output_tokens_x` (mtmd-model.cpp:3784 @b1b770d90), a member of
 /// `mtmd_model`: for M-RoPE, the token positions in X; otherwise every token.
-pub fn nOutputTokensX(model: *const model_mod.Model, img: *const impl.ImageF32) c_int {
+pub fn nOutputTokensX(model: *const mod.model.Model, img: *const mod.impl.ImageF32) c_int {
     const params = &model.hparams;
     const n_total = nOutputTokens(model, img);
     switch (model.proj_type) {
@@ -1527,7 +1505,7 @@ pub fn nOutputTokensX(model: *const model_mod.Model, img: *const impl.ImageF32) 
 
 /// Ports `n_output_tokens_y` (mtmd-model.cpp:3819 @b1b770d90), a member of
 /// `mtmd_model`.
-pub fn nOutputTokensY(model: *const model_mod.Model, img: *const impl.ImageF32) c_int {
+pub fn nOutputTokensY(model: *const mod.model.Model, img: *const mod.impl.ImageF32) c_int {
     const params = &model.hparams;
     switch (model.proj_type) {
         .qwen2vl, .qwen25vl, .qwen3vl, .magevl, .sensenova_u1, .ling3vl, .exaone4_5, .mimovl, .glm4v, .glm5v, .paddleocr, .hunyuanvl, .youtuvl, .muse_glimmer, .lfm3vl => return @divTrunc(@divTrunc(img.ny(), params.patch_size), 2),
@@ -1539,25 +1517,25 @@ pub fn nOutputTokensY(model: *const model_mod.Model, img: *const impl.ImageF32) 
 
 /// Ports `n_output_tokens` (mtmd-model.cpp:3850 @b1b770d90), a member of
 /// `mtmd_model`: the per-projector body is `arms_inputs.nOutputTokens`.
-pub fn nOutputTokens(model: *const model_mod.Model, img: *const impl.ImageF32) c_int {
-    return arms_inputs.nOutputTokens(model, img);
+pub fn nOutputTokens(model: *const mod.model.Model, img: *const mod.impl.ImageF32) c_int {
+    return mod.arms_inputs.nOutputTokens(model, img);
 }
 
 /// Ports `cbx_read_tensor` (mtmd-model.cpp:4197 @b1b770d90), a member of
 /// `mtmd_model`: reads a chatterbox tensor by name as F32, returns the
 /// element count (0 if not found); `out` may be null to query the size.
-pub fn cbxReadTensor(model: *const model_mod.Model, name: []const u8, out: ?[*]f32, n_max: usize) usize {
+pub fn cbxReadTensor(model: *const mod.model.Model, name: []const u8, out: ?[*]f32, n_max: usize) usize {
     const t = (model.cbx_tensors.get(name) orelse return 0) orelse return 0;
-    const n: usize = @intCast(c.ggml_nelements(t));
+    const n: usize = @intCast(mod.impl.c.ggml_nelements(t));
     const o = out orelse return n;
     if (n_max < n) return 0;
-    if (t.type == c.GGML_TYPE_F32) {
-        c.ggml_backend_tensor_get(t, o, 0, n * @sizeOf(f32));
-    } else if (t.type == c.GGML_TYPE_F16) {
-        const tmp = gpa.alloc(c.ggml_fp16_t, n) catch impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
-        defer gpa.free(tmp);
-        c.ggml_backend_tensor_get(t, tmp.ptr, 0, n * @sizeOf(c.ggml_fp16_t));
-        for (0..n) |i| o[i] = c.ggml_fp16_to_fp32(tmp[i]);
+    if (t.type == mod.impl.c.GGML_TYPE_F32) {
+        mod.impl.c.ggml_backend_tensor_get(t, o, 0, n * @sizeOf(f32));
+    } else if (t.type == mod.impl.c.GGML_TYPE_F16) {
+        const tmp = std.heap.c_allocator.alloc(mod.impl.c.ggml_fp16_t, n) catch mod.impl.abortUncaught("std::bad_alloc", "std::bad_alloc");
+        defer std.heap.c_allocator.free(tmp);
+        mod.impl.c.ggml_backend_tensor_get(t, tmp.ptr, 0, n * @sizeOf(mod.impl.c.ggml_fp16_t));
+        for (0..n) |i| o[i] = mod.impl.c.ggml_fp16_to_fp32(tmp[i]);
     } else {
         return 0;
     }
@@ -1567,13 +1545,13 @@ pub fn cbxReadTensor(model: *const model_mod.Model, name: []const u8, out: ?[*]f
 /// Ports `n_mmproj_embd` (mtmd-model.cpp:4223 @b1b770d90), a member of
 /// `mtmd_model`: the embedding size of the projector's output, which must
 /// be the text model's; the per-projector body is `arms_tensors.nMmprojEmbd`.
-pub fn nMmprojEmbd(model: *const model_mod.Model) c_int {
-    return arms_tensors.nMmprojEmbd(model);
+pub fn nMmprojEmbd(model: *const mod.model.Model) c_int {
+    return mod.arms_tensors.nMmprojEmbd(model);
 }
 
 /// Ports `n_temporal_merge` (mtmd-model.cpp:4360 @b1b770d90), a member of
 /// `mtmd_model`: the qwen-vl models and Nemotron Omni fuse two frames into one.
-pub fn nTemporalMerge(model: *const model_mod.Model) c_int {
+pub fn nTemporalMerge(model: *const mod.model.Model) c_int {
     return switch (model.proj_type) {
         .qwen2vl, .qwen25vl, .qwen3vl, .lfm3vl, .nemotron_omni, .ling3vl => 2,
         else => 1,
@@ -1585,8 +1563,8 @@ pub fn nTemporalMerge(model: *const model_mod.Model) c_int {
 pub const EncodeState = struct {
     ctx: *Ctx,
     params: *EncodeParams,
-    imgs: *const impl.ImageF32Batch,
-    gf: ?*c.ggml_cgraph,
+    imgs: *const mod.impl.ImageF32Batch,
+    gf: ?*mod.impl.c.ggml_cgraph,
 
     image_size_width: c_int,
     image_size_height: c_int,
@@ -1597,44 +1575,44 @@ pub const EncodeState = struct {
     pos_h: c_int,
 
     /// The `get_inp_tensor` lambda (mtmd-subcontext.cpp:578 @b1b770d90).
-    pub fn getInpTensor(self: *const EncodeState, name: [*:0]const u8) T {
-        const inp = c.ggml_graph_get_tensor(self.gf, name);
-        if (inp == null) _ = c.ggml_abort("mtmd-subcontext.cpp", 581, "Failed to get tensor %s", name);
-        if (inp.*.flags & c.GGML_TENSOR_FLAG_INPUT == 0) _ = c.ggml_abort("mtmd-subcontext.cpp", 584, "Tensor %s is not an input tensor", name);
+    pub fn getInpTensor(self: *const EncodeState, name: [*:0]const u8) mod.graph.T {
+        const inp = mod.impl.c.ggml_graph_get_tensor(self.gf, name);
+        if (inp == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 581, "Failed to get tensor %s", name);
+        if (inp.*.flags & mod.impl.c.GGML_TENSOR_FLAG_INPUT == 0) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 584, "Tensor %s is not an input tensor", name);
         return inp;
     }
 
     /// The `set_input_f32` lambda (mtmd-subcontext.cpp:589 @b1b770d90).
     pub fn setInputF32(self: *const EncodeState, name: [*:0]const u8, values: []const f32) void {
         const cur = self.getInpTensor(name);
-        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 591, "cur->type == GGML_TYPE_F32");
-        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 592, "ggml_nelements(cur) == (int64_t)values.size()");
-        c.ggml_backend_tensor_set(cur, values.ptr, 0, c.ggml_nbytes(cur));
+        mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 591, "cur->type == GGML_TYPE_F32");
+        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 592, "ggml_nelements(cur) == (int64_t)values.size()");
+        mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
     }
 
     /// The `set_input_attn_mask` lambda (mtmd-subcontext.cpp:597 @b1b770d90): a
     /// mask from `build_inp_attn_mask`, f16 if flash attn is enabled.
     pub fn setInputAttnMask(self: *const EncodeState, values: []const f32, idx: c_int) Error!void {
         var buf: [32]u8 = undefined;
-        const cur = self.getInpTensor(graph_mod.attnMaskName(&buf, idx));
-        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 599, "ggml_nelements(cur) == (int64_t)values.size()");
-        if (cur.?.type == c.GGML_TYPE_F16) {
-            const values_f16 = try gpa.alloc(c.ggml_fp16_t, values.len);
-            defer gpa.free(values_f16);
-            c.ggml_fp32_to_fp16_row(values.ptr, values_f16.ptr, @intCast(values.len));
-            c.ggml_backend_tensor_set(cur, values_f16.ptr, 0, c.ggml_nbytes(cur));
+        const cur = self.getInpTensor(mod.graph.attnMaskName(&buf, idx));
+        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 599, "ggml_nelements(cur) == (int64_t)values.size()");
+        if (cur.?.type == mod.impl.c.GGML_TYPE_F16) {
+            const values_f16 = try std.heap.c_allocator.alloc(mod.impl.c.ggml_fp16_t, values.len);
+            defer std.heap.c_allocator.free(values_f16);
+            mod.impl.c.ggml_fp32_to_fp16_row(values.ptr, values_f16.ptr, @intCast(values.len));
+            mod.impl.c.ggml_backend_tensor_set(cur, values_f16.ptr, 0, mod.impl.c.ggml_nbytes(cur));
         } else {
-            impl.ggmlAssert(cur.?.type == c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 605, "cur->type == GGML_TYPE_F32");
-            c.ggml_backend_tensor_set(cur, values.ptr, 0, c.ggml_nbytes(cur));
+            mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_F32, "mtmd-subcontext.cpp", 605, "cur->type == GGML_TYPE_F32");
+            mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
         }
     }
 
     /// The `set_input_i32` lambda (mtmd-subcontext.cpp:610 @b1b770d90).
     pub fn setInputI32(self: *const EncodeState, name: [*:0]const u8, values: []const i32) void {
         const cur = self.getInpTensor(name);
-        impl.ggmlAssert(cur.?.type == c.GGML_TYPE_I32, "mtmd-subcontext.cpp", 612, "cur->type == GGML_TYPE_I32");
-        impl.ggmlAssert(c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 613, "ggml_nelements(cur) == (int64_t)values.size()");
-        c.ggml_backend_tensor_set(cur, values.ptr, 0, c.ggml_nbytes(cur));
+        mod.impl.ggmlAssert(cur.?.type == mod.impl.c.GGML_TYPE_I32, "mtmd-subcontext.cpp", 612, "cur->type == GGML_TYPE_I32");
+        mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(cur) == @as(i64, @intCast(values.len)), "mtmd-subcontext.cpp", 613, "ggml_nelements(cur) == (int64_t)values.size()");
+        mod.impl.c.ggml_backend_tensor_set(cur, values.ptr, 0, mod.impl.c.ggml_nbytes(cur));
     }
 
     /// The `set_gen_state_in` lambda (mtmd-subcontext.cpp:618 @b1b770d90): the
@@ -1642,18 +1620,18 @@ pub const EncodeState = struct {
     /// the graph's to read.
     pub fn setGenStateIn(self: *const EncodeState) Error!void {
         const state_slots = self.params.gen_state.?.slots.items;
-        const slots = try models.genStateSlots(&self.ctx.model.hparams, self.ctx.model);
-        defer models.freeSlots(slots);
+        const slots = try mod.models.genStateSlots(&self.ctx.model.hparams, self.ctx.model);
+        defer mod.models.freeSlots(slots);
         var i: usize = 0;
         for (slots) |slot| {
-            impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 622, "i < slots.size()");
+            mod.impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 622, "i < slots.size()");
             if (slot.in_place) {
                 i += 1;
                 continue;
             }
             var nb: [256]u8 = undefined;
-            _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
-            c.ggml_backend_tensor_copy(state_slots[i], self.getInpTensor(@ptrCast(&nb)));
+            _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+            mod.impl.c.ggml_backend_tensor_copy(state_slots[i], self.getInpTensor(@ptrCast(&nb)));
             i += 1;
         }
     }
@@ -1662,25 +1640,25 @@ pub const EncodeState = struct {
     /// the streaming encoder's state in, and its "pos" slot returned; without
     /// a stream the state is zero.
     pub fn setEncStateIn(self: *const EncodeState) Error!c_int {
-        const state_slots = try models.encStateSlots(&self.ctx.model.hparams, self.ctx.model);
-        defer models.freeSlots(state_slots);
-        impl.ggmlAssert(state_slots.len != 0 and std.mem.eql(u8, state_slots[0].name, "pos"), "mtmd-subcontext.cpp", 634, "!state_slots.empty() && state_slots[0].name == \"pos\"");
+        const state_slots = try mod.models.encStateSlots(&self.ctx.model.hparams, self.ctx.model);
+        defer mod.models.freeSlots(state_slots);
+        mod.impl.ggmlAssert(state_slots.len != 0 and std.mem.eql(u8, state_slots[0].name, "pos"), "mtmd-subcontext.cpp", 634, "!state_slots.empty() && state_slots[0].name == \"pos\"");
         var nb: [256]u8 = undefined;
         if (self.params.enc_state == null) {
             for (state_slots) |slot| {
-                _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+                _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
                 const t = self.getInpTensor(@ptrCast(&nb));
-                c.ggml_backend_tensor_memset(t, 0, 0, c.ggml_nbytes(t));
+                mod.impl.c.ggml_backend_tensor_memset(t, 0, 0, mod.impl.c.ggml_nbytes(t));
             }
             return 0;
         }
         const slots = self.params.enc_state.?.slots.items;
-        impl.ggmlAssert(slots.len == state_slots.len, "mtmd-subcontext.cpp", 643, "slots.size() == state_slots.size()");
+        mod.impl.ggmlAssert(slots.len == state_slots.len, "mtmd-subcontext.cpp", 643, "slots.size() == state_slots.size()");
         var base_f: f32 = 0.0;
-        c.ggml_backend_tensor_get(slots[0], &base_f, 0, @sizeOf(f32));
+        mod.impl.c.ggml_backend_tensor_get(slots[0], &base_f, 0, @sizeOf(f32));
         for (state_slots, 0..) |slot, i| {
-            _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
-            c.ggml_backend_tensor_copy(slots[i], self.getInpTensor(@ptrCast(&nb)));
+            _ = stdlib.libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+            mod.impl.c.ggml_backend_tensor_copy(slots[i], self.getInpTensor(@ptrCast(&nb)));
         }
         return @intFromFloat(base_f);
     }
@@ -1688,16 +1666,16 @@ pub const EncodeState = struct {
     /// The `set_lfm3a_window_inputs` lambda (mtmd-subcontext.cpp:654 @b1b770d90): the lfm3a
     /// encoder's and codec's causal sliding window over [cached window | this call].
     pub fn setLfm3aWindowInputs(self: *const EncodeState, base: c_int, n_pos: c_int, window: c_int) Error!void {
-        const positions = try gpa.alloc(i32, @intCast(n_pos));
-        defer gpa.free(positions);
+        const positions = try std.heap.c_allocator.alloc(i32, @intCast(n_pos));
+        defer std.heap.c_allocator.free(positions);
         for (positions, 0..) |*v, i| v.* = base + @as(i32, @intCast(i));
         self.setInputI32("positions", positions);
 
         // key j holds position base - prefix + j
         const prefix = window - 1;
         const n_kv = prefix + n_pos;
-        const mask = try gpa.alloc(f32, @as(usize, @intCast(n_kv)) * @as(usize, @intCast(n_pos)));
-        defer gpa.free(mask);
+        const mask = try std.heap.c_allocator.alloc(f32, @as(usize, @intCast(n_kv)) * @as(usize, @intCast(n_pos)));
+        defer std.heap.c_allocator.free(mask);
         @memset(mask, -std.math.inf(f32));
         var q: c_int = 0;
         while (q < n_pos) : (q += 1) {
@@ -1713,20 +1691,20 @@ pub const EncodeState = struct {
     /// positions and the causal sliding-window mask of the mimi transformers.
     pub fn setPocketttsTfmInputs(self: *const EncodeState) Error!void {
         const hparams = &self.ctx.model.hparams;
-        const n_pos = c.ggml_nelements(self.getInpTensor("inp_pos"));
-        impl.ggmlAssert(n_pos > 0, "mtmd-subcontext.cpp", 679, "n_pos > 0");
-        const positions = try gpa.alloc(i32, @intCast(n_pos));
-        defer gpa.free(positions);
+        const n_pos = mod.impl.c.ggml_nelements(self.getInpTensor("inp_pos"));
+        mod.impl.ggmlAssert(n_pos > 0, "mtmd-subcontext.cpp", 679, "n_pos > 0");
+        const positions = try std.heap.c_allocator.alloc(i32, @intCast(n_pos));
+        defer std.heap.c_allocator.free(positions);
         for (positions, 0..) |*p, i| p.* = @intCast(i);
         self.setInputI32("inp_pos", positions);
 
         // the preprocessor truncates the waveform to keep this mask bounded
-        const max_pos: i64 = @divTrunc(@as(i64, model_mod.Hparams.pockettts_max_spk_seconds) * hparams.audio_sample_rate, 120);
-        impl.ggmlAssert(n_pos <= max_pos, "mtmd-subcontext.cpp", 688, "n_pos <= max_pos && \"pocket-tts speaker reference too long for a dense mask\"");
+        const max_pos: i64 = @divTrunc(@as(i64, mod.model.Hparams.pockettts_max_spk_seconds) * hparams.audio_sample_rate, 120);
+        mod.impl.ggmlAssert(n_pos <= max_pos, "mtmd-subcontext.cpp", 688, "n_pos <= max_pos && \"pocket-tts speaker reference too long for a dense mask\"");
 
         const context: i64 = hparams.mimi_tfm_context;
-        const mask = try gpa.alloc(f32, @intCast(n_pos * n_pos));
-        defer gpa.free(mask);
+        const mask = try std.heap.c_allocator.alloc(f32, @intCast(n_pos * n_pos));
+        defer std.heap.c_allocator.free(mask);
         @memset(mask, -std.math.inf(f32));
         var q: i64 = 0;
         while (q < n_pos) : (q += 1) {
@@ -1742,38 +1720,38 @@ pub const EncodeState = struct {
 
 /// Ports `copy_gen_state_out` (mtmd-subcontext.cpp:409 @b1b770d90): state_out can have another
 /// shape than its slot, only the byte size must match.
-fn copyGenStateOut(src: *c.ggml_tensor, dst: *c.ggml_tensor) Error!void {
-    impl.ggmlAssert(c.ggml_nbytes(src) == c.ggml_nbytes(dst), "mtmd-subcontext.cpp", 410, "ggml_nbytes(src) == ggml_nbytes(dst)");
-    if (src.type == dst.type and c.ggml_are_same_shape(src, dst) and c.ggml_is_contiguous(src)) {
-        c.ggml_backend_tensor_copy(src, dst);
+fn copyGenStateOut(src: *mod.impl.c.ggml_tensor, dst: *mod.impl.c.ggml_tensor) Error!void {
+    mod.impl.ggmlAssert(mod.impl.c.ggml_nbytes(src) == mod.impl.c.ggml_nbytes(dst), "mtmd-subcontext.cpp", 410, "ggml_nbytes(src) == ggml_nbytes(dst)");
+    if (src.type == dst.type and mod.impl.c.ggml_are_same_shape(src, dst) and mod.impl.c.ggml_is_contiguous(src)) {
+        mod.impl.c.ggml_backend_tensor_copy(src, dst);
         return;
     }
-    const tmp = try gpa.alloc(u8, c.ggml_nbytes(src));
-    defer gpa.free(tmp);
-    c.ggml_backend_tensor_get(src, tmp.ptr, 0, tmp.len);
-    c.ggml_backend_tensor_set(dst, tmp.ptr, 0, tmp.len);
+    const tmp = try std.heap.c_allocator.alloc(u8, mod.impl.c.ggml_nbytes(src));
+    defer std.heap.c_allocator.free(tmp);
+    mod.impl.c.ggml_backend_tensor_get(src, tmp.ptr, 0, tmp.len);
+    mod.impl.c.ggml_backend_tensor_set(dst, tmp.ptr, 0, tmp.len);
 }
 
 /// Allocates one F32 tensor per slot on the shared backend, named by `fmt`
 /// over the slot, and clears them: the tail `gen_state_init` and
 /// `enc_state_init`'s lfm3a and gemma4a arm share (a zero state is the cold
 /// start).
-fn allocStateSlots(ctx: *Ctx, slots: []const models.StateSlot, comptime fmt: [*:0]const u8, ctx_data: *?*c.ggml_context, buf: *c.ggml_backend_buffer_t, out: *std.ArrayList(*c.ggml_tensor)) Error!bool {
-    const params: c.ggml_init_params = .{
-        .mem_size = c.ggml_tensor_overhead() * slots.len,
+fn allocStateSlots(ctx: *Ctx, slots: []const mod.models.StateSlot, comptime fmt: [*:0]const u8, ctx_data: *?*mod.impl.c.ggml_context, buf: *mod.impl.c.ggml_backend_buffer_t, out: *std.ArrayList(*mod.impl.c.ggml_tensor)) Error!bool {
+    const params: mod.impl.c.ggml_init_params = .{
+        .mem_size = mod.impl.c.ggml_tensor_overhead() * slots.len,
         .mem_buffer = null,
         .no_alloc = true,
     };
-    ctx_data.* = c.ggml_init(params);
+    ctx_data.* = mod.impl.c.ggml_init(params);
     for (slots) |slot| {
-        const t = c.ggml_new_tensor_2d(ctx_data.*, c.GGML_TYPE_F32, slot.ne0, slot.ne1);
-        _ = c.ggml_format_name(t, fmt, slot.name.ptr);
-        try out.append(gpa, t.?);
+        const t = mod.impl.c.ggml_new_tensor_2d(ctx_data.*, mod.impl.c.GGML_TYPE_F32, slot.ne0, slot.ne1);
+        _ = mod.impl.c.ggml_format_name(t, fmt, slot.name.ptr);
+        try out.append(std.heap.c_allocator, t.?);
     }
-    buf.* = c.ggml_backend_alloc_ctx_tensors(ctx_data.*, ctx.backends.backend);
+    buf.* = mod.impl.c.ggml_backend_alloc_ctx_tensors(ctx_data.*, ctx.backends.backend);
     if (buf.* == null) return false;
     // a zero state is the cold start
-    c.ggml_backend_buffer_clear(buf.*, 0);
+    mod.impl.c.ggml_backend_buffer_clear(buf.*, 0);
     return true;
 }
 
@@ -1781,17 +1759,17 @@ fn allocStateSlots(ctx: *Ctx, slots: []const models.StateSlot, comptime fmt: [*:
 /// `mtmd_subcontext`: the RNG and the slots kept between GEN_WAV calls. A
 /// seed of `UINT32_MAX` means random; free the result with `destroy`.
 pub fn genStateInit(ctx: *Ctx, seed: u32) Error!?*GenState {
-    const st = try gpa.create(GenState);
+    const st = try std.heap.c_allocator.create(GenState);
     st.* = .{};
     errdefer st.destroy();
-    st.rng = libcxx.Mt19937.init(if (seed == std.math.maxInt(u32)) libcxx.randomDevice() else seed);
+    st.rng = stdlib.libcxx.Mt19937.init(if (seed == std.math.maxInt(u32)) stdlib.libcxx.randomDevice() else seed);
 
-    const slots = try models.genStateSlots(&ctx.model.hparams, ctx.model);
-    defer models.freeSlots(slots);
+    const slots = try mod.models.genStateSlots(&ctx.model.hparams, ctx.model);
+    defer mod.models.freeSlots(slots);
     if (slots.len == 0) return st;
 
     if (!try allocStateSlots(ctx, slots, "gen_state_%s", &st.ctx_data, &st.buf, &st.slots)) {
-        impl.logErr("%s: failed to allocate the gen state\n", .{"gen_state_init"});
+        mod.impl.logErr("%s: failed to allocate the gen state\n", .{"gen_state_init"});
         st.destroy();
         return null;
     }
@@ -1807,24 +1785,24 @@ pub fn encStateInit(ctx: *Ctx, n_frames_max: i32) Error!?*EncState {
     const hparams = &ctx.model.hparams;
     if (ctx.projType() == .lfm3a or ctx.projType() == .gemma4a) {
         // see list_enc_state_slots()
-        const slots = try models.encStateSlots(hparams, ctx.model);
-        defer models.freeSlots(slots);
-        const st = try gpa.create(EncState);
+        const slots = try mod.models.encStateSlots(hparams, ctx.model);
+        defer mod.models.freeSlots(slots);
+        const st = try std.heap.c_allocator.create(EncState);
         st.* = .{};
         errdefer st.destroy();
         if (!try allocStateSlots(ctx, slots, "enc_state_%s", &st.ctx_data, &st.buf, &st.slots)) {
-            impl.logErr("%s: failed to allocate the encoder state\n", .{func});
+            mod.impl.logErr("%s: failed to allocate the encoder state\n", .{func});
             st.destroy();
             return null;
         }
         return st;
     }
     if (ctx.projType() != .voxtral_rt or hparams.attn_window_size <= 0) {
-        impl.logErr("%s: the encoder does not support streaming input\n", .{func});
+        mod.impl.logErr("%s: the encoder does not support streaming input\n", .{func});
         return null;
     }
     if (n_frames_max <= 0) {
-        impl.logErr("%s: invalid n_frames_max %d\n", .{ func, @as(c_int, n_frames_max) });
+        mod.impl.logErr("%s: invalid n_frames_max %d\n", .{ func, @as(c_int, n_frames_max) });
         return null;
     }
 
@@ -1832,37 +1810,37 @@ pub fn encStateInit(ctx: *Ctx, n_frames_max: i32) Error!?*EncState {
     const d_head: i32 = if (hparams.n_embd_head > 0) hparams.n_embd_head else @divTrunc(hparams.n_embd, hparams.n_head);
     const n_embd_kv = hparams.n_head_kv * d_head;
 
-    const st = try gpa.create(EncState);
+    const st = try std.heap.c_allocator.create(EncState);
     st.* = .{};
     errdefer st.destroy();
     st.n_ctx = hparams.attn_window_size + n_frames_max;
-    try st.slot_pos.appendNTimes(gpa, -1, @intCast(st.n_ctx));
+    try st.slot_pos.appendNTimes(std.heap.c_allocator, -1, @intCast(st.n_ctx));
 
-    const params: c.ggml_init_params = .{
-        .mem_size = c.ggml_tensor_overhead() * 2 * @as(usize, @intCast(n_layer)),
+    const params: mod.impl.c.ggml_init_params = .{
+        .mem_size = mod.impl.c.ggml_tensor_overhead() * 2 * @as(usize, @intCast(n_layer)),
         .mem_buffer = null,
         .no_alloc = true,
     };
-    st.ctx_data = c.ggml_init(params);
+    st.ctx_data = mod.impl.c.ggml_init(params);
     var il: c_int = 0;
     while (il < n_layer) : (il += 1) {
-        const k = c.ggml_new_tensor_2d(st.ctx_data, c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
-        const v = c.ggml_new_tensor_2d(st.ctx_data, c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
-        _ = c.ggml_format_name(k, "enc_state_k_%d", il);
-        _ = c.ggml_format_name(v, "enc_state_v_%d", il);
-        try st.k.append(gpa, k.?);
-        try st.v.append(gpa, v.?);
+        const k = mod.impl.c.ggml_new_tensor_2d(st.ctx_data, mod.impl.c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
+        const v = mod.impl.c.ggml_new_tensor_2d(st.ctx_data, mod.impl.c.GGML_TYPE_F16, n_embd_kv, st.n_ctx);
+        _ = mod.impl.c.ggml_format_name(k, "enc_state_k_%d", il);
+        _ = mod.impl.c.ggml_format_name(v, "enc_state_v_%d", il);
+        try st.k.append(std.heap.c_allocator, k.?);
+        try st.v.append(std.heap.c_allocator, v.?);
     }
-    st.buf = c.ggml_backend_alloc_ctx_tensors(st.ctx_data, ctx.backends.backend);
+    st.buf = mod.impl.c.ggml_backend_alloc_ctx_tensors(st.ctx_data, ctx.backends.backend);
     if (st.buf == null) {
-        impl.logErr("%s: failed to allocate the encoder state\n", .{func});
+        mod.impl.logErr("%s: failed to allocate the encoder state\n", .{func});
         st.destroy();
         return null;
     }
     // empty slots are masked out, but they must not hold NaN
-    c.ggml_backend_buffer_clear(st.buf, 0);
+    mod.impl.c.ggml_backend_buffer_clear(st.buf, 0);
 
-    impl.logInf("%s: encoder state: %d slots, %.2f MiB\n", .{ func, @as(c_int, st.n_ctx), @as(f64, @floatFromInt(c.ggml_backend_buffer_get_size(st.buf))) / 1024.0 / 1024.0 });
+    mod.impl.logInf("%s: encoder state: %d slots, %.2f MiB\n", .{ func, @as(c_int, st.n_ctx), @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(st.buf))) / 1024.0 / 1024.0 });
 
     return st;
 }
@@ -1877,7 +1855,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
     // [QWEN_VIDEO] for video models, the batch dimension is used as temporal dimension for merged frames
     if (!ctx.support_batch and n_batch_cur > nTemporalMerge(ctx.model)) {
-        impl.logErr("%s: batch size %d exceeds maximum supported batch/temporal-merge size %d\n", .{ func, n_batch_cur, nTemporalMerge(ctx.model) });
+        mod.impl.logErr("%s: batch size %d exceeds maximum supported batch/temporal-merge size %d\n", .{ func, n_batch_cur, nTemporalMerge(ctx.model) });
         return false;
     }
 
@@ -1888,30 +1866,30 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         params.gen_process == .gen_wav or
         params.gen_process == .tts;
     if (needs_gen_state and params.gen_state == null) {
-        impl.logErr("%s: audio gen requires a gen state\n", .{func});
+        mod.impl.logErr("%s: audio gen requires a gen state\n", .{func});
         return false;
     }
     if (ctx.projType() == .drama3_gen and params.gen_process == .gen_code) {
         var pos: f32 = 0.0;
-        c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
-        if (@as(c_int, @intFromFloat(pos)) >= models.drama3_gen.n_pos_max) {
-            impl.logErr("%s: the codebook tower holds at most %d rows\n", .{ func, @as(c_int, models.drama3_gen.n_pos_max) });
+        mod.impl.c.ggml_backend_tensor_get(params.gen_state.?.slots.items[0], &pos, 0, @sizeOf(f32));
+        if (@as(c_int, @intFromFloat(pos)) >= mod.models.drama3_gen.n_pos_max) {
+            mod.impl.logErr("%s: the codebook tower holds at most %d rows\n", .{ func, @as(c_int, mod.models.drama3_gen.n_pos_max) });
             return false;
         }
     }
 
     // build the inference graph
-    c.ggml_backend_sched_reset(ctx.backends.sched);
-    var built = try models.buildGraph(ctx, imgs, params);
+    mod.impl.c.ggml_backend_sched_reset(ctx.backends.sched);
+    var built = try mod.models.buildGraph(ctx, imgs, params);
     defer built.deinit();
     const gf = built.gf;
 
     // the last node is the embedding tensor, code2wav has no out_embd
     // read it before scheduling: backends may reorder the nodes of graphs with several outputs (Metal)
-    const embeddings: T = if (params.out_embd != null) c.ggml_graph_node(gf, -1) else null;
+    const embeddings: mod.graph.T = if (params.out_embd != null) mod.impl.c.ggml_graph_node(gf, -1) else null;
 
-    if (!c.ggml_backend_sched_alloc_graph(ctx.backends.sched, gf)) {
-        impl.logErr("%s: failed to allocate compute graph\n", .{func});
+    if (!mod.impl.c.ggml_backend_sched_alloc_graph(ctx.backends.sched, gf)) {
+        mod.impl.logErr("%s: failed to allocate compute graph\n", .{func});
         return false;
     }
 
@@ -1942,8 +1920,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     if (!imgs.is_audio) {
         var nelem: usize = 0;
         for (imgs.entries.items) |*img| nelem += @as(usize, @intCast(img.nx() * img.ny() * 3));
-        const inp_raw = try gpa.alloc(f32, nelem);
-        defer gpa.free(inp_raw);
+        const inp_raw = try std.heap.c_allocator.alloc(f32, nelem);
+        defer std.heap.c_allocator.free(inp_raw);
         @memset(inp_raw, 0);
 
         // planar R, G, B per image; the batch dim is the temporal dim in Qwen-VL models
@@ -1954,7 +1932,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
             var b: c_int = 0;
             while (b < n_batch_cur) : (b += 1) {
-                impl.logDbg("%s: copying image %d/%d to input buffer (nx=%d, ny=%d)\n", .{ func, b + 1, n_batch_cur, @as(c_int, @intCast(nx)), @as(c_int, @intCast(ny)) });
+                mod.impl.logDbg("%s: copying image %d/%d to input buffer (nx=%d, ny=%d)\n", .{ func, b + 1, n_batch_cur, @as(c_int, @intCast(nx)), @as(c_int, @intCast(ny)) });
                 const buf = imgs.entries.items[@intCast(b)].roBuf();
                 const batch_entry = inp_raw[@as(usize, @intCast(b)) * (3 * n) ..];
                 for (0..ny) |y| {
@@ -1972,30 +1950,30 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     } else if (params.gen_process != .gen_wav and
         params.gen_process != .tts and
         params.gen_process != .tts_vocode and
-        c.ggml_graph_get_tensor(gf, "inp_raw") != null)
+        mod.impl.c.ggml_graph_get_tensor(gf, "inp_raw") != null)
     {
         // audio input. GEN_WAV and the chatterbox TTS stages are not here: they take codes or feats, set in the switch below.
         // a GEN_CODE graph may have no hidden-state input (lfm3a_gen feedback embedding)
-        impl.ggmlAssert(imgs.entries.items.len == 1, "mtmd-subcontext.cpp", 752, "imgs.entries.size() == 1");
+        mod.impl.ggmlAssert(imgs.entries.items.len == 1, "mtmd-subcontext.cpp", 752, "imgs.entries.size() == 1");
 
         const mel_inp = &imgs.entries.items[0];
         const buf = mel_inp.roBuf();
         const n_step = mel_inp.nx();
         const n_mel = mel_inp.ny();
-        impl.ggmlAssert(@as(usize, @intCast(n_step)) * @as(usize, @intCast(n_mel)) == buf.len, "mtmd-subcontext.cpp", 758, "(size_t)n_step * n_mel == buf.size()");
+        mod.impl.ggmlAssert(@as(usize, @intCast(n_step)) * @as(usize, @intCast(n_mel)) == buf.len, "mtmd-subcontext.cpp", 758, "(size_t)n_step * n_mel == buf.size()");
 
         st.setInputF32("inp_raw", buf);
     }
 
     // set input per projector; an arm that returns false is the C++'s
     // `return false` out of encode()
-    if (!try arms_inputs.setInputsChecked(&st)) return false;
+    if (!try mod.arms_inputs.setInputsChecked(&st)) return false;
 
     backendCpuSetNThreads(ctx.backends.backend_cpu, params.n_threads);
 
-    const status = c.ggml_backend_sched_graph_compute(ctx.backends.sched, gf);
-    if (status != c.GGML_STATUS_SUCCESS) {
-        impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ func, @as(c_int, @intCast(status)) });
+    const status = mod.impl.c.ggml_backend_sched_graph_compute(ctx.backends.sched, gf);
+    if (status != mod.impl.c.GGML_STATUS_SUCCESS) {
+        mod.impl.logErr("%s: ggml_backend_sched_graph_compute failed with error %d\n", .{ func, @as(c_int, @intCast(status)) });
         return false;
     }
 
@@ -2004,23 +1982,23 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         const n_tokens_out: c_int = @intCast(embeddings.?.ne[1]);
         const expected_n_tokens_out = nOutputTokens(model, &imgs.entries.items[0]);
         if (n_tokens_out != expected_n_tokens_out) {
-            impl.logErr("%s: expected output %d tokens, got %d\n", .{ func, expected_n_tokens_out, n_tokens_out });
-            _ = c.ggml_abort("mtmd-subcontext.cpp", 2288, "Invalid number of output tokens");
+            mod.impl.logErr("%s: expected output %d tokens, got %d\n", .{ func, expected_n_tokens_out, n_tokens_out });
+            _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2288, "Invalid number of output tokens");
         }
 
-        impl.logDbg("%s: output embedding shape [%d, %d, %d]\n", .{ func, @as(c_int, @intCast(embeddings.?.ne[0])), @as(c_int, @intCast(embeddings.?.ne[1])), @as(c_int, @intCast(embeddings.?.ne[2])) });
+        mod.impl.logDbg("%s: output embedding shape [%d, %d, %d]\n", .{ func, @as(c_int, @intCast(embeddings.?.ne[0])), @as(c_int, @intCast(embeddings.?.ne[1])), @as(c_int, @intCast(embeddings.?.ne[2])) });
 
         // copy output to user buffer if provided
         // if output is empty, skip the copy
         const out_batch_embd = params.out_embd.?;
         if (out_batch_embd.items.len != 0) {
-            if (out_batch_embd.items.len != @as(usize, @intCast(c.ggml_nelements(embeddings)))) {
-                impl.logErr("%s: output buffer has %zu elements but expected %zu\n", .{ func, out_batch_embd.items.len, @as(usize, @intCast(c.ggml_nelements(embeddings))) });
-                _ = c.ggml_abort("mtmd-subcontext.cpp", 2300, "Output buffer size mismatch");
+            if (out_batch_embd.items.len != @as(usize, @intCast(mod.impl.c.ggml_nelements(embeddings)))) {
+                mod.impl.logErr("%s: output buffer has %zu elements but expected %zu\n", .{ func, out_batch_embd.items.len, @as(usize, @intCast(mod.impl.c.ggml_nelements(embeddings))) });
+                _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2300, "Output buffer size mismatch");
             }
-            c.ggml_backend_tensor_get(embeddings, out_batch_embd.items.ptr, 0, c.ggml_nbytes(embeddings));
+            mod.impl.c.ggml_backend_tensor_get(embeddings, out_batch_embd.items.ptr, 0, mod.impl.c.ggml_nbytes(embeddings));
         } else {
-            impl.logWrn("%s: output buffer is empty, skipping copy\n", .{func});
+            mod.impl.logWrn("%s: output buffer is empty, skipping copy\n", .{func});
         }
     }
 
@@ -2031,49 +2009,49 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     // chatterbox's stages, each returns here: `MTMD_SUBCTX_GEN_PROCESS_TOKENIZE`,
     // `MTMD_SUBCTX_GEN_PROCESS_TTS_VOCODE`, `MTMD_SUBCTX_GEN_PROCESS_TTS`
     // (mtmd-subcontext.cpp:2312, 2374, 2382 @b1b770d90)
-    if (ctx.projType() == .chatterbox and params.gen_process == .tokenize) return models.chatterbox_gen.encodeTokenizeOut(ctx, params, gf);
-    if (ctx.projType() == .chatterbox and params.gen_process == .tts_vocode) return models.chatterbox_gen.encodeVocodeOut(params, gf);
-    if (ctx.projType() == .chatterbox and params.gen_process == .tts) return models.chatterbox_gen.encodeTtsOut(ctx, params, gf);
+    if (ctx.projType() == .chatterbox and params.gen_process == .tokenize) return mod.models.chatterbox_gen.encodeTokenizeOut(ctx, params, gf);
+    if (ctx.projType() == .chatterbox and params.gen_process == .tts_vocode) return mod.models.chatterbox_gen.encodeVocodeOut(params, gf);
+    if (ctx.projType() == .chatterbox and params.gen_process == .tts) return mod.models.chatterbox_gen.encodeTtsOut(ctx, params, gf);
 
     // optional outputs: a pipeline yields codes or feats, and not all have an eos head
     if (params.out_codes) |out_codes| {
-        const codes = c.ggml_graph_get_tensor(gf, "out_codes");
+        const codes = mod.impl.c.ggml_graph_get_tensor(gf, "out_codes");
         if (codes != null) {
-            try out_codes.resize(gpa, @intCast(c.ggml_nelements(codes)));
-            c.ggml_backend_tensor_get(codes, out_codes.items.ptr, 0, c.ggml_nbytes(codes));
+            try out_codes.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(codes)));
+            mod.impl.c.ggml_backend_tensor_get(codes, out_codes.items.ptr, 0, mod.impl.c.ggml_nbytes(codes));
         }
     }
     if (params.out_feats) |out_feats| {
-        const feats = c.ggml_graph_get_tensor(gf, "out_feats");
+        const feats = mod.impl.c.ggml_graph_get_tensor(gf, "out_feats");
         if (feats != null) {
-            try out_feats.resize(gpa, @intCast(c.ggml_nelements(feats)));
-            c.ggml_backend_tensor_get(feats, out_feats.items.ptr, 0, c.ggml_nbytes(feats));
+            try out_feats.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(feats)));
+            mod.impl.c.ggml_backend_tensor_get(feats, out_feats.items.ptr, 0, mod.impl.c.ggml_nbytes(feats));
         }
     }
     if (params.out_is_eos) |out_is_eos| {
-        const eos = c.ggml_graph_get_tensor(gf, "out_eos_score");
+        const eos = mod.impl.c.ggml_graph_get_tensor(gf, "out_eos_score");
         if (eos != null) {
-            impl.ggmlAssert(c.ggml_nelements(eos) == 1, "mtmd-subcontext.cpp", 2536, "ggml_nelements(eos) == 1");
+            mod.impl.ggmlAssert(mod.impl.c.ggml_nelements(eos) == 1, "mtmd-subcontext.cpp", 2536, "ggml_nelements(eos) == 1");
             var score: f32 = 0.0;
-            c.ggml_backend_tensor_get(eos, &score, 0, @sizeOf(f32));
+            mod.impl.c.ggml_backend_tensor_get(eos, &score, 0, @sizeOf(f32));
             out_is_eos.* = score > hparams.gen_eos_threshold;
         }
     }
     if (params.out_audio) |out_audio| {
-        const audio = c.ggml_graph_get_tensor(gf, "out_audio");
-        if (audio == null) _ = c.ggml_abort("mtmd-subcontext.cpp", 2545, "out_audio requested but graph has no \"out_audio\" tensor");
-        try out_audio.resize(gpa, @intCast(c.ggml_nelements(audio)));
-        c.ggml_backend_tensor_get(audio, out_audio.items.ptr, 0, c.ggml_nbytes(audio));
+        const audio = mod.impl.c.ggml_graph_get_tensor(gf, "out_audio");
+        if (audio == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2545, "out_audio requested but graph has no \"out_audio\" tensor");
+        try out_audio.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(audio)));
+        mod.impl.c.ggml_backend_tensor_get(audio, out_audio.items.ptr, 0, mod.impl.c.ggml_nbytes(audio));
 
         if (model.proj_type == .soprano) {
-            const spectrum = try gpa.dupe(f32, out_audio.items);
-            defer gpa.free(spectrum);
-            try models.soprano.decodeSpectrum(model, spectrum, out_audio);
+            const spectrum = try std.heap.c_allocator.dupe(f32, out_audio.items);
+            defer std.heap.c_allocator.free(spectrum);
+            try mod.models.soprano.decodeSpectrum(model, spectrum, out_audio);
         }
 
         // drop the tail audio that comes from the code-0 rear padding, drama3 has no padding
         if (model.proj_type != .drama3_gen) {
-            const n_codes: i64 = if (params.codes != null) graph_mod.ne(model.gen_code_head_w, 2) + 1 else 0;
+            const n_codes: i64 = if (params.codes != null) mod.graph.ne(model.gen_code_head_w, 2) + 1 else 0;
             const n_frames_w: i64 = hparams.wav_tfm_swa;
             const n_frames: i64 = if (params.codes) |cd| @divTrunc(@as(i64, @intCast(cd.items.len)), n_codes) else n_frames_w;
             if (n_frames < n_frames_w) {
@@ -2084,29 +2062,29 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     }
     if (params.enc_state != null and (model.proj_type == .lfm3a or model.proj_type == .gemma4a)) {
         const state_slots = params.enc_state.?.slots.items;
-        const slots = try models.encStateSlots(hparams, model);
-        defer models.freeSlots(slots);
+        const slots = try mod.models.encStateSlots(hparams, model);
+        defer mod.models.freeSlots(slots);
         for (slots, 0..) |slot, i| {
             var nb: [256]u8 = undefined;
-            _ = libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
-            const t = c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
-            impl.ggmlAssert(t != null, "mtmd-subcontext.cpp", 2572, "t != nullptr");
+            _ = stdlib.libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
+            const t = mod.impl.c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
+            mod.impl.ggmlAssert(t != null, "mtmd-subcontext.cpp", 2572, "t != nullptr");
             try copyGenStateOut(t, state_slots[i]);
         }
     } else if (params.enc_state != null and model.proj_type == .nemotron_transcribe) {
         const es = params.enc_state.?;
-        const chunk = c.ggml_graph_get_tensor(gf, "spk_chunk");
-        const preds = c.ggml_graph_get_tensor(gf, "spk_preds");
-        impl.ggmlAssert(chunk != null and preds != null, "mtmd-subcontext.cpp", 2579, "chunk != nullptr && preds != nullptr");
-        try es.spk_chunk.resize(gpa, @intCast(c.ggml_nelements(chunk)));
-        try es.spk_preds.resize(gpa, @intCast(c.ggml_nelements(preds)));
-        c.ggml_backend_tensor_get(chunk, es.spk_chunk.items.ptr, 0, c.ggml_nbytes(chunk));
-        c.ggml_backend_tensor_get(preds, es.spk_preds.items.ptr, 0, c.ggml_nbytes(preds));
+        const chunk = mod.impl.c.ggml_graph_get_tensor(gf, "spk_chunk");
+        const preds = mod.impl.c.ggml_graph_get_tensor(gf, "spk_preds");
+        mod.impl.ggmlAssert(chunk != null and preds != null, "mtmd-subcontext.cpp", 2579, "chunk != nullptr && preds != nullptr");
+        try es.spk_chunk.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(chunk)));
+        try es.spk_preds.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(preds)));
+        mod.impl.c.ggml_backend_tensor_get(chunk, es.spk_chunk.items.ptr, 0, mod.impl.c.ggml_nbytes(chunk));
+        mod.impl.c.ggml_backend_tensor_get(preds, es.spk_preds.items.ptr, 0, mod.impl.c.ggml_nbytes(preds));
     } else if (params.enc_state) |es| {
-        const tail = c.ggml_graph_get_tensor(gf, "out_stem_tail");
-        impl.ggmlAssert(tail != null, "mtmd-subcontext.cpp", 2587, "tail != nullptr");
-        try es.stem_tail.resize(gpa, @intCast(c.ggml_nelements(tail)));
-        c.ggml_backend_tensor_get(tail, es.stem_tail.items.ptr, 0, c.ggml_nbytes(tail));
+        const tail = mod.impl.c.ggml_graph_get_tensor(gf, "out_stem_tail");
+        mod.impl.ggmlAssert(tail != null, "mtmd-subcontext.cpp", 2587, "tail != nullptr");
+        try es.stem_tail.resize(std.heap.c_allocator, @intCast(mod.impl.c.ggml_nelements(tail)));
+        mod.impl.c.ggml_backend_tensor_get(tail, es.stem_tail.items.ptr, 0, mod.impl.c.ggml_nbytes(tail));
 
         const n_new = @divTrunc(imgs.entries.items[0].nx() - 2, 2);
         var i: i32 = 0;
@@ -2116,8 +2094,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
     if (params.gen_process == .gen_wav) {
         const state_slots = params.gen_state.?.slots.items;
-        const slots = try models.genStateSlots(hparams, model);
-        defer models.freeSlots(slots);
+        const slots = try mod.models.genStateSlots(hparams, model);
+        defer mod.models.freeSlots(slots);
         var i: usize = 0;
         for (slots) |slot| {
             if (slot.in_place) {
@@ -2125,10 +2103,10 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
                 continue;
             }
             var nb: [256]u8 = undefined;
-            _ = libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
-            const t = c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
-            if (t == null) _ = c.ggml_abort("mtmd-subcontext.cpp", 2608, "graph has no \"state_out_%s\" tensor", slot.name.ptr);
-            impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 2610, "i < slots.size()");
+            _ = stdlib.libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
+            const t = mod.impl.c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
+            if (t == null) _ = mod.impl.c.ggml_abort("mtmd-subcontext.cpp", 2608, "graph has no \"state_out_%s\" tensor", slot.name.ptr);
+            mod.impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 2610, "i < slots.size()");
             try copyGenStateOut(t, state_slots[i]);
             i += 1;
         }
@@ -2141,12 +2119,12 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
     if (ctx.debug_output_embeddings and embeddings != null) {
         const n_embd = embeddings.?.ne[0];
         const n_tokens = embeddings.?.ne[1];
-        const emb_data = try gpa.alloc(f32, @intCast(c.ggml_nelements(embeddings)));
-        defer gpa.free(emb_data);
-        c.ggml_backend_tensor_get(embeddings, emb_data.ptr, 0, c.ggml_nbytes(embeddings));
+        const emb_data = try std.heap.c_allocator.alloc(f32, @intCast(mod.impl.c.ggml_nelements(embeddings)));
+        defer std.heap.c_allocator.free(emb_data);
+        mod.impl.c.ggml_backend_tensor_get(embeddings, emb_data.ptr, 0, mod.impl.c.ggml_nbytes(embeddings));
 
-        impl.logInf("\n=== MTMD_DEBUG_EMBEDDINGS ===\n", .{});
-        impl.logInf("Shape: [%lld, %lld]\n", .{ @as(c_longlong, n_embd), @as(c_longlong, n_tokens) });
+        mod.impl.logInf("\n=== MTMD_DEBUG_EMBEDDINGS ===\n", .{});
+        mod.impl.logInf("Shape: [%lld, %lld]\n", .{ @as(c_longlong, n_embd), @as(c_longlong, n_tokens) });
 
         // TEMP debugging (parity validation), will be removed before merge
         // when the env var holds a path, dump the raw data: [int32 n_tokens][int32 n_embd][f32 data]
@@ -2162,17 +2140,17 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         }
 
         // Print first few values of first token
-        impl.logInf("Token 0 (first 16 values): ", .{});
+        mod.impl.logInf("Token 0 (first 16 values): ", .{});
         var i: i64 = 0;
-        while (i < @min(@as(i64, 16), n_embd)) : (i += 1) impl.logInf("%.6f ", .{@as(f64, emb_data[@intCast(i)])});
-        impl.logInf("\n", .{});
+        while (i < @min(@as(i64, 16), n_embd)) : (i += 1) mod.impl.logInf("%.6f ", .{@as(f64, emb_data[@intCast(i)])});
+        mod.impl.logInf("\n", .{});
 
         // Print last few values of first token
         if (n_embd > 16) {
-            impl.logInf("Token 0 (last 16 values):  ", .{});
+            mod.impl.logInf("Token 0 (last 16 values):  ", .{});
             i = n_embd - 16;
-            while (i < n_embd) : (i += 1) impl.logInf("%.6f ", .{@as(f64, emb_data[@intCast(i)])});
-            impl.logInf("\n", .{});
+            while (i < n_embd) : (i += 1) mod.impl.logInf("%.6f ", .{@as(f64, emb_data[@intCast(i)])});
+            mod.impl.logInf("\n", .{});
         }
 
         // Compute and print statistics
@@ -2189,8 +2167,8 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         const nf: f32 = @floatFromInt(emb_data.len);
         const mean = sum / nf;
         const variance = @mulAdd(f32, -mean, mean, sum_sq / nf);
-        impl.logInf("Stats: mean=%.6f, std=%.6f, min=%.6f, max=%.6f, sum=%.6f\n", .{ @as(f64, mean), @as(f64, libm.sqrtf(variance)), @as(f64, min_val), @as(f64, max_val), @as(f64, sum) });
-        impl.logInf("=== END MTMD_DEBUG_EMBEDDINGS ===\n\n", .{});
+        mod.impl.logInf("Stats: mean=%.6f, std=%.6f, min=%.6f, max=%.6f, sum=%.6f\n", .{ @as(f64, mean), @as(f64, @sqrt(@as(f32, variance))), @as(f64, min_val), @as(f64, max_val), @as(f64, sum) });
+        mod.impl.logInf("=== END MTMD_DEBUG_EMBEDDINGS ===\n\n", .{});
     }
 
     return true;
@@ -2201,5 +2179,5 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
 test {
     std.testing.refAllDecls(@This());
-    impl.refAllDeep(@This());
+    mod.impl.refAllDeep(@This());
 }

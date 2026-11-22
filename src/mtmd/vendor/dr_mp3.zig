@@ -29,8 +29,8 @@
 //! a pointer.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const Io = @import("audio_io.zig").Io;
 
 /// Set when a decode read memory whose contents the C leaves to the
 /// implementation: past the main-data buffer. (The Xing/LAME tag parse,
@@ -362,11 +362,11 @@ fn l12DequantizeGranule(grbuf: [*]f32, bs: *Bs, sci: *L12ScaleInfo, group_size: 
                     const half: c_int = (@as(c_int, 1) << @intCast(ba - 1)) - 1;
                     for (0..gs) |kk| dst[kk] = @floatFromInt(@as(c_int, @bitCast(bsGetBits(bs, ba))) - half);
                 } else {
-                    const mod: u32 = (@as(u32, 2) << @intCast(ba - 17)) + 1;
-                    var code = bsGetBits(bs, @intCast(mod + 2 - (mod >> 3)));
+                    const modulus: u32 = (@as(u32, 2) << @intCast(ba - 17)) + 1;
+                    var code = bsGetBits(bs, @intCast(modulus + 2 - (modulus >> 3)));
                     for (0..gs) |kk| {
-                        dst[kk] = @floatFromInt(@as(c_int, @bitCast(code % mod -% mod / 2)));
-                        code /= mod;
+                        dst[kk] = @floatFromInt(@as(c_int, @bitCast(code % modulus -% modulus / 2)));
+                        code /= modulus;
                     }
                 }
             }
@@ -1426,7 +1426,7 @@ pub const Mp3 = struct {
     gpa: std.mem.Allocator,
     /// The memory stream (`memory.pData`, `memory.dataSize`,
     /// `memory.currentReadPos`) or the decoder's callbacks.
-    io: Io,
+    io: mod.audio_io.Io,
     /// The whole buffer: a memory stream's `dataSize` can shrink below it.
     full: []const u8,
     memory_mode: bool,
@@ -1459,7 +1459,7 @@ pub const Mp3 = struct {
     ///
     /// Return: the decoder, owned by the caller (`deinit`), or null where
     /// the C returns `MA_FALSE`.
-    pub fn init(gpa: std.mem.Allocator, io: Io) ?*Mp3 {
+    pub fn init(gpa: std.mem.Allocator, io: mod.audio_io.Io) ?*Mp3 {
         if (io.data.len == 0) return null;
         const m = gpa.create(Mp3) catch return null;
         m.* = .{ .gpa = gpa, .io = io, .full = io.data, .memory_mode = io.mode != .decoder, .dec = undefined };

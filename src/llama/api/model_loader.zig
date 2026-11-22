@@ -11,14 +11,11 @@
 //! and `exports.zig` exports it once libllama swaps.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-
-const c = impl.c;
+const llama = @import("../module.zig");
 
 /// Ports `llama_ftype_name` (llama-model-loader.cpp:34 @b1b770d90).
-pub fn llama_ftype_name(ftype: c.enum_llama_ftype) callconv(.c) [*c]const u8 {
-    return loader.ftypeName(ftype).ptr;
+pub fn llama_ftype_name(ftype: llama.impl.c.enum_llama_ftype) callconv(.c) [*c]const u8 {
+    return llama.loader.ftypeName(ftype).ptr;
 }
 
 // -----------------------------------------------------------------------------

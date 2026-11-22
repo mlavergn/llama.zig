@@ -32,12 +32,29 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const rows = @import("rows.zig");
+pub const legacy = @import("legacy.zig");
+pub const k = @import("k.zig");
+pub const ternary = @import("ternary.zig");
+pub const iq = @import("iq.zig");
+pub const testing = @import("testing.zig");
+
+/// The architecture's kernels, as `arch/arm/quants.c` or `arch/x86/quants.c`
+/// supplies them.
+pub const arch = switch (@import("builtin").cpu.arch) {
+    .aarch64 => @import("arm/module.zig"),
+    .x86_64 => @import("x86/module.zig"),
+    else => @compileError("no quants kernels for " ++ @tagName(@import("builtin").cpu.arch)),
+};
+
+pub const golden = @import("golden.zig");
+
 comptime {
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("k.zig");
-    _ = @import("ternary.zig");
-    _ = @import("iq.zig");
+    _ = rows;
+    _ = legacy;
+    _ = k;
+    _ = ternary;
+    _ = iq;
     // The architecture's own kernels, as the C compiles one `arch/` file:
     // ggml-cpu/arch/arm/quants.c across quants/arm/, arch/x86/quants.c
     // across quants/x86/.
@@ -53,15 +70,10 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("rows.zig");
-    _ = @import("legacy.zig");
-    _ = @import("k.zig");
-    _ = @import("ternary.zig");
-    _ = @import("iq.zig");
     switch (builtin.cpu.arch) {
         .aarch64 => _ = @import("arm/module.zig"),
         .x86_64 => _ = @import("x86/module.zig"),
         else => {},
     }
-    _ = @import("testing.zig");
+    _ = testing;
 }

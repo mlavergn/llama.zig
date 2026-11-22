@@ -11,11 +11,7 @@
 //! names, and `exports.zig` exports them once libllama swaps.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const context_opt = @import("../context_opt.zig");
-const api_context = @import("context.zig");
-
-const c = impl.c;
+const llama = @import("../module.zig");
 
 /// Ports `llama_opt_param_filter_all` (llama-context.cpp:5140 @b1b770d90).
 ///
@@ -24,7 +20,7 @@ const c = impl.c;
 /// - `userdata`: unused.
 ///
 /// Return: true, for every tensor.
-pub fn llama_opt_param_filter_all(tensor: [*c]const c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
+pub fn llama_opt_param_filter_all(tensor: [*c]const llama.impl.c.struct_ggml_tensor, userdata: ?*anyopaque) callconv(.c) bool {
     _ = tensor;
     _ = userdata;
     return true;
@@ -38,8 +34,8 @@ pub fn llama_opt_param_filter_all(tensor: [*c]const c.struct_ggml_tensor, userda
 /// - `lopt_params`: the training parameters.
 ///
 /// Return: nothing.
-pub fn llama_opt_init(ctx: ?*c.struct_llama_context, model: ?*c.struct_llama_model, lopt_params: c.struct_llama_opt_params) callconv(.c) void {
-    context_opt.optInit(api_context.ctxOf(ctx), api_context.modelOf(model), lopt_params);
+pub fn llama_opt_init(ctx: ?*llama.impl.c.struct_llama_context, model: ?*llama.impl.c.struct_llama_model, lopt_params: llama.impl.c.struct_llama_opt_params) callconv(.c) void {
+    llama.context_opt.optInit(llama.api.context.ctxOf(ctx), llama.api.context.modelOf(model), lopt_params);
 }
 
 /// Ports `llama_opt_epoch` (llama-context.cpp:5150 @b1b770d90).
@@ -55,15 +51,15 @@ pub fn llama_opt_init(ctx: ?*c.struct_llama_context, model: ?*c.struct_llama_mod
 ///
 /// Return: nothing.
 pub fn llama_opt_epoch(
-    ctx: ?*c.struct_llama_context,
-    dataset: c.ggml_opt_dataset_t,
-    result_train: c.ggml_opt_result_t,
-    result_eval: c.ggml_opt_result_t,
+    ctx: ?*llama.impl.c.struct_llama_context,
+    dataset: llama.impl.c.ggml_opt_dataset_t,
+    result_train: llama.impl.c.ggml_opt_result_t,
+    result_eval: llama.impl.c.ggml_opt_result_t,
     idata_split: i64,
-    callback_train: c.ggml_opt_epoch_callback,
-    callback_eval: c.ggml_opt_epoch_callback,
+    callback_train: llama.impl.c.ggml_opt_epoch_callback,
+    callback_eval: llama.impl.c.ggml_opt_epoch_callback,
 ) callconv(.c) void {
-    context_opt.optEpoch(api_context.ctxOf(ctx), dataset, result_train, result_eval, idata_split, callback_train, callback_eval);
+    llama.context_opt.optEpoch(llama.api.context.ctxOf(ctx), dataset, result_train, result_eval, idata_split, callback_train, callback_eval);
 }
 
 // -----------------------------------------------------------------------------

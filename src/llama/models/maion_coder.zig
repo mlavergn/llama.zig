@@ -13,23 +13,13 @@
 //! declared in `llama.cpp/src/models/models.h`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 // Mirrors the declaration of `llama_model_maion_coder` (src/models/models.h:182 @b1b770d90).
 
 /// Ports `llama_model_maion_coder`'s `load_arch_hparams` (models/maion-coder.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -49,7 +39,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
     _ = try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, true, exc);
     hp.rope_pattern = hp.is_swa_impl;
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
     hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
 
@@ -57,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_maion_coder`'s `load_arch_tensors` (models/maion-coder.cpp:28 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -99,26 +89,26 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_maion_coder`'s `build_arch_graph` (models/maion-coder.cpp:67 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_maion_coder`'s `graph`
 /// (models/maion-coder.cpp:71 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/maion-coder.cpp", 74, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/maion-coder.cpp", 75, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/maion-coder.cpp", 74, "n_embd_head == hparams.n_embd_head_v()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/maion-coder.cpp", 75, "n_embd_head == n_rot");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
     const inp_pos = b.buildInpPos();
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -146,12 +136,12 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
 
         if (layer.ffn_gate_inp == null) {
@@ -177,7 +167,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         inpL = cur;
     }

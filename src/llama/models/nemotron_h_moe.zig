@@ -10,57 +10,50 @@
 //! in `nemotron_h.zig`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const nemotron_h = @import("nemotron_h.zig");
-
-const c = impl.c;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_nemotron_h_moe`'s `build_arch_graph`
 /// (models/nemotron-h-moe.cpp:3 @b1b770d90): the MTP draft head for that
 /// graph type, Nemotron-H's graph otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     if (params.gtype == .decoder_mtp) return buildGraphMtp(model, b);
-    return nemotron_h.buildGraph(model, b);
+    return llama.models.nemotron_h.buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_nemotron_h_moe`'s `graph_mtp`
 /// (models/nemotron-h-moe.cpp:11 @b1b770d90): the MTP draft head.
-fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphMtp(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    impl.assert(hp.n_layer_nextn == 1, "models/nemotron-h-moe.cpp", 13, "hparams.n_layer_nextn == 1 && \"NEMOTRON_H_MOE MTP currently supports a single MTP block\"");
+    llama.impl.assert(hp.n_layer_nextn == 1, "models/nemotron-h-moe.cpp", 13, "hparams.n_layer_nextn == 1 && \"NEMOTRON_H_MOE MTP currently supports a single MTP block\"");
 
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h-moe.cpp", 16, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/nemotron-h-moe.cpp", 16, "n_embd_head == hparams.n_embd_head_k()");
 
     const il: c_int = @intCast(hp.nLayer());
     const layer = &model.layers[@intCast(il)];
 
-    impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null, "models/nemotron-h-moe.cpp", 21, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm");
-    impl.assert(layer.ffn_gate_inp != null, "models/nemotron-h-moe.cpp", 22, "layer.ffn_gate_inp");
+    llama.impl.assert(layer.nextn.eh_proj != null and layer.nextn.enorm != null and layer.nextn.hnorm != null, "models/nemotron-h-moe.cpp", 21, "layer.nextn.eh_proj && layer.nextn.enorm && layer.nextn.hnorm");
+    llama.impl.assert(layer.ffn_gate_inp != null, "models/nemotron-h-moe.cpp", 22, "layer.ffn_gate_inp");
 
     // The token embedding weights.
     const tok_embd_w = layer.nextn.embed_tokens orelse model.tok_embd;
-    impl.assert(tok_embd_w != null, "models/nemotron-h-moe.cpp", 26, "tok_embd_w != nullptr && \"NEMOTRON_H_MOE MTP requires token embeddings\"");
+    llama.impl.assert(tok_embd_w != null, "models/nemotron-h-moe.cpp", 26, "tok_embd_w != nullptr && \"NEMOTRON_H_MOE MTP requires token embeddings\"");
 
-    const inp = impl.allocator.create(graph.InpEmbdH) catch impl.abort("models/nemotron-h-moe.cpp", 28, "out of memory");
+    const inp = std.heap.c_allocator.create(llama.graph.InpEmbdH) catch llama.impl.abort("models/nemotron-h-moe.cpp", 28, "out of memory");
     inp.* = .{ .n_embd = hp.nEmbdInp(), .n_embd_state = hp.n_embd };
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.tokens);
 
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
-    c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInp(), b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.embd);
 
-    var tok_embd: *Tensor = undefined;
+    var tok_embd: *llama.impl.c.ggml_tensor = undefined;
     b.ubatch.assertEmbdOrToken("models/nemotron-h-moe.cpp", 37);
     if (b.ubatch.token != null) {
-        tok_embd = c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
+        tok_embd = llama.impl.c.ggml_get_rows(ctx, tok_embd_w, inp.tokens);
     } else {
         tok_embd = inp.embd.?;
     }
@@ -70,7 +63,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     const h_embd = inp.h.?;
 
-    _ = b.res.addInput(graph.InpEmbdH, inp);
+    _ = b.res.addInput(llama.graph.InpEmbdH, inp);
 
     const inp_out_ids = b.buildInpOutIds();
 
@@ -81,7 +74,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     const e_norm = b.buildNorm(tok_embd, layer.nextn.enorm, null, .rms, il);
     b.cb(e_norm, "mtp_enorm", il);
 
-    const concat: *Tensor = c.ggml_concat(ctx, e_norm, h_norm, 0);
+    const concat: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, e_norm, h_norm, 0);
     b.cb(concat, "mtp_concat", il);
 
     var cur = b.buildLoraMm(layer.nextn.eh_proj.?, concat, layer.nextn.eh_proj_s);
@@ -94,18 +87,18 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
 
     {
         const qkv = b.buildQkv(layer, cur, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
-        const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
+        const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / stdlib.libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
         cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, kq_scale, il);
         b.cb(cur, "mtp_attn_out", il);
     }
 
-    cur = c.ggml_add(ctx, cur, inpSA);
+    cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
     b.cb(cur, "mtp_attn_residual", il);
 
     // The output rows are gathered here so the MoE FFN below runs only on
     // the positions kept.
     if (b.cropBeforeNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     // The MoE FFN sub-layer (mtp.layers.1).
@@ -121,7 +114,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         b.cb(ffn_shexp, "mtp_ffn_shexp", il);
 
         if (layer.ffn_latent_down) |w| {
-            cur = c.ggml_mul_mat(ctx, w, cur);
+            cur = llama.impl.c.ggml_mul_mat(ctx, w, cur);
         }
 
         var moe_out = b.buildMoeFfn(cur, .{
@@ -145,31 +138,31 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         b.cb(moe_out, "mtp_ffn_moe_out", il);
 
         if (layer.ffn_latent_up) |w| {
-            moe_out = c.ggml_mul_mat(ctx, w, moe_out);
+            moe_out = llama.impl.c.ggml_mul_mat(ctx, w, moe_out);
         }
 
-        cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+        cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
         b.cb(cur, "mtp_ffn_out", il);
     }
 
-    cur = c.ggml_add(ctx, cur, ffn_residual);
+    cur = llama.impl.c.ggml_add(ctx, cur, ffn_residual);
     b.cb(cur, "mtp_post_ffn", il);
 
     // The final head norm: the MTP head has its own LayerNorm.
-    impl.assert(layer.nextn.shared_head_norm != null, "models/nemotron-h-moe.cpp", 139, "layer.nextn.shared_head_norm && \"NEMOTRON_H_MOE MTP: missing final head norm\"");
+    llama.impl.assert(layer.nextn.shared_head_norm != null, "models/nemotron-h-moe.cpp", 139, "layer.nextn.shared_head_norm && \"NEMOTRON_H_MOE MTP: missing final head norm\"");
     cur = b.buildNorm(cur, layer.nextn.shared_head_norm, null, .norm, -1);
 
     b.cb(cur, "h_nextn", -1);
     b.res.t_h_nextn = cur;
 
     if (b.cropAfterNextn(inp_out_ids)) {
-        cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+        cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
     }
 
     // The LM head.
     const head_w = layer.nextn.shared_head_head orelse model.output;
     const head_s = if (layer.nextn.shared_head_head != null) layer.nextn.shared_head_head_s else model.output_s;
-    impl.assert(head_w != null, "models/nemotron-h-moe.cpp", 152, "head_w != nullptr && \"NEMOTRON_H_MOE MTP requires an output projection\"");
+    llama.impl.assert(head_w != null, "models/nemotron-h-moe.cpp", 152, "head_w != nullptr && \"NEMOTRON_H_MOE MTP requires an output projection\"");
     cur = b.buildLoraMm(head_w.?, cur, head_s);
     b.cb(cur, "result_output", -1);
 

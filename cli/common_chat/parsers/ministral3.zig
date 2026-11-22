@@ -9,35 +9,23 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const msg_mod = @import("../msg.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 const Build = struct {
     a: Allocator,
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
     include_grammar: bool = true,
-    cb: *ChatBuilder = undefined,
-    tool_choice: ParserId = undefined,
+    cb: *common_chat.chat_peg.ChatBuilder = undefined,
+    tool_choice: peg.ParserId = undefined,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         self.cb = p;
         const b = &p.b;
         const generation_prompt = try b.eps();
@@ -58,7 +46,7 @@ const Build = struct {
         // Tool call parser
         if (self.has_tools and self.inputs.tool_choice != .none) {
             self.tool_choice = try b.choiceEmpty();
-            parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return util.toPeg(e);
+            common_chat.parsers.foreachFunction(&self.inputs.tools, self, tool) catch |e| return common_chat.util.toPeg(e);
 
             const min_calls: c_int = if (self.inputs.tool_choice == .required) 1 else 0;
             const max_calls: c_int = if (self.inputs.parallel_tool_calls) -1 else 1;
@@ -72,47 +60,47 @@ const Build = struct {
         return b.plus(generation_prompt, try b.shl(reasoning, try p.content(try b.rest())));
     }
 
-    fn tool(self: *Build, tool_index: usize, t: *Value) Error!void {
-        const function = t.at("function") catch |e| return util.fromJson(e);
-        const name = try parsers.functionName(t);
-        const schema = try msg_mod.toolParameters(self.a, function);
-        const rule = self.buildTool(tool_index, name, &schema) catch |e| return util.fromPeg(e);
-        self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return util.fromPeg(e);
+    fn tool(self: *Build, tool_index: usize, t: *json.Value) common_chat.exception.Error!void {
+        const function = t.at("function") catch |e| return common_chat.util.fromJson(e);
+        const name = try common_chat.parsers.functionName(t);
+        const schema = try common_chat.msg.toolParameters(self.a, function);
+        const rule = self.buildTool(tool_index, name, &schema) catch |e| return common_chat.util.fromPeg(e);
+        self.cb.b.orAssign(&self.tool_choice, rule) catch |e| return common_chat.util.fromPeg(e);
     }
 
-    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const Value) chat_peg.Error!ParserId {
+    fn buildTool(self: *Build, tool_index: usize, name: []const u8, schema: *const json.Value) peg.Error!peg.ParserId {
         const p = self.cb;
         const b = &p.b;
         const open = try p.toolOpen(try b.plusLit(try p.toolName(try b.literal(name)), "[ARGS]"));
-        const schema_name = try parsers.indexName(self.a, "tool-", tool_index, "-schema");
+        const schema_name = try common_chat.parsers.indexName(self.a, "tool-", tool_index, "-schema");
         const body = try b.plus(open, try p.toolArgs(try b.schemaJson(try b.json(), schema_name, schema, false)));
-        return b.rule(try parsers.indexName(self.a, "tool-", tool_index, ""), body, false);
+        return b.rule(try common_chat.parsers.indexName(self.a, "tool-", tool_index, ""), body, false);
     }
 };
 
 /// The `{"type": ..., <key>: <text>}` block pushed onto the rebuilt content.
-fn block(a: Allocator, ty: []const u8, key: []const u8, text: []const u8) Error!Value {
-    var v = Value.emptyObject();
-    try v.set(a, "type", try Value.from(a, ty));
-    try v.set(a, key, try Value.from(a, text));
+fn block(a: Allocator, ty: []const u8, key: []const u8, text: []const u8) common_chat.exception.Error!json.Value {
+    var v = json.Value.emptyObject();
+    try v.set(a, "type", try json.Value.from(a, ty));
+    try v.set(a, key, try json.Value.from(a, text));
     return v;
 }
 
 /// The messages rebuilt as the template expects: a system or assistant
 /// message's reasoning and content as typed blocks.
-fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
-    var adjusted_messages = Value.emptyArray();
+fn adjustMessages(a: Allocator, messages: *const json.Value) common_chat.exception.Error!json.Value {
+    var adjusted_messages = json.Value.emptyArray();
     var it = @constCast(messages).items();
     while (it.next()) |item| {
         const msg = item.value;
-        const role = msg.value("role", []const u8, "") catch |e| return util.fromJson(e);
+        const role = msg.value("role", []const u8, "") catch |e| return common_chat.util.fromJson(e);
         if (!std.mem.eql(u8, role, "system") and !std.mem.eql(u8, role, "assistant")) {
             // Only adjust system and assistant messages. Interestingly, the system message may contain thinking.
-            adjusted_messages.pushBack(a, try msg.clone(a)) catch |e| return util.fromJson(e);
+            adjusted_messages.pushBack(a, try msg.clone(a)) catch |e| return common_chat.util.fromJson(e);
             continue;
         }
 
-        var content = Value.emptyArray();
+        var content = json.Value.emptyArray();
 
         // If message contains `reasoning_content`, add it as a block of type `thinking`
         if (msg.contains("reasoning_content")) {
@@ -120,7 +108,7 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
                 error.OutOfMemory, error.JsonError => unreachable,
             };
             if (rc.isString()) {
-                content.pushBack(a, try block(a, "thinking", "thinking", rc.string)) catch |e| return util.fromJson(e);
+                content.pushBack(a, try block(a, "thinking", "thinking", rc.string)) catch |e| return common_chat.util.fromJson(e);
             }
         }
 
@@ -130,18 +118,18 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
                 error.OutOfMemory, error.JsonError => unreachable,
             };
             if (c.isString()) {
-                content.pushBack(a, try block(a, "text", "text", c.string)) catch |e| return util.fromJson(e);
+                content.pushBack(a, try block(a, "text", "text", c.string)) catch |e| return common_chat.util.fromJson(e);
             } else if (c.isArray()) {
                 const blocks = try c.clone(a);
-                content.insert(a, &blocks) catch |e| return util.fromJson(e);
+                content.insert(a, &blocks) catch |e| return common_chat.util.fromJson(e);
             }
         }
 
         var adjusted = try msg.clone(a);
-        const slot = adjusted.index(a, "content") catch |e| return util.fromJson(e);
+        const slot = adjusted.index(a, "content") catch |e| return common_chat.util.fromJson(e);
         slot.assign(a, content);
-        adjusted.erase(a, "reasoning_content") catch |e| return util.fromJson(e);
-        adjusted_messages.pushBack(a, adjusted) catch |e| return util.fromJson(e);
+        adjusted.erase(a, "reasoning_content") catch |e| return common_chat.util.fromJson(e);
+        adjusted_messages.pushBack(a, adjusted) catch |e| return common_chat.util.fromJson(e);
     }
     return adjusted_messages;
 }
@@ -149,21 +137,21 @@ fn adjustMessages(a: Allocator, messages: *const Value) Error!Value {
 /// Ports `common_chat_params_init_ministral_3` (parsers/ministral3.cpp:3 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
     // Build up messages to follow the format: https://huggingface.co/mistralai/Ministral-3-14B-Reasoning-2512/blob/main/chat_template.jinja
     const adjusted_messages = try adjustMessages(a, &inputs.messages);
 
-    const has_tools = parsers.hasTools(&inputs.tools);
-    const has_response_format = parsers.hasResponseFormat(&inputs.json_schema);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
+    const has_response_format = common_chat.parsers.hasResponseFormat(&inputs.json_schema);
     const extract_reasoning = inputs.reasoning_format != .none;
 
     data.supports_thinking = true;
     data.thinking_start_tag = "[THINK]";
     try data.thinking_end_tags.append(a, "[/THINK]");
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, &adjusted_messages, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, &adjusted_messages, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, &adjusted_messages, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, &adjusted_messages, null, null);
     data.format = .peg_native;
     try data.preserved_tokens.appendSlice(a, &.{ "[THINK]", "[/THINK]", "[TOOL_CALLS]", "[ARGS]" });
 
@@ -187,12 +175,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (build.include_grammar) {
         data.grammar_lazy = !has_response_format and has_tools and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
         try data.addWordTrigger(a, "[TOOL_CALLS]");
     }
 

@@ -9,14 +9,13 @@
 //! `main` handed over.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const file = @import("file.zig");
-const env = @import("env.zig");
 
 /// Ports `common_is_tty` (common/common.cpp:1032 @b1b770d90): whether
 /// `f` is attached to a terminal.
 pub fn isTty(f: std.Io.File) bool {
-    return f.isTty(file.defaultIo()) catch false;
+    return f.isTty(mod.file.defaultIo()) catch false;
 }
 
 const win = struct {
@@ -48,11 +47,11 @@ pub fn enableAnsi() bool {
 /// Ports `tty_can_use_colors` (common/common.cpp:1040 @b1b770d90).
 pub fn canUseColors() bool {
     // Check NO_COLOR environment variable (https://no-color.org/)
-    if (env.get("NO_COLOR")) |no_color| {
+    if (mod.env.get("NO_COLOR")) |no_color| {
         if (no_color.len != 0) return false;
     }
     // Check TERM environment variable
-    if (env.get("TERM")) |term| {
+    if (mod.env.get("TERM")) |term| {
         if (std.mem.eql(u8, term, "dumb")) return false;
     }
     // Check if stdout and stderr are connected to a terminal

@@ -10,28 +10,16 @@
 //! `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Cparams = @import("../cparams.zig").Cparams;
-const RopeParams = model_mod.RopeParams;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_exaone4`'s `load_arch_hparams` (models/exaone4.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
     if (hp.nLayer() == 64) { // 32B
-        hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
         hp.n_swa = 4096;
         try self.loadSwaPattern(ml, 4, false, exc);
         hp.rope_pattern = hp.is_swa_impl;
@@ -52,9 +40,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_exaone4`'s `load_arch_tensors` (models/exaone4.cpp:25 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -64,7 +52,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     var i: i32 = 0;
@@ -73,7 +61,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         var flags: u32 = 0;
         if (is_nextn) {
             // NextN/MTP layers are preserved in GGUF but are not executed yet.
-            flags |= loader.tensor_skip;
+            flags |= llama.loader.tensor_skip;
         }
 
         const layer = &self.layers[@intCast(i)];
@@ -82,7 +70,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
         layer.wo = try self.createTensor(.{ .tensor = .attn_out, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd }, flags, exc);
 
         if (!is_nextn) {
-            const rope_dup: u32 = if (i != 0) loader.tensor_duplicated else 0;
+            const rope_dup: u32 = if (i != 0) llama.loader.tensor_duplicated else 0;
             layer.rope_freqs = try self.createTensor(.{ .tensor = .rope_freqs, .suffix = "weight", .bid = i }, &.{@divTrunc(l.n_rot, 2)}, nr | rope_dup, exc);
         }
 
@@ -113,7 +101,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE parameters.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     // The SWA layers use the global base and scale.
@@ -124,8 +112,8 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 }
 
 /// Ports `llama_model_exaone4`'s `build_arch_graph` (models/exaone4.cpp:84 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    if (b.hparams.swa_type == @backingInt(hparams_mod.SwaType.standard)) {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    if (b.hparams.swa_type == @backingInt(llama.hparams.SwaType.standard)) {
         buildGraph(true, model, b);
     } else {
         buildGraph(false, model, b);
@@ -134,15 +122,15 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports the constructor of `llama_model_exaone4`'s `graph<iswa>`
 /// (models/exaone4.cpp:93 @b1b770d90).
-fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 97, "n_embd_head == hparams.n_embd_head_v()");
-    impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 98, "n_embd_head == n_rot");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/exaone4.cpp", 97, "n_embd_head == hparams.n_embd_head_v()");
+    llama.impl.assert(n_embd_head == b.n_rot, "models/exaone4.cpp", 98, "n_embd_head == n_rot");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // The positions.
     const inp_pos = b.buildInpPos();
@@ -178,17 +166,17 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "attn_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -198,7 +186,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", -1);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

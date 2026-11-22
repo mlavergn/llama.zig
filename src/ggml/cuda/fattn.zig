@@ -30,19 +30,8 @@
 //! to that end.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const config = @import("config");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const fattn_common = @import("fattn_common.zig");
-const fattn_mma = @import("fattn_mma.zig");
-const fattn_tile = @import("fattn_tile.zig");
-const fattn_vec = @import("fattn_vec.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
-
-const kq_stride = fattn_common.kq_stride;
 
 /// `sizeof(half)`.
 const sizeof_half = 2;
@@ -57,32 +46,32 @@ const sizeof_half = 2;
 /// group is partial.
 /// It is in this translation unit whichever instance file's `launch_fattn`
 /// asks for it, since the C's function is not a template.
-pub fn compactMask(mask: *const Tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: common.cu.cudaStream_t) void {
+pub fn compactMask(mask: *const ggml.impl.c.ggml_tensor, indices: ?[*]i32, counts: ?[*]i32, n_queries: i32, ncols1: i32, n_kv_max: i32, stream: ggml.cuda.common.cu.cudaStream_t) void {
     const s31: i64 = @bitCast(mask.nb[1] / sizeof_half);
     const s33: i64 = @bitCast(mask.nb[3] / sizeof_half);
     // `dim3`'s members are `unsigned int`.
-    const blocks_num: kernels.Dim3 = .{
+    const blocks_num: ggml.cuda.kernels.Dim3 = .{
         .x = @bitCast(@divTrunc(n_queries + ncols1 - 1, ncols1)),
         .y = @truncate(@as(u64, @bitCast(mask.ne[3]))),
         .z = 1,
     };
-    const block_dim: kernels.Dim3 = .{ .x = 256, .y = 1, .z = 1 };
-    const launch_params: kernels.LaunchParams = .{
+    const block_dim: ggml.cuda.kernels.Dim3 = .{ .x = 256, .y = 1, .z = 1 };
+    const launch_params: ggml.cuda.kernels.LaunchParams = .{
         .grid = blocks_num,
         .block = block_dim,
         .shmem = 0,
         .stream = stream,
     };
     // the last group of queries is partial only if ncols1 does not divide n_queries
-    impl.assert(ncols1 == 1 or ncols1 == 8, "ncols1 == 1 || ncols1 == 8");
+    ggml.impl.assert(ncols1 == 1 or ncols1 == 8, "ncols1 == 1 || ncols1 == 8");
     const kernel = if (ncols1 == 1)
-        comptime kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)1, (bool)0>")
+        comptime ggml.cuda.kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)1, (bool)0>")
     else if (@rem(n_queries, 8) != 0)
-        comptime kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)8, (bool)1>")
+        comptime ggml.cuda.kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)8, (bool)1>")
     else
-        comptime kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)8, (bool)0>");
-    kernels.launchPdl(kernel, launch_params, .{ @as(?*const anyopaque, mask.data), indices, counts, @as(c_int, @truncate(mask.ne[0])), n_queries, n_kv_max, s31, s33 });
-    common.cudaCheck(common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        comptime ggml.cuda.kernels.get("fattn", "flash_attn_mask_to_sparse_indices<(int)8, (bool)0>");
+    ggml.cuda.kernels.launchPdl(kernel, launch_params, .{ @as(?*const anyopaque, mask.data), indices, counts, @as(c_int, @truncate(mask.ne[0])), n_queries, n_kv_max, s31, s33 });
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse` (fattn.cu:139 @b1b770d90),
@@ -92,85 +81,85 @@ pub fn compactMask(mask: *const Tensor, indices: ?[*]i32, counts: ?[*]i32, n_que
 /// handles up to `64/ncols2` queries per K/V pass. Never with
 /// `kv_rows` (`src[5]`), and CDNA takes it for DKQ 576; the CDNA arms are
 /// false on a CUDA device.
-pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const Tensor, ncols1: c_int, ncols2: c_int) bool {
-    const Q = impl.one(Tensor, dst.src[0]);
-    const K = impl.one(Tensor, dst.src[1]);
-    const V = impl.one(Tensor, dst.src[2]);
-    const mask_opt: ?*const Tensor = dst.src[3];
+pub fn mmaF16ShallUseSparse(cc: c_int, dst: *const ggml.impl.c.ggml_tensor, ncols1: c_int, ncols2: c_int) bool {
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const mask_opt: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
 
-    const max_bias = impl.getOpParamsF32(dst, 1);
-    const logit_softcap = impl.getOpParamsF32(dst, 2);
+    const max_bias = ggml.impl.getOpParamsF32(dst, 1);
+    const logit_softcap = ggml.impl.getOpParamsF32(dst, 2);
 
     // On CDNA only the DKQ=576 kernel variant with ncols2=16 is compiled with sparse support.
-    if (fattn_common.amdMfmaAvailable(cc) and !fattn_mma.mayUseSparse(@truncate(Q.ne[0]), @truncate(V.ne[0]), 1, 16)) {
+    if (ggml.cuda.fattn_common.amdMfmaAvailable(cc) and !ggml.cuda.fattn_mma.mayUseSparse(@truncate(Q.ne[0]), @truncate(V.ne[0]), 1, 16)) {
         return false;
     }
 
-    const n_kv_max = impl.getOpParamsI32(dst, 4);
+    const n_kv_max = ggml.impl.getOpParamsI32(dst, 4);
 
     // the dense kernel handles up to 64/ncols2 queries per K/V pass, the single-query gather has to beat that
     const n_gather: i64 = (if (ncols1 == 1) @min(Q.ne[1], @as(i64, @divTrunc(64, ncols2))) else @as(i64, ncols1)) * @as(i64, n_kv_max);
 
-    if (!((common.cc.isNvidia(cc) and common.turingMmaAvailable(cc)) or fattn_common.amdMfmaAvailable(cc)) or dst.src[5] != null) {
+    if (!((ggml.cuda.common.cc.isNvidia(cc) and ggml.cuda.common.turingMmaAvailable(cc)) or ggml.cuda.fattn_common.amdMfmaAvailable(cc)) or dst.src[5] != null) {
         return false;
     }
     const mask = mask_opt orelse return false;
     return n_kv_max > 0 and max_bias == 0.0 and logit_softcap == 0.0 and
         mask.ne[0] == K.ne[1] and mask.ne[1] >= Q.ne[1] and mask.ne[2] == 1 and
-        K.ne[1] >= @max(@as(i64, 4096), if (common.cc.isNvidia(cc)) 2 * n_gather else 2 * @as(i64, n_kv_max));
+        K.ne[1] >= @max(@as(i64, 4096), if (ggml.cuda.common.cc.isNvidia(cc)) 2 * n_gather else 2 * @as(i64, n_kv_max));
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1` (fattn.cu:172 @b1b770d90).
 /// The sparse arm is under `!GGML_USE_MUSA` (HIP too).
-fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *common.Context, dst: *Tensor) void {
-    const cc = common.info().devices[@intCast(common.getDevice())].cc;
-    const Q = impl.one(Tensor, dst.src[0]);
+fn mmaF16SwitchNcols1(comptime DKQ: comptime_int, comptime DV: comptime_int, comptime ncols2: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    if (comptime fattn_mma.mayUseSparse(DKQ, DV, 1, ncols2)) {
+    if (comptime ggml.cuda.fattn_mma.mayUseSparse(DKQ, DV, 1, ncols2)) {
         // a sparse variant at the full tile width gathers the union of its queries once, prefer it for large batches
-        const has_wide_sparse = comptime fattn_mma.mayUseSparse(DKQ, DV, 64 / ncols2, ncols2);
+        const has_wide_sparse = comptime ggml.cuda.fattn_mma.mayUseSparse(DKQ, DV, 64 / ncols2, ncols2);
         if (!(has_wide_sparse and Q.ne[1] > 32 / ncols2) and mmaF16ShallUseSparse(cc, dst, 1, ncols2)) {
-            fattn_mma.mmaF16Case(DKQ, DV, 1, ncols2, ctx, dst);
+            ggml.cuda.fattn_mma.mmaF16Case(DKQ, DV, 1, ncols2, ctx, dst);
             return;
         }
     }
 
     if (ncols2 <= 8) {
-        if (common.turingMmaAvailable(cc) and Q.ne[1] <= 8 / ncols2) {
-            fattn_mma.mmaF16Case(DKQ, DV, 8 / ncols2, ncols2, ctx, dst);
+        if (ggml.cuda.common.turingMmaAvailable(cc) and Q.ne[1] <= 8 / ncols2) {
+            ggml.cuda.fattn_mma.mmaF16Case(DKQ, DV, 8 / ncols2, ncols2, ctx, dst);
             return;
         }
     }
 
     if (ncols2 <= 16) {
         if (Q.ne[1] <= 16 / ncols2) {
-            fattn_mma.mmaF16Case(DKQ, DV, 16 / ncols2, ncols2, ctx, dst);
+            ggml.cuda.fattn_mma.mmaF16Case(DKQ, DV, 16 / ncols2, ncols2, ctx, dst);
             return;
         }
     }
 
-    if (Q.ne[1] <= 32 / ncols2 or (common.cc.isNvidia(cc) and common.highestCompiledArch(cc) == common.cc.turing) or
-        (common.cc.isAmd(cc) and DKQ > 256))
+    if (Q.ne[1] <= 32 / ncols2 or (ggml.cuda.common.cc.isNvidia(cc) and ggml.cuda.common.highestCompiledArch(cc) == ggml.cuda.common.cc.turing) or
+        (ggml.cuda.common.cc.isAmd(cc) and DKQ > 256))
     {
-        fattn_mma.mmaF16Case(DKQ, DV, 32 / ncols2, ncols2, ctx, dst);
+        ggml.cuda.fattn_mma.mmaF16Case(DKQ, DV, 32 / ncols2, ncols2, ctx, dst);
         return;
     }
 
-    fattn_mma.mmaF16Case(DKQ, DV, 64 / ncols2, ncols2, ctx, dst);
+    ggml.cuda.fattn_mma.mmaF16Case(DKQ, DV, 64 / ncols2, ncols2, ctx, dst);
 }
 
 /// `use_gqa_opt` as `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` and
 /// `ggml_cuda_get_best_fattn_kernel` both compute it: no GQA optimization
 /// for a node with no mask, ALiBi, an unpadded K/V, or a non-quantized
 /// operand with a row stride not a multiple of 16 bytes.
-fn gqaOpt(base: bool, Q: *const Tensor, K: *const Tensor, V: *const Tensor, mask: ?*const Tensor) bool {
+fn gqaOpt(base: bool, Q: *const ggml.impl.c.ggml_tensor, K: *const ggml.impl.c.ggml_tensor, V: *const ggml.impl.c.ggml_tensor, mask: ?*const ggml.impl.c.ggml_tensor) bool {
     var use_gqa_opt = base;
-    for ([_]?*const Tensor{ Q, K, V, mask }) |t_opt| {
+    for ([_]?*const ggml.impl.c.ggml_tensor{ Q, K, V, mask }) |t_opt| {
         const t = t_opt orelse continue;
-        if (c.ggml_is_quantized(t.type)) {
+        if (ggml.impl.c.ggml_is_quantized(t.type)) {
             continue;
         }
-        for (1..c.GGML_MAX_DIMS) |i| {
+        for (1..ggml.impl.c.GGML_MAX_DIMS) |i| {
             if (t.nb[i] % 16 != 0) {
                 use_gqa_opt = false;
                 break;
@@ -182,29 +171,29 @@ fn gqaOpt(base: bool, Q: *const Tensor, K: *const Tensor, V: *const Tensor, mask
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2` (fattn.cu:211 @b1b770d90).
 /// Under `kv_rows` the K/V length is the mask's column count.
-fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *common.Context, dst: *Tensor) void {
-    const cc = common.info().devices[@intCast(common.getDevice())].cc;
+fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const KQV = dst;
-    const Q = impl.one(Tensor, dst.src[0]);
-    const K = impl.one(Tensor, dst.src[1]);
-    const V = impl.one(Tensor, dst.src[2]);
-    const mask: ?*const Tensor = dst.src[3];
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
 
     // with kv_rows the kernel iterates over the mask columns
-    const kv_rows: ?*const Tensor = dst.src[5];
+    const kv_rows: ?*const ggml.impl.c.ggml_tensor = dst.src[5];
     const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
 
-    const max_bias = impl.getOpParamsF32(KQV, 1);
+    const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
 
     // Edge cases like no mask, ALiBi, unpadded K/V, or misaligned addresses for large data transfers
     //     are put into the template specialization without GQA optimizations.
-    const use_gqa_opt = gqaOpt(mask != null and max_bias == 0.0 and @rem(n_kv, kq_stride) == 0, Q, K, V, mask);
+    const use_gqa_opt = gqaOpt(mask != null and max_bias == 0.0 and @rem(n_kv, ggml.cuda.fattn_common.kq_stride) == 0, Q, K, V, mask);
 
-    impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
+    ggml.impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
     const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
 
     // On Volta the GQA optimizations aren't as impactful vs. minimizing wasted compute:
-    if (cc == common.cc.volta) {
+    if (cc == ggml.cuda.common.cc.volta) {
         if (use_gqa_opt and @rem(gqa_ratio, 8) == 0) {
             mmaF16SwitchNcols1(DKQ, DV, 8, ctx, dst);
             return;
@@ -224,12 +213,12 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
             mmaF16SwitchNcols1(DKQ, DV, 1, ctx, dst);
             return;
         } else {
-            impl.abort("fatal error");
+            ggml.impl.abort("fatal error");
         }
     }
 
     // On RDNA it is preferable to minimize wasted compute vs. duplicate I/O for the mask.
-    if (fattn_common.amdWmmaAvailable(cc)) {
+    if (ggml.cuda.fattn_common.amdWmmaAvailable(cc)) {
         if (use_gqa_opt and @rem(gqa_ratio, 8) == 0) {
             mmaF16SwitchNcols1(DKQ, DV, 8, ctx, dst);
             return;
@@ -264,99 +253,99 @@ fn mmaF16SwitchNcols2(comptime DKQ: comptime_int, comptime DV: comptime_int, ctx
     if (DKQ <= 256) {
         mmaF16SwitchNcols1(DKQ, DV, 1, ctx, dst);
     } else {
-        impl.abort("fatal error");
+        ggml.impl.abort("fatal error");
     }
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_mma_f16` (fattn.cu:308 @b1b770d90). Head
 /// sizes 40 and 72 are taken (#30285).
-fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
-    const cc = common.info().devices[@intCast(common.getDevice())].cc;
+fn mmaF16(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const KQV = dst;
-    const Q = impl.one(Tensor, dst.src[0]);
-    const K = impl.one(Tensor, dst.src[1]);
-    const V = impl.one(Tensor, dst.src[2]);
-    const mask: ?*const Tensor = dst.src[3];
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
 
     switch (Q.ne[0]) {
         40 => {
-            impl.assert(V.ne[0] == 40, "V->ne[0] == 40");
+            ggml.impl.assert(V.ne[0] == 40, "V->ne[0] == 40");
             mmaF16SwitchNcols2(40, 40, ctx, dst);
         },
         64 => {
-            impl.assert(V.ne[0] == 64, "V->ne[0] == 64");
+            ggml.impl.assert(V.ne[0] == 64, "V->ne[0] == 64");
             mmaF16SwitchNcols2(64, 64, ctx, dst);
         },
         72 => {
-            impl.assert(V.ne[0] == 72, "V->ne[0] == 72");
+            ggml.impl.assert(V.ne[0] == 72, "V->ne[0] == 72");
             mmaF16SwitchNcols2(72, 72, ctx, dst);
         },
         80 => {
-            impl.assert(V.ne[0] == 80, "V->ne[0] == 80");
+            ggml.impl.assert(V.ne[0] == 80, "V->ne[0] == 80");
             mmaF16SwitchNcols2(80, 80, ctx, dst);
         },
         96 => {
-            impl.assert(V.ne[0] == 96, "V->ne[0] == 96");
+            ggml.impl.assert(V.ne[0] == 96, "V->ne[0] == 96");
             mmaF16SwitchNcols2(96, 96, ctx, dst);
         },
         112 => {
-            impl.assert(V.ne[0] == 112, "V->ne[0] == 112");
+            ggml.impl.assert(V.ne[0] == 112, "V->ne[0] == 112");
             mmaF16SwitchNcols2(112, 112, ctx, dst);
         },
         128 => {
-            impl.assert(V.ne[0] == 128, "V->ne[0] == 128");
+            ggml.impl.assert(V.ne[0] == 128, "V->ne[0] == 128");
             mmaF16SwitchNcols2(128, 128, ctx, dst);
         },
         192 => {
             // MiMo-V2.5 / V2.5-Pro / V2-Flash: gqa_ratio is 8 (SWA) or 16 (full attn)
-            impl.assert(V.ne[0] == 128, "V->ne[0] == 128");
-            const max_bias = impl.getOpParamsF32(KQV, 1);
+            ggml.impl.assert(V.ne[0] == 128, "V->ne[0] == 128");
+            const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
             const use_gqa_opt = mask != null and max_bias == 0.0;
-            impl.assert(use_gqa_opt, "use_gqa_opt");
-            impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
+            ggml.impl.assert(use_gqa_opt, "use_gqa_opt");
+            ggml.impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
             const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
             if (@rem(gqa_ratio, 16) == 0) {
                 mmaF16SwitchNcols1(192, 128, 16, ctx, dst);
             } else {
-                impl.assert(@rem(gqa_ratio, 8) == 0, "gqa_ratio % 8 == 0");
+                ggml.impl.assert(@rem(gqa_ratio, 8) == 0, "gqa_ratio % 8 == 0");
                 mmaF16SwitchNcols1(192, 128, 8, ctx, dst);
             }
         },
         256 => {
-            impl.assert(V.ne[0] == 256, "V->ne[0] == 256");
+            ggml.impl.assert(V.ne[0] == 256, "V->ne[0] == 256");
             mmaF16SwitchNcols2(256, 256, ctx, dst);
         },
         320 => {
             // For Mistral Small 4, go straight to the ncols1 switch (ncols2=32-only build).
-            impl.assert(V.ne[0] == 256, "V->ne[0] == 256");
-            const max_bias = impl.getOpParamsF32(KQV, 1);
+            ggml.impl.assert(V.ne[0] == 256, "V->ne[0] == 256");
+            const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
 
             const use_gqa_opt = mask != null and max_bias == 0.0;
-            impl.assert(use_gqa_opt, "use_gqa_opt");
-            impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
+            ggml.impl.assert(use_gqa_opt, "use_gqa_opt");
+            ggml.impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
             const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
-            impl.assert(@rem(gqa_ratio, 32) == 0, "gqa_ratio % 32 == 0");
+            ggml.impl.assert(@rem(gqa_ratio, 32) == 0, "gqa_ratio % 32 == 0");
 
             mmaF16SwitchNcols1(320, 256, 32, ctx, dst);
         },
         512 => {
-            impl.assert(V.ne[0] == 512, "V->ne[0] == 512");
+            ggml.impl.assert(V.ne[0] == 512, "V->ne[0] == 512");
             mmaF16SwitchNcols2(512, 512, ctx, dst);
         },
         576 => {
             // For Deepseek, go straight to the ncols1 switch to avoid compiling unnecessary kernels.
-            impl.assert(V.ne[0] == 512, "V->ne[0] == 512");
-            const max_bias = impl.getOpParamsF32(KQV, 1);
+            ggml.impl.assert(V.ne[0] == 512, "V->ne[0] == 512");
+            const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
 
             const use_gqa_opt = mask != null and max_bias == 0.0;
-            impl.assert(use_gqa_opt, "use_gqa_opt");
+            ggml.impl.assert(use_gqa_opt, "use_gqa_opt");
 
-            impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
+            ggml.impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
             const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
-            if (fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
+            if (ggml.cuda.fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
                 mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
-            } else if (gqa_ratio == 20 and common.cc.isNvidia(cc)) { // GLM 4.7 Flash
-                if (cc >= common.cc.dgx_spark) {
+            } else if (gqa_ratio == 20 and ggml.cuda.common.cc.isNvidia(cc)) { // GLM 4.7 Flash
+                if (cc >= ggml.cuda.common.cc.dgx_spark) {
                     if (Q.ne[1] <= 8) {
                         mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
                         return;
@@ -364,7 +353,7 @@ fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
                     mmaF16SwitchNcols1(576, 512, 4, ctx, dst);
                     return;
                 }
-                if (cc >= common.cc.blackwell) {
+                if (cc >= ggml.cuda.common.cc.blackwell) {
                     if (Q.ne[1] <= 4 and K.ne[1] >= 65536) {
                         mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
                         return;
@@ -372,7 +361,7 @@ fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
                     mmaF16SwitchNcols1(576, 512, 4, ctx, dst);
                     return;
                 }
-                if (cc >= common.cc.ada_lovelace) {
+                if (cc >= ggml.cuda.common.cc.ada_lovelace) {
                     if (Q.ne[1] <= 4) {
                         mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
                         return;
@@ -380,7 +369,7 @@ fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
                     mmaF16SwitchNcols1(576, 512, 4, ctx, dst);
                     return;
                 }
-                if (cc >= common.cc.turing) {
+                if (cc >= ggml.cuda.common.cc.turing) {
                     if (Q.ne[1] <= 4) {
                         if (K.ne[1] <= 16384) {
                             mmaF16SwitchNcols1(576, 512, 16, ctx, dst);
@@ -401,36 +390,36 @@ fn mmaF16(ctx: *common.Context, dst: *Tensor) void {
             }
         },
         else => {
-            impl.abort("fatal error");
+            ggml.impl.abort("fatal error");
         },
     }
 }
 
 /// The K/V types `ggml_cuda_get_fattn_vec_case` tries, in its order:
 /// every V type outermost, every K type within.
-const vec_types = [_]c.enum_ggml_type{
-    c.GGML_TYPE_F16,
-    c.GGML_TYPE_Q4_0,
-    c.GGML_TYPE_Q4_1,
-    c.GGML_TYPE_Q5_0,
-    c.GGML_TYPE_Q5_1,
-    c.GGML_TYPE_Q8_0,
-    c.GGML_TYPE_BF16,
-    c.GGML_TYPE_F8_E4M3,
+const vec_types = [_]ggml.impl.c.enum_ggml_type{
+    ggml.impl.c.GGML_TYPE_F16,
+    ggml.impl.c.GGML_TYPE_Q4_0,
+    ggml.impl.c.GGML_TYPE_Q4_1,
+    ggml.impl.c.GGML_TYPE_Q5_0,
+    ggml.impl.c.GGML_TYPE_Q5_1,
+    ggml.impl.c.GGML_TYPE_Q8_0,
+    ggml.impl.c.GGML_TYPE_BF16,
+    ggml.impl.c.GGML_TYPE_F8_E4M3,
 };
 
 /// The spelling `GGML_CUDA_FA_QUANTS` and the instance files give a K or V
 /// type: `ggml_type_name`'s.
-fn faTypeName(comptime t: c.enum_ggml_type) []const u8 {
+fn faTypeName(comptime t: ggml.impl.c.enum_ggml_type) []const u8 {
     return switch (t) {
-        c.GGML_TYPE_F16 => "f16",
-        c.GGML_TYPE_Q4_0 => "q4_0",
-        c.GGML_TYPE_Q4_1 => "q4_1",
-        c.GGML_TYPE_Q5_0 => "q5_0",
-        c.GGML_TYPE_Q5_1 => "q5_1",
-        c.GGML_TYPE_Q8_0 => "q8_0",
-        c.GGML_TYPE_BF16 => "bf16",
-        c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
+        ggml.impl.c.GGML_TYPE_F16 => "f16",
+        ggml.impl.c.GGML_TYPE_Q4_0 => "q4_0",
+        ggml.impl.c.GGML_TYPE_Q4_1 => "q4_1",
+        ggml.impl.c.GGML_TYPE_Q5_0 => "q5_0",
+        ggml.impl.c.GGML_TYPE_Q5_1 => "q5_1",
+        ggml.impl.c.GGML_TYPE_Q8_0 => "q8_0",
+        ggml.impl.c.GGML_TYPE_BF16 => "bf16",
+        ggml.impl.c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
         else => @compileError("not a FlashAttention vector-kernel type"),
     };
 }
@@ -441,7 +430,7 @@ fn faTypeName(comptime t: c.enum_ggml_type) []const u8 {
 /// `type_V` was compiled. Its instantiations are only referenced when it
 /// was, as the C's `if constexpr` arranges, because the kernel table has
 /// no entry for one that was not.
-fn faCompiled(comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type) bool {
+fn faCompiled(comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type) bool {
     @setEvalBranchQuota(100_000);
     const name = faTypeName(type_K) ++ "-" ++ faTypeName(type_V);
     for (config.cuda_fa_combinations) |combination| {
@@ -451,14 +440,14 @@ fn faCompiled(comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_ty
 }
 
 /// Ports `fattn_vec_case_t` (fattn.cu:460 @b1b770d90).
-const VecCase = *const fn (ctx: *common.Context, dst: *Tensor) void;
+const VecCase = *const fn (ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void;
 
 /// `ggml_cuda_flash_attn_ext_vec_case<D, type_K, type_V>` as a function
 /// pointer, which the C takes by naming the template.
-fn vecCaseFn(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type) VecCase {
+fn vecCaseFn(comptime D: comptime_int, comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type) VecCase {
     return &struct {
-        fn f(ctx: *common.Context, dst: *Tensor) void {
-            fattn_vec.vecCase(D, type_K, type_V, ctx, dst);
+        fn f(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+            ggml.cuda.fattn_vec.vecCase(D, type_K, type_V, ctx, dst);
         }
     }.f;
 }
@@ -470,9 +459,9 @@ fn vecCaseFn(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, compti
 /// F32 K or V takes the F16 kernel; that is said once, here.
 /// The `F8_E4M3` pairs are included; the C lists the pairs in a different
 /// order, and at most one matches.
-fn getFattnVecCase(head_size: i64, type_K_in: c.enum_ggml_type, type_V_in: c.enum_ggml_type) ?VecCase {
-    const type_K: c.enum_ggml_type = if (type_K_in == c.GGML_TYPE_F32) c.GGML_TYPE_F16 else type_K_in;
-    const type_V: c.enum_ggml_type = if (type_V_in == c.GGML_TYPE_F32) c.GGML_TYPE_F16 else type_V_in;
+fn getFattnVecCase(head_size: i64, type_K_in: ggml.impl.c.enum_ggml_type, type_V_in: ggml.impl.c.enum_ggml_type) ?VecCase {
+    const type_K: ggml.impl.c.enum_ggml_type = if (type_K_in == ggml.impl.c.GGML_TYPE_F32) ggml.impl.c.GGML_TYPE_F16 else type_K_in;
+    const type_V: ggml.impl.c.enum_ggml_type = if (type_V_in == ggml.impl.c.GGML_TYPE_F32) ggml.impl.c.GGML_TYPE_F16 else type_V_in;
     inline for (vec_types) |type_V_case| {
         inline for (vec_types) |type_K_case| {
             if (comptime faCompiled(type_K_case, type_V_case)) {
@@ -492,21 +481,21 @@ fn getFattnVecCase(head_size: i64, type_K_in: c.enum_ggml_type, type_V_in: c.enu
 var vec_warned = false;
 
 /// Ports `ggml_cuda_flash_attn_ext_vec` (fattn.cu:541 @b1b770d90).
-fn vec(ctx: *common.Context, dst: *Tensor) void {
-    const Q = impl.one(Tensor, dst.src[0]);
-    const K = impl.one(Tensor, dst.src[1]);
-    const V = impl.one(Tensor, dst.src[2]);
+fn vec(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
 
     var vec_case = getFattnVecCase(Q.ne[0], K.type, V.type);
     if (vec_case == null) {
         if (!vec_warned) {
-            impl.logWarn("%s: no FlashAttention vector kernel compiled for K/V types %s-%s, converting K and V to f16 instead (slow). " ++
-                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", c.ggml_type_name(K.type), c.ggml_type_name(V.type), c.ggml_type_name(K.type), c.ggml_type_name(V.type) });
+            ggml.impl.logWarn("%s: no FlashAttention vector kernel compiled for K/V types %s-%s, converting K and V to f16 instead (slow). " ++
+                "Add \"%s-%s\" to GGML_CUDA_FA_QUANTS to compile it.\n", .{ "ggml_cuda_flash_attn_ext_vec", ggml.impl.c.ggml_type_name(K.type), ggml.impl.c.ggml_type_name(V.type), ggml.impl.c.ggml_type_name(K.type), ggml.impl.c.ggml_type_name(V.type) });
             vec_warned = true;
         }
-        vec_case = getFattnVecCase(Q.ne[0], c.GGML_TYPE_F16, c.GGML_TYPE_F16);
+        vec_case = getFattnVecCase(Q.ne[0], ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_F16);
     }
-    impl.assert(vec_case != null, "vec_case != nullptr");
+    ggml.impl.assert(vec_case != null, "vec_case != nullptr");
     vec_case.?(ctx, dst);
 }
 
@@ -522,17 +511,17 @@ const BestKernel = enum(c_int) {
 /// Ports `ggml_cuda_fattn_kv_type_supported` (fattn.cu:570 @b1b770d90):
 /// the K/V types for which there is a vector kernel template instance;
 /// other kernels convert these to f16.
-fn kvTypeSupported(t: c.enum_ggml_type) bool {
+fn kvTypeSupported(t: ggml.impl.c.enum_ggml_type) bool {
     return switch (t) {
-        c.GGML_TYPE_F32,
-        c.GGML_TYPE_F16,
-        c.GGML_TYPE_BF16,
-        c.GGML_TYPE_Q4_0,
-        c.GGML_TYPE_Q4_1,
-        c.GGML_TYPE_Q5_0,
-        c.GGML_TYPE_Q5_1,
-        c.GGML_TYPE_Q8_0,
-        c.GGML_TYPE_F8_E4M3,
+        ggml.impl.c.GGML_TYPE_F32,
+        ggml.impl.c.GGML_TYPE_F16,
+        ggml.impl.c.GGML_TYPE_BF16,
+        ggml.impl.c.GGML_TYPE_Q4_0,
+        ggml.impl.c.GGML_TYPE_Q4_1,
+        ggml.impl.c.GGML_TYPE_Q5_0,
+        ggml.impl.c.GGML_TYPE_Q5_1,
+        ggml.impl.c.GGML_TYPE_Q8_0,
+        ggml.impl.c.GGML_TYPE_F8_E4M3,
         => true,
         else => false,
     };
@@ -541,27 +530,27 @@ fn kvTypeSupported(t: c.enum_ggml_type) bool {
 /// Ports `ggml_cuda_get_best_fattn_kernel` (fattn.cu:587 @b1b770d90). A node
 /// with `kv_rows` (`src[5]`, `ggml_flash_attn_ext_rows`) takes
 /// the MMA kernel or none.
-fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
+fn getBestKernel(device: c_int, dst: *const ggml.impl.c.ggml_tensor) BestKernel {
     const KQV = dst;
-    const Q = impl.one(Tensor, dst.src[0]);
-    const K = impl.one(Tensor, dst.src[1]);
-    const V = impl.one(Tensor, dst.src[2]);
-    const mask: ?*const Tensor = dst.src[3];
-    const kv_rows: ?*const Tensor = dst.src[5];
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const K = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const V = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
+    const mask: ?*const ggml.impl.c.ggml_tensor = dst.src[3];
+    const kv_rows: ?*const ggml.impl.c.ggml_tensor = dst.src[5];
 
     // with kv_rows the kernel iterates over the mask columns
     const n_kv: i64 = if (kv_rows) |r| r.ne[0] else K.ne[1];
 
     const gqa_ratio: c_int = @truncate(@divTrunc(Q.ne[2], K.ne[2]));
-    impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
+    ggml.impl.assert(@rem(Q.ne[2], K.ne[2]) == 0, "Q->ne[2] % K->ne[2] == 0");
 
-    const max_bias = impl.getOpParamsF32(KQV, 1);
+    const max_bias = ggml.impl.getOpParamsF32(KQV, 1);
 
     // The effective batch size for the kernel can be increased by gqa_ratio.
     // The kernel versions without this optimization are also used for ALiBi, if there is no mask, or if the KV cache is not padded,
-    const gqa_opt_applies = gqaOpt(gqa_ratio >= 2 and mask != null and max_bias == 0.0 and @rem(n_kv, kq_stride) == 0, Q, K, V, mask);
+    const gqa_opt_applies = gqaOpt(gqa_ratio >= 2 and mask != null and max_bias == 0.0 and @rem(n_kv, ggml.cuda.fattn_common.kq_stride) == 0, Q, K, V, mask);
 
-    const cc = common.info().devices[@intCast(device)].cc;
+    const cc = ggml.cuda.common.info().devices[@intCast(device)].cc;
 
     switch (K.ne[0]) {
         40, 64, 72, 80, 96, 128, 112, 256 => {
@@ -614,7 +603,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
 
     // only the MMA kernel reads K/V through kv_rows
     if (kv_rows != null) {
-        return if (common.cc.isNvidia(cc) and common.turingMmaAvailable(cc) and mask != null and Q.ne[0] != 40 and Q.ne[0] != 72)
+        return if (ggml.cuda.common.cc.isNvidia(cc) and ggml.cuda.common.turingMmaAvailable(cc) and mask != null and Q.ne[0] != 40 and Q.ne[0] != 72)
             .mma_f16
         else
             .none;
@@ -622,23 +611,23 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
 
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
-    const can_use_vector_kernel = Q.ne[0] <= 256 and @rem(Q.ne[0], 64) == 0 and Q.ne[0] != 192 and @rem(K.ne[1], kq_stride) == 0;
+    const can_use_vector_kernel = Q.ne[0] <= 256 and @rem(Q.ne[0], 64) == 0 and Q.ne[0] != 192 and @rem(K.ne[1], ggml.cuda.fattn_common.kq_stride) == 0;
 
     // If Turing tensor cores are available, use them (for head sizes 40 and 72 too):
-    if (common.turingMmaAvailable(cc)) {
+    if (ggml.cuda.common.turingMmaAvailable(cc)) {
         if (can_use_vector_kernel) {
-            if (!c.ggml_is_quantized(K.type) and !c.ggml_is_quantized(V.type)) {
+            if (!ggml.impl.c.ggml_is_quantized(K.type) and !ggml.impl.c.ggml_is_quantized(V.type)) {
                 // the sparse gather exists only in the MMA kernel: (DKQ, DV, 1, 8) with GQA > 4
                 const sparse_decode = gqa_opt_applies and gqa_ratio > 4 and
-                    fattn_mma.mayUseSparse(@truncate(K.ne[0]), @truncate(V.ne[0]), 1, 8) and
+                    ggml.cuda.fattn_mma.mayUseSparse(@truncate(K.ne[0]), @truncate(V.ne[0]), 1, 8) and
                     mmaF16ShallUseSparse(cc, dst, 1, 8);
-                if (!sparse_decode and cc >= common.cc.ada_lovelace and Q.ne[1] == 1 and Q.ne[3] == 1 and
+                if (!sparse_decode and cc >= ggml.cuda.common.cc.ada_lovelace and Q.ne[1] == 1 and Q.ne[3] == 1 and
                     !(gqa_ratio > 4 and (Q.ne[0] >= 256 or K.ne[1] >= 8192)))
                 {
                     return .vec;
                 }
             } else {
-                if (cc >= common.cc.ada_lovelace) {
+                if (cc >= ggml.cuda.common.cc.ada_lovelace) {
                     if (Q.ne[1] <= 2) {
                         return .vec;
                     }
@@ -661,7 +650,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
         gqa_ratio_eff *= 2;
     }
 
-    if (common.voltaMmaAvailable(cc) and Q.ne[0] != 40 and Q.ne[0] != 72) {
+    if (ggml.cuda.common.voltaMmaAvailable(cc) and Q.ne[0] != 40 and Q.ne[0] != 72) {
         if (can_use_vector_kernel and Q.ne[1] * gqa_ratio_eff <= 2) {
             return .vec;
         }
@@ -672,12 +661,12 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     }
 
     // On CDNA, the sparse MMA kernel is used for DKQ=576 regardless of the head size heuristics.
-    if (fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
+    if (ggml.cuda.fattn_common.amdMfmaAvailable(cc) and mmaF16ShallUseSparse(cc, dst, 1, 16)) {
         return .mma_f16;
     }
 
     // AMD MFMA needs a certain minimum batch size to outscale the tile kernel for large head sizes.
-    if (fattn_common.amdMfmaAvailable(cc) and Q.ne[0] != 40 and Q.ne[0] != 72) {
+    if (ggml.cuda.fattn_common.amdMfmaAvailable(cc) and Q.ne[0] != 40 and Q.ne[0] != 72) {
         if ((Q.ne[0] <= 64 and Q.ne[1] * gqa_ratio_eff > 8)) {
             return .mma_f16;
         }
@@ -693,7 +682,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
     }
 
     // AMD WMMA is faster than the tile kernel if the wide tiles with high arithmetic intensity can be utilized.
-    if ((fattn_common.amdWmmaAvailable(cc) and gqa_opt_applies and Q.ne[0] <= 256) and Q.ne[0] != 40 and Q.ne[0] != 72 and
+    if ((ggml.cuda.fattn_common.amdWmmaAvailable(cc) and gqa_opt_applies and Q.ne[0] <= 256) and Q.ne[0] != 40 and Q.ne[0] != 72 and
         Q.ne[1] * gqa_ratio_eff > @as(i64, if (Q.ne[0] <= 128) 8 else 16))
     {
         return .mma_f16;
@@ -701,7 +690,7 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
 
     // If there are no tensor cores available, use the generic tile kernel:
     if (can_use_vector_kernel) {
-        if (!c.ggml_is_quantized(K.type) and !c.ggml_is_quantized(V.type)) {
+        if (!ggml.impl.c.ggml_is_quantized(K.type) and !ggml.impl.c.ggml_is_quantized(V.type)) {
             if (Q.ne[1] == 1) {
                 if (!gqa_opt_applies) {
                     return .vec;
@@ -725,15 +714,15 @@ fn getBestKernel(device: c_int, dst: *const Tensor) BestKernel {
 /// - `dst`: a `GGML_OP_FLASH_ATTN_EXT` node.
 ///
 /// Return: the allocation size in bytes.
-pub fn getAllocSize(device: c_int, dst: *const Tensor) usize {
-    impl.assert(dst.op == c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
+pub fn getAllocSize(device: c_int, dst: *const ggml.impl.c.ggml_tensor) usize {
+    ggml.impl.assert(dst.op == ggml.impl.c.GGML_OP_FLASH_ATTN_EXT, "dst->op == GGML_OP_FLASH_ATTN_EXT");
 
-    const Q: ?*const Tensor = dst.src[0];
-    const K: ?*const Tensor = dst.src[1];
-    const V: ?*const Tensor = dst.src[2];
+    const Q: ?*const ggml.impl.c.ggml_tensor = dst.src[0];
+    const K: ?*const ggml.impl.c.ggml_tensor = dst.src[1];
+    const V: ?*const ggml.impl.c.ggml_tensor = dst.src[2];
 
-    impl.assert(K != null, "K != nullptr");
-    impl.assert(V != null, "V != nullptr");
+    ggml.impl.assert(K != null, "K != nullptr");
+    ggml.impl.assert(V != null, "V != nullptr");
 
     const kernel = getBestKernel(device, dst);
 
@@ -747,29 +736,29 @@ pub fn getAllocSize(device: c_int, dst: *const Tensor) usize {
         },
         .vec => {
             const f16_fallback = getFattnVecCase(Q.?.ne[0], K.?.type, V.?.type) == null;
-            need_f16_K = K.?.type == c.GGML_TYPE_F32 or f16_fallback;
-            need_f16_V = V.?.type == c.GGML_TYPE_F32 or f16_fallback;
+            need_f16_K = K.?.type == ggml.impl.c.GGML_TYPE_F32 or f16_fallback;
+            need_f16_V = V.?.type == ggml.impl.c.GGML_TYPE_F32 or f16_fallback;
         },
         .none => {},
     }
 
-    const f16_extra = fattn_common.getF16ExtraData(dst, need_f16_K, need_f16_V);
+    const f16_extra = ggml.cuda.fattn_common.getF16ExtraData(dst, need_f16_K, need_f16_V);
 
     return f16_extra.end -% @intFromPtr(dst.data);
 }
 
 /// Ports `ggml_cuda_flash_attn_ext` (fattn.cu:819 @b1b770d90).
-pub fn flashAttnExt(ctx: *common.Context, dst: *Tensor) void {
-    common.setDevice(ctx.device);
-    switch (getBestKernel(common.getDevice(), dst)) {
-        .none => impl.abort("fatal error"),
-        .tile => fattn_tile.flashAttnExtTile(ctx, dst),
+pub fn flashAttnExt(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    ggml.cuda.common.setDevice(ctx.device);
+    switch (getBestKernel(ggml.cuda.common.getDevice(), dst)) {
+        .none => ggml.impl.abort("fatal error"),
+        .tile => ggml.cuda.fattn_tile.flashAttnExtTile(ctx, dst),
         .vec => vec(ctx, dst),
         .mma_f16 => mmaF16(ctx, dst),
     }
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_supported` (fattn.cu:836 @b1b770d90).
-pub fn supported(device: c_int, dst: *const Tensor) bool {
+pub fn supported(device: c_int, dst: *const ggml.impl.c.ggml_tensor) bool {
     return getBestKernel(device, dst) != .none;
 }

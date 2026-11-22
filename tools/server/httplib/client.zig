@@ -28,22 +28,12 @@
 //! it, through the socket mutex and the in-flight count.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
-extern "c" fn connect(sock: c_int, addr: ?*const anyopaque, len: u32) c_int;
-const sync = @import("stdlib").sync;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const detail = @import("detail.zig");
-const socket = @import("socket.zig");
-const message = @import("message.zig");
-
-const Headers = detail.Headers;
 
 /// What a client call can fail with besides an `Error`: only allocation.
 const Oom = error{OutOfMemory};
-const Socket = socket.Socket;
-const k = socket.k;
-
-extern "c" fn getsockopt(sock: c_int, level: c_int, optname: c_int, optval: ?*anyopaque, optlen: *u32) c_int;
 
 const is_darwin = builtin.os.tag.isDarwin();
 const F_GETFL: c_int = 3;
@@ -114,8 +104,8 @@ pub const Response = struct {
     version: []const u8 = "",
     status: c_int = -1,
     reason: []const u8 = "",
-    headers: Headers = .{},
-    trailers: Headers = .{},
+    headers: mod.detail.Headers = .{},
+    trailers: mod.detail.Headers = .{},
     body: std.ArrayList(u8) = .empty,
     location: []const u8 = "", // Redirect location
 
@@ -149,8 +139,8 @@ pub const Request = struct {
     a: std.mem.Allocator,
     method: []const u8 = "",
     path: []const u8 = "",
-    headers: Headers = .{},
-    params: detail.Params = .{},
+    headers: mod.detail.Headers = .{},
+    params: mod.detail.Params = .{},
     body: []const u8 = "",
     response_handler: ?ResponseHandler = null,
     content_receiver: ?ContentReceiver = null,
@@ -166,12 +156,12 @@ pub const Request = struct {
 
     /// `has_header(key)`.
     pub fn hasHeader(self: *const Request, key: []const u8) bool {
-        return detail.hasHeader(&self.headers, key);
+        return mod.detail.hasHeader(&self.headers, key);
     }
 
     /// `set_header(key, val)`: appended when valid.
     pub fn setHeader(self: *Request, key: []const u8, val: []const u8) Oom!void {
-        try detail.setHeader(self.a, &self.headers, try self.a.dupe(u8, key), try self.a.dupe(u8, val));
+        try mod.detail.setHeader(self.a, &self.headers, try self.a.dupe(u8, key), try self.a.dupe(u8, val));
     }
 };
 
@@ -184,7 +174,7 @@ pub const Result = struct {
 /// Ports `parse_port` (httplib.h:888 @b1b770d90): over
 /// `parse_int_in_range`, so the whole string must be the number.
 pub fn parsePort(s: []const u8, port: *c_int) bool {
-    return detail.parseIntInRange(s, 1, 65535, port);
+    return mod.detail.parseIntInRange(s, 1, 65535, port);
 }
 
 /// Ports `UrlComponents` (httplib.h:896 @b1b770d90).
@@ -236,7 +226,7 @@ pub fn parseUrl(url: []const u8, uc: *UrlComponents) bool {
             // IPv6 host must be [a-fA-F0-9:]+ only
             if (uc.host.len == 0) return false;
             for (uc.host) |c| {
-                if (!(detail.isAsciiDigit(c) or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F') or c == ':')) return false;
+                if (!(mod.detail.isAsciiDigit(c) or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F') or c == ':')) return false;
             }
             pos = close + 1;
             if (pos < url.len) {
@@ -362,7 +352,7 @@ fn applyAddrMap(a: std.mem.Allocator, addr_map: []const AddrMapEntry, host: []co
     ip.* = "";
     const v = addrMapFind(addr_map, host) orelse return;
     if (v.len == 0) return;
-    if (try socket.isIpAddress(a, v)) {
+    if (try mod.socket.isIpAddress(a, v)) {
         ip.* = v;
     } else {
         connect_host.* = v;
@@ -421,20 +411,20 @@ fn normalizeQueryString(a: std.mem.Allocator, query: []const u8) Oom![]u8 {
         a: std.mem.Allocator,
         result: std.ArrayList(u8) = .empty,
         pub fn call(self: *@This(), seg: []const u8) Oom!void {
-            const pair = detail.divideQueryPair(seg);
+            const pair = mod.detail.divideQueryPair(seg);
             if (pair.key.len == 0) return;
-            const dec_key = try detail.decodeQueryComponent(self.a, pair.key);
-            const dec_val = try detail.decodeQueryComponent(self.a, pair.val);
+            const dec_key = try mod.detail.decodeQueryComponent(self.a, pair.key);
+            const dec_val = try mod.detail.decodeQueryComponent(self.a, pair.val);
             if (self.result.items.len != 0) try self.result.append(self.a, '&');
-            try self.result.appendSlice(self.a, try detail.encodeQueryComponent(self.a, dec_key));
+            try self.result.appendSlice(self.a, try mod.detail.encodeQueryComponent(self.a, dec_key));
             if (pair.val.len != 0 or std.mem.findScalar(u8, seg, '=') != null) {
                 try self.result.append(self.a, '=');
-                try self.result.appendSlice(self.a, try detail.encodeQueryComponent(self.a, dec_val));
+                try self.result.appendSlice(self.a, try mod.detail.encodeQueryComponent(self.a, dec_val));
             }
         }
     };
     var ctx: Ctx = .{ .a = a };
-    try detail.split(query, '&', std.math.maxInt(usize), &ctx);
+    try mod.detail.split(query, '&', std.math.maxInt(usize), &ctx);
     return ctx.result.items;
 }
 
@@ -500,7 +490,7 @@ pub fn parseStatusLine(a: std.mem.Allocator, line: []const u8, version: *[]const
     };
     const l: At = .{ .line = line };
     if (!std.mem.startsWith(u8, line, "HTTP/1.") or (l.at(7) != '0' and l.at(7) != '1') or l.at(8) != ' ' or
-        !detail.isAsciiDigit(l.at(9)) or !detail.isAsciiDigit(l.at(10)) or !detail.isAsciiDigit(l.at(11)))
+        !mod.detail.isAsciiDigit(l.at(9)) or !mod.detail.isAsciiDigit(l.at(10)) or !mod.detail.isAsciiDigit(l.at(11)))
     {
         return false;
     }
@@ -528,33 +518,33 @@ pub fn parseStatusLine(a: std.mem.Allocator, line: []const u8, version: *[]const
 
 /// Ports `has_conflicting_content_length` (httplib.cpp:3919 @b1b770d90): both a
 /// `Transfer-Encoding` and a non-zero `Content-Length`.
-fn hasConflictingContentLength(headers: *const Headers) bool {
+fn hasConflictingContentLength(headers: *const mod.detail.Headers) bool {
     var invalid = false;
-    return detail.hasHeader(headers, "Transfer-Encoding") and detail.getHeaderValueU64(headers, "Content-Length", 0, &invalid) > 0;
+    return mod.detail.hasHeader(headers, "Transfer-Encoding") and mod.detail.getHeaderValueU64(headers, "Content-Length", 0, &invalid) > 0;
 }
 
 /// Ports `set_nonblocking` (httplib.cpp:2655 @b1b770d90).
-fn setNonblocking(sock: Socket, nonblocking: bool) void {
-    const flags = libc.fcntl(sock, F_GETFL, @as(c_int, 0));
-    _ = libc.fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
+fn setNonblocking(sock: mod.socket.Socket, nonblocking: bool) void {
+    const flags = stdlib.libc.fcntl(sock, F_GETFL, @as(c_int, 0));
+    _ = stdlib.libc.fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
 }
 
 /// Ports `wait_until_socket_is_ready` (httplib.cpp:1933 @b1b770d90): a non-blocking
 /// connect's outcome, within the connection timeout.
-fn waitUntilSocketIsReady(sock: Socket, sec: i64, usec: i64) Error {
-    var pfd = [_]std.posix.pollfd{.{ .fd = sock, .events = k.POLLIN | k.POLLOUT, .revents = 0 }};
+fn waitUntilSocketIsReady(sock: mod.socket.Socket, sec: i64, usec: i64) Error {
+    var pfd = [_]std.posix.pollfd{.{ .fd = sock, .events = mod.socket.k.POLLIN | mod.socket.k.POLLOUT, .revents = 0 }};
     const timeout: c_int = @intCast(sec * 1000 + @divTrunc(usec, 1000));
     var poll_res: c_int = undefined;
     while (true) {
-        poll_res = std.c.poll(&pfd, 1, timeout);
-        if (poll_res < 0 and socket.errno() == k.EINTR) continue;
+        poll_res = stdlib.libc.poll(&pfd, 1, timeout);
+        if (poll_res < 0 and mod.socket.errno() == mod.socket.k.EINTR) continue;
         break;
     }
     if (poll_res == 0) return .connection_timeout;
-    if (poll_res > 0 and (pfd[0].revents & (k.POLLIN | k.POLLOUT)) != 0) {
+    if (poll_res > 0 and (pfd[0].revents & (mod.socket.k.POLLIN | mod.socket.k.POLLOUT)) != 0) {
         var err: c_int = 0;
         var len: u32 = @sizeOf(c_int);
-        const res = getsockopt(sock, k.SOL_SOCKET, SO_ERROR, &err, &len);
+        const res = stdlib.libc.getsockopt(sock, mod.socket.k.SOL_SOCKET, @intCast(SO_ERROR), &err, &len);
         return if (res >= 0 and err == 0) .success else .connection;
     }
     return .connection;
@@ -590,26 +580,26 @@ pub const ClientImpl = struct {
     keep_alive: bool = false,
     follow_location: bool = false,
     path_encode: bool = true,
-    address_family: c_int = k.AF_UNSPEC,
-    tcp_nodelay: bool = detail.tcp_nodelay,
+    address_family: c_int = mod.socket.k.AF_UNSPEC,
+    tcp_nodelay: bool = mod.detail.tcp_nodelay,
     ipv6_v6only: bool = false,
     decompress: bool = true,
-    payload_max_length: usize = detail.payload_max_length,
+    payload_max_length: usize = mod.detail.payload_max_length,
 
     basic_auth_username: []const u8 = "",
     basic_auth_password: []const u8 = "",
-    default_headers: Headers = .{},
+    default_headers: mod.detail.Headers = .{},
 
     proxy_host: []const u8 = "",
     proxy_port: c_int = -1,
     proxy_basic_auth_username: []const u8 = "",
     proxy_basic_auth_password: []const u8 = "",
 
-    sock: Socket = socket.invalid_socket,
+    sock: mod.socket.Socket = mod.socket.invalid_socket,
     /// `socket_mutex_`, `socket_requests_in_flight_` and
     /// `socket_should_be_closed_when_request_is_done_`: what `stop` reads
     /// from another thread.
-    socket_mutex: sync.Mutex = .{},
+    socket_mutex: stdlib.sync.Mutex = .{},
     socket_requests_in_flight: usize = 0,
     socket_should_be_closed_when_request_is_done: bool = false,
     /// `stop_requested_`: set by `stop` while a request is in flight. The
@@ -632,7 +622,7 @@ pub const ClientImpl = struct {
     /// Ports `ClientImpl`'s destructor (httplib.cpp:10696 @b1b770d90): the socket shut down and
     /// closed.
     pub fn deinit(self: *ClientImpl) void {
-        if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
+        if (self.sock != mod.socket.invalid_socket) _ = mod.socket.shutdownSocket(self.sock);
         self.closeSocket();
     }
 
@@ -675,7 +665,7 @@ pub const ClientImpl = struct {
     }
 
     /// Ports `set_default_headers` (httplib.cpp:13266 @b1b770d90).
-    pub fn setDefaultHeaders(self: *ClientImpl, headers: Headers) void {
+    pub fn setDefaultHeaders(self: *ClientImpl, headers: mod.detail.Headers) void {
         self.default_headers = headers;
     }
 
@@ -736,14 +726,14 @@ pub const ClientImpl = struct {
     }
 
     fn closeSocket(self: *ClientImpl) void {
-        if (self.sock == socket.invalid_socket) return;
-        _ = socket.closeSocket(self.sock);
-        self.sock = socket.invalid_socket;
+        if (self.sock == mod.socket.invalid_socket) return;
+        _ = mod.socket.closeSocket(self.sock);
+        self.sock = mod.socket.invalid_socket;
     }
 
     /// Ports `disconnect` (httplib.cpp:10805 @b1b770d90).
     fn disconnect(self: *ClientImpl) void {
-        if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
+        if (self.sock != mod.socket.invalid_socket) _ = mod.socket.shutdownSocket(self.sock);
         self.closeSocket();
     }
 
@@ -756,7 +746,7 @@ pub const ClientImpl = struct {
         self.socket_mutex.lock();
         defer self.socket_mutex.unlock();
         if (self.socket_requests_in_flight > 0) {
-            if (self.sock != socket.invalid_socket) _ = socket.shutdownSocket(self.sock);
+            if (self.sock != mod.socket.invalid_socket) _ = mod.socket.shutdownSocket(self.sock);
             // shutdown() does not wake a read waiting in WSAPoll on Windows, so the
             // request's reads also give up once they see this flag.
             self.stop_requested.store(true, .seq_cst);
@@ -771,17 +761,17 @@ pub const ClientImpl = struct {
     /// connected without blocking past the connection timeout, then given
     /// the read and write timeouts. Through a proxy the proxy is reached by
     /// name; otherwise the address map is applied to the host.
-    pub fn createClientSocket(self: *ClientImpl, err: *Error) Oom!Socket {
+    pub fn createClientSocket(self: *ClientImpl, err: *Error) Oom!mod.socket.Socket {
         const Ctx = struct {
             cli: *ClientImpl,
             err: *Error,
-            fn bindOrConnect(ctx: ?*anyopaque, sock2: Socket, addr: ?*const anyopaque, addrlen: u32, quit: *bool) bool {
+            fn bindOrConnect(ctx: ?*anyopaque, sock2: mod.socket.Socket, addr: ?*const anyopaque, addrlen: u32, quit: *bool) bool {
                 const c: *@This() = @ptrCast(@alignCast(ctx.?));
                 setNonblocking(sock2, true);
-                const ret = connect(sock2, addr, addrlen);
+                const ret = stdlib.libc.connect(sock2, @ptrCast(@alignCast(addr.?)), addrlen);
                 if (ret < 0) {
                     // is_connection_error
-                    if (socket.errno() != EINPROGRESS) {
+                    if (mod.socket.errno() != EINPROGRESS) {
                         c.err.* = .connection;
                         return false;
                     }
@@ -792,8 +782,8 @@ pub const ClientImpl = struct {
                     }
                 }
                 setNonblocking(sock2, false);
-                _ = socket.setSocketOptTime(sock2, k.SOL_SOCKET, k.SO_RCVTIMEO, c.cli.read_timeout_sec, c.cli.read_timeout_usec);
-                _ = socket.setSocketOptTime(sock2, k.SOL_SOCKET, k.SO_SNDTIMEO, c.cli.write_timeout_sec, c.cli.write_timeout_usec);
+                _ = mod.socket.setSocketOptTime(sock2, mod.socket.k.SOL_SOCKET, mod.socket.k.SO_RCVTIMEO, c.cli.read_timeout_sec, c.cli.read_timeout_usec);
+                _ = mod.socket.setSocketOptTime(sock2, mod.socket.k.SOL_SOCKET, mod.socket.k.SO_SNDTIMEO, c.cli.write_timeout_sec, c.cli.write_timeout_usec);
                 c.err.* = .success;
                 return true;
             }
@@ -806,8 +796,8 @@ pub const ClientImpl = struct {
         if (!proxied) try applyAddrMap(self.a, self.addr_map.items, self.host, &connect_host, &ip);
         const hz = try self.a.dupeSentinel(u8, connect_host, 0);
         const ipz = try self.a.dupeSentinel(u8, ip, 0);
-        const sock = socket.createSocket(hz, ipz, if (proxied) self.proxy_port else self.port, self.address_family, 0, self.tcp_nodelay, self.ipv6_v6only, null, .{ .ctx = &ctx, .func = Ctx.bindOrConnect });
-        if (sock != socket.invalid_socket) {
+        const sock = mod.socket.createSocket(hz, ipz, if (proxied) self.proxy_port else self.port, self.address_family, 0, self.tcp_nodelay, self.ipv6_v6only, null, .{ .ctx = &ctx, .func = Ctx.bindOrConnect });
+        if (sock != mod.socket.invalid_socket) {
             err.* = .success;
         } else if (err.* == .success) {
             err.* = .connection;
@@ -820,10 +810,10 @@ pub const ClientImpl = struct {
     /// a 100 Continue the caller handles itself for Expect: 100-continue. 101
     /// ends HTTP on the connection, so it is final. A server sending them
     /// without end would hold the client, so there may be only so many.
-    fn readResponseLine(self: *ClientImpl, strm: *socket.SocketStream, res: *Response, skip_100_continue: bool) Oom!bool {
+    fn readResponseLine(self: *ClientImpl, strm: *mod.socket.SocketStream, res: *Response, skip_100_continue: bool) Oom!bool {
         _ = self;
         var buf: [2048]u8 = undefined;
-        var lr = socket.LineReader.init(res.a, strm, &buf);
+        var lr = mod.socket.LineReader.init(res.a, strm, &buf);
         defer lr.deinit();
 
         if (!try lr.getline()) return false;
@@ -835,8 +825,8 @@ pub const ClientImpl = struct {
         while (100 <= res.status and res.status < 200 and res.status != 101 and (skip_100_continue or res.status != 100)) {
             interim_count += 1;
             if (interim_count > interim_response_max_count) return false;
-            var interim_headers: Headers = .{};
-            if (!try message.readHeaders(res.a, strm, &interim_headers)) return false;
+            var interim_headers: mod.detail.Headers = .{};
+            if (!try mod.message.readHeaders(res.a, strm, &interim_headers)) return false;
             if (!try lr.getline()) return false; // next response line
             if (!try parseStatusLine(res.a, lr.cstr(), &res.version, &res.status, &res.reason)) return false;
         }
@@ -857,8 +847,8 @@ pub const ClientImpl = struct {
     /// `SIGPIPE`. Nothing TLS is compiled in, so its settings never retire
     /// the connection.
     fn socketReusable(self: *ClientImpl) bool {
-        if (self.sock == socket.invalid_socket) return false;
-        if (!socket.isSocketAlive(self.sock)) {
+        if (self.sock == mod.socket.invalid_socket) return false;
+        if (!mod.socket.isSocketAlive(self.sock)) {
             // Peer seems gone — non-graceful shutdown to avoid SIGPIPE.
             self.disconnect();
             return false;
@@ -885,7 +875,7 @@ pub const ClientImpl = struct {
 
             if (!self.socketReusable()) {
                 const sock = try self.createClientSocket(err);
-                if (sock == socket.invalid_socket) return false;
+                if (sock == mod.socket.invalid_socket) return false;
                 self.sock = sock;
             }
 
@@ -910,7 +900,7 @@ pub const ClientImpl = struct {
         }
 
         // `process_socket`, then `process_client_socket` (httplib.cpp:2106 @b1b770d90)
-        var strm: socket.SocketStream = .{
+        var strm: mod.socket.SocketStream = .{
             .sock = self.sock,
             .read_timeout_sec = self.read_timeout_sec,
             .read_timeout_usec = self.read_timeout_usec,
@@ -954,7 +944,7 @@ pub const ClientImpl = struct {
         }
         // RFC 9110 5.3 recommends sending control data such as Host first
         if (!r.hasHeader("Host")) {
-            const v = if (self.address_family == k.AF_UNIX) "localhost" else try makeHostAndPortString(r.a, self.host, self.port, false);
+            const v = if (self.address_family == mod.socket.k.AF_UNIX) "localhost" else try makeHostAndPortString(r.a, self.host, self.port, false);
             try r.headers.entries.insert(r.a, 0, .{ .key = "Host", .value = v });
         }
         if (!r.hasHeader("Accept")) _ = try r.headers.emplace(r.a, "Accept", "*/*");
@@ -974,7 +964,7 @@ pub const ClientImpl = struct {
     /// it, and a redirect followed. Through a proxy, a path that does not
     /// begin with '/' would follow the authority and name another host, so it
     /// is a write error.
-    fn handleRequest(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
+    fn handleRequest(self: *ClientImpl, strm: *mod.socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
         if (req.path.len == 0) {
             err.* = .connection;
             return false;
@@ -1009,7 +999,7 @@ pub const ClientImpl = struct {
             // or "Connection: close"), so that a redirect or an auth retry below does
             // not reuse the socket.
             if (self.socket_should_be_closed_when_request_is_done or close_connection or
-                detail.hasHeaderToken(&res.headers, "Connection", "close") or
+                mod.detail.hasHeaderToken(&res.headers, "Connection", "close") or
                 (std.mem.eql(u8, res.version, "HTTP/1.0") and !std.mem.eql(u8, res.reason, "Connection established")))
             {
                 self.disconnect();
@@ -1069,7 +1059,7 @@ pub const ClientImpl = struct {
         // A Unix socket client sends "Host: localhost", so a Location naming
         // localhost names this client too.
         const is_same_host = std.mem.eql(u8, next_host, self.host) or
-            (self.address_family == k.AF_UNIX and std.mem.eql(u8, next_host, "localhost"));
+            (self.address_family == mod.socket.k.AF_UNIX and std.mem.eql(u8, next_host, "localhost"));
 
         // Same host redirect - use current client
         if (std.mem.eql(u8, next_scheme, scheme) and is_same_host and next_port == self.port) {
@@ -1113,7 +1103,7 @@ pub const ClientImpl = struct {
         // A Unix socket client reaches every host through its own socket, as curl's
         // --unix-socket does, unless the caller mapped that host elsewhere. The
         // Location's host is never taken as a socket path.
-        if (self.address_family == k.AF_UNIX) {
+        if (self.address_family == mod.socket.k.AF_UNIX) {
             const target = addrMapFind(redirect_client.addr_map.items, redirect_client.host);
             if (target == null or target.?.len == 0) {
                 const t = try addrMapTarget(self.a, self.addr_map.items, self.host);
@@ -1150,7 +1140,7 @@ pub const ClientImpl = struct {
     /// write -- and, unless waiting on `100 Continue`, the body.
     /// `rejected_locally` says the request line or a header was refused
     /// before any byte reached the socket.
-    fn writeRequest(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, close_connection: bool, err: *Error, skip_body: bool, rejected_locally: *bool) Oom!bool {
+    fn writeRequest(self: *ClientImpl, strm: *mod.socket.SocketStream, req: *Request, close_connection: bool, err: *Error, skip_body: bool, rejected_locally: *bool) Oom!bool {
         rejected_locally.* = false;
 
         if (close_connection) {
@@ -1170,17 +1160,17 @@ pub const ClientImpl = struct {
 
         // Request line and headers
         {
-            var bstrm: socket.BufferStream = .{ .a = req.a };
+            var bstrm: mod.socket.BufferStream = .{ .a = req.a };
             const path_with_query = try self.makeRequestTarget(req);
 
             // The query already came in through `req.path`; still populate
             // `req.params` for handlers/users who read them.
             const query_part = queryOf(req.path);
-            if (query_part.len != 0) try detail.parseQueryText(req.a, query_part, &req.params);
+            if (query_part.len != 0) try mod.detail.parseQueryText(req.a, query_part, &req.params);
 
             // `write_request_line` (httplib.cpp:4045 @b1b770d90): the method
             // must be a token, the target a request-target
-            if (!detail.isToken(req.method) or !detail.isRequestTarget(path_with_query)) {
+            if (!mod.detail.isToken(req.method) or !mod.detail.isRequestTarget(path_with_query)) {
                 err.* = .write;
                 rejected_locally.* = true;
                 return false;
@@ -1189,18 +1179,18 @@ pub const ClientImpl = struct {
 
             // `check_and_write_headers` (httplib.cpp:8387 @b1b770d90)
             for (req.headers.entries.items) |h| {
-                if (!detail.isFieldValid(h.key, h.value)) {
+                if (!mod.detail.isFieldValid(h.key, h.value)) {
                     err.* = .invalid_headers;
                     rejected_locally.* = true;
                     return false;
                 }
             }
-            if (try message.writeHeaders(req.a, &bstrm, &req.headers) <= 0) {
+            if (try mod.message.writeHeaders(req.a, &bstrm, &req.headers) <= 0) {
                 err.* = .write;
                 return false;
             }
 
-            if (!message.writeData(strm, bstrm.buffer.items)) {
+            if (!mod.message.writeData(strm, bstrm.buffer.items)) {
                 err.* = .write;
                 return false;
             }
@@ -1212,10 +1202,10 @@ pub const ClientImpl = struct {
     }
 
     /// Ports `write_request_body` (httplib.cpp:11928 @b1b770d90).
-    fn writeRequestBody(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, err: *Error) Oom!bool {
+    fn writeRequestBody(self: *ClientImpl, strm: *mod.socket.SocketStream, req: *Request, err: *Error) Oom!bool {
         _ = self;
         if (req.body.len == 0) return true; // no content provider here
-        if (!message.writeData(strm, req.body)) {
+        if (!mod.message.writeData(strm, req.body)) {
             err.* = .write;
             return false;
         }
@@ -1249,14 +1239,14 @@ pub const ClientImpl = struct {
     /// (with `Expect: 100-continue` past the threshold), the status line and
     /// headers read, the response handler told, the body read into the
     /// content receiver.
-    fn processRequest(self: *ClientImpl, strm: *socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
+    fn processRequest(self: *ClientImpl, strm: *mod.socket.SocketStream, req: *Request, res: *Response, close_connection: bool, err: *Error) Oom!bool {
         // Auto-add Expect: 100-continue for large bodies
         if (expect_100_threshold > 0 and !req.hasHeader("Expect")) {
             if (req.body.len >= expect_100_threshold) try req.setHeader("Expect", "100-continue");
         }
 
         // Check for Expect: 100-continue
-        var expect_100_continue = detail.hasHeaderToken(&req.headers, "Expect", "100-continue");
+        var expect_100_continue = mod.detail.hasHeaderToken(&req.headers, "Expect", "100-continue");
 
         // Send request (skip body if using Expect: 100-continue)
         var rejected_locally = false;
@@ -1289,7 +1279,7 @@ pub const ClientImpl = struct {
         // Receive response and headers
         // When using Expect: 100-continue, don't auto-skip `100 Continue` response
         if ((!status_line_read and !try self.readResponseLine(strm, res, !expect_100_continue)) or
-            !try message.readHeaders(res.a, strm, &res.headers))
+            !try mod.message.readHeaders(res.a, strm, &res.headers))
         {
             if (write_request_success) err.* = .read;
             return false;
@@ -1305,7 +1295,7 @@ pub const ClientImpl = struct {
                 // Read the actual response
                 res.headers = .{};
                 res.body.clearRetainingCapacity();
-                if (!try self.readResponseLine(strm, res, true) or !try message.readHeaders(res.a, strm, &res.headers)) {
+                if (!try self.readResponseLine(strm, res, true) or !try mod.message.readHeaders(res.a, strm, &res.headers)) {
                     err.* = .read;
                     return false;
                 }
@@ -1327,7 +1317,7 @@ pub const ClientImpl = struct {
                     err.* = .read;
                     return false;
                 }
-                if (message.hasFaultyTransferEncoding(res)) {
+                if (mod.message.hasFaultyTransferEncoding(res)) {
                     self.socket_mutex.lock();
                     defer self.socket_mutex.unlock();
                     self.socket_should_be_closed_when_request_is_done = true;
@@ -1350,7 +1340,7 @@ pub const ClientImpl = struct {
             if (res.status != 304) {
                 var content_status: c_int = 0;
                 const max_length = if (req.content_receiver != null) std.math.maxInt(usize) else self.payload_max_length;
-                if (!try message.readContent(strm, res, max_length, &content_status, &out, self.decompress)) {
+                if (!try mod.message.readContent(strm, res, max_length, &content_status, &out, self.decompress)) {
                     if (err.* != .canceled) {
                         // Tell the caller apart from a plain read failure when the body was
                         // over the payload limit or could not be decoded because of its
@@ -1379,7 +1369,7 @@ pub fn errorToString(e: Error) []const u8 {
 }
 
 /// `Headers`.
-pub const HeadersMap = Headers;
+pub const HeadersMap = mod.detail.Headers;
 
 /// Ports `Client` (httplib.h:3234 @b1b770d90) for a plain-HTTP host: the
 /// verbs over a `ClientImpl`. A failure to allocate is reported as
@@ -1418,7 +1408,7 @@ pub const Client = struct {
         self.impl.setProxyBasicAuth(username, password);
     }
 
-    pub fn setDefaultHeaders(self: *Client, headers: Headers) void {
+    pub fn setDefaultHeaders(self: *Client, headers: mod.detail.Headers) void {
         self.impl.setDefaultHeaders(headers);
     }
 
@@ -1439,7 +1429,7 @@ pub const Client = struct {
     }
 
     /// Ports `ClientImpl`'s `Get` (httplib.cpp:12405 @b1b770d90), with headers.
-    pub fn get(self: *Client, a: std.mem.Allocator, path: []const u8, headers: *const Headers) Result {
+    pub fn get(self: *Client, a: std.mem.Allocator, path: []const u8, headers: *const mod.detail.Headers) Result {
         const req: Request = .{ .a = a, .method = "GET", .path = path, .headers = headers.clone(a) catch return .{ .res = null, .err = .unknown } };
         return self.run(&req);
     }
@@ -1456,7 +1446,7 @@ pub const Client = struct {
         self: *Client,
         a: std.mem.Allocator,
         path: []const u8,
-        headers: *const Headers,
+        headers: *const mod.detail.Headers,
         ctx: *anyopaque,
         on_response: ?*const fn (ctx: *anyopaque, r: *const Response) bool,
         on_data: *const fn (ctx: *anyopaque, data: []const u8) bool,
@@ -1638,13 +1628,13 @@ test "encode_uri_component and hosted_at answer as cpp-httplib 0.66.0" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try std.testing.expectEqualStrings("a%20b%2Fc%3Fd%3De%26f~g*'()!-_.%C3%A9%25", try detail.encodeUriComponent(a, "a b/c?d=e&f~g*'()!-_.\xc3\xa9%"));
+    try std.testing.expectEqualStrings("a%20b%2Fc%3Fd%3De%26f~g*'()!-_.%C3%A9%25", try mod.detail.encodeUriComponent(a, "a b/c?d=e&f~g*'()!-_.\xc3\xa9%"));
     var addrs: std.ArrayList([]const u8) = .empty;
-    try socket.hostedAt(a, "::ffff:127.0.0.1", &addrs);
+    try mod.socket.hostedAt(a, "::ffff:127.0.0.1", &addrs);
     try std.testing.expectEqual(@as(usize, 1), addrs.items.len);
     try std.testing.expectEqualStrings("::ffff:127.0.0.1", addrs.items[0]);
     addrs.clearRetainingCapacity();
-    try socket.hostedAt(a, "fe80::1%lo", &addrs);
+    try mod.socket.hostedAt(a, "fe80::1%lo", &addrs);
     try std.testing.expectEqualStrings("fe80::1%lo", addrs.items[0]);
     var ch: []const u8 = undefined;
     var ip: []const u8 = undefined;

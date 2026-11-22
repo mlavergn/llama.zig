@@ -24,36 +24,13 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("impl.zig");
-const hparams_mod = @import("hparams.zig");
-const cparams_mod = @import("cparams.zig");
-const batch = @import("batch.zig");
-const memory = @import("memory.zig");
-const io = @import("io.zig");
-const kv_cache = @import("kv_cache.zig");
-const kv_cache_iswa = @import("kv_cache_iswa.zig");
-const graph = @import("graph.zig");
-const model_mod = @import("model.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Hparams = hparams_mod.Hparams;
-const Ubatch = batch.Ubatch;
-const KvCache = kv_cache.KvCache;
-const KvCacheContext = kv_cache.KvCacheContext;
-const KvCacheIswa = kv_cache_iswa.KvCacheIswa;
-const SlotInfo = kv_cache.SlotInfo;
-const StreamCopyInfo = kv_cache.StreamCopyInfo;
-const Tensor = c.ggml_tensor;
-const max_seq = cparams_mod.max_seq;
 
 const file = "llama-kv-cache-dsv4.cpp";
 
 fn oom() noreturn {
-    impl.abort(file, 0, "out of memory");
+    mod.impl.abort(file, 0, "out of memory");
 }
 
 /// `DSV4_CSA_RATIO` (llama-kv-cache-dsv4.cpp:18 @b1b770d90).
@@ -82,13 +59,13 @@ fn compSize(kv_size: u32, ratio: u32) u32 {
 
 /// Ports `dsv4_clear_tensor_stream` (llama-kv-cache-dsv4.cpp:32 @b1b770d90):
 /// zero one stream's plane of a contiguous 3-D tensor.
-fn clearTensorStream(tensor: *Tensor, stream: u32) void {
-    impl.assert(c.ggml_is_contiguous(tensor), file, 33, "ggml_is_contiguous(tensor)");
-    impl.assert(tensor.ne[3] == 1, file, 34, "tensor->ne[3] == 1");
-    impl.assert(stream < @as(u32, @truncate(@as(u64, @bitCast(tensor.ne[2])))), file, 35, "stream < (uint32_t) tensor->ne[2]");
+fn clearTensorStream(tensor: *mod.impl.c.ggml_tensor, stream: u32) void {
+    mod.impl.assert(mod.impl.c.ggml_is_contiguous(tensor), file, 33, "ggml_is_contiguous(tensor)");
+    mod.impl.assert(tensor.ne[3] == 1, file, 34, "tensor->ne[3] == 1");
+    mod.impl.assert(stream < @as(u32, @truncate(@as(u64, @bitCast(tensor.ne[2])))), file, 35, "stream < (uint32_t) tensor->ne[2]");
 
     const stream_size = tensor.nb[2];
-    c.ggml_backend_tensor_memset(tensor, 0, stream * stream_size, stream_size);
+    mod.impl.c.ggml_backend_tensor_memset(tensor, 0, stream * stream_size, stream_size);
 }
 
 /// Ports `dsv4_state_n_used_k_rows` (llama-kv-cache-dsv4.cpp:41 @b1b770d90):
@@ -105,14 +82,14 @@ fn stateNUsedKRows(pos_max: i32, ratio: u32, kv_size: u32) u32 {
 fn streamOffset(n_stream: u32, seq_id: i32, size: u32) i64 {
     if (n_stream <= 1) return 0;
     if (seq_id < 0 or @as(u32, @bitCast(seq_id)) >= n_stream) {
-        impl.throwRuntime(file, 56, "DSV4 sequence id out of stream range");
+        mod.impl.throwRuntime(file, 56, "DSV4 sequence id out of stream range");
     }
     return @as(i64, seq_id) * size;
 }
 
 /// Ports `dsv4_ubatch_has_coupled` (llama-kv-cache-dsv4.cpp:62 @b1b770d90):
 /// whether a token belongs to several sequences at once.
-fn ubatchHasCoupled(ubatch: *const Ubatch) bool {
+fn ubatchHasCoupled(ubatch: *const mod.batch.Ubatch) bool {
     for (0..ubatch.n_tokens) |i| {
         if (ubatch.n_seq_id[i] > 1) return true;
     }
@@ -120,7 +97,7 @@ fn ubatchHasCoupled(ubatch: *const Ubatch) bool {
 }
 
 /// Ports `dsv4_token_has_seq` (llama-kv-cache-dsv4.cpp:72 @b1b770d90).
-fn tokenHasSeq(ubatch: *const Ubatch, i: usize, seq_id: i32) bool {
+fn tokenHasSeq(ubatch: *const mod.batch.Ubatch, i: usize, seq_id: i32) bool {
     var s: usize = 0;
     while (s < @as(usize, @intCast(ubatch.n_seq_id[i]))) : (s += 1) {
         if (ubatch.seq_id[i][s] == seq_id) return true;
@@ -134,19 +111,19 @@ fn tokenHasSeq(ubatch: *const Ubatch, i: usize, seq_id: i32) bool {
 /// writes each sequence's stream separately.
 ///
 /// Return: a ubatch holding its own reference, the caller's to `release`.
-fn buildRawWriteUbatch(ubatch: *const Ubatch) Ubatch {
+fn buildRawWriteUbatch(ubatch: *const mod.batch.Ubatch) mod.batch.Ubatch {
     if (!ubatchHasCoupled(ubatch)) {
         ubatch.retain();
         return ubatch.*;
     }
     ubatch.assertEmbdOrToken("llama-kv-cache-dsv4.cpp", 86);
     if (ubatch.embd != null) {
-        impl.throwRuntime(file, 88, "DSV4 coupled embedding ubatches are not supported");
+        mod.impl.throwRuntime(file, 88, "DSV4 coupled embedding ubatches are not supported");
     }
 
     var counts: std.ArrayList(u32) = .empty;
-    defer counts.deinit(allocator);
-    counts.appendNTimes(allocator, 0, ubatch.n_seqs_unq) catch oom();
+    defer counts.deinit(std.heap.c_allocator);
+    counts.appendNTimes(std.heap.c_allocator, 0, ubatch.n_seqs_unq) catch oom();
     var n_tokens: u32 = 0;
     for (0..ubatch.n_seqs_unq) |s| {
         const seq_id = ubatch.seq_id_unq[s];
@@ -165,19 +142,19 @@ fn buildRawWriteUbatch(ubatch: *const Ubatch) Ubatch {
 
     const n_seq_tokens = counts.items[0];
     for (counts.items[1..]) |n| {
-        if (n != n_seq_tokens) impl.throwRuntime(file, 110, "DSV4 coupled raw writes require equal sequence lengths");
+        if (n != n_seq_tokens) mod.impl.throwRuntime(file, 110, "DSV4 coupled raw writes require equal sequence lengths");
     }
 
-    const data = allocator.create(batch.UbatchData) catch oom();
+    const data = std.heap.c_allocator.create(mod.batch.UbatchData) catch oom();
     data.* = .{};
-    data.pos.appendNTimes(allocator, 0, @as(usize, n_tokens) * ubatch.n_pos) catch oom();
-    data.n_seq_id.ensureTotalCapacity(allocator, n_tokens) catch oom();
-    data.seq_id.ensureTotalCapacity(allocator, n_tokens) catch oom();
-    data.seq_id_data.ensureTotalCapacity(allocator, n_tokens) catch oom();
-    data.seq_id_unq.appendSlice(allocator, ubatch.seq_id_unq[0..ubatch.n_seqs_unq]) catch oom();
-    data.seq_idx.appendNTimes(allocator, -1, max_seq) catch oom();
-    data.output.appendNTimes(allocator, 0, n_tokens) catch oom();
-    if (ubatch.token != null) data.token.ensureTotalCapacity(allocator, n_tokens) catch oom();
+    data.pos.appendNTimes(std.heap.c_allocator, 0, @as(usize, n_tokens) * ubatch.n_pos) catch oom();
+    data.n_seq_id.ensureTotalCapacity(std.heap.c_allocator, n_tokens) catch oom();
+    data.seq_id.ensureTotalCapacity(std.heap.c_allocator, n_tokens) catch oom();
+    data.seq_id_data.ensureTotalCapacity(std.heap.c_allocator, n_tokens) catch oom();
+    data.seq_id_unq.appendSlice(std.heap.c_allocator, ubatch.seq_id_unq[0..ubatch.n_seqs_unq]) catch oom();
+    data.seq_idx.appendNTimes(std.heap.c_allocator, -1, mod.cparams.max_seq) catch oom();
+    data.output.appendNTimes(std.heap.c_allocator, 0, n_tokens) catch oom();
+    if (ubatch.token != null) data.token.ensureTotalCapacity(std.heap.c_allocator, n_tokens) catch oom();
 
     for (data.seq_id_unq.items, 0..) |seq_id, s| data.seq_idx.items[@intCast(seq_id)] = @intCast(s);
 
@@ -223,15 +200,15 @@ fn buildRawWriteUbatch(ubatch: *const Ubatch) Ubatch {
 /// Ports `dsv4_build_raw_write_ubatches` (llama-kv-cache-dsv4.cpp:178 @b1b770d90).
 ///
 /// Return: one raw-write ubatch per ubatch, the caller's to release.
-fn buildRawWriteUbatches(ubatches: []const Ubatch) std.ArrayList(Ubatch) {
-    var res: std.ArrayList(Ubatch) = .empty;
-    res.ensureTotalCapacity(allocator, ubatches.len) catch oom();
+fn buildRawWriteUbatches(ubatches: []const mod.batch.Ubatch) std.ArrayList(mod.batch.Ubatch) {
+    var res: std.ArrayList(mod.batch.Ubatch) = .empty;
+    res.ensureTotalCapacity(std.heap.c_allocator, ubatches.len) catch oom();
     for (ubatches) |*u| res.appendAssumeCapacity(buildRawWriteUbatch(u));
     return res;
 }
 
 /// Ports `dsv4_batch_has_coupled` (llama-kv-cache-dsv4.cpp:187 @b1b770d90).
-fn batchHasCoupled(b: *const c.llama_batch) bool {
+fn batchHasCoupled(b: *const mod.impl.c.llama_batch) bool {
     if (b.n_seq_id == null) return false;
     var i: i32 = 0;
     while (i < b.n_tokens) : (i += 1) {
@@ -243,14 +220,14 @@ fn batchHasCoupled(b: *const c.llama_batch) bool {
 /// Ports `dsv4_comp_graph_n_stream` (llama-kv-cache-dsv4.cpp:201 @b1b770d90):
 /// coupled sequence sets must stay in one graph stream because their
 /// compressed state is shared; independent per-sequence state can fan out.
-fn compGraphNStream(ubatch: *const Ubatch, n_stream: u32) i64 {
+fn compGraphNStream(ubatch: *const mod.batch.Ubatch, n_stream: u32) i64 {
     if (n_stream <= 1 or ubatch.n_seqs_unq <= 1 or ubatchHasCoupled(ubatch)) return 1;
     return ubatch.n_seqs_unq;
 }
 
 /// Ports `dsv4_state_src_stream_range` (llama-kv-cache-dsv4.cpp:211
 /// @b1b770d90): the streams a state write saves.
-fn stateSrcStreamRange(n_stream: u32, seq_id: i32, s0: *u32, ns: *u32, exc: *Exception) Thrown!void {
+fn stateSrcStreamRange(n_stream: u32, seq_id: i32, s0: *u32, ns: *u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     if (seq_id >= 0 and n_stream > 1) {
         if (@as(u32, @bitCast(seq_id)) >= n_stream) {
             return exc.throw(.runtime_error, "DSV4 state sequence id out of stream range", .{});
@@ -265,7 +242,7 @@ fn stateSrcStreamRange(n_stream: u32, seq_id: i32, s0: *u32, ns: *u32, exc: *Exc
 
 /// Ports `dsv4_state_dst_stream_range` (llama-kv-cache-dsv4.cpp:230
 /// @b1b770d90): the first stream a state read restores into.
-fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *Exception) Thrown!void {
+fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     if (seq_id >= 0) {
         if (ns != 1) return exc.throw(.runtime_error, "DSV4 sequence state stream count mismatch", .{});
         if (n_stream > 1 and @as(u32, @bitCast(seq_id)) >= n_stream) {
@@ -281,11 +258,11 @@ fn stateDstStreamRange(n_stream: u32, seq_id: i32, ns: u32, s0: *u32, exc: *Exce
 /// Ports `dsv4_state_write_tensor_streams` (llama-kv-cache-dsv4.cpp:254
 /// @b1b770d90): a tensor's metadata, then the first `n_rows` rows of each
 /// stream -- `stream_ids`' streams when given, else `ns` from `s0`.
-fn stateWriteTensorStreams(w: io.Writer, tensor: *Tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, stream_ids: ?[]const u32, exc: *Exception) Thrown!void {
+fn stateWriteTensorStreams(w: mod.io.Writer, tensor: *mod.impl.c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, stream_ids: ?[]const u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     const type_i: i32 = @intCast(tensor.type);
     const ne0: u64 = @bitCast(tensor.ne[0]);
     const rows: u64 = n_rows;
-    const row_size: u64 = c.ggml_row_size(tensor.type, tensor.ne[0]);
+    const row_size: u64 = mod.impl.c.ggml_row_size(tensor.type, tensor.ne[0]);
 
     if (n_rows > tensor_rows) return exc.throw(.runtime_error, "DSV4 state tensor row count exceeds storage", .{});
 
@@ -311,7 +288,7 @@ fn stateWriteTensorStreams(w: io.Writer, tensor: *Tensor, tensor_rows: u32, n_ro
 }
 
 /// Ports `dsv4_state_read_tensor_streams` (llama-kv-cache-dsv4.cpp:296 @b1b770d90).
-fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, exc: *Exception) Thrown!void {
+fn stateReadTensorStreams(r: mod.io.Reader, tensor: *mod.impl.c.ggml_tensor, tensor_rows: u32, n_rows: u32, s0: u32, ns: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     const type_i_ref = try r.readValue(i32, exc);
     const ne0_ref = try r.readValue(u64, exc);
     const rows_ref = try r.readValue(u64, exc);
@@ -320,7 +297,7 @@ fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_row
     const type_i: i32 = @intCast(tensor.type);
     const ne0: u64 = @bitCast(tensor.ne[0]);
     const rows: u64 = n_rows;
-    const row_size: u64 = c.ggml_row_size(tensor.type, tensor.ne[0]);
+    const row_size: u64 = mod.impl.c.ggml_row_size(tensor.type, tensor.ne[0]);
 
     if (type_i != type_i_ref or ne0 != ne0_ref or rows != rows_ref or row_size != row_size_ref) {
         return exc.throw(.runtime_error, "DSV4 state tensor metadata mismatch", .{});
@@ -343,19 +320,19 @@ fn stateReadTensorStreams(r: io.Reader, tensor: *Tensor, tensor_rows: u32, n_row
 /// next graph after a read (`refill_comp_mirrors`).
 ///
 /// Return: the layer ids, the caller's to free.
-fn kCacheStateLayers(kv: *const KvCache, kv_src: []const i32) std.ArrayList(u32) {
+fn kCacheStateLayers(kv: *const mod.kv_cache.KvCache, kv_src: []const i32) std.ArrayList(u32) {
     var all = kv.getLayerIds();
-    defer all.deinit(allocator);
+    defer all.deinit(std.heap.c_allocator);
     var res: std.ArrayList(u32) = .empty;
     for (all.items) |il| {
-        if (kv_src[il] == @as(i32, @intCast(il))) res.append(allocator, il) catch oom();
+        if (kv_src[il] == @as(i32, @intCast(il))) res.append(std.heap.c_allocator, il) catch oom();
     }
     return res;
 }
 
 /// Ports `dsv4_state_write_k_cache` (llama-kv-cache-dsv4.cpp:348
 /// @b1b770d90): a compressed cache's first `n_rows` rows, layer by layer.
-fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n_rows: u32, kv_src: []const i32, exc: *Exception) Thrown!void {
+fn stateWriteKCache(w: mod.io.Writer, kv: *const mod.kv_cache.KvCache, seq_id: i32, flags: u32, n_rows: u32, kv_src: []const i32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     _ = flags;
 
     var s0: u32 = undefined;
@@ -366,7 +343,7 @@ fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n
     const kv_size = kv.getSize();
     // mirrors are never serialized, so the state format does not depend on the split
     var layer_ids = kCacheStateLayers(kv, kv_src);
-    defer layer_ids.deinit(allocator);
+    defer layer_ids.deinit(std.heap.c_allocator);
     const n_layer: u32 = @intCast(layer_ids.items.len);
 
     if (n_rows > kv_size) return exc.throw(.runtime_error, "DSV4 K-cache state row count exceeds cache size", .{});
@@ -383,7 +360,7 @@ fn stateWriteKCache(w: io.Writer, kv: *const KvCache, seq_id: i32, flags: u32, n
 }
 
 /// Ports `dsv4_state_read_k_cache` (llama-kv-cache-dsv4.cpp:382 @b1b770d90).
-fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: []const i32, exc: *Exception) Thrown!void {
+fn stateReadKCache(r: mod.io.Reader, kv: *mod.kv_cache.KvCache, seq_id: i32, flags: u32, kv_src: []const i32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
     _ = flags;
 
     const version = try r.readValue(u32, exc);
@@ -395,11 +372,11 @@ fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: 
 
     const kv_size = kv.getSize();
     if (version == 1 and n_rows_ref != kv_size) {
-        impl.logInfo("kv size ref %d kv %d\n", .{ n_rows_ref, kv_size });
+        mod.impl.logInfo("kv size ref %d kv %d\n", .{ n_rows_ref, kv_size });
         return exc.throw(.runtime_error, "DSV4 K-cache state size mismatch", .{});
     }
     if (n_rows_ref > kv_size) {
-        impl.logInfo("kv rows ref %d kv %d\n", .{ n_rows_ref, kv_size });
+        mod.impl.logInfo("kv rows ref %d kv %d\n", .{ n_rows_ref, kv_size });
         return exc.throw(.runtime_error, "DSV4 K-cache state size mismatch", .{});
     }
 
@@ -407,7 +384,7 @@ fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: 
     try stateDstStreamRange(kv.getNStream(), seq_id, ns, &s0, exc);
 
     var layer_ids = kCacheStateLayers(kv, kv_src);
-    defer layer_ids.deinit(allocator);
+    defer layer_ids.deinit(std.heap.c_allocator);
     if (n_layer_ref != layer_ids.items.len) return exc.throw(.runtime_error, "DSV4 K-cache layer count mismatch", .{});
 
     for (layer_ids.items) |il| {
@@ -423,13 +400,13 @@ fn stateReadKCache(r: io.Reader, kv: *KvCache, seq_id: i32, flags: u32, kv_src: 
 /// Return: the text, NUL-terminated, the caller's to free.
 pub fn planPositions(values: []const i32) [:0]u8 {
     var out: std.ArrayList(u8) = .empty;
-    out.append(allocator, '[') catch oom();
+    out.append(std.heap.c_allocator, '[') catch oom();
     for (values, 0..) |v, i| {
-        if (i > 0) out.appendSlice(allocator, ", ") catch oom();
-        out.print(allocator, "{d}", .{v}) catch oom();
+        if (i > 0) out.appendSlice(std.heap.c_allocator, ", ") catch oom();
+        out.print(std.heap.c_allocator, "{d}", .{v}) catch oom();
     }
-    out.append(allocator, ']') catch oom();
-    return out.toOwnedSliceSentinel(allocator, 0) catch oom();
+    out.append(std.heap.c_allocator, ']') catch oom();
+    return out.toOwnedSliceSentinel(std.heap.c_allocator, 0) catch oom();
 }
 
 /// `LLAMA_DSV4_COMPRESS_DEBUG`, read into `dsv4_build_comp_plan`'s static
@@ -488,23 +465,23 @@ pub const CompPlan = struct {
     n_kv: i64 = 0,
 
     pub fn deinit(self: *CompPlan) void {
-        self.state_pos.deinit(allocator);
-        self.state_persist_src_idxs.deinit(allocator);
-        self.state_persist_dst_idxs.deinit(allocator);
-        self.state_restore_src_idxs.deinit(allocator);
-        self.state_restore_dst_idxs.deinit(allocator);
-        self.state_snapshot_src_idxs.deinit(allocator);
-        self.state_snapshot_dst_idxs.deinit(allocator);
-        self.state_read_idxs.deinit(allocator);
-        self.state_write_idxs.deinit(allocator);
-        self.state_write_pos.deinit(allocator);
-        self.n_visible.deinit(allocator);
+        self.state_pos.deinit(std.heap.c_allocator);
+        self.state_persist_src_idxs.deinit(std.heap.c_allocator);
+        self.state_persist_dst_idxs.deinit(std.heap.c_allocator);
+        self.state_restore_src_idxs.deinit(std.heap.c_allocator);
+        self.state_restore_dst_idxs.deinit(std.heap.c_allocator);
+        self.state_snapshot_src_idxs.deinit(std.heap.c_allocator);
+        self.state_snapshot_dst_idxs.deinit(std.heap.c_allocator);
+        self.state_read_idxs.deinit(std.heap.c_allocator);
+        self.state_write_idxs.deinit(std.heap.c_allocator);
+        self.state_write_pos.deinit(std.heap.c_allocator);
+        self.n_visible.deinit(std.heap.c_allocator);
         self.* = .{};
     }
 };
 
 fn push(comptime T: type, list: *std.ArrayList(T), v: T) void {
-    list.append(allocator, v) catch oom();
+    list.append(std.heap.c_allocator, v) catch oom();
 }
 
 /// The planner's `state_source_idx` lambda (llama-kv-cache-dsv4.cpp:493
@@ -541,20 +518,20 @@ const SourceIdx = struct {
 /// streams.
 ///
 /// Return: the plan, the caller's to `deinit`.
-fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32, rs_idx: []const u32) CompPlan {
+fn buildCompPlan(ubatch: *const mod.batch.Ubatch, ratio: u32, overlap: bool, pad_blocks: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32, rs_idx: []const u32) CompPlan {
     var plan: CompPlan = .{};
-    plan.n_visible.appendNTimes(allocator, 0, ubatch.n_tokens) catch oom();
+    plan.n_visible.appendNTimes(std.heap.c_allocator, 0, ubatch.n_tokens) catch oom();
     plan.n_stream = compGraphNStream(ubatch, n_stream);
 
     if (n_stream <= 1 and ubatch.n_seqs_unq > 1) {
-        impl.throwRuntime(file, 446, "DSV4 single compressed stream cannot serve multiple sequences");
+        mod.impl.throwRuntime(file, 446, "DSV4 single compressed stream cannot serve multiple sequences");
     }
 
     const state_rows: i64 = @as(i64, state_size) * n_stream;
 
     const PersistRow = struct { dst: i32, src: i32, pos: i32 };
     var persist_rows: std.ArrayList(PersistRow) = .empty;
-    defer persist_rows.deinit(allocator);
+    defer persist_rows.deinit(std.heap.c_allocator);
 
     // For the overlap compressor, `build_overlap_compressed_kv_from_state`
     // reads `state_read_idxs` as two contiguous halves: the first
@@ -562,19 +539,19 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
     // every block's current-window rows. They are collected apart here and
     // joined once every completed block has been visited.
     var overlap_prev_reads: std.ArrayList(i32) = .empty;
-    defer overlap_prev_reads.deinit(allocator);
+    defer overlap_prev_reads.deinit(std.heap.c_allocator);
     var overlap_cur_reads: std.ArrayList(i32) = .empty;
-    defer overlap_cur_reads.deinit(allocator);
+    defer overlap_cur_reads.deinit(std.heap.c_allocator);
 
     var src: SourceIdx = .{ .state_rows = state_rows, .n_tokens = ubatch.n_tokens, .n_stream = n_stream, .state_size = state_size };
-    defer src.curr_token_idx_map.deinit(allocator);
+    defer src.curr_token_idx_map.deinit(std.heap.c_allocator);
     var state_write_counts: std.AutoHashMapUnmanaged(i32, u32) = .empty;
-    defer state_write_counts.deinit(allocator);
+    defer state_write_counts.deinit(std.heap.c_allocator);
 
     for (0..ubatch.n_tokens) |i| {
         var s: usize = 0;
         while (s < @as(usize, @intCast(ubatch.n_seq_id[i]))) : (s += 1) {
-            src.curr_token_idx_map.put(allocator, .{ .seq = ubatch.seq_id[i][s], .pos = ubatch.pos[i] }, @intCast(i)) catch oom();
+            src.curr_token_idx_map.put(std.heap.c_allocator, .{ .seq = ubatch.seq_id[i][s], .pos = ubatch.pos[i] }, @intCast(i)) catch oom();
         }
     }
 
@@ -608,7 +585,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
                     row.pos = pos;
                 }
             } else {
-                persist_rows.append(allocator, .{ .dst = state_idx, .src = @intCast(i), .pos = pos }) catch oom();
+                persist_rows.append(std.heap.c_allocator, .{ .dst = state_idx, .src = @intCast(i), .pos = pos }) catch oom();
             }
 
             if ((upos + 1) % ratio != 0) continue;
@@ -618,7 +595,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
 
             push(i64, &plan.state_write_idxs, cache_off + upos / ratio);
             push(i32, &plan.state_write_pos, source_start);
-            const gop = state_write_counts.getOrPut(allocator, seq_id) catch oom();
+            const gop = state_write_counts.getOrPut(std.heap.c_allocator, seq_id) catch oom();
             if (!gop.found_existing) gop.value_ptr.* = 0;
             gop.value_ptr.* += 1;
 
@@ -644,7 +621,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
             src: *const SourceIdx,
             prev: *std.ArrayList(i32),
             cur: *std.ArrayList(i32),
-            ubatch: *const Ubatch,
+            ubatch: *const mod.batch.Ubatch,
             overlap: bool,
             ratio: u32,
             n_stream: u32,
@@ -686,7 +663,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
                 const n_writes: u32 = state_write_counts.get(seq_id) orelse 0;
                 if (n_writes >= n_blocks) continue;
                 if (n_writes + 1 != n_blocks) {
-                    impl.throwRuntime(file, 592, "DSV4 CSA sequence positions are not contiguous");
+                    mod.impl.throwRuntime(file, 592, "DSV4 CSA sequence positions are not contiguous");
                 }
 
                 var i: usize = 0;
@@ -724,8 +701,8 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
 
     if (overlap) {
         // [ all blocks' prev-window rows | all blocks' cur-window rows ]
-        plan.state_read_idxs.appendSlice(allocator, overlap_prev_reads.items) catch oom();
-        plan.state_read_idxs.appendSlice(allocator, overlap_cur_reads.items) catch oom();
+        plan.state_read_idxs.appendSlice(std.heap.c_allocator, overlap_prev_reads.items) catch oom();
+        plan.state_read_idxs.appendSlice(std.heap.c_allocator, overlap_cur_reads.items) catch oom();
     }
 
     // Keep the mask, and with it the compressed-attention branch, present
@@ -750,7 +727,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
         // the graph's tensor sizes do not depend on the ubatch's sequence
         // count. Streams absent from the ubatch get no-op entries.
         var token_idxs: std.ArrayList(u32) = .empty;
-        defer token_idxs.deinit(allocator);
+        defer token_idxs.deinit(std.heap.c_allocator);
 
         var stream: u32 = 0;
         while (stream < n_stream) : (stream += 1) {
@@ -780,7 +757,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
             token_idxs.clearRetainingCapacity();
             if (seq_id >= 0) {
                 for (0..ubatch.n_tokens) |i| {
-                    if (tokenHasSeq(ubatch, i, seq_id)) token_idxs.append(allocator, @intCast(i)) catch oom();
+                    if (tokenHasSeq(ubatch, i, seq_id)) token_idxs.append(std.heap.c_allocator, @intCast(i)) catch oom();
                 }
             }
 
@@ -815,14 +792,14 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
 
     if (compressDebug()) {
         const persist = planPositions(plan.state_persist_dst_idxs.items);
-        defer allocator.free(persist);
+        defer std.heap.c_allocator.free(persist);
         const write_pos = planPositions(plan.state_write_pos.items);
-        defer allocator.free(write_pos);
-        impl.logDebug("%s: ratio=%u, n_tokens=%u, n_seqs_unq=%u, state_persist_dst=%s, state_write_pos=%s\n", .{ "dsv4_build_comp_plan", ratio, ubatch.n_tokens, ubatch.n_seqs_unq, persist.ptr, write_pos.ptr });
+        defer std.heap.c_allocator.free(write_pos);
+        mod.impl.logDebug("%s: ratio=%u, n_tokens=%u, n_seqs_unq=%u, state_persist_dst=%s, state_write_pos=%s\n", .{ "dsv4_build_comp_plan", ratio, ubatch.n_tokens, ubatch.n_seqs_unq, persist.ptr, write_pos.ptr });
         for (0..ubatch.n_seqs_unq) |s| {
             const seq_id = ubatch.seq_id_unq[s];
             const rollback: u32 = if (seq_id >= 0 and @as(u32, @bitCast(seq_id)) < rs_idx.len) rs_idx[@intCast(seq_id)] else 0;
-            impl.logDebug("%s:   seq %d pos [%d, %d] rollback=%u\n", .{ "dsv4_build_comp_plan", seq_id, ubatch.pos[0], ubatch.pos[ubatch.n_tokens - 1], rollback });
+            mod.impl.logDebug("%s:   seq %d pos [%d, %d] rollback=%u\n", .{ "dsv4_build_comp_plan", seq_id, ubatch.pos[0], ubatch.pos[ubatch.n_tokens - 1], rollback });
         }
     }
 
@@ -834,12 +811,12 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
 /// rollback restore.
 ///
 /// Return: the plans, the caller's to free.
-fn buildCompPlans(ubatches: []const Ubatch, ratio: u32, overlap: bool, pad_blocks: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32, rs_idx: []const u32) std.ArrayList(CompPlan) {
+fn buildCompPlans(ubatches: []const mod.batch.Ubatch, ratio: u32, overlap: bool, pad_blocks: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32, rs_idx: []const u32) std.ArrayList(CompPlan) {
     var plans: std.ArrayList(CompPlan) = .empty;
-    plans.ensureTotalCapacity(allocator, ubatches.len) catch oom();
+    plans.ensureTotalCapacity(std.heap.c_allocator, ubatches.len) catch oom();
 
-    const rs = allocator.dupe(u32, rs_idx) catch oom();
-    defer allocator.free(rs);
+    const rs = std.heap.c_allocator.dupe(u32, rs_idx) catch oom();
+    defer std.heap.c_allocator.free(rs);
     for (ubatches) |*ubatch| {
         plans.appendAssumeCapacity(buildCompPlan(ubatch, ratio, overlap, pad_blocks, state_size, kv_size, n_stream, n_rs_seq, rs));
 
@@ -853,7 +830,7 @@ fn buildCompPlans(ubatches: []const Ubatch, ratio: u32, overlap: bool, pad_block
 
 fn freePlans(list: *std.ArrayList(CompPlan)) void {
     for (list.items) |*p| p.deinit();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
 /// Ports `dsv4_build_comp_sinfos` (llama-kv-cache-dsv4.cpp:788 @b1b770d90):
@@ -861,18 +838,18 @@ fn freePlans(list: *std.ArrayList(CompPlan)) void {
 /// since compressed rows are graph outputs, not token writes.
 ///
 /// Return: the slots, the caller's to free.
-fn buildCompSinfos(ubatches: []const Ubatch, n_stream: u32) std.ArrayList(SlotInfo) {
-    var sinfos: std.ArrayList(SlotInfo) = .empty;
-    sinfos.ensureTotalCapacity(allocator, ubatches.len) catch oom();
+fn buildCompSinfos(ubatches: []const mod.batch.Ubatch, n_stream: u32) std.ArrayList(mod.kv_cache.SlotInfo) {
+    var sinfos: std.ArrayList(mod.kv_cache.SlotInfo) = .empty;
+    sinfos.ensureTotalCapacity(std.heap.c_allocator, ubatches.len) catch oom();
 
     for (ubatches) |*ubatch| {
         if (n_stream <= 1 and ubatch.n_seqs_unq > 1) {
-            impl.throwRuntime(file, 778, "DSV4 single compressed stream cannot serve multiple sequences");
+            mod.impl.throwRuntime(file, 778, "DSV4 single compressed stream cannot serve multiple sequences");
         }
 
         const ns: u32 = @intCast(compGraphNStream(ubatch, n_stream));
-        var sinfo: SlotInfo = .{};
-        sinfo.s0 = if (n_stream > 1) max_seq else 0;
+        var sinfo: mod.kv_cache.SlotInfo = .{};
+        sinfo.s0 = if (n_stream > 1) mod.cparams.max_seq else 0;
         sinfo.s1 = 0;
         sinfo.resize(ns);
 
@@ -883,11 +860,11 @@ fn buildCompSinfos(ubatches: []const Ubatch, n_stream: u32) std.ArrayList(SlotIn
             sinfo.s0 = @min(sinfo.s0, strm);
             sinfo.s1 = @max(sinfo.s1, strm);
             sinfo.strm.items[s] = @intCast(strm);
-            sinfo.idxs.items[s].appendNTimes(allocator, 0, 1) catch oom();
+            sinfo.idxs.items[s].appendNTimes(std.heap.c_allocator, 0, 1) catch oom();
         }
 
         if (n_stream > 1 and sinfo.s1 -% sinfo.s0 +% 1 != ns) {
-            impl.throwRuntime(file, 798, "DSV4 compressed streams are not contiguous in ubatch");
+            mod.impl.throwRuntime(file, 798, "DSV4 compressed streams are not contiguous in ubatch");
         }
 
         sinfos.appendAssumeCapacity(sinfo);
@@ -900,9 +877,9 @@ fn buildCompSinfos(ubatches: []const Ubatch, n_stream: u32) std.ArrayList(SlotIn
 /// except that a coupled ubatch reads its first sequence's stream alone.
 ///
 /// Return: the slots, the caller's to free.
-fn buildRawReadSinfos(sinfos_write: []const SlotInfo, ubatches: []const Ubatch) std.ArrayList(SlotInfo) {
-    var sinfos: std.ArrayList(SlotInfo) = .empty;
-    sinfos.ensureTotalCapacity(allocator, ubatches.len) catch oom();
+fn buildRawReadSinfos(sinfos_write: []const mod.kv_cache.SlotInfo, ubatches: []const mod.batch.Ubatch) std.ArrayList(mod.kv_cache.SlotInfo) {
+    var sinfos: std.ArrayList(mod.kv_cache.SlotInfo) = .empty;
+    sinfos.ensureTotalCapacity(std.heap.c_allocator, ubatches.len) catch oom();
 
     for (ubatches, 0..) |*ubatch, i| {
         const sinfo_write = &sinfos_write[i];
@@ -918,15 +895,15 @@ fn buildRawReadSinfos(sinfos_write: []const SlotInfo, ubatches: []const Ubatch) 
             if (sinfo_write.strm.items[i_stream] == seq_id) break;
         }
         if (i_stream == sinfo_write.nStream()) {
-            impl.throwRuntime(file, 830, "DSV4 raw write stream not found for coupled read");
+            mod.impl.throwRuntime(file, 830, "DSV4 raw write stream not found for coupled read");
         }
 
-        var sinfo: SlotInfo = .{};
+        var sinfo: mod.kv_cache.SlotInfo = .{};
         sinfo.s0 = @intCast(sinfo_write.strm.items[i_stream]);
         sinfo.s1 = @intCast(sinfo_write.strm.items[i_stream]);
         sinfo.resize(1);
         sinfo.strm.items[0] = sinfo_write.strm.items[i_stream];
-        sinfo.idxs.items[0].appendSlice(allocator, sinfo_write.idxs.items[i_stream].items) catch oom();
+        sinfo.idxs.items[0].appendSlice(std.heap.c_allocator, sinfo_write.idxs.items[i_stream].items) catch oom();
         sinfos.appendAssumeCapacity(sinfo);
     }
     return sinfos;
@@ -937,9 +914,9 @@ fn buildRawReadSinfos(sinfos_write: []const SlotInfo, ubatches: []const Ubatch) 
 /// indices all zero.
 ///
 /// Return: the plan, the caller's to `deinit`.
-fn buildReserveCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32) CompPlan {
+fn buildReserveCompPlan(ubatch: *const mod.batch.Ubatch, ratio: u32, overlap: bool, state_size: u32, kv_size: u32, n_stream: u32, n_rs_seq: u32) CompPlan {
     var plan: CompPlan = .{};
-    plan.n_visible.appendNTimes(allocator, 0, ubatch.n_tokens) catch oom();
+    plan.n_visible.appendNTimes(std.heap.c_allocator, 0, ubatch.n_tokens) catch oom();
     plan.n_stream = compGraphNStream(ubatch, n_stream);
     plan.n_kv = kv_size;
 
@@ -955,23 +932,23 @@ fn buildReserveCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, state_
     const n_restore: usize = if (n_rs_seq > 0) @as(usize, state_size) * n_stream else 0;
     const n_snapshot: usize = @as(usize, n_rs_seq) * state_size * n_stream;
 
-    plan.state_pos.appendNTimes(allocator, 0, ubatch.n_tokens) catch oom();
-    plan.state_persist_src_idxs.appendNTimes(allocator, 0, n_persist) catch oom();
-    plan.state_persist_dst_idxs.appendNTimes(allocator, 0, n_persist) catch oom();
-    plan.state_restore_src_idxs.appendNTimes(allocator, 0, n_restore) catch oom();
-    plan.state_restore_dst_idxs.appendNTimes(allocator, 0, n_restore) catch oom();
-    plan.state_snapshot_src_idxs.appendNTimes(allocator, 0, n_snapshot) catch oom();
-    plan.state_snapshot_dst_idxs.appendNTimes(allocator, 0, n_snapshot) catch oom();
-    plan.state_read_idxs.appendNTimes(allocator, 0, @as(usize, if (overlap) 2 else 1) * ratio * n_blocks) catch oom();
-    plan.state_write_idxs.appendNTimes(allocator, 0, n_blocks) catch oom();
-    plan.state_write_pos.appendNTimes(allocator, 0, n_blocks) catch oom();
+    plan.state_pos.appendNTimes(std.heap.c_allocator, 0, ubatch.n_tokens) catch oom();
+    plan.state_persist_src_idxs.appendNTimes(std.heap.c_allocator, 0, n_persist) catch oom();
+    plan.state_persist_dst_idxs.appendNTimes(std.heap.c_allocator, 0, n_persist) catch oom();
+    plan.state_restore_src_idxs.appendNTimes(std.heap.c_allocator, 0, n_restore) catch oom();
+    plan.state_restore_dst_idxs.appendNTimes(std.heap.c_allocator, 0, n_restore) catch oom();
+    plan.state_snapshot_src_idxs.appendNTimes(std.heap.c_allocator, 0, n_snapshot) catch oom();
+    plan.state_snapshot_dst_idxs.appendNTimes(std.heap.c_allocator, 0, n_snapshot) catch oom();
+    plan.state_read_idxs.appendNTimes(std.heap.c_allocator, 0, @as(usize, if (overlap) 2 else 1) * ratio * n_blocks) catch oom();
+    plan.state_write_idxs.appendNTimes(std.heap.c_allocator, 0, n_blocks) catch oom();
+    plan.state_write_pos.appendNTimes(std.heap.c_allocator, 0, n_blocks) catch oom();
 
     return plan;
 }
 
 /// Ports `dsv4_make_k_only` (llama-kv-cache-dsv4.cpp:904 @b1b770d90):
 /// `llama_kv_cache` allocates K-only storage when `is_mla()`.
-fn makeKOnly(hparams: *Hparams) void {
+fn makeKOnly(hparams: *mod.hparams.Hparams) void {
     hparams.n_embd_head_k_mla_impl = hparams.nEmbdHeadK(0);
     hparams.n_embd_head_v_mla_impl = hparams.nEmbdHeadK(0);
 }
@@ -982,10 +959,10 @@ fn makeKOnly(hparams: *Hparams) void {
 /// `llama_dsv4_comp_state`'s `layer` (llama-kv-cache-dsv4.h:55 @b1b770d90).
 const CompLayer = struct {
     il: u32,
-    kv: *Tensor,
-    score: *Tensor,
-    kv_stream: std.ArrayList(*Tensor) = .empty,
-    score_stream: std.ArrayList(*Tensor) = .empty,
+    kv: *mod.impl.c.ggml_tensor,
+    score: *mod.impl.c.ggml_tensor,
+    kv_stream: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
+    score_stream: std.ArrayList(*mod.impl.c.ggml_tensor) = .empty,
 };
 
 /// Ports `llama_dsv4_comp_state` (llama-kv-cache-dsv4.h:11 @b1b770d90): a
@@ -993,7 +970,7 @@ const CompLayer = struct {
 /// pending window's projected K and gate scores, per stream, with
 /// `n_rs_seq` rollback snapshot planes after the current one.
 pub const CompState = struct {
-    sc_info: StreamCopyInfo = .{},
+    sc_info: mod.kv_cache.StreamCopyInfo = .{},
 
     ratio: u32,
     state_size: u32,
@@ -1002,7 +979,7 @@ pub const CompState = struct {
     n_rs_seq: u32,
 
     /// One context and buffer per buffer type, in the buffer types' name order.
-    ctxs_bufs: memory.Bufs,
+    ctxs_bufs: mod.memory.Bufs,
 
     layers: std.ArrayList(CompLayer) = .empty,
 
@@ -1017,7 +994,7 @@ pub const CompState = struct {
     ///
     /// Return: the state, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
-        model: *const model_mod.Model,
+        model: *const mod.model.Model,
         no_alloc: bool,
         offload: bool,
         unified: bool,
@@ -1027,13 +1004,13 @@ pub const CompState = struct {
         n_embd_state: u32,
         n_rs_seq: u32,
         name: [*:0]const u8,
-        filter: memory.LayerFilter,
-        exc: *Exception,
-    ) Thrown!*CompState {
+        filter: mod.memory.LayerFilter,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!*CompState {
         const func = "llama_dsv4_comp_state";
         const hparams = &model.hparams;
 
-        const self = allocator.create(CompState) catch oom();
+        const self = std.heap.c_allocator.create(CompState) catch oom();
         self.* = .{
             .ctxs_bufs = .{ .no_alloc = no_alloc },
             .ratio = ratio,
@@ -1045,11 +1022,11 @@ pub const CompState = struct {
         errdefer self.destroy();
 
         // One context per buffer type, ordered by the buffer type's name.
-        var ctx_map: std.ArrayList(struct { buft: c.ggml_backend_buffer_type_t, ctx: *c.ggml_context }) = .empty;
+        var ctx_map: std.ArrayList(struct { buft: mod.impl.c.ggml_backend_buffer_type_t, ctx: *mod.impl.c.ggml_context }) = .empty;
         var n_moved: usize = 0;
         defer {
-            for (ctx_map.items[n_moved..]) |e| c.ggml_free(e.ctx);
-            ctx_map.deinit(allocator);
+            for (ctx_map.items[n_moved..]) |e| mod.impl.c.ggml_free(e.ctx);
+            ctx_map.deinit(std.heap.c_allocator);
         }
 
         const n_stream = self.n_stream;
@@ -1059,59 +1036,59 @@ pub const CompState = struct {
             if (filter.func != null and !filter.call(@intCast(il))) continue;
 
             var dev_name: [*:0]const u8 = "CPU";
-            var buft = c.ggml_backend_cpu_buffer_type();
+            var buft = mod.impl.c.ggml_backend_cpu_buffer_type();
             if (offload) {
                 const dev = model.devLayer(il);
-                buft = c.ggml_backend_dev_buffer_type(dev);
-                dev_name = c.ggml_backend_dev_name(dev);
+                buft = mod.impl.c.ggml_backend_dev_buffer_type(dev);
+                dev_name = mod.impl.c.ggml_backend_dev_name(dev);
             }
 
-            impl.logDebug("%s: layer %3d: dev = %s\n", .{ func, il, dev_name });
+            mod.impl.logDebug("%s: layer %3d: dev = %s\n", .{ func, il, dev_name });
 
             // The `ctx_for_buft` lambda.
-            const ctx: *c.ggml_context = blk: {
-                const bname = std.mem.span(c.ggml_backend_buft_name(buft));
+            const ctx: *mod.impl.c.ggml_context = blk: {
+                const bname = std.mem.span(mod.impl.c.ggml_backend_buft_name(buft));
                 var pos: usize = 0;
                 while (pos < ctx_map.items.len) : (pos += 1) {
-                    const order = std.mem.order(u8, std.mem.span(c.ggml_backend_buft_name(ctx_map.items[pos].buft)), bname);
+                    const order = std.mem.order(u8, std.mem.span(mod.impl.c.ggml_backend_buft_name(ctx_map.items[pos].buft)), bname);
                     if (order == .eq) break :blk ctx_map.items[pos].ctx;
                     if (order == .gt) break;
                 }
-                const ctx = c.ggml_init(.{
-                    .mem_size = 2 * (1 + @as(usize, n_stream)) * hparams.nLayer() * c.ggml_tensor_overhead(),
+                const ctx = mod.impl.c.ggml_init(.{
+                    .mem_size = 2 * (1 + @as(usize, n_stream)) * hparams.nLayer() * mod.impl.c.ggml_tensor_overhead(),
                     .mem_buffer = null,
                     .no_alloc = true,
                 }) orelse return exc.throw(.runtime_error, "failed to create ggml context for DSV4 compressor state", .{});
-                ctx_map.insert(allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
+                ctx_map.insert(std.heap.c_allocator, pos, .{ .buft = buft, .ctx = ctx }) catch oom();
                 break :blk ctx;
             };
 
             const n_planes: i64 = @as(i64, n_stream) * (1 + n_rs_seq);
-            const kv: *Tensor = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
-            const score: *Tensor = c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
+            const kv: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
+            const score: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_3d(ctx, mod.impl.c.GGML_TYPE_F32, n_embd_state, state_size, n_planes);
 
-            _ = c.ggml_format_name(kv, "dsv4_%s_state_kv_l%d", name, @as(c_int, @intCast(il)));
-            _ = c.ggml_format_name(score, "dsv4_%s_state_score_l%d", name, @as(c_int, @intCast(il)));
+            _ = mod.impl.c.ggml_format_name(kv, "dsv4_%s_state_kv_l%d", name, @as(c_int, @intCast(il)));
+            _ = mod.impl.c.ggml_format_name(score, "dsv4_%s_state_score_l%d", name, @as(c_int, @intCast(il)));
 
             var layer: CompLayer = .{ .il = il, .kv = kv, .score = score };
             var s: u32 = 0;
             while (s < n_stream) : (s += 1) {
-                layer.kv_stream.append(allocator, c.ggml_view_2d(ctx, kv, n_embd_state, state_size, kv.nb[1], s * kv.nb[2])) catch oom();
-                layer.score_stream.append(allocator, c.ggml_view_2d(ctx, score, n_embd_state, state_size, score.nb[1], s * score.nb[2])) catch oom();
+                layer.kv_stream.append(std.heap.c_allocator, mod.impl.c.ggml_view_2d(ctx, kv, n_embd_state, state_size, kv.nb[1], s * kv.nb[2])) catch oom();
+                layer.score_stream.append(std.heap.c_allocator, mod.impl.c.ggml_view_2d(ctx, score, n_embd_state, state_size, score.nb[1], s * score.nb[2])) catch oom();
             }
 
-            self.map_layer_ids.put(allocator, @intCast(il), @intCast(self.layers.items.len)) catch oom();
-            self.layers.append(allocator, layer) catch oom();
+            self.map_layer_ids.put(std.heap.c_allocator, @intCast(il), @intCast(self.layers.items.len)) catch oom();
+            self.layers.append(std.heap.c_allocator, layer) catch oom();
         }
 
         for (ctx_map.items) |e| {
             const buf = try self.ctxs_bufs.emplace(e.ctx, e.buft, "DSV4 compressor state", exc);
             n_moved += 1;
 
-            impl.logInfo("%s: %10s DSV4 %s state buffer size = %8.2f MiB\n", .{ func, c.ggml_backend_buffer_name(buf), name, @as(f64, @floatFromInt(c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
+            mod.impl.logInfo("%s: %10s DSV4 %s state buffer size = %8.2f MiB\n", .{ func, mod.impl.c.ggml_backend_buffer_name(buf), name, @as(f64, @floatFromInt(mod.impl.c.ggml_backend_buffer_get_size(buf))) / 1024.0 / 1024.0 });
         }
 
-        impl.logInfo("%s: %s ratio = %u, state = %u x %u, streams = %u, rs_seq = %u, layers = %zu, size = %7.2f MiB\n", .{ func, name, ratio, state_size, n_embd_state, n_stream, n_rs_seq, self.layers.items.len, @as(f64, @floatFromInt(self.totalSize())) / 1024.0 / 1024.0 });
+        mod.impl.logInfo("%s: %s ratio = %u, state = %u x %u, streams = %u, rs_seq = %u, layers = %zu, size = %7.2f MiB\n", .{ func, name, ratio, state_size, n_embd_state, n_stream, n_rs_seq, self.layers.items.len, @as(f64, @floatFromInt(self.totalSize())) / 1024.0 / 1024.0 });
 
         return self;
     }
@@ -1120,13 +1097,13 @@ pub const CompState = struct {
     pub fn destroy(self: *CompState) void {
         self.ctxs_bufs.deinit();
         for (self.layers.items) |*l| {
-            l.kv_stream.deinit(allocator);
-            l.score_stream.deinit(allocator);
+            l.kv_stream.deinit(std.heap.c_allocator);
+            l.score_stream.deinit(std.heap.c_allocator);
         }
-        self.layers.deinit(allocator);
-        self.map_layer_ids.deinit(allocator);
+        self.layers.deinit(std.heap.c_allocator);
+        self.map_layer_ids.deinit(std.heap.c_allocator);
         self.sc_info.deinit();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `clear` (llama-kv-cache-dsv4.cpp:1018
@@ -1135,7 +1112,7 @@ pub const CompState = struct {
         if (!data) return;
 
         if (seq_id >= 0) {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_stream, file, 1024, "(uint32_t) seq_id < n_stream");
+            mod.impl.assert(@as(u32, @bitCast(seq_id)) < self.n_stream, file, 1024, "(uint32_t) seq_id < n_stream");
 
             for (self.layers.items) |*layer| {
                 var d: u32 = 0;
@@ -1148,30 +1125,30 @@ pub const CompState = struct {
             return;
         }
 
-        for (self.ctxs_bufs.bufs.items) |e| c.ggml_backend_buffer_clear(e.buf, 0);
+        for (self.ctxs_bufs.bufs.items) |e| mod.impl.c.ggml_backend_buffer_clear(e.buf, 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1041
     /// @b1b770d90): clear the destination now and queue the stream copy for
     /// the next update.
     pub fn seqCp(self: *CompState, seq_id_src: i32, seq_id_dst: i32) void {
-        impl.assert(seq_id_src >= 0 and @as(u32, @bitCast(seq_id_src)) < self.n_stream, file, 1042, "seq_id_src >= 0 && (uint32_t) seq_id_src < n_stream");
-        impl.assert(seq_id_dst >= 0 and @as(u32, @bitCast(seq_id_dst)) < self.n_stream, file, 1043, "seq_id_dst >= 0 && (uint32_t) seq_id_dst < n_stream");
+        mod.impl.assert(seq_id_src >= 0 and @as(u32, @bitCast(seq_id_src)) < self.n_stream, file, 1042, "seq_id_src >= 0 && (uint32_t) seq_id_src < n_stream");
+        mod.impl.assert(seq_id_dst >= 0 and @as(u32, @bitCast(seq_id_dst)) < self.n_stream, file, 1043, "seq_id_dst >= 0 && (uint32_t) seq_id_dst < n_stream");
 
         if (seq_id_src == seq_id_dst) return;
 
         self.clear(seq_id_dst, true);
 
-        self.sc_info.ssrc.append(allocator, @bitCast(seq_id_src)) catch oom();
-        self.sc_info.sdst.append(allocator, @bitCast(seq_id_dst)) catch oom();
+        self.sc_info.ssrc.append(std.heap.c_allocator, @bitCast(seq_id_src)) catch oom();
+        self.sc_info.sdst.append(std.heap.c_allocator, @bitCast(seq_id_dst)) catch oom();
     }
 
     /// Ports `llama_dsv4_comp_state`'s `apply_copies` (llama-kv-cache-dsv4.cpp:1055 @b1b770d90).
-    pub fn applyCopies(self: *const CompState, sc_info: *const StreamCopyInfo) void {
+    pub fn applyCopies(self: *const CompState, sc_info: *const mod.kv_cache.StreamCopyInfo) void {
         for (sc_info.ssrc.items, sc_info.sdst.items) |ssrc, sdst| {
             for (self.layers.items) |*layer| {
-                c.ggml_backend_tensor_copy(layer.kv_stream.items[ssrc], layer.kv_stream.items[sdst]);
-                c.ggml_backend_tensor_copy(layer.score_stream.items[ssrc], layer.score_stream.items[sdst]);
+                mod.impl.c.ggml_backend_tensor_copy(layer.kv_stream.items[ssrc], layer.kv_stream.items[sdst]);
+                mod.impl.c.ggml_backend_tensor_copy(layer.score_stream.items[ssrc], layer.score_stream.items[sdst]);
             }
         }
     }
@@ -1209,22 +1186,22 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1091 @b1b770d90).
-    pub fn memoryBreakdown(self: *const CompState, out: *std.ArrayList(memory.BuftSize)) void {
+    pub fn memoryBreakdown(self: *const CompState, out: *std.ArrayList(mod.memory.BuftSize)) void {
         self.ctxs_bufs.memoryBreakdown(out);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `state_write` (llama-kv-cache-dsv4.cpp:1095
     /// @b1b770d90): each saved stream's plane is the one its pending
     /// rollback, if any, points at.
-    pub fn stateWrite(self: *const CompState, w: io.Writer, seq_id: i32, flags: u32, rs_idx: []const u32, exc: *Exception) Thrown!void {
+    pub fn stateWrite(self: *const CompState, w: mod.io.Writer, seq_id: i32, flags: u32, rs_idx: []const u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         _ = flags;
 
         var s0: u32 = undefined;
         var ns: u32 = undefined;
         try stateSrcStreamRange(self.n_stream, seq_id, &s0, &ns, exc);
 
-        const stream_ids = allocator.alloc(u32, ns) catch oom();
-        defer allocator.free(stream_ids);
+        const stream_ids = std.heap.c_allocator.alloc(u32, ns) catch oom();
+        defer std.heap.c_allocator.free(stream_ids);
         for (0..ns) |s| {
             const seq: u32 = if (seq_id >= 0) @bitCast(seq_id) else s0 + @as(u32, @intCast(s));
             if (seq >= rs_idx.len or rs_idx[seq] > self.n_rs_seq) {
@@ -1252,7 +1229,7 @@ pub const CompState = struct {
     }
 
     /// Ports `llama_dsv4_comp_state`'s `state_read` (llama-kv-cache-dsv4.cpp:1133 @b1b770d90).
-    pub fn stateRead(self: *CompState, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateRead(self: *CompState, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         _ = flags;
 
         const version = try r.readValue(u32, exc);
@@ -1281,52 +1258,52 @@ pub const CompState = struct {
     }
 
     fn layerAt(self: *const CompState, il: i32) *const CompLayer {
-        const ids = self.map_layer_ids.get(il) orelse impl.abort(file, 1164, "map::at:  key not found");
+        const ids = self.map_layer_ids.get(il) orelse mod.impl.abort(file, 1164, "map::at:  key not found");
         return &self.layers.items[@intCast(ids)];
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv_all` (llama-kv-cache-dsv4.cpp:1175
     /// @b1b770d90): every plane of every stream, as rows.
-    pub fn getKvAll(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
+    pub fn getKvAll(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
         const state = self.layerAt(il).kv;
-        return c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
+        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_score_all` (llama-kv-cache-dsv4.cpp:1182 @b1b770d90).
-    pub fn getScoreAll(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
+    pub fn getScoreAll(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
         const state = self.layerAt(il).score;
-        return c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
+        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], @as(i64, self.getNRows()) * (1 + self.n_rs_seq), state.nb[1], 0);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_kv` (llama-kv-cache-dsv4.cpp:1189
     /// @b1b770d90): the current plane alone.
-    pub fn getKv(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
-        const state: *Tensor = self.getKvAll(ctx, il);
-        const row_size = c.ggml_row_size(state.type, state.ne[0]);
-        return c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
+    pub fn getKv(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+        const state: *mod.impl.c.ggml_tensor = self.getKvAll(ctx, il);
+        const row_size = mod.impl.c.ggml_row_size(state.type, state.ne[0]);
+        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `get_score` (llama-kv-cache-dsv4.cpp:1196 @b1b770d90).
-    pub fn getScore(self: *const CompState, ctx: *c.ggml_context, il: i32) *Tensor {
-        const state: *Tensor = self.getScoreAll(ctx, il);
-        const row_size = c.ggml_row_size(state.type, state.ne[0]);
-        return c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
+    pub fn getScore(self: *const CompState, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
+        const state: *mod.impl.c.ggml_tensor = self.getScoreAll(ctx, il);
+        const row_size = mod.impl.c.ggml_row_size(state.type, state.ne[0]);
+        return mod.impl.c.ggml_view_2d(ctx, state, state.ne[0], self.getNRows(), state.nb[1], 0 * row_size);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `cpy_kv` (llama-kv-cache-dsv4.cpp:1203 @b1b770d90).
-    pub fn cpyKv(self: *const CompState, ctx: *c.ggml_context, cur: *Tensor, idxs: *Tensor, il: i32) *Tensor {
-        return c.ggml_set_rows(ctx, self.getKvAll(ctx, il), cur, idxs);
+    pub fn cpyKv(self: *const CompState, ctx: *mod.impl.c.ggml_context, cur: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+        return mod.impl.c.ggml_set_rows(ctx, self.getKvAll(ctx, il), cur, idxs);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `cpy_score` (llama-kv-cache-dsv4.cpp:1207 @b1b770d90).
-    pub fn cpyScore(self: *const CompState, ctx: *c.ggml_context, cur: *Tensor, idxs: *Tensor, il: i32) *Tensor {
-        return c.ggml_set_rows(ctx, self.getScoreAll(ctx, il), cur, idxs);
+    pub fn cpyScore(self: *const CompState, ctx: *mod.impl.c.ggml_context, cur: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
+        return mod.impl.c.ggml_set_rows(ctx, self.getScoreAll(ctx, il), cur, idxs);
     }
 
     /// Ports `llama_dsv4_comp_state`'s `total_size` (llama-kv-cache-dsv4.cpp:1211 @b1b770d90).
     pub fn totalSize(self: *const CompState) usize {
         var size: usize = 0;
-        for (self.ctxs_bufs.bufs.items) |e| size += c.ggml_backend_buffer_get_size(e.buf);
+        for (self.ctxs_bufs.bufs.items) |e| size += mod.impl.c.ggml_backend_buffer_get_size(e.buf);
         return size;
     }
 };
@@ -1339,7 +1316,7 @@ pub const CompState = struct {
 /// stack, as the C++'s by-reference captures do; the caches read their
 /// filters only while they are built.
 const FilterRaw = struct {
-    outer: memory.LayerFilter,
+    outer: mod.memory.LayerFilter,
 
     fn call(ctx: ?*const anyopaque, il: i32) bool {
         const self: *const FilterRaw = @ptrCast(@alignCast(ctx.?));
@@ -1347,7 +1324,7 @@ const FilterRaw = struct {
         return true;
     }
 
-    fn filter(self: *const FilterRaw) memory.LayerFilter {
+    fn filter(self: *const FilterRaw) mod.memory.LayerFilter {
         return .{ .ctx = self, .func = call };
     }
 };
@@ -1357,8 +1334,8 @@ const FilterRaw = struct {
 /// 1350, 1358, 1362, 1366 @b1b770d90): the caller's filter, then the
 /// layer's compression ratio and whether it owns the rows.
 const FilterComp = struct {
-    outer: memory.LayerFilter,
-    hparams: *const Hparams,
+    outer: mod.memory.LayerFilter,
+    hparams: *const mod.hparams.Hparams,
     /// `comp_read`, see `KvCacheDsv4`.
     comp_read: []const i32,
     is_v41: bool,
@@ -1386,7 +1363,7 @@ const FilterComp = struct {
         };
     }
 
-    fn filter(self: *const FilterComp) memory.LayerFilter {
+    fn filter(self: *const FilterComp) mod.memory.LayerFilter {
         return .{ .ctx = self, .func = call };
     }
 };
@@ -1406,7 +1383,7 @@ const HistoryEntry = struct {
 
 /// The `tok_at` lambda of `dsv41_shared_history_ok`: the batch first, since
 /// the batch continues the cache.
-fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const KvCache, seq_id: i32, p: i32) i32 {
+fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const mod.kv_cache.KvCache, seq_id: i32, p: i32) i32 {
     // `upper_bound`, then one back: the last entry at or before the key.
     var lo: usize = 0;
     var hi: usize = in_batch.len;
@@ -1416,7 +1393,7 @@ fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const KvCache, seq_id: i32
         if (m.seq_id < seq_id or (m.seq_id == seq_id and m.pos <= p)) lo = mid + 1 else hi = mid;
     }
     if (lo > 0 and in_batch[lo - 1].seq_id == seq_id) return in_batch[lo - 1].tok;
-    return if (kv) |k| k.getCells(seq_id).seqPosTokLe(seq_id, p) else c.LLAMA_TOKEN_NULL;
+    return if (kv) |k| k.getCells(seq_id).seqPosTokLe(seq_id, p) else mod.impl.c.LLAMA_TOKEN_NULL;
 }
 
 /// Ports `dsv41_shared_history_ok` (llama-kv-cache-dsv4.cpp:1426
@@ -1425,7 +1402,7 @@ fn historyTokAt(in_batch: []const HistoryEntry, kv: ?*const KvCache, seq_id: i32
 /// if all of them agree on its predecessors.
 ///
 /// Return: false, having logged, where they do not.
-fn dsv41SharedHistoryOk(b: *const c.llama_batch, kv: ?*const KvCache, n_hist: u32) bool {
+fn dsv41SharedHistoryOk(b: *const mod.impl.c.llama_batch, kv: ?*const mod.kv_cache.KvCache, n_hist: u32) bool {
     const func = "dsv41_shared_history_ok";
     if (n_hist == 0 or b.token == null or b.n_seq_id == null) return true;
 
@@ -1442,10 +1419,10 @@ fn dsv41SharedHistoryOk(b: *const c.llama_batch, kv: ?*const KvCache, n_hist: u3
     // `std::map`'s assignment: a later token at the same key replaces the
     // earlier one, so a stable sort keeps the last of each run.
     var entries: std.ArrayList(HistoryEntry) = .empty;
-    defer entries.deinit(allocator);
+    defer entries.deinit(std.heap.c_allocator);
     for (0..n_tokens) |i| {
         for (0..@as(usize, @intCast(b.n_seq_id[i]))) |s| {
-            entries.append(allocator, .{ .seq_id = b.seq_id[i][s], .pos = b.pos[i], .tok = b.token[i] }) catch oom();
+            entries.append(std.heap.c_allocator, .{ .seq_id = b.seq_id[i][s], .pos = b.pos[i], .tok = b.token[i] }) catch oom();
         }
     }
     std.sort.block(HistoryEntry, entries.items, {}, HistoryEntry.lessThan);
@@ -1468,7 +1445,7 @@ fn dsv41SharedHistoryOk(b: *const c.llama_batch, kv: ?*const KvCache, n_hist: u3
             while (s < b.n_seq_id[i]) : (s += 1) {
                 const ts = historyTokAt(in_batch, kv, b.seq_id[i][s], p);
                 if (ts != t0) {
-                    impl.logError("%s: token %d at pos %d is shared by seq %d and seq %d, whose Engram n-gram histories differ at pos %d (%d vs %d); decode such tokens per sequence\n", .{ func, @as(i32, @intCast(i)), b.pos[i], b.seq_id[i][0], b.seq_id[i][s], p, t0, ts });
+                    mod.impl.logError("%s: token %d at pos %d is shared by seq %d and seq %d, whose Engram n-gram histories differ at pos %d (%d vs %d); decode such tokens per sequence\n", .{ func, @as(i32, @intCast(i)), b.pos[i], b.seq_id[i][0], b.seq_id[i][s], p, t0, ts });
                     return false;
                 }
             }
@@ -1485,10 +1462,10 @@ fn dsv41SharedHistoryOk(b: *const c.llama_batch, kv: ?*const KvCache, n_hist: u3
 /// The four hyperparameter copies are fields because each cache keeps a
 /// pointer to its own; the cache must not move once built.
 pub const KvCacheDsv4 = struct {
-    hparams_raw: Hparams,
-    hparams_csa: Hparams,
-    hparams_hca: Hparams,
-    hparams_lid: Hparams,
+    hparams_raw: mod.hparams.Hparams,
+    hparams_csa: mod.hparams.Hparams,
+    hparams_hca: mod.hparams.Hparams,
+    hparams_lid: mod.hparams.Hparams,
 
     n_seq_max: u32,
     n_rs_seq: u32,
@@ -1511,10 +1488,10 @@ pub const KvCacheDsv4 = struct {
 
     comp_mirrors_stale: bool = false,
 
-    kv_raw: ?*KvCacheIswa = null,
-    kv_csa: ?*KvCache = null,
-    kv_hca: ?*KvCache = null,
-    kv_lid: ?*KvCache = null,
+    kv_raw: ?*mod.kv_cache_iswa.KvCacheIswa = null,
+    kv_csa: ?*mod.kv_cache.KvCache = null,
+    kv_hca: ?*mod.kv_cache.KvCache = null,
+    kv_lid: ?*mod.kv_cache.KvCache = null,
     csa_state: ?*CompState = null,
     hca_state: ?*CompState = null,
     lid_state: ?*CompState = null,
@@ -1526,10 +1503,10 @@ pub const KvCacheDsv4 = struct {
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
-        model: *const model_mod.Model,
+        model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: c.enum_ggml_type,
-        type_v: c.enum_ggml_type,
+        type_k: mod.impl.c.enum_ggml_type,
+        type_v: mod.impl.c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         swa_full: bool,
@@ -1538,14 +1515,14 @@ pub const KvCacheDsv4 = struct {
         n_seq_max: u32,
         n_ubatch: u32,
         n_rs_seq: u32,
-        filter: memory.LayerFilter,
-        reuse: memory.LayerMap,
-        exc: *Exception,
-    ) Thrown!*KvCacheDsv4 {
+        filter: mod.memory.LayerFilter,
+        reuse: mod.memory.LayerMap,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!*KvCacheDsv4 {
         const func = "llama_kv_cache_dsv4";
         const mhp = &model.hparams;
 
-        const self = allocator.create(KvCacheDsv4) catch oom();
+        const self = std.heap.c_allocator.create(KvCacheDsv4) catch oom();
         self.* = .{
             .hparams_raw = mhp.*,
             .hparams_csa = mhp.*,
@@ -1555,8 +1532,8 @@ pub const KvCacheDsv4 = struct {
             .n_rs_seq = n_rs_seq,
         };
         errdefer self.destroy();
-        self.rs_idx.appendNTimes(allocator, 0, n_seq_max) catch oom();
-        self.rs_max.appendNTimes(allocator, 0, n_seq_max) catch oom();
+        self.rs_idx.appendNTimes(std.heap.c_allocator, 0, n_seq_max) catch oom();
+        self.rs_max.appendNTimes(std.heap.c_allocator, 0, n_seq_max) catch oom();
 
         const filter_raw: FilterRaw = .{ .outer = filter };
 
@@ -1570,11 +1547,11 @@ pub const KvCacheDsv4 = struct {
         self.hparams_hca.n_layer_nextn = 0;
         self.hparams_lid.n_layer_nextn = 0;
 
-        impl.logInfo("%s: creating DSV4 raw KV cache\n", .{func});
+        mod.impl.logInfo("%s: creating DSV4 raw KV cache\n", .{func});
 
         makeKOnly(&self.hparams_raw);
 
-        self.kv_raw = try KvCacheIswa.create(model, no_alloc, &self.hparams_raw, type_k, type_v, v_trans, offload, swa_full, unified_raw, kv_size, n_seq_max, n_ubatch, null, filter_raw.filter(), reuse, .{}, exc);
+        self.kv_raw = try mod.kv_cache_iswa.KvCacheIswa.create(model, no_alloc, &self.hparams_raw, type_k, type_v, v_trans, offload, swa_full, unified_raw, kv_size, n_seq_max, n_ubatch, null, filter_raw.filter(), reuse, .{}, exc);
 
         // V4.1: CSA slot = ratio 2, HCA slot = ratio 1, no overlap and no
         // indexer compressor; the index K is stored next to the compressed
@@ -1585,7 +1562,7 @@ pub const KvCacheDsv4 = struct {
 
         if (is_v41) {
             const n_embd_comp = mhp.nEmbdHeadK(0) +% mhp.indexer_head_size;
-            for ([_]*Hparams{ &self.hparams_csa, &self.hparams_hca }) |hp| {
+            for ([_]*mod.hparams.Hparams{ &self.hparams_csa, &self.hparams_hca }) |hp| {
                 @memset(&hp.n_head_kv_arr, 1);
                 hp.n_embd_head_k_full = n_embd_comp;
                 hp.n_embd_head_v_full = n_embd_comp;
@@ -1602,7 +1579,7 @@ pub const KvCacheDsv4 = struct {
         self.hparams_lid.n_embd_head_v_full = mhp.indexer_head_size;
         self.hparams_lid.n_embd_head_k_swa = mhp.indexer_head_size;
         self.hparams_lid.n_embd_head_v_swa = mhp.indexer_head_size;
-        self.hparams_lid.rope_type = c.LLAMA_ROPE_TYPE_NEOX;
+        self.hparams_lid.rope_type = mod.impl.c.LLAMA_ROPE_TYPE_NEOX;
         makeKOnly(&self.hparams_lid);
 
         // V4.1 cross-layer KV sharing: a compressed layer reads the storage
@@ -1610,8 +1587,8 @@ pub const KvCacheDsv4 = struct {
         // split), of a per-device mirror fed with the source's new rows, so
         // the whole cache never crosses devices. no mirrors without offload
         const n_layer = mhp.nLayer();
-        self.comp_read.appendNTimes(allocator, -1, n_layer) catch oom();
-        self.comp_il_src.appendNTimes(allocator, 0, n_layer) catch oom();
+        self.comp_read.appendNTimes(std.heap.c_allocator, -1, n_layer) catch oom();
+        self.comp_il_src.appendNTimes(std.heap.c_allocator, 0, n_layer) catch oom();
         const comp_read = self.comp_read.items;
         const comp_il_src = self.comp_il_src.items;
         for (0..n_layer) |ilu| {
@@ -1646,30 +1623,30 @@ pub const KvCacheDsv4 = struct {
 
         const unified_compressed = false;
 
-        impl.logInfo("%s: creating DSV4 CSA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
+        mod.impl.logInfo("%s: creating DSV4 CSA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
 
-        self.kv_csa = try KvCache.create(model, no_alloc, &self.hparams_csa, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_csa.filter(), .{}, .{}, exc);
+        self.kv_csa = try mod.kv_cache.KvCache.create(model, no_alloc, &self.hparams_csa, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_csa.filter(), .{}, .{}, exc);
 
-        impl.logInfo("%s: creating DSV4 HCA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_hca) });
+        mod.impl.logInfo("%s: creating DSV4 HCA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_hca) });
 
-        self.kv_hca = try KvCache.create(model, no_alloc, &self.hparams_hca, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_hca), 256), n_seq_max, 0, .none, null, filter_hca.filter(), .{}, .{}, exc);
+        self.kv_hca = try mod.kv_cache.KvCache.create(model, no_alloc, &self.hparams_hca, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_hca), 256), n_seq_max, 0, .none, null, filter_hca.filter(), .{}, .{}, exc);
 
-        impl.logInfo("%s: creating DSV4 lightning-indexer KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
+        mod.impl.logInfo("%s: creating DSV4 lightning-indexer KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
 
-        self.kv_lid = try KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_lid.filter(), .{}, .{}, exc);
+        self.kv_lid = try mod.kv_cache.KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_lid.filter(), .{}, .{}, exc);
 
-        impl.logInfo("%s: creating DSV4 CSA compressor state\n", .{func});
+        mod.impl.logInfo("%s: creating DSV4 CSA compressor state\n", .{func});
 
         const csa_state_size: u32 = if (is_v41) ratio_csa else 2 * ratio_csa;
         const csa_state_embd: u32 = if (is_v41) mhp.nEmbdHeadK(0) else 2 *% mhp.nEmbdHeadK(0);
 
         self.csa_state = try CompState.create(model, no_alloc, offload, unified_compressed, n_seq_max, ratio_csa, csa_state_size, csa_state_embd, n_rs_seq, "csa", filter_csa_state.filter(), exc);
 
-        impl.logInfo("%s: creating DSV4 HCA compressor state\n", .{func});
+        mod.impl.logInfo("%s: creating DSV4 HCA compressor state\n", .{func});
 
         self.hca_state = try CompState.create(model, no_alloc, offload, unified_compressed, n_seq_max, ratio_hca, ratio_hca, mhp.nEmbdHeadK(0), n_rs_seq, "hca", filter_hca_state.filter(), exc);
 
-        impl.logInfo("%s: creating DSV4 lightning-indexer compressor state\n", .{func});
+        mod.impl.logInfo("%s: creating DSV4 lightning-indexer compressor state\n", .{func});
 
         self.lid_state = try CompState.create(model, no_alloc, offload, unified_compressed, n_seq_max, csa_ratio, 2 * csa_ratio, 2 *% mhp.indexer_head_size, n_rs_seq, "lid", filter_lid.filter(), exc);
 
@@ -1692,11 +1669,11 @@ pub const KvCacheDsv4 = struct {
         if (self.csa_state) |s| s.destroy();
         if (self.hca_state) |s| s.destroy();
         if (self.lid_state) |s| s.destroy();
-        self.rs_idx.deinit(allocator);
-        self.rs_max.deinit(allocator);
-        self.comp_il_src.deinit(allocator);
-        self.comp_read.deinit(allocator);
-        allocator.destroy(self);
+        self.rs_idx.deinit(std.heap.c_allocator);
+        self.rs_max.deinit(std.heap.c_allocator);
+        self.comp_il_src.deinit(std.heap.c_allocator);
+        self.comp_read.deinit(std.heap.c_allocator);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `init_batch` (llama-kv-cache-dsv4.cpp:1483
@@ -1704,7 +1681,7 @@ pub const KvCacheDsv4 = struct {
     /// equal-length ubatch -- or a sequence split, for coupled sequence
     /// sets, which serialize until DSV4 has explicit shared-state handling
     /// for compressed streams.
-    pub fn initBatch(self: *KvCacheDsv4, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *Dsv4Context {
+    pub fn initBatch(self: *KvCacheDsv4, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *Dsv4Context {
         _ = embd_all;
 
         if (self.hparams_raw.ple_n_heads > 0 and
@@ -1720,7 +1697,7 @@ pub const KvCacheDsv4 = struct {
         {
             balloc.splitReset();
 
-            var ubatches: std.ArrayList(Ubatch) = .empty;
+            var ubatches: std.ArrayList(mod.batch.Ubatch) = .empty;
             while (true) {
                 const ub = if (has_coupled)
                     balloc.splitSeq(n_ubatch)
@@ -1730,7 +1707,7 @@ pub const KvCacheDsv4 = struct {
                     // the same ubatch.
                     balloc.splitEqual(n_ubatch, raw_per_seq or comp_per_seq, if (self.n_rs_seq > 0) self.n_rs_seq + 1 else 0);
                 if (ub.n_tokens == 0) break;
-                ubatches.append(allocator, ub) catch oom();
+                ubatches.append(std.heap.c_allocator, ub) catch oom();
             }
 
             if (balloc.getNUsed() >= balloc.getNTokens()) {
@@ -1746,7 +1723,7 @@ pub const KvCacheDsv4 = struct {
     /// `init_batch`'s `make_context` lambda (llama-kv-cache-dsv4.cpp:1498
     /// @b1b770d90): place the raw writes in both halves of the raw cache.
     /// Takes `ubatches`, and releases them when they do not fit.
-    fn makeContext(self: *KvCacheDsv4, ubatches_: std.ArrayList(Ubatch)) ?*Dsv4Context {
+    fn makeContext(self: *KvCacheDsv4, ubatches_: std.ArrayList(mod.batch.Ubatch)) ?*Dsv4Context {
         var ubatches = ubatches_;
         var ubatches_raw = buildRawWriteUbatches(ubatches.items);
 
@@ -1757,7 +1734,7 @@ pub const KvCacheDsv4 = struct {
             return null;
         };
         if (sinfos_base.items.len == 0) {
-            sinfos_base.deinit(allocator);
+            sinfos_base.deinit(std.heap.c_allocator);
             releaseAll(&ubatches_raw);
             releaseAll(&ubatches);
             return null;
@@ -1770,7 +1747,7 @@ pub const KvCacheDsv4 = struct {
             return null;
         };
         if (sinfos_swa.items.len == 0) {
-            sinfos_swa.deinit(allocator);
+            sinfos_swa.deinit(std.heap.c_allocator);
             freeSlotInfos(&sinfos_base);
             releaseAll(&ubatches_raw);
             releaseAll(&ubatches);
@@ -1866,7 +1843,7 @@ pub const KvCacheDsv4 = struct {
     /// Ports `llama_kv_cache_dsv4`'s `seq_cp` (llama-kv-cache-dsv4.cpp:1631
     /// @b1b770d90): whole sequences only.
     pub fn seqCp(self: *KvCacheDsv4, seq_id_src: i32, seq_id_dst: i32, p0: i32, p1: i32) void {
-        impl.assert(p0 <= 0 and p1 < 0, file, 1632, "p0 <= 0 && p1 < 0 && \"DSV4 only supports full sequence copies\"");
+        mod.impl.assert(p0 <= 0 and p1 < 0, file, 1632, "p0 <= 0 && p1 < 0 && \"DSV4 only supports full sequence copies\"");
 
         self.getRaw().seqCp(seq_id_src, seq_id_dst, p0, p1);
         self.getCsa().seqCp(seq_id_src, seq_id_dst, -1, -1);
@@ -1885,7 +1862,7 @@ pub const KvCacheDsv4 = struct {
 
     /// Ports `llama_kv_cache_dsv4`'s `seq_keep` (llama-kv-cache-dsv4.cpp:1649 @b1b770d90).
     pub fn seqKeep(self: *KvCacheDsv4, seq_id: i32) void {
-        impl.assert(seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1650, "seq_id >= 0 && (uint32_t) seq_id < n_seq_max");
+        mod.impl.assert(seq_id >= 0 and @as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1650, "seq_id >= 0 && (uint32_t) seq_id < n_seq_max");
 
         self.getRaw().seqKeep(seq_id);
 
@@ -1924,7 +1901,7 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `memory_breakdown` (llama-kv-cache-dsv4.cpp:1691 @b1b770d90).
-    pub fn memoryBreakdown(self: *const KvCacheDsv4, out: *std.ArrayList(memory.BuftSize)) void {
+    pub fn memoryBreakdown(self: *const KvCacheDsv4, out: *std.ArrayList(mod.memory.BuftSize)) void {
         self.getRaw().memoryBreakdown(out);
         self.getCsa().memoryBreakdown(out);
         self.getHca().memoryBreakdown(out);
@@ -1937,8 +1914,8 @@ pub const KvCacheDsv4 = struct {
     /// Ports `llama_kv_cache_dsv4`'s `state_write` (llama-kv-cache-dsv4.cpp:1714
     /// @b1b770d90): a header, the raw cache, the used rows of the compressed
     /// caches unless partial, then the compressor states.
-    pub fn stateWrite(self: *const KvCacheDsv4, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
-        const partial_only = flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0;
+    pub fn stateWrite(self: *const KvCacheDsv4, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+        const partial_only = flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0;
 
         const magic: u32 = state_magic;
         const version: u32 = state_version;
@@ -1971,7 +1948,7 @@ pub const KvCacheDsv4 = struct {
 
     /// Ports `llama_kv_cache_dsv4`'s `state_read` (llama-kv-cache-dsv4.cpp:1748
     /// @b1b770d90): a restored sequence has no rollback pending.
-    pub fn stateRead(self: *KvCacheDsv4, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateRead(self: *KvCacheDsv4, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         const magic = try r.readValue(u32, exc);
         const version = try r.readValue(u32, exc);
 
@@ -1982,7 +1959,7 @@ pub const KvCacheDsv4 = struct {
         if (mode != state_mode_full and mode != state_mode_partial) return exc.throw(.runtime_error, "DSV4 state mode mismatch", .{});
 
         const partial_only = mode == state_mode_partial;
-        if (partial_only != (flags & c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0)) {
+        if (partial_only != (flags & mod.impl.c.LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY != 0)) {
             return exc.throw(.runtime_error, "DSV4 state flags mismatch", .{});
         }
 
@@ -2005,7 +1982,7 @@ pub const KvCacheDsv4 = struct {
         try self.getLidState().stateRead(r, seq_id, flags, exc);
 
         if (seq_id >= 0) {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1791, "(uint32_t) seq_id < n_seq_max");
+            mod.impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1791, "(uint32_t) seq_id < n_seq_max");
             self.rs_idx.items[@intCast(seq_id)] = 0;
             self.rs_max.items[@intCast(seq_id)] = 0;
         } else {
@@ -2022,22 +1999,22 @@ pub const KvCacheDsv4 = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `get_raw` (llama-kv-cache-dsv4.cpp:1800 @b1b770d90).
-    pub fn getRaw(self: *const KvCacheDsv4) *KvCacheIswa {
+    pub fn getRaw(self: *const KvCacheDsv4) *mod.kv_cache_iswa.KvCacheIswa {
         return self.kv_raw.?;
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `get_csa` (llama-kv-cache-dsv4.cpp:1804 @b1b770d90).
-    pub fn getCsa(self: *const KvCacheDsv4) *KvCache {
+    pub fn getCsa(self: *const KvCacheDsv4) *mod.kv_cache.KvCache {
         return self.kv_csa.?;
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `get_hca` (llama-kv-cache-dsv4.cpp:1808 @b1b770d90).
-    pub fn getHca(self: *const KvCacheDsv4) *KvCache {
+    pub fn getHca(self: *const KvCacheDsv4) *mod.kv_cache.KvCache {
         return self.kv_hca.?;
     }
 
     /// Ports `llama_kv_cache_dsv4`'s `get_lid` (llama-kv-cache-dsv4.cpp:1812 @b1b770d90).
-    pub fn getLid(self: *const KvCacheDsv4) *KvCache {
+    pub fn getLid(self: *const KvCacheDsv4) *mod.kv_cache.KvCache {
         return self.kv_lid.?;
     }
 
@@ -2070,11 +2047,11 @@ pub const KvCacheDsv4 = struct {
     /// (llama-kv-cache-dsv4.cpp:1840 @b1b770d90): a ubatch that touches a
     /// sequence consumes its pending rollback and leaves snapshots for its
     /// own tokens only.
-    pub fn updateRsForUbatches(self: *KvCacheDsv4, ubatches: []const Ubatch) void {
+    pub fn updateRsForUbatches(self: *KvCacheDsv4, ubatches: []const mod.batch.Ubatch) void {
         if (self.n_rs_seq == 0) return;
 
-        const n_seq_tokens = allocator.alloc(u32, self.n_seq_max) catch oom();
-        defer allocator.free(n_seq_tokens);
+        const n_seq_tokens = std.heap.c_allocator.alloc(u32, self.n_seq_max) catch oom();
+        defer std.heap.c_allocator.free(n_seq_tokens);
 
         for (ubatches) |*ubatch| {
             @memset(n_seq_tokens, 0);
@@ -2107,9 +2084,9 @@ pub const KvCacheDsv4 = struct {
 
         self.comp_mirrors_stale = false;
 
-        for ([_]*KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
+        for ([_]*mod.kv_cache.KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
             var layer_ids = kv.getLayerIds();
-            defer layer_ids.deinit(allocator);
+            defer layer_ids.deinit(std.heap.c_allocator);
             for (layer_ids.items) |il| {
                 const src = self.comp_il_src.items[il];
                 if (src == @as(i32, @intCast(il))) {
@@ -2118,9 +2095,9 @@ pub const KvCacheDsv4 = struct {
 
                 const t_src = kv.getKStorage(src);
                 const t_dst = kv.getKStorage(@intCast(il));
-                impl.assert(t_src.type == t_dst.type and c.ggml_are_same_shape(t_src, t_dst), file, 1886, "t_src->type == t_dst->type && ggml_are_same_shape(t_src, t_dst)");
+                mod.impl.assert(t_src.type == t_dst.type and mod.impl.c.ggml_are_same_shape(t_src, t_dst), file, 1886, "t_src->type == t_dst->type && ggml_are_same_shape(t_src, t_dst)");
 
-                c.ggml_backend_tensor_copy(t_src, t_dst);
+                mod.impl.c.ggml_backend_tensor_copy(t_src, t_dst);
             }
         }
     }
@@ -2133,9 +2110,9 @@ pub const KvCacheDsv4 = struct {
             self.getHca().clear(data);
             self.getLid().clear(data);
         } else {
-            impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1899, "(uint32_t) seq_id < n_seq_max");
+            mod.impl.assert(@as(u32, @bitCast(seq_id)) < self.n_seq_max, file, 1899, "(uint32_t) seq_id < n_seq_max");
 
-            for ([_]*KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
+            for ([_]*mod.kv_cache.KvCache{ self.getCsa(), self.getHca(), self.getLid() }) |kv| {
                 _ = kv.seqRm(seq_id, -1, -1);
 
                 if (data) {
@@ -2143,7 +2120,7 @@ pub const KvCacheDsv4 = struct {
                     // `seq_rm`
                     // (https://github.com/ggml-org/llama.cpp/pull/26490#discussion_r3798143663).
                     var layer_ids = kv.getLayerIds();
-                    defer layer_ids.deinit(allocator);
+                    defer layer_ids.deinit(std.heap.c_allocator);
                     for (layer_ids.items) |il| clearTensorStream(kv.getKStorage(@intCast(il)), @bitCast(seq_id));
                 }
             }
@@ -2165,23 +2142,23 @@ pub const KvCacheDsv4 = struct {
     // -------------------------------------------------------------------------
     // The memory interface
 
-    pub fn memoryOf(self: *KvCacheDsv4) memory.Memory {
+    pub fn memoryOf(self: *KvCacheDsv4) mod.memory.Memory {
         return .{ .ptr = self, .vtable = &vtable };
     }
 
-    const vtable: memory.Memory.VTable = .{
+    const vtable: mod.memory.Memory.VTable = .{
         .initBatch = struct {
-            fn f(p: *anyopaque, b: *batch.BatchAllocr, n: u32, e: bool) memory.Context {
+            fn f(p: *anyopaque, b: *mod.batch.BatchAllocr, n: u32, e: bool) mod.memory.Context {
                 return from(p).initBatch(b, n, e).contextOf();
             }
         }.f,
         .initFull = struct {
-            fn f(p: *anyopaque) memory.Context {
+            fn f(p: *anyopaque) mod.memory.Context {
                 return from(p).initFull().contextOf();
             }
         }.f,
         .initUpdate = struct {
-            fn f(p: *anyopaque, l: *anyopaque, o: bool) memory.Context {
+            fn f(p: *anyopaque, l: *anyopaque, o: bool) mod.memory.Context {
                 return from(p).initUpdate(l, o).contextOf();
             }
         }.f,
@@ -2231,17 +2208,17 @@ pub const KvCacheDsv4 = struct {
             }
         }.f,
         .memoryBreakdown = struct {
-            fn f(p: *anyopaque, out: *std.ArrayList(memory.BuftSize)) void {
+            fn f(p: *anyopaque, out: *std.ArrayList(mod.memory.BuftSize)) void {
                 from(p).memoryBreakdown(out);
             }
         }.f,
         .stateWrite = struct {
-            fn f(p: *anyopaque, w: io.Writer, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, w: mod.io.Writer, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateWrite(w, s, fl, e);
             }
         }.f,
         .stateRead = struct {
-            fn f(p: *anyopaque, r: io.Reader, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, r: mod.io.Reader, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateRead(r, s, fl, e);
             }
         }.f,
@@ -2257,19 +2234,19 @@ pub const KvCacheDsv4 = struct {
     }
 };
 
-fn releaseAll(list: *std.ArrayList(Ubatch)) void {
+fn releaseAll(list: *std.ArrayList(mod.batch.Ubatch)) void {
     for (list.items) |*u| u.release();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn freeSlotInfos(list: *std.ArrayList(SlotInfo)) void {
+fn freeSlotInfos(list: *std.ArrayList(mod.kv_cache.SlotInfo)) void {
     for (list.items) |*si| si.deinit();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
-    var out: std.ArrayList(Ubatch) = .empty;
-    out.ensureTotalCapacity(allocator, list.len) catch oom();
+fn retainedCopy(list: []const mod.batch.Ubatch) std.ArrayList(mod.batch.Ubatch) {
+    var out: std.ArrayList(mod.batch.Ubatch) = .empty;
+    out.ensureTotalCapacity(std.heap.c_allocator, list.len) catch oom();
     for (list) |u| {
         u.retain();
         out.appendAssumeCapacity(u);
@@ -2282,16 +2259,16 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
 
 /// Ports `dsv4_build_full_sinfo` (llama-kv-cache-dsv4.cpp:1934 @b1b770d90):
 /// every stream, with a dummy index.
-fn buildFullSinfo(kv: *const KvCache) SlotInfo {
+fn buildFullSinfo(kv: *const mod.kv_cache.KvCache) mod.kv_cache.SlotInfo {
     const n_stream = kv.getNStream();
 
-    var sinfo: SlotInfo = .{};
+    var sinfo: mod.kv_cache.SlotInfo = .{};
     sinfo.s0 = 0;
     sinfo.s1 = n_stream - 1;
     sinfo.resize(n_stream);
     for (0..n_stream) |s| {
         sinfo.strm.items[s] = @intCast(s);
-        sinfo.idxs.items[s].appendNTimes(allocator, 0, 1) catch oom();
+        sinfo.idxs.items[s].appendNTimes(std.heap.c_allocator, 0, 1) catch oom();
     }
     return sinfo;
 }
@@ -2303,38 +2280,38 @@ fn buildFullSinfo(kv: *const KvCache) SlotInfo {
 pub const RawContext = struct {
     i_next: usize = 0,
 
-    kv_swa: *KvCache,
+    kv_swa: *mod.kv_cache.KvCache,
 
-    sinfos_write: std.ArrayList(SlotInfo) = .empty,
-    sinfos_read: std.ArrayList(SlotInfo) = .empty,
-    ubatches: std.ArrayList(Ubatch) = .empty,
-    ubatches_write: std.ArrayList(Ubatch) = .empty,
+    sinfos_write: std.ArrayList(mod.kv_cache.SlotInfo) = .empty,
+    sinfos_read: std.ArrayList(mod.kv_cache.SlotInfo) = .empty,
+    ubatches: std.ArrayList(mod.batch.Ubatch) = .empty,
+    ubatches_write: std.ArrayList(mod.batch.Ubatch) = .empty,
 
-    ctx_base_mem: ?*KvCacheContext = null,
-    ctx_swa_mem: ?*KvCacheContext = null,
+    ctx_base_mem: ?*mod.kv_cache.KvCacheContext = null,
+    ctx_swa_mem: ?*mod.kv_cache.KvCacheContext = null,
 
     n_kv: u32 = 0,
 
-    status: memory.Status,
+    status: mod.memory.Status,
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsv4_raw_context`
     /// (llama-kv-cache-dsv4.cpp:1949 @b1b770d90).
-    pub fn createFull(kv: *KvCacheIswa) *RawContext {
-        const self = allocator.create(RawContext) catch oom();
+    pub fn createFull(kv: *mod.kv_cache_iswa.KvCacheIswa) *RawContext {
+        const self = std.heap.c_allocator.create(RawContext) catch oom();
         self.* = .{ .kv_swa = kv.getSwa(), .status = .success };
         self.n_kv = self.kv_swa.getSize();
-        self.sinfos_read.append(allocator, buildFullSinfo(self.kv_swa)) catch oom();
-        self.sinfos_write.append(allocator, self.sinfos_read.items[0].clone()) catch oom();
+        self.sinfos_read.append(std.heap.c_allocator, buildFullSinfo(self.kv_swa)) catch oom();
+        self.sinfos_write.append(std.heap.c_allocator, self.sinfos_read.items[0].clone()) catch oom();
         return self;
     }
 
     /// Ports the update constructor of `llama_kv_cache_dsv4_raw_context`
     /// (llama-kv-cache-dsv4.cpp:1959 @b1b770d90).
-    pub fn createUpdate(kv: *KvCacheIswa, lctx: *anyopaque, optimize: bool) *RawContext {
-        const self = allocator.create(RawContext) catch oom();
+    pub fn createUpdate(kv: *mod.kv_cache_iswa.KvCacheIswa, lctx: *anyopaque, optimize: bool) *RawContext {
+        const self = std.heap.c_allocator.create(RawContext) catch oom();
         const b = kv.getBase().initUpdate(lctx, optimize);
         const s = kv.getSwa().initUpdate(lctx, optimize);
-        self.* = .{ .kv_swa = kv.getSwa(), .ctx_base_mem = b, .ctx_swa_mem = s, .status = memory.statusCombine(b.getStatus(), s.getStatus()) };
+        self.* = .{ .kv_swa = kv.getSwa(), .ctx_base_mem = b, .ctx_swa_mem = s, .status = mod.memory.statusCombine(b.getStatus(), s.getStatus()) };
         self.n_kv = self.kv_swa.getSize();
         return self;
     }
@@ -2344,14 +2321,14 @@ pub const RawContext = struct {
     /// raw writes through an ordinary KV cache context; the SWA half's are
     /// applied here, so its reads can differ from its writes.
     pub fn createBatch(
-        kv: *KvCacheIswa,
-        sinfos_base_write: std.ArrayList(SlotInfo),
-        sinfos_swa_write: std.ArrayList(SlotInfo),
-        sinfos_swa_read: std.ArrayList(SlotInfo),
-        ubatches: std.ArrayList(Ubatch),
-        ubatches_write: std.ArrayList(Ubatch),
+        kv: *mod.kv_cache_iswa.KvCacheIswa,
+        sinfos_base_write: std.ArrayList(mod.kv_cache.SlotInfo),
+        sinfos_swa_write: std.ArrayList(mod.kv_cache.SlotInfo),
+        sinfos_swa_read: std.ArrayList(mod.kv_cache.SlotInfo),
+        ubatches: std.ArrayList(mod.batch.Ubatch),
+        ubatches_write: std.ArrayList(mod.batch.Ubatch),
     ) *RawContext {
-        const self = allocator.create(RawContext) catch oom();
+        const self = std.heap.c_allocator.create(RawContext) catch oom();
         self.* = .{
             .kv_swa = kv.getSwa(),
             .sinfos_write = sinfos_swa_write,
@@ -2360,7 +2337,7 @@ pub const RawContext = struct {
             .ubatches_write = ubatches_write,
             .status = .success,
         };
-        self.ctx_base_mem = KvCacheContext.createBatch(kv.getBase(), sinfos_base_write, retainedCopy(self.ubatches_write.items));
+        self.ctx_base_mem = mod.kv_cache.KvCacheContext.createBatch(kv.getBase(), sinfos_base_write, retainedCopy(self.ubatches_write.items));
         self.n_kv = self.kv_swa.getSize();
         return self;
     }
@@ -2373,7 +2350,7 @@ pub const RawContext = struct {
         releaseAll(&self.ubatches_write);
         if (self.ctx_base_mem) |m| m.destroy();
         if (self.ctx_swa_mem) |m| m.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `next` (llama-kv-cache-dsv4.cpp:1989 @b1b770d90).
@@ -2407,12 +2384,12 @@ pub const RawContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_status` (llama-kv-cache-dsv4.cpp:2022 @b1b770d90).
-    pub fn getStatus(self: *const RawContext) memory.Status {
+    pub fn getStatus(self: *const RawContext) mod.memory.Status {
         return self.status;
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:2026 @b1b770d90).
-    pub fn getUbatch(self: *const RawContext) *const Ubatch {
+    pub fn getUbatch(self: *const RawContext) *const mod.batch.Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
@@ -2430,7 +2407,7 @@ pub const RawContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k` (llama-kv-cache-dsv4.cpp:2044 @b1b770d90).
-    pub fn getK(self: *const RawContext, ctx: *c.ggml_context, il: i32) *Tensor {
+    pub fn getK(self: *const RawContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
         return self.kv_swa.getK(ctx, il, self.n_kv, &self.sinfos_read.items[self.i_next]);
     }
 
@@ -2438,23 +2415,23 @@ pub const RawContext = struct {
     /// @b1b770d90): `k_idxs` may be expanded to one block per stream while
     /// `k_cur` is the token block alone; each copy then gets a zero
     /// dependency on the others, so every write executes.
-    pub fn cpyK(self: *const RawContext, ctx: *c.ggml_context, k_cur: *Tensor, k_idxs: *Tensor, il: i32) *Tensor {
+    pub fn cpyK(self: *const RawContext, ctx: *mod.impl.c.ggml_context, k_cur: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
         const sinfo = &self.sinfos_write.items[self.i_next];
 
         if (k_cur.ne[2] == k_idxs.ne[0]) return self.kv_swa.cpyK(ctx, k_cur, k_idxs, il, sinfo);
 
         const n_fanout: i64 = @intCast(sinfo.size() * sinfo.nStream());
 
-        impl.assert(sinfo.nStream() > 1, file, 2059, "sinfo.n_stream() > 1");
-        impl.assert(k_cur.ne[2] == @as(i64, @intCast(sinfo.size())), file, 2060, "k_cur->ne[2] == (int64_t) sinfo.size()");
-        impl.assert(k_idxs.ne[0] == n_fanout, file, 2061, "k_idxs->ne[0] == n_fanout");
+        mod.impl.assert(sinfo.nStream() > 1, file, 2059, "sinfo.n_stream() > 1");
+        mod.impl.assert(k_cur.ne[2] == @as(i64, @intCast(sinfo.size())), file, 2060, "k_cur->ne[2] == (int64_t) sinfo.size()");
+        mod.impl.assert(k_idxs.ne[0] == n_fanout, file, 2061, "k_idxs->ne[0] == n_fanout");
 
-        var res: ?*Tensor = null;
+        var res: ?*mod.impl.c.ggml_tensor = null;
         for (0..sinfo.nStream()) |s| {
-            const k_idxs_s: *Tensor = c.ggml_view_1d(ctx, k_idxs, @intCast(sinfo.size()), s * sinfo.size() * c.ggml_element_size(k_idxs));
+            const k_idxs_s: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_view_1d(ctx, k_idxs, @intCast(sinfo.size()), s * sinfo.size() * mod.impl.c.ggml_element_size(k_idxs));
             const cur = self.kv_swa.cpyK(ctx, k_cur, k_idxs_s, il, sinfo);
             if (res) |r| {
-                res = c.ggml_add(ctx, r, c.ggml_sub(ctx, cur, cur));
+                res = mod.impl.c.ggml_add(ctx, r, mod.impl.c.ggml_sub(ctx, cur, cur));
             } else {
                 res = cur;
             }
@@ -2464,33 +2441,33 @@ pub const RawContext = struct {
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `build_input_k_idxs`
     /// (llama-kv-cache-dsv4.cpp:2077 @b1b770d90): one index per raw write.
-    pub fn buildInputKIdxs(self: *const RawContext, ctx: *c.ggml_context, ubatch: *const Ubatch) *Tensor {
+    pub fn buildInputKIdxs(self: *const RawContext, ctx: *mod.impl.c.ggml_context, ubatch: *const mod.batch.Ubatch) *mod.impl.c.ggml_tensor {
         const n_tokens: u32 = if (self.ubatches_write.items.len == 0) ubatch.n_tokens else self.ubatches_write.items[self.i_next].n_tokens;
 
-        const k_idxs: *Tensor = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I64, n_tokens);
-        c.ggml_set_input(k_idxs);
+        const k_idxs: *mod.impl.c.ggml_tensor = mod.impl.c.ggml_new_tensor_1d(ctx, mod.impl.c.GGML_TYPE_I64, n_tokens);
+        mod.impl.c.ggml_set_input(k_idxs);
         return k_idxs;
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2086 @b1b770d90).
-    pub fn getKRot(self: *const RawContext) []const ?*Tensor {
+    pub fn getKRot(self: *const RawContext) []const ?*mod.impl.c.ggml_tensor {
         return self.kv_swa.getKRot();
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_k_idxs` (llama-kv-cache-dsv4.cpp:2090 @b1b770d90).
-    pub fn setInputKIdxs(self: *const RawContext, dst: *Tensor) void {
+    pub fn setInputKIdxs(self: *const RawContext, dst: *mod.impl.c.ggml_tensor) void {
         self.kv_swa.setInputKIdxs(dst, &self.ubatches_write.items[self.i_next], &self.sinfos_write.items[self.i_next]);
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `set_input_attn_mask` (llama-kv-cache-dsv4.cpp:2094 @b1b770d90).
-    pub fn setInputAttnMask(self: *const RawContext, attn_mask: *const graph.AttnMask, ubatch: *const Ubatch, causal_attn: bool) void {
+    pub fn setInputAttnMask(self: *const RawContext, attn_mask: *const mod.graph.AttnMask, ubatch: *const mod.batch.Ubatch, causal_attn: bool) void {
         self.kv_swa.setInputAttnMask(attn_mask, ubatch, causal_attn);
     }
 
     /// Ports `llama_kv_cache_dsv4_raw_context`'s `get_prev_tokens`
     /// (llama-kv-cache-dsv4.cpp:2098 @b1b770d90): the token history of the
     /// raw (window) cells, for host-side n-gram hashing (deepseek41 Engram).
-    pub fn getPrevTokens(self: *const RawContext, ubatch: *const Ubatch, n: u32, res: *std.ArrayList(i32)) void {
+    pub fn getPrevTokens(self: *const RawContext, ubatch: *const mod.batch.Ubatch, n: u32, res: *std.ArrayList(i32)) void {
         self.kv_swa.getPrevTokens(ubatch, n, res);
     }
 };
@@ -2502,34 +2479,34 @@ pub const RawContext = struct {
 /// @b1b770d90): compressed rows are graph outputs, not token writes, so
 /// this exposes a compressed cache's K without `apply` semantics.
 pub const CompContext = struct {
-    kv: *KvCache,
+    kv: *mod.kv_cache.KvCache,
     i_cur: usize = 0,
-    sinfos: std.ArrayList(SlotInfo) = .empty,
-    ubatches: std.ArrayList(Ubatch) = .empty,
+    sinfos: std.ArrayList(mod.kv_cache.SlotInfo) = .empty,
+    ubatches: std.ArrayList(mod.batch.Ubatch) = .empty,
     n_kv: u32,
 
     /// Ports the full-cache constructor of `llama_kv_cache_dsv4_comp_context`
     /// (llama-kv-cache-dsv4.cpp:2107 @b1b770d90).
-    pub fn createFull(kv: *KvCache) *CompContext {
-        const self = allocator.create(CompContext) catch oom();
+    pub fn createFull(kv: *mod.kv_cache.KvCache) *CompContext {
+        const self = std.heap.c_allocator.create(CompContext) catch oom();
         self.* = .{ .kv = kv, .n_kv = kv.getSize() };
         const n_stream = kv.getNStream();
 
-        var si: SlotInfo = .{ .s0 = 0, .s1 = n_stream - 1 };
-        si.idxs.resize(allocator, n_stream) catch oom();
+        var si: mod.kv_cache.SlotInfo = .{ .s0 = 0, .s1 = n_stream - 1 };
+        si.idxs.resize(std.heap.c_allocator, n_stream) catch oom();
         for (0..n_stream) |s| {
-            si.strm.append(allocator, @intCast(s)) catch oom();
+            si.strm.append(std.heap.c_allocator, @intCast(s)) catch oom();
             si.idxs.items[s] = .empty;
-            si.idxs.items[s].append(allocator, 0) catch oom();
+            si.idxs.items[s].append(std.heap.c_allocator, 0) catch oom();
         }
-        self.sinfos.append(allocator, si) catch oom();
+        self.sinfos.append(std.heap.c_allocator, si) catch oom();
         return self;
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsv4_comp_context`
     /// (llama-kv-cache-dsv4.cpp:2120 @b1b770d90): takes both lists.
-    pub fn createBatch(kv: *KvCache, sinfos: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *CompContext {
-        const self = allocator.create(CompContext) catch oom();
+    pub fn createBatch(kv: *mod.kv_cache.KvCache, sinfos: std.ArrayList(mod.kv_cache.SlotInfo), ubatches: std.ArrayList(mod.batch.Ubatch)) *CompContext {
+        const self = std.heap.c_allocator.create(CompContext) catch oom();
         self.* = .{ .kv = kv, .sinfos = sinfos, .ubatches = ubatches, .n_kv = kv.getSize() };
         return self;
     }
@@ -2538,7 +2515,7 @@ pub const CompContext = struct {
     pub fn destroy(self: *CompContext) void {
         freeSlotInfos(&self.sinfos);
         releaseAll(&self.ubatches);
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `next` (llama-kv-cache-dsv4.cpp:2130 @b1b770d90).
@@ -2554,17 +2531,17 @@ pub const CompContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k` (llama-kv-cache-dsv4.cpp:2146 @b1b770d90).
-    pub fn getK(self: *const CompContext, ctx: *c.ggml_context, il: i32) *Tensor {
+    pub fn getK(self: *const CompContext, ctx: *mod.impl.c.ggml_context, il: i32) *mod.impl.c.ggml_tensor {
         return self.kv.getK(ctx, il, self.n_kv, &self.sinfos.items[self.i_cur]);
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `cpy_k` (llama-kv-cache-dsv4.cpp:2150 @b1b770d90).
-    pub fn cpyK(self: *const CompContext, ctx: *c.ggml_context, k_cur: *Tensor, k_idxs: *Tensor, il: i32) *Tensor {
+    pub fn cpyK(self: *const CompContext, ctx: *mod.impl.c.ggml_context, k_cur: *mod.impl.c.ggml_tensor, k_idxs: *mod.impl.c.ggml_tensor, il: i32) *mod.impl.c.ggml_tensor {
         return self.kv.cpyK(ctx, k_cur, k_idxs, il, &self.sinfos.items[self.i_cur]);
     }
 
     /// Ports `llama_kv_cache_dsv4_comp_context`'s `get_k_rot` (llama-kv-cache-dsv4.cpp:2154 @b1b770d90).
-    pub fn getKRot(self: *const CompContext) []const ?*Tensor {
+    pub fn getKRot(self: *const CompContext) []const ?*mod.impl.c.ggml_tensor {
         return self.kv.getKRot();
     }
 };
@@ -2581,16 +2558,16 @@ const empty_plan: CompPlan = .{};
 pub const Dsv4Context = struct {
     i_next: usize = 0,
 
-    ubatches: std.ArrayList(Ubatch) = .empty,
+    ubatches: std.ArrayList(mod.batch.Ubatch) = .empty,
 
     plans_csa: std.ArrayList(CompPlan) = .empty,
     plans_hca: std.ArrayList(CompPlan) = .empty,
     plans_lid: std.ArrayList(CompPlan) = .empty,
 
     ctx_raw: ?*RawContext = null,
-    ctx_csa_mem: ?*KvCacheContext = null,
-    ctx_hca_mem: ?*KvCacheContext = null,
-    ctx_lid_mem: ?*KvCacheContext = null,
+    ctx_csa_mem: ?*mod.kv_cache.KvCacheContext = null,
+    ctx_hca_mem: ?*mod.kv_cache.KvCacheContext = null,
+    ctx_lid_mem: ?*mod.kv_cache.KvCacheContext = null,
 
     ctx_csa: ?*CompContext = null,
     ctx_hca: ?*CompContext = null,
@@ -2600,9 +2577,9 @@ pub const Dsv4Context = struct {
     hca_state: ?*CompState = null,
     lid_state: ?*CompState = null,
 
-    sc_info_csa: StreamCopyInfo = .{},
-    sc_info_hca: StreamCopyInfo = .{},
-    sc_info_lid: StreamCopyInfo = .{},
+    sc_info_csa: mod.kv_cache.StreamCopyInfo = .{},
+    sc_info_hca: mod.kv_cache.StreamCopyInfo = .{},
+    sc_info_lid: mod.kv_cache.StreamCopyInfo = .{},
 
     /// Whether the plans are the reserve graph's worst cases, rebuilt per
     /// ubatch -- the C++'s `mutable` reserve plans.
@@ -2611,14 +2588,14 @@ pub const Dsv4Context = struct {
     reserve_plan_hca: CompPlan = .{},
     reserve_plan_lid: CompPlan = .{},
 
-    status: memory.Status,
+    status: mod.memory.Status,
 
     kv: ?*KvCacheDsv4 = null,
 
     /// Ports the status constructor of `llama_kv_cache_dsv4_context`
     /// (llama-kv-cache-dsv4.cpp:2162 @b1b770d90).
-    pub fn createStatus(status: memory.Status) *Dsv4Context {
-        const self = allocator.create(Dsv4Context) catch oom();
+    pub fn createStatus(status: mod.memory.Status) *Dsv4Context {
+        const self = std.heap.c_allocator.create(Dsv4Context) catch oom();
         self.* = .{ .status = status };
         return self;
     }
@@ -2627,7 +2604,7 @@ pub const Dsv4Context = struct {
     /// (llama-kv-cache-dsv4.cpp:2164 @b1b770d90): the reserve graph's view,
     /// with worst-case plans.
     pub fn createFull(kv: *KvCacheDsv4) *Dsv4Context {
-        const self = allocator.create(Dsv4Context) catch oom();
+        const self = std.heap.c_allocator.create(Dsv4Context) catch oom();
         const raw = RawContext.createFull(kv.getRaw());
         const csa = kv.getCsa().initFull();
         const hca = kv.getHca().initFull();
@@ -2644,7 +2621,7 @@ pub const Dsv4Context = struct {
             .hca_state = kv.getHcaState(),
             .lid_state = kv.getLidState(),
             .reserve_plans = true,
-            .status = memory.statusCombine(memory.statusCombine(raw.getStatus(), csa.getStatus()), memory.statusCombine(hca.getStatus(), lid.getStatus())),
+            .status = mod.memory.statusCombine(mod.memory.statusCombine(raw.getStatus(), csa.getStatus()), mod.memory.statusCombine(hca.getStatus(), lid.getStatus())),
             .kv = kv,
         };
         return self;
@@ -2653,8 +2630,8 @@ pub const Dsv4Context = struct {
     /// Ports the update constructor of `llama_kv_cache_dsv4_context`
     /// (llama-kv-cache-dsv4.cpp:2183 @b1b770d90): an update when any of the
     /// caches has one, or any compressor state has queued copies.
-    pub fn createUpdate(kv: *KvCacheDsv4, lctx: *anyopaque, optimize: bool, sc_info_csa: StreamCopyInfo, sc_info_hca: StreamCopyInfo, sc_info_lid: StreamCopyInfo) *Dsv4Context {
-        const self = allocator.create(Dsv4Context) catch oom();
+    pub fn createUpdate(kv: *KvCacheDsv4, lctx: *anyopaque, optimize: bool, sc_info_csa: mod.kv_cache.StreamCopyInfo, sc_info_hca: mod.kv_cache.StreamCopyInfo, sc_info_lid: mod.kv_cache.StreamCopyInfo) *Dsv4Context {
+        const self = std.heap.c_allocator.create(Dsv4Context) catch oom();
         const raw = RawContext.createUpdate(kv.getRaw(), lctx, optimize);
         const csa = kv.getCsa().initUpdate(lctx, optimize);
         const hca = kv.getHca().initUpdate(lctx, optimize);
@@ -2673,9 +2650,9 @@ pub const Dsv4Context = struct {
             .status = undefined,
             .kv = kv,
         };
-        const copies: memory.Status = if (self.sc_info_csa.empty() and self.sc_info_hca.empty() and self.sc_info_lid.empty()) .no_update else .success;
-        self.status = memory.statusCombine(
-            memory.statusCombine(memory.statusCombine(raw.getStatus(), csa.getStatus()), memory.statusCombine(hca.getStatus(), lid.getStatus())),
+        const copies: mod.memory.Status = if (self.sc_info_csa.empty() and self.sc_info_hca.empty() and self.sc_info_lid.empty()) .no_update else .success;
+        self.status = mod.memory.statusCombine(
+            mod.memory.statusCombine(mod.memory.statusCombine(raw.getStatus(), csa.getStatus()), mod.memory.statusCombine(hca.getStatus(), lid.getStatus())),
             copies,
         );
         return self;
@@ -2688,13 +2665,13 @@ pub const Dsv4Context = struct {
     /// Takes every list.
     pub fn createBatch(
         kv: *KvCacheDsv4,
-        sinfos_raw_base_write: std.ArrayList(SlotInfo),
-        sinfos_raw_swa_write: std.ArrayList(SlotInfo),
-        sinfos_raw_swa_read: std.ArrayList(SlotInfo),
-        ubatches: std.ArrayList(Ubatch),
-        ubatches_raw: std.ArrayList(Ubatch),
+        sinfos_raw_base_write: std.ArrayList(mod.kv_cache.SlotInfo),
+        sinfos_raw_swa_write: std.ArrayList(mod.kv_cache.SlotInfo),
+        sinfos_raw_swa_read: std.ArrayList(mod.kv_cache.SlotInfo),
+        ubatches: std.ArrayList(mod.batch.Ubatch),
+        ubatches_raw: std.ArrayList(mod.batch.Ubatch),
     ) *Dsv4Context {
-        const self = allocator.create(Dsv4Context) catch oom();
+        const self = std.heap.c_allocator.create(Dsv4Context) catch oom();
         self.* = .{ .ubatches = ubatches, .status = .success, .kv = kv };
         const ub = self.ubatches.items;
 
@@ -2737,7 +2714,7 @@ pub const Dsv4Context = struct {
         self.reserve_plan_csa.deinit();
         self.reserve_plan_hca.deinit();
         self.reserve_plan_lid.deinit();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsv4_context`'s `next` (llama-kv-cache-dsv4.cpp:2258 @b1b770d90).
@@ -2758,7 +2735,7 @@ pub const Dsv4Context = struct {
     /// compressor states' queued stream copies; then the mirrors a state
     /// read left stale are refilled.
     pub fn apply(self: *Dsv4Context) bool {
-        std.debug.assert(!memory.statusIsFail(self.status));
+        std.debug.assert(!mod.memory.statusIsFail(self.status));
 
         var res = true;
 
@@ -2786,12 +2763,12 @@ pub const Dsv4Context = struct {
     }
 
     /// Ports `llama_kv_cache_dsv4_context`'s `get_status` (llama-kv-cache-dsv4.cpp:2297 @b1b770d90).
-    pub fn getStatus(self: *const Dsv4Context) memory.Status {
+    pub fn getStatus(self: *const Dsv4Context) mod.memory.Status {
         return self.status;
     }
 
     /// Ports `llama_kv_cache_dsv4_context`'s `get_ubatch` (llama-kv-cache-dsv4.cpp:2301 @b1b770d90).
-    pub fn getUbatch(self: *const Dsv4Context) *const Ubatch {
+    pub fn getUbatch(self: *const Dsv4Context) *const mod.batch.Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
@@ -2868,7 +2845,7 @@ pub const Dsv4Context = struct {
     /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2386 @b1b770d90): the
     /// reserve graph's worst case, rebuilt for `ubatch`, else the current
     /// plan. The returned plan is valid until the next call.
-    pub fn getCsaPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
+    pub fn getCsaPlanFor(self: *const Dsv4Context, ubatch: *const mod.batch.Ubatch) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (!self.reserve_plans) return self.getCsaPlan();
 
@@ -2880,7 +2857,7 @@ pub const Dsv4Context = struct {
 
     /// Ports the overload of `llama_kv_cache_dsv4_context`'s `get_hca_plan`
     /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2400 @b1b770d90).
-    pub fn getHcaPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
+    pub fn getHcaPlanFor(self: *const Dsv4Context, ubatch: *const mod.batch.Ubatch) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (!self.reserve_plans) return self.getHcaPlan();
 
@@ -2892,7 +2869,7 @@ pub const Dsv4Context = struct {
 
     /// Ports the overload of `llama_kv_cache_dsv4_context`'s `get_lid_plan`
     /// that takes a ubatch (llama-kv-cache-dsv4.cpp:2414 @b1b770d90).
-    pub fn getLidPlanFor(self: *const Dsv4Context, ubatch: *const Ubatch) *const CompPlan {
+    pub fn getLidPlanFor(self: *const Dsv4Context, ubatch: *const mod.batch.Ubatch) *const CompPlan {
         std.debug.assert(self.status == .success);
         if (!self.reserve_plans) return self.getLidPlan();
 
@@ -2902,11 +2879,11 @@ pub const Dsv4Context = struct {
         return &m.reserve_plan_lid;
     }
 
-    pub fn contextOf(self: *Dsv4Context) memory.Context {
+    pub fn contextOf(self: *Dsv4Context) mod.memory.Context {
         return .{ .ptr = self, .vtable = &ctx_vtable };
     }
 
-    const ctx_vtable: memory.Context.VTable = .{
+    const ctx_vtable: mod.memory.Context.VTable = .{
         .next = struct {
             fn f(p: *anyopaque) bool {
                 return cast(p).next();
@@ -2918,12 +2895,12 @@ pub const Dsv4Context = struct {
             }
         }.f,
         .getUbatch = struct {
-            fn f(p: *anyopaque) *const Ubatch {
+            fn f(p: *anyopaque) *const mod.batch.Ubatch {
                 return cast(p).getUbatch();
             }
         }.f,
         .getStatus = struct {
-            fn f(p: *anyopaque) memory.Status {
+            fn f(p: *anyopaque) mod.memory.Status {
                 return cast(p).getStatus();
             }
         }.f,
@@ -2961,7 +2938,7 @@ const TestUbatch = struct {
     seq_ptr: [16][*c]i32 = undefined,
     seq_unq: [1]i32 = undefined,
 
-    fn ubatch(self: *TestUbatch, seq: i32, pos: []const i32) Ubatch {
+    fn ubatch(self: *TestUbatch, seq: i32, pos: []const i32) mod.batch.Ubatch {
         for (pos, 0..) |p, i| {
             self.pos[i] = p;
             self.seq_data[i] = seq;
@@ -3054,7 +3031,7 @@ test "an HCA step that completes no block still keeps its write" {
 test "a pending rollback restores from its snapshot plane once" {
     var tu: TestUbatch = .{};
     const ub = tu.ubatch(0, &.{ 4, 5 });
-    const ubs = [_]Ubatch{ ub, ub };
+    const ubs = [_]mod.batch.Ubatch{ ub, ub };
     var plans = buildCompPlans(&ubs, csa_ratio, true, true, 2 * csa_ratio, 256, 1, 2, &.{2});
     defer freePlans(&plans);
 
@@ -3081,6 +3058,6 @@ test "a reserve plan is sized for the worst sequence split" {
 
 test "plan positions print as a list" {
     const s = planPositions(&.{ 1, -2, 3 });
-    defer allocator.free(s);
+    defer std.heap.c_allocator.free(s);
     try std.testing.expectEqualStrings("[1, -2, 3]", s);
 }

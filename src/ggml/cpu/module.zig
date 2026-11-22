@@ -37,36 +37,62 @@
 
 const std = @import("std");
 
+pub const defs = @import("defs.zig");
+pub const traits = @import("traits.zig");
+pub const convert = @import("convert.zig");
+pub const features = @import("features.zig");
+pub const tensor = @import("tensor.zig");
+pub const mulmat = @import("mulmat.zig");
+pub const forward = @import("forward.zig");
+pub const plan = @import("plan.zig");
+pub const threading = @import("threading.zig");
+pub const quants = @import("quants/module.zig");
+pub const binary_ops = @import("binary_ops.zig"); // ggml-cpu/binary-ops.cpp
+pub const unary_ops = @import("unary_ops.zig"); // ggml-cpu/unary-ops.cpp
+pub const vec = @import("vec.zig"); // ggml-cpu/vec.cpp
+pub const tiled = @import("tiled.zig"); // ggml-cpu/tiled/tiled.cpp
+pub const tiled_kernel = @import("tiled_kernel.zig"); // ggml-cpu/tiled/tiled-kernel.cpp
+pub const ops = @import("ops/module.zig");
+pub const extra = @import("extra.zig"); // ggml-cpu/traits.cpp
+pub const cpu_backend = @import("cpu_backend.zig"); // ggml-cpu/ggml-cpu.cpp
+pub const repack = @import("repack/module.zig"); // ggml-cpu/repack.cpp, arch/arm/repack.cpp
+pub const vec_testing = @import("vec_testing.zig");
+pub const simd = @import("simd.zig");
+
+pub const vec_golden_generic = @import("vec_golden_generic.zig");
+
+pub const vec_golden = @import("vec_golden.zig");
+
 comptime {
     // Ported translation units export C symbols that nothing in Zig
     // references, so they need forcing into the compilation or the archive
     // ships without them and the link fails with symbols the C++ still wants.
-    _ = @import("defs.zig");
-    _ = @import("traits.zig");
-    _ = @import("convert.zig");
-    _ = @import("features.zig");
-    _ = @import("tensor.zig");
-    _ = @import("mulmat.zig");
-    _ = @import("forward.zig");
-    _ = @import("plan.zig");
-    _ = @import("threading.zig");
+    _ = defs;
+    _ = traits;
+    _ = convert;
+    _ = features;
+    _ = tensor;
+    _ = mulmat;
+    _ = forward;
+    _ = plan;
+    _ = threading;
     // ggml-cpu/quants.c, split across src/ggml/cpu/quants/:
-    _ = @import("quants/module.zig");
-    _ = @import("binary_ops.zig"); // ggml-cpu/binary-ops.cpp
-    _ = @import("unary_ops.zig"); // ggml-cpu/unary-ops.cpp
-    _ = @import("vec.zig"); // ggml-cpu/vec.cpp
-    _ = @import("tiled.zig"); // ggml-cpu/tiled/tiled.cpp
-    _ = @import("tiled_kernel.zig"); // ggml-cpu/tiled/tiled-kernel.cpp
+    _ = quants;
+    _ = binary_ops;
+    _ = unary_ops;
+    _ = vec;
+    _ = tiled;
+    _ = tiled_kernel;
     // ggml-cpu/ops.cpp, split by op family across src/ggml/cpu/ops/:
-    _ = @import("ops/module.zig");
+    _ = ops;
     // The vtable cluster, which moves as one unit -- ggml-cpu/traits.cpp,
     // ggml-cpu.cpp, repack.cpp and arch/arm/repack.cpp. See
     // `repack/module.zig` for why a partial swap reads as success.
-    _ = @import("extra.zig"); // ggml-cpu/traits.cpp
-    _ = @import("cpu_backend.zig"); // ggml-cpu/ggml-cpu.cpp
-    _ = @import("repack/module.zig"); // ggml-cpu/repack.cpp, arch/arm/repack.cpp
+    _ = extra;
+    _ = cpu_backend;
+    _ = repack;
     // Not a port: the golden check for vec.cpp's float dot products.
-    _ = @import("vec_testing.zig");
+    _ = vec_testing;
 }
 
 // -----------------------------------------------------------------------------
@@ -74,21 +100,5 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("defs.zig");
-    _ = @import("traits.zig");
-    _ = @import("convert.zig");
-    _ = @import("features.zig");
-    _ = @import("simd.zig");
-    _ = @import("tensor.zig");
-    _ = @import("mulmat.zig");
-    _ = @import("forward.zig");
-    _ = @import("plan.zig");
-    _ = @import("threading.zig");
-    _ = @import("binary_ops.zig");
-    _ = @import("unary_ops.zig");
-    _ = @import("vec.zig");
-    _ = @import("tiled.zig");
-    _ = @import("tiled_kernel.zig");
-    _ = @import("ops/module.zig");
-    _ = @import("vec_testing.zig");
+    _ = simd;
 }

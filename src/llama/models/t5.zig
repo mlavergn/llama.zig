@@ -12,20 +12,10 @@
 //! `llama_model_t5encoder` (`t5encoder.zig`) reuses the encoder graph.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Layer = model_mod.Layer;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_t5`'s `load_arch_hparams` (models/t5.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -61,11 +51,11 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_t5`'s `load_arch_tensors` (models/t5.cpp:38 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     const n_rel_attn_bkts: i64 = hp.n_rel_attn_bkts;
 
@@ -106,7 +96,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
         layer.attn_norm_cross = try self.createTensor(.{ .tensor = .dec_cross_attn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         // This tensor seems to be unused in the HF transformers implementation.
-        layer.attn_rel_b_cross = try self.createTensor(.{ .tensor = .dec_cross_attn_rel_b, .suffix = "weight", .bid = i }, &.{ l.n_head, n_rel_attn_bkts }, nr | loader.tensor_skip_if_virtual, exc);
+        layer.attn_rel_b_cross = try self.createTensor(.{ .tensor = .dec_cross_attn_rel_b, .suffix = "weight", .bid = i }, &.{ l.n_head, n_rel_attn_bkts }, nr | llama.loader.tensor_skip_if_virtual, exc);
 
         layer.wq_cross = try self.createTensor(.{ .tensor = .dec_cross_attn_q, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_k_gqa }, 0, exc);
         layer.wk_cross = try self.createTensor(.{ .tensor = .dec_cross_attn_k, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_embd_k_gqa }, 0, exc);
@@ -123,17 +113,17 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// The resize of `layers` to the decoder's layer count in `llama_model_t5`'s
 /// `load_arch_tensors`: the new layers start empty, the existing ones keep
 /// their tensors.
-fn resizeLayers(self: *Model, n: usize) void {
+fn resizeLayers(self: *llama.model.Model, n: usize) void {
     const old = self.layers.len;
-    self.layers = impl.allocator.realloc(self.layers, n) catch impl.abort("models/t5.cpp", 59, "out of memory");
+    self.layers = std.heap.c_allocator.realloc(self.layers, n) catch llama.impl.abort("models/t5.cpp", 59, "out of memory");
     if (n > old) @memset(self.layers[old..], .{});
 }
 
 /// The encoder layers of `llama_model_t5`'s `load_arch_tensors`
 /// (models/t5.cpp:38 @b1b770d90), which `llama_model_t5encoder`'s repeats
 /// unchanged.
-pub fn loadEncoderLayers(self: *Model, l: Model.Locals, n_rel_attn_bkts: i64, exc: *Exception) Thrown!void {
-    const nr = loader.tensor_not_required;
+pub fn loadEncoderLayers(self: *llama.model.Model, l: llama.model.Model.Locals, n_rel_attn_bkts: i64, exc: *llama.impl.Exception) llama.impl.Thrown!void {
+    const nr = llama.loader.tensor_not_required;
 
     var i: i32 = 0;
     while (i < l.n_layer) : (i += 1) {
@@ -157,22 +147,22 @@ pub fn loadEncoderLayers(self: *Model, l: Model.Locals, n_rel_attn_bkts: i64, ex
 /// Ports `llama_model_t5`'s `build_arch_graph` (models/t5.cpp:358
 /// @b1b770d90): the encoder graph for an encode, the decoder graph
 /// otherwise.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     switch (params.gtype) {
         .encoder => buildEncoder(model, b),
         .default, .decoder => buildDecoder(model, b),
-        else => impl.abort("models/t5.cpp", 366, "invalid graph type"),
+        else => llama.impl.abort("models/t5.cpp", 366, "invalid graph type"),
     }
 }
 
 /// Ports the constructor of `llama_model_t5`'s `graph` specialised for the
 /// decoder (models/t5.cpp:110 @b1b770d90).
-fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
+fn buildDecoder(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/t5.cpp", 114, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/t5.cpp", 114, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -207,7 +197,7 @@ fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
             cur = b.buildAttn(inp_attn_self, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, kq_b, null, null, 1.0, il);
             b.cb(cur, "kqv_out", il);
         }
-        cur = c.ggml_add(ctx, cur, inpSA);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(cur, "cross_inp", il);
 
         var inpCA = cur;
@@ -227,18 +217,18 @@ fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
             var Vcur = b.buildLoraMm(layer.wv_cross.?, embd_enc, null);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, n_outputs_enc);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, n_outputs_enc);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, n_outputs_enc);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, n_outputs_enc);
 
             cur = b.buildAttn(inp_attn_cross, layer.wo_cross, null, null, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
             b.cb(cur, "kqv_out", il);
         }
         if (il == dec_n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpCA = c.ggml_get_rows(ctx, inpCA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpCA = llama.impl.c.ggml_get_rows(ctx, inpCA, inp_out_ids);
         }
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpCA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpCA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -251,7 +241,7 @@ fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
             cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, if (gated) .gelu else .relu, if (gated) .par else .seq, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -278,12 +268,12 @@ fn buildDecoder(model: *const Model, b: *const graph.Builder) void {
 /// Ports the constructor of `llama_model_t5`'s `graph` specialised for the
 /// encoder (models/t5.cpp:263 @b1b770d90), which `llama_model_t5encoder`
 /// also builds.
-pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
+pub fn buildEncoder(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/t5.cpp", 266, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/t5.cpp", 266, "n_embd_head == hparams.n_embd_head_k()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -313,9 +303,9 @@ pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
             var Vcur = b.buildLoraMm(layer.wv_enc.?, cur, null);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             const attn_rel_b = layer.attn_rel_b_enc orelse model.layers[0].attn_rel_b_enc;
             const kq_b = b.buildPosBias(pos_bucket_enc, attn_rel_b.?);
@@ -324,10 +314,10 @@ pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "kqv_out", il);
         }
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward network.
@@ -340,7 +330,7 @@ pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
             cur = b.buildFfn(cur, layer.ffn_up_enc, null, null, layer.ffn_gate_enc, null, null, layer.ffn_down_enc, null, null, null, if (gated) .gelu else .relu, if (gated) .par else .seq, il);
             b.cb(cur, "ffn_out", il);
         }
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "ffn_out", il);
 
         cur = b.buildCvec(cur, il);
@@ -357,7 +347,7 @@ pub fn buildEncoder(model: *const Model, b: *const graph.Builder) void {
     b.cb(cur, "result_norm", -1);
     b.res.t_embd = cur;
 
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 }
 
 // -----------------------------------------------------------------------------

@@ -22,7 +22,6 @@
 //! symbols still come from the C side.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
 const stdlib = @import("stdlib");
 
 /// The importable half of ggml's headers.
@@ -33,11 +32,6 @@ const stdlib = @import("stdlib");
 /// `c_import.h`, translated by `build/llamacpp.zig` (Zig 0.17 has no
 /// `@cImport`).
 pub const c = @import("ggml_c");
-
-/// The port's mutex, under every `std::mutex` and `ggml_mutex_t` it ports: a
-/// futex, with no C library under it (`stdlib/sync/`). `.{}` needs no setup, as
-/// libc++'s `constexpr mutex()` does not.
-pub const Mutex = @import("stdlib").sync.Mutex;
 
 /// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
 /// Darwin target and no other. Ported code that takes the C's Accelerate arm
@@ -113,7 +107,7 @@ pub const logError = struct {
 /// host-arms harness came to compare them with a callback installed.
 pub const fprintfStderr = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        _ = @call(.auto, libc.fprintf, .{ stdlib.stdio.cStream(.stderr), fmt } ++ args);
+        _ = @call(.auto, stdlib.libc.fprintf, .{ stdlib.stdio.cStream(.stderr), fmt } ++ args);
     }
 }.f;
 

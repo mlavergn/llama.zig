@@ -8,3 +8,4 @@
  */
 #include "llama.h"
 #include "gguf.h"
+#include "ggml-cpu.h"

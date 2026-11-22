@@ -6,22 +6,18 @@
 //! Ports `llama.cpp/tools/mtmd/models/kimivl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const model_mod = @import("../model.zig");
-const c = impl.c;
+const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda of a 2D RoPE (kimivl.cpp:16 @b1b770d90):
 /// `build_rope_2d(ctx0, cur, pos_a, pos_b, freq_base, interleave_freq)`,
 /// `pos_a` on the first half of each head and `pos_b` on the second.
 pub const Rope2d = struct {
-    pos_a: graph.T,
-    pos_b: graph.T,
+    pos_a: mtmd.graph.T,
+    pos_b: mtmd.graph.T,
     freq_base: f32,
     interleave_freq: bool = false,
 
-    pub fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: graph.T, layer: *const model_mod.Layer) graph.T {
+    pub fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
         _ = layer;
         const self: *Rope2d = @ptrCast(@alignCast(ctx.?));
         return g.buildRope2d(g.ctx0, cur, self.pos_a, self.pos_b, self.freq_base, self.interleave_freq);
@@ -29,22 +25,22 @@ pub const Rope2d = struct {
 };
 
 /// Ports `build` (kimivl.cpp:3 @b1b770d90), a member of `mtmd_graph_kimivl`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
     const hparams = g.hparams;
 
     // 2D input positions
-    const pos_h = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, g.n_patches);
-    _ = c.ggml_set_name(pos_h, "pos_h");
-    c.ggml_set_input(pos_h);
+    const pos_h = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches);
+    _ = mtmd.impl.c.ggml_set_name(pos_h, "pos_h");
+    mtmd.impl.c.ggml_set_input(pos_h);
 
-    const pos_w = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, g.n_patches);
-    _ = c.ggml_set_name(pos_w, "pos_w");
-    c.ggml_set_input(pos_w);
+    const pos_w = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches);
+    _ = mtmd.impl.c.ggml_set_name(pos_w, "pos_w");
+    mtmd.impl.c.ggml_set_input(pos_w);
 
-    const learned_pos_embd = g.resizePositionEmbeddings(graph.default_interpolation_mode);
+    const learned_pos_embd = g.resizePositionEmbeddings(mtmd.graph.default_interpolation_mode);
 
     // build ViT with 2D position embeddings
     var rope: Rope2d = .{ .pos_a = pos_w, .pos_b = pos_h, .freq_base = hparams.rope_theta };
@@ -60,12 +56,12 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         cur = g.buildPatchMergePermute(cur, scale_factor);
 
         // projection norm
-        const proj_inp_dim: c_int = @intCast(graph.ne(cur, 0));
-        cur = c.ggml_view_2d(ctx0, cur, g.n_embd, graph.ne(cur, 1) * scale_factor * scale_factor, c.ggml_row_size(cur.?.type, g.n_embd), 0);
-        cur = c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
-        cur = c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
-        cur = c.ggml_add(ctx0, cur, model.mm_input_norm_b);
-        cur = c.ggml_view_2d(ctx0, cur, proj_inp_dim, @divTrunc(@divTrunc(graph.ne(cur, 1), scale_factor), scale_factor), c.ggml_row_size(cur.?.type, proj_inp_dim), 0);
+        const proj_inp_dim: c_int = @intCast(mtmd.graph.ne(cur, 0));
+        cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, g.n_embd, mtmd.graph.ne(cur, 1) * scale_factor * scale_factor, mtmd.impl.c.ggml_row_size(cur.?.type, g.n_embd), 0);
+        cur = mtmd.impl.c.ggml_norm(ctx0, cur, 1e-5); // default nn.LayerNorm
+        cur = mtmd.impl.c.ggml_mul(ctx0, cur, model.mm_input_norm_w);
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_input_norm_b);
+        cur = mtmd.impl.c.ggml_view_2d(ctx0, cur, proj_inp_dim, @divTrunc(@divTrunc(mtmd.graph.ne(cur, 1), scale_factor), scale_factor), mtmd.impl.c.ggml_row_size(cur.?.type, proj_inp_dim), 0);
         g.cb(cur, "proj_inp_normed", -1);
 
         // projection mlp
@@ -74,7 +70,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     }
 
     // build the graph
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

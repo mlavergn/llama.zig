@@ -28,9 +28,7 @@
 //! differences wrap; so do these, with `*%`, `+%` and `-%`.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const c = impl.c;
+const mod = @import("module.zig");
 
 /// Mirrors `LLAMA_MAX_LAYERS` (llama-hparams.h:11 @b1b770d90).
 pub const max_layers = 512;
@@ -314,7 +312,7 @@ pub const Hparams = extern struct {
     const Self = @This();
 
     fn outOfBounds(comptime line: c_int, comptime func: [:0]const u8, il: u32, n: u32, comptime what: [:0]const u8) noreturn {
-        c.ggml_abort("llama-hparams.cpp", line, "%s: il (%u) out of bounds (" ++ what ++ ": %u)\n", func.ptr, il, n);
+        mod.impl.c.ggml_abort("llama-hparams.cpp", line, "%s: il (%u) out of bounds (" ++ what ++ ": %u)\n", func.ptr, il, n);
     }
 
     /// Ports `llama_hparams`'s `set_swa_pattern` (llama-hparams.cpp:8 @b1b770d90).
@@ -349,33 +347,33 @@ pub const Hparams = extern struct {
     /// Ports `llama_hparams`'s `n_head` (llama-hparams.cpp:50 @b1b770d90).
     pub fn nHead(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_head_arr[il];
-        impl.abort("llama-hparams.cpp", 55, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 55, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_head_kv` (llama-hparams.cpp:58 @b1b770d90).
     pub fn nHeadKv(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_head_kv_arr[il];
-        impl.abort("llama-hparams.cpp", 63, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 63, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_ff` (llama-hparams.cpp:66 @b1b770d90).
     pub fn nFf(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_ff_arr[il];
-        impl.abort("llama-hparams.cpp", 71, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 71, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_ff_exp` (llama-hparams.cpp:74 @b1b770d90):
     /// the expert feed-forward size, per layer.
     pub fn nFfExp(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_ff_exp_arr[il];
-        impl.abort("llama-hparams.cpp", 79, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 79, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_expert_used` (llama-hparams.cpp:82 @b1b770d90):
     /// the top-k routing count, per layer.
     pub fn nExpertUsed(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return self.n_expert_used_arr[il];
-        impl.abort("llama-hparams.cpp", 87, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 87, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_expert_used_max` (llama-hparams.cpp:90 @b1b770d90).
@@ -399,7 +397,7 @@ pub const Hparams = extern struct {
     /// Ports `llama_hparams`'s `n_rot` (llama-hparams.cpp:110 @b1b770d90).
     pub fn nRot(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return if (self.isSwa(il)) self.n_rot_swa else self.n_rot_full;
-        impl.abort("llama-hparams.cpp", 115, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 115, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_embd_inp` (llama-hparams.cpp:118 @b1b770d90).
@@ -423,13 +421,13 @@ pub const Hparams = extern struct {
     /// Ports `llama_hparams`'s `n_embd_head_k` (llama-hparams.cpp:140 @b1b770d90).
     pub fn nEmbdHeadK(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return if (self.isSwa(il)) self.n_embd_head_k_swa else self.n_embd_head_k_full;
-        impl.abort("llama-hparams.cpp", 145, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 145, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_embd_head_v` (llama-hparams.cpp:148 @b1b770d90).
     pub fn nEmbdHeadV(self: *const Self, il: u32) u32 {
         if (il < self.n_layer_all) return if (self.isSwa(il)) self.n_embd_head_v_swa else self.n_embd_head_v_full;
-        impl.abort("llama-hparams.cpp", 153, "fatal error");
+        mod.impl.abort("llama-hparams.cpp", 153, "fatal error");
     }
 
     /// Ports `llama_hparams`'s `n_embd_k_gqa` (llama-hparams.cpp:156 @b1b770d90).
@@ -524,7 +522,7 @@ pub const Hparams = extern struct {
 
     /// Ports `llama_hparams`'s `n_pos_per_embd` (llama-hparams.cpp:285 @b1b770d90).
     pub fn nPosPerEmbd(self: *const Self) u32 {
-        return if (self.rope_type == c.LLAMA_ROPE_TYPE_MROPE or self.rope_type == c.LLAMA_ROPE_TYPE_IMROPE) 4 else 1;
+        return if (self.rope_type == mod.impl.c.LLAMA_ROPE_TYPE_MROPE or self.rope_type == mod.impl.c.LLAMA_ROPE_TYPE_IMROPE) 4 else 1;
     }
 
     /// Ports `llama_hparams`'s `is_swa` (llama-hparams.cpp:290 @b1b770d90).

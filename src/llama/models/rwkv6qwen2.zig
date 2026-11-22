@@ -11,22 +11,11 @@
 //! mix is in `rwkv6_base.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const rwkv6 = @import("rwkv6.zig");
-const rwkv6_base = @import("rwkv6_base.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_rwkv6qwen2`'s `load_arch_hparams` (models/rwkv6qwen2.cpp:3
 /// @b1b770d90): the same keys and size table as RWKV-6.
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     if (try meta.getKey(f32, .attention_layernorm_eps, false, exc)) |v| hp.f_norm_eps = v;
@@ -37,14 +26,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .rescale_every_n_layers, false, exc)) |v| hp.rescale_every_n_layers = v;
     if (try meta.getKey(u32, .token_shift_count, false, exc)) |v| hp.token_shift_count = v;
 
-    self.type = rwkv6.typeOf(hp.nLayer(), hp.n_embd);
+    self.type = llama.models.rwkv6.typeOf(hp.nLayer(), hp.n_embd);
 }
 
 /// Ports `llama_model_rwkv6qwen2`'s `load_arch_tensors` (models/rwkv6qwen2.cpp:26 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -99,18 +88,18 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_rwkv6qwen2`'s `build_arch_graph` (models/rwkv6qwen2.cpp:80 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_rwkv6qwen2`'s `graph`
 /// (models/rwkv6qwen2.cpp:84 @b1b770d90): one token shift, before the time
 /// mix only.
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const ubatch = b.ubatch;
-    impl.assert(b.n_embd == hp.nEmbdR(), "models/rwkv6qwen2.cpp", 85, "n_embd == hparams.n_embd_r()");
+    llama.impl.assert(b.n_embd == hp.nEmbdR(), "models/rwkv6qwen2.cpp", 85, "n_embd == hparams.n_embd_r()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
@@ -126,30 +115,30 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
-        inpL = c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
+        inpL = llama.impl.c.ggml_reshape_3d(ctx, inpL, n_embd, n_seq_tokens, n_seqs);
 
         var token_shift = b.buildRwkvTokenShiftLoad(rs_inp, ubatch, il);
 
         const att_norm = b.buildNorm(inpL, layer.attn_norm, layer.attn_norm_b, .rms, il);
         b.cb(att_norm, "attn_norm", il);
 
-        const x_prev: *Tensor = c.ggml_concat(ctx, token_shift, c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
+        const x_prev: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, token_shift, llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, n_seq_tokens - 1, n_seqs, att_norm.nb[1], att_norm.nb[2], 0), 1);
 
-        var cur = rwkv6_base.buildRwkv6TimeMix(model, b, rs_inp, att_norm, x_prev, ubatch, il);
+        var cur = llama.models.rwkv6_base.buildRwkv6TimeMix(model, b, rs_inp, att_norm, x_prev, ubatch, il);
 
         const last: usize = @intCast((n_seq_tokens - 1) * n_embd);
-        token_shift = c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * c.ggml_element_size(att_norm));
-        c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
+        token_shift = llama.impl.c.ggml_view_3d(ctx, att_norm, n_embd, 1, n_seqs, att_norm.nb[1], att_norm.nb[2], last * llama.impl.c.ggml_element_size(att_norm));
+        llama.impl.c.ggml_build_forward_expand(b.gf, b.buildRwkvTokenShiftStore(token_shift, ubatch, il));
 
-        var ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpL);
+        var ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(ffn_inp, "ffn_inp", il);
 
-        cur = c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
-        ffn_inp = c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
+        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd, n_tokens);
+        ffn_inp = llama.impl.c.ggml_reshape_2d(ctx, ffn_inp, n_embd, n_tokens);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            ffn_inp = c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            ffn_inp = llama.impl.c.ggml_get_rows(ctx, ffn_inp, inp_out_ids);
         }
 
         // The feed-forward network.
@@ -159,7 +148,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

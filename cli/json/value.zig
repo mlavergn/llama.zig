@@ -27,12 +27,9 @@
 //! exact `what()` text upstream's `common_json_error` carries.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const builtin = @import("builtin");
-const errors = @import("errors.zig");
-
-const Error = errors.Error;
-const fail = errors.fail;
 
 /// Ports `nesting_depth_limit` (json.hpp:21062 @b1b770d90): how many levels
 /// a copy or a comparison descends before it finishes the value below
@@ -107,7 +104,7 @@ pub const Map = struct {
     /// - `key`: the member's name.
     ///
     /// Return: the member's value, borrowed until the map next changes.
-    pub fn emplace(self: *Map, gpa: std.mem.Allocator, key: []const u8) Error!*Value {
+    pub fn emplace(self: *Map, gpa: std.mem.Allocator, key: []const u8) mod.errors.Error!*Value {
         if (self.get(key)) |v| return v;
         try self.members.ensureUnusedCapacity(gpa, 1);
         const k = try gpa.dupe(u8, key);
@@ -167,7 +164,7 @@ pub const Value = union(Type) {
     /// - `s`: any bytes; need not be valid UTF-8 (`dump` decides).
     ///
     /// Return: the value, owned by the caller.
-    pub fn initString(gpa: std.mem.Allocator, s: []const u8) Error!Value {
+    pub fn initString(gpa: std.mem.Allocator, s: []const u8) mod.errors.Error!Value {
         return .{ .string = try gpa.dupe(u8, s) };
     }
 
@@ -183,7 +180,7 @@ pub const Value = union(Type) {
     /// - `x`: a bool, integer, float, string slice, null, optional or `Value`.
     ///
     /// Return: the value, owned by the caller.
-    pub fn from(gpa: std.mem.Allocator, x: anytype) Error!Value {
+    pub fn from(gpa: std.mem.Allocator, x: anytype) mod.errors.Error!Value {
         const T = @TypeOf(x);
         if (T == Value) return x;
         switch (@typeInfo(T)) {
@@ -254,7 +251,7 @@ pub const Value = union(Type) {
             .array, .object => stack.append(gpa, x.*) catch {
                 // the C's destructor is noexcept: a failed allocation of its
                 // stack ends the process
-                errors.writeStderr("json: out of memory destroying a value\n");
+                mod.errors.writeStderr("json: out of memory destroying a value\n");
                 std.process.abort();
             },
             else => {},
@@ -268,7 +265,7 @@ pub const Value = union(Type) {
     /// - `gpa`: the copy's allocator.
     ///
     /// Return: the copy, owned by the caller.
-    pub fn clone(self: *const Value, gpa: std.mem.Allocator) Error!Value {
+    pub fn clone(self: *const Value, gpa: std.mem.Allocator) mod.errors.Error!Value {
         return self.cloneAt(gpa, 0);
     }
 
@@ -278,7 +275,7 @@ pub const Value = union(Type) {
     /// deeper is copied by `cloneIteratively` without the call stack. The
     /// C keeps the depth in a thread-local count shared with `==`; neither
     /// reaches the other, so a parameter counts the same levels.
-    fn cloneAt(self: *const Value, gpa: std.mem.Allocator, depth: usize) Error!Value {
+    fn cloneAt(self: *const Value, gpa: std.mem.Allocator, depth: usize) mod.errors.Error!Value {
         switch (self.*) {
             .object, .array => if (depth >= nesting_depth_limit) return cloneIteratively(self, gpa),
             else => {},
@@ -322,7 +319,7 @@ pub const Value = union(Type) {
     /// has not been made yet wait on a worklist; until then each is null in
     /// the copy, so a copy cut short by a failed allocation is a valid tree
     /// that `deinit` frees.
-    fn cloneIteratively(src: *const Value, gpa: std.mem.Allocator) Error!Value {
+    fn cloneIteratively(src: *const Value, gpa: std.mem.Allocator) mod.errors.Error!Value {
         var root: Value = .null;
         errdefer root.deinit(gpa);
         var worklist: std.ArrayList(CopyWork) = .empty;
@@ -343,7 +340,7 @@ pub const Value = union(Type) {
     /// `src`'s copy in `dst`, every element created up front (so the
     /// pointers handed to the worklist stay valid) and each structured one
     /// left null on the worklist.
-    fn copyArrayLevel(src: *const Array, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) Error!void {
+    fn copyArrayLevel(src: *const Array, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) mod.errors.Error!void {
         var out: Array = .empty;
         try out.appendNTimes(gpa, .null, src.items.len);
         dst.* = .{ .array = out };
@@ -353,7 +350,7 @@ pub const Value = union(Type) {
     /// Ports `copy_object_level` (json.hpp:21290 @b1b770d90): the object
     /// `src`'s copy in `dst`, every key in order with a null value, then
     /// each value copied, or left null on the worklist if structured.
-    fn copyObjectLevel(src: *const Map, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) Error!void {
+    fn copyObjectLevel(src: *const Map, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) mod.errors.Error!void {
         dst.* = emptyObject();
         const out = &dst.object.members;
         try out.ensureTotalCapacity(gpa, src.members.items.len);
@@ -364,7 +361,7 @@ pub const Value = union(Type) {
     /// Ports `copy_shallow` (json.hpp:21249 @b1b770d90) and
     /// `copy_leaf_value` (json.hpp:21192 @b1b770d90): a leaf copied into the
     /// null `dst`, a container deferred to the worklist.
-    fn copyShallow(src: *const Value, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) Error!void {
+    fn copyShallow(src: *const Value, dst: *Value, gpa: std.mem.Allocator, worklist: *std.ArrayList(CopyWork)) mod.errors.Error!void {
         switch (src.*) {
             .object, .array => try worklist.append(gpa, .{ .src = src, .dst = dst }),
             .string => |s| dst.* = .{ .string = try gpa.dupe(u8, s) },
@@ -571,7 +568,7 @@ pub const Value = union(Type) {
             if (t == std.meta.activeTag(right.*) and (t == .array or t == .object)) {
                 // descend: the elements decide, and are compared further down
                 stack.append(a, .{ .lhs = left, .rhs = right }) catch {
-                    errors.writeStderr("json: out of memory comparing values\n");
+                    mod.errors.writeStderr("json: out of memory comparing values\n");
                     std.process.abort();
                 };
             } else {
@@ -621,10 +618,10 @@ pub const Value = union(Type) {
     /// if this is not an object or has no such member.
     ///
     /// Return: borrowed; valid until this value next changes.
-    pub fn at(self: *const Value, key: []const u8) Error!*Value {
+    pub fn at(self: *const Value, key: []const u8) mod.errors.Error!*Value {
         switch (self.*) {
-            .object => |*m| return m.get(key) orelse fail(.out_of_range, 403, "key '{s}' not found", .{key}),
-            else => return fail(.type_error, 304, "cannot use at() with {s}", .{self.typeName()}),
+            .object => |*m| return m.get(key) orelse mod.errors.fail(.out_of_range, 403, "key '{s}' not found", .{key}),
+            else => return mod.errors.fail(.type_error, 304, "cannot use at() with {s}", .{self.typeName()}),
         }
     }
 
@@ -632,13 +629,13 @@ pub const Value = union(Type) {
     /// (json.hpp:22802 @b1b770d90): element `idx`, bounds-checked.
     ///
     /// Return: borrowed; valid until this value next changes.
-    pub fn atIndex(self: *const Value, idx: usize) Error!*Value {
+    pub fn atIndex(self: *const Value, idx: usize) mod.errors.Error!*Value {
         switch (self.*) {
             .array => |*a| {
-                if (idx >= a.items.len) return fail(.out_of_range, 401, "array index {d} is out of range", .{idx});
+                if (idx >= a.items.len) return mod.errors.fail(.out_of_range, 401, "array index {d} is out of range", .{idx});
                 return &a.items[idx];
             },
-            else => return fail(.type_error, 304, "cannot use at() with {s}", .{self.typeName()}),
+            else => return mod.errors.fail(.type_error, 304, "cannot use at() with {s}", .{self.typeName()}),
         }
     }
 
@@ -647,11 +644,11 @@ pub const Value = union(Type) {
     /// added as null if absent; a null value becomes an object first.
     ///
     /// Return: borrowed; valid until this value next changes.
-    pub fn index(self: *Value, gpa: std.mem.Allocator, key: []const u8) Error!*Value {
+    pub fn index(self: *Value, gpa: std.mem.Allocator, key: []const u8) mod.errors.Error!*Value {
         if (self.* == .null) self.* = emptyObject();
         switch (self.*) {
             .object => |*m| return m.emplace(gpa, key),
-            else => return fail(.type_error, 305, "cannot use operator[] with a string argument with {s}", .{self.typeName()}),
+            else => return mod.errors.fail(.type_error, 305, "cannot use operator[] with a string argument with {s}", .{self.typeName()}),
         }
     }
 
@@ -660,14 +657,14 @@ pub const Value = union(Type) {
     /// padded with nulls up to it; a null value becomes an array first.
     ///
     /// Return: borrowed; valid until this value next changes.
-    pub fn indexAt(self: *Value, gpa: std.mem.Allocator, idx: usize) Error!*Value {
+    pub fn indexAt(self: *Value, gpa: std.mem.Allocator, idx: usize) mod.errors.Error!*Value {
         if (self.* == .null) self.* = emptyArray();
         switch (self.*) {
             .array => |*a| {
                 if (idx >= a.items.len) try a.appendNTimes(gpa, .null, idx + 1 - a.items.len);
                 return &a.items[idx];
             },
-            else => return fail(.type_error, 305, "cannot use operator[] with a numeric argument with {s}", .{self.typeName()}),
+            else => return mod.errors.fail(.type_error, 305, "cannot use operator[] with a numeric argument with {s}", .{self.typeName()}),
         }
     }
 
@@ -680,19 +677,19 @@ pub const Value = union(Type) {
     /// `GGML_ASSERT`, and aborts there and here.
     ///
     /// Return: borrowed; valid until this value next changes.
-    pub fn front(self: *Value) Error!*Value {
+    pub fn front(self: *Value) mod.errors.Error!*Value {
         return self.end(true);
     }
 
     /// Ports `common_json`'s `back` (json.cpp:294 @b1b770d90) over `back`
     /// (json.hpp:23272 @b1b770d90): as `front`, at the other end.
-    pub fn back(self: *Value) Error!*Value {
+    pub fn back(self: *Value) mod.errors.Error!*Value {
         return self.end(false);
     }
 
-    fn end(self: *Value, first: bool) Error!*Value {
+    fn end(self: *Value, first: bool) mod.errors.Error!*Value {
         switch (self.*) {
-            .null => return fail(.invalid_iterator, 214, "cannot get value", .{}),
+            .null => return mod.errors.fail(.invalid_iterator, 214, "cannot get value", .{}),
             .array => |*a| {
                 if (a.items.len == 0) jsonAssert("m_it.array_iterator != m_object->m_data.m_value.array->end()");
                 return &a.items[if (first) 0 else a.items.len - 1];
@@ -740,23 +737,23 @@ pub const Value = union(Type) {
     /// Ports `common_json`'s key `erase` (json.cpp:301 @b1b770d90)
     /// over `erase_internal` (json.hpp:23434 @b1b770d90): drops `key` if it
     /// is a member; an error if this is not an object.
-    pub fn erase(self: *Value, gpa: std.mem.Allocator, key: []const u8) Error!void {
+    pub fn erase(self: *Value, gpa: std.mem.Allocator, key: []const u8) mod.errors.Error!void {
         switch (self.*) {
             .object => |*m| _ = m.erase(gpa, key),
-            else => return fail(.type_error, 307, "cannot use erase() with {s}", .{self.typeName()}),
+            else => return mod.errors.fail(.type_error, 307, "cannot use erase() with {s}", .{self.typeName()}),
         }
     }
 
     /// Ports `common_json`'s index `erase` (json.cpp:305 @b1b770d90) over
     /// the index `erase` (json.hpp:23486 @b1b770d90).
-    pub fn eraseIndex(self: *Value, gpa: std.mem.Allocator, idx: usize) Error!void {
+    pub fn eraseIndex(self: *Value, gpa: std.mem.Allocator, idx: usize) mod.errors.Error!void {
         switch (self.*) {
             .array => |*a| {
-                if (idx >= a.items.len) return fail(.out_of_range, 401, "array index {d} is out of range", .{idx});
+                if (idx >= a.items.len) return mod.errors.fail(.out_of_range, 401, "array index {d} is out of range", .{idx});
                 var v = a.orderedRemove(idx);
                 v.deinit(gpa);
             },
-            else => return fail(.type_error, 307, "cannot use erase() with {s}", .{self.typeName()}),
+            else => return mod.errors.fail(.type_error, 307, "cannot use erase() with {s}", .{self.typeName()}),
         }
     }
 
@@ -778,7 +775,7 @@ pub const Value = union(Type) {
     /// - `gpa`: the tree's allocator.
     /// - `key`: the member's name.
     /// - `v`: moved in, even on error.
-    pub fn set(self: *Value, gpa: std.mem.Allocator, key: []const u8, v: Value) Error!void {
+    pub fn set(self: *Value, gpa: std.mem.Allocator, key: []const u8, v: Value) mod.errors.Error!void {
         var owned = v;
         const slot = self.index(gpa, key) catch |e| {
             owned.deinit(gpa);
@@ -794,11 +791,11 @@ pub const Value = union(Type) {
     /// Parameters:
     /// - `gpa`: the tree's allocator.
     /// - `v`: moved in, even on error.
-    pub fn pushBack(self: *Value, gpa: std.mem.Allocator, v: Value) Error!void {
+    pub fn pushBack(self: *Value, gpa: std.mem.Allocator, v: Value) mod.errors.Error!void {
         var owned = v;
         if (self.* != .null and self.* != .array) {
             owned.deinit(gpa);
-            return fail(.type_error, 308, "cannot use push_back() with {s}", .{self.typeName()});
+            return mod.errors.fail(.type_error, 308, "cannot use push_back() with {s}", .{self.typeName()});
         }
         if (self.* == .null) self.* = emptyArray();
         self.array.append(gpa, owned) catch |e| {
@@ -816,9 +813,9 @@ pub const Value = union(Type) {
     /// Parameters:
     /// - `gpa`: the tree's allocator.
     /// - `vals`: copied from; may be any value.
-    pub fn insert(self: *Value, gpa: std.mem.Allocator, vals: *const Value) Error!void {
-        if (self.* != .array) return fail(.type_error, 309, "cannot use insert() with {s}", .{self.typeName()});
-        if (vals == self) return fail(.invalid_iterator, 211, "passed iterators may not belong to container", .{});
+    pub fn insert(self: *Value, gpa: std.mem.Allocator, vals: *const Value) mod.errors.Error!void {
+        if (self.* != .array) return mod.errors.fail(.type_error, 309, "cannot use insert() with {s}", .{self.typeName()});
+        if (vals == self) return mod.errors.fail(.invalid_iterator, 211, "passed iterators may not belong to container", .{});
         if (vals.* != .array) return;
         const src = vals.array.items;
         try self.array.ensureUnusedCapacity(gpa, src.len);
@@ -848,13 +845,13 @@ pub const Value = union(Type) {
     /// integer's range saturates, as AArch64's `fcvtz*` does.
     ///
     /// Return: the value; a string is borrowed until this value next changes.
-    pub fn get(self: *const Value, comptime T: type) Error!T {
+    pub fn get(self: *const Value, comptime T: type) mod.errors.Error!T {
         if (T == bool) {
-            if (self.* != .boolean) return fail(.type_error, 302, "type must be boolean, but is {s}", .{self.typeName()});
+            if (self.* != .boolean) return mod.errors.fail(.type_error, 302, "type must be boolean, but is {s}", .{self.typeName()});
             return self.boolean;
         }
         if (T == []const u8) {
-            if (self.* != .string) return fail(.type_error, 302, "type must be string, but is {s}", .{self.typeName()});
+            if (self.* != .string) return mod.errors.fail(.type_error, 302, "type must be string, but is {s}", .{self.typeName()});
             return self.string;
         }
         switch (self.*) {
@@ -864,7 +861,7 @@ pub const Value = union(Type) {
             .boolean => |b| if (!isExactNumber(T)) return castNumber(T, @as(u8, @intFromBool(b))),
             else => {},
         }
-        return fail(.type_error, 302, "type must be number, but is {s}", .{self.typeName()});
+        return mod.errors.fail(.type_error, 302, "type must be number, but is {s}", .{self.typeName()});
     }
 
     /// Ports `get<std::vector<T>>()`, `COMMON_JSON_GET` (json.cpp:417 @b1b770d90)
@@ -876,8 +873,8 @@ pub const Value = union(Type) {
     /// - `T`: as `get` takes it.
     ///
     /// Return: owned by the caller; strings in it are borrowed from this value.
-    pub fn getSlice(self: *const Value, gpa: std.mem.Allocator, comptime T: type) Error![]T {
-        if (self.* != .array) return fail(.type_error, 302, "type must be array, but is {s}", .{self.typeName()});
+    pub fn getSlice(self: *const Value, gpa: std.mem.Allocator, comptime T: type) mod.errors.Error![]T {
+        if (self.* != .array) return mod.errors.fail(.type_error, 302, "type must be array, but is {s}", .{self.typeName()});
         const out = try gpa.alloc(T, self.array.items.len);
         errdefer gpa.free(out);
         for (self.array.items, 0..) |*v, i| out[i] = try v.get(T);
@@ -892,7 +889,7 @@ pub const Value = union(Type) {
     /// - `gpa`: allocates the result.
     ///
     /// Return: owned by the caller; the strings are borrowed from this value.
-    pub fn getStringSet(self: *const Value, gpa: std.mem.Allocator) Error![][]const u8 {
+    pub fn getStringSet(self: *const Value, gpa: std.mem.Allocator) mod.errors.Error![][]const u8 {
         const all = try self.getSlice(gpa, []const u8);
         errdefer gpa.free(all);
         std.mem.sort([]const u8, all, {}, stdlib.strings.lessThan);
@@ -921,8 +918,8 @@ pub const Value = union(Type) {
     /// - `T`: as `get` takes it.
     ///
     /// Return: owned by the caller; keys are borrowed from this value.
-    pub fn getMap(self: *const Value, gpa: std.mem.Allocator, comptime T: type) Error![]MapEntry(T) {
-        if (self.* != .object) return fail(.type_error, 302, "type must be object, but is {s}", .{self.typeName()});
+    pub fn getMap(self: *const Value, gpa: std.mem.Allocator, comptime T: type) mod.errors.Error![]MapEntry(T) {
+        if (self.* != .object) return mod.errors.fail(.type_error, 302, "type must be object, but is {s}", .{self.typeName()});
         const ms = self.object.members.items;
         const out = try gpa.alloc(MapEntry(T), ms.len);
         errdefer gpa.free(out);
@@ -935,7 +932,7 @@ pub const Value = union(Type) {
     /// on anything but an object this gives `def` rather than throwing.
     ///
     /// Return: as `get`.
-    pub fn value(self: *const Value, key: []const u8, comptime T: type, def: T) Error!T {
+    pub fn value(self: *const Value, key: []const u8, comptime T: type, def: T) mod.errors.Error!T {
         if (!self.contains(key)) return def;
         return (try self.at(key)).get(T);
     }
@@ -991,10 +988,10 @@ pub const Value = union(Type) {
     /// iterator's `key()` is.
     ///
     /// Return: borrowed until the value changes.
-    pub fn keyAt(self: *const Value, i: usize) Error![]const u8 {
+    pub fn keyAt(self: *const Value, i: usize) mod.errors.Error![]const u8 {
         switch (self.*) {
             .object => |*m| return m.members.items[i].key,
-            else => return fail(.invalid_iterator, 207, "cannot use key() for non-object iterators", .{}),
+            else => return mod.errors.fail(.invalid_iterator, 207, "cannot use key() for non-object iterators", .{}),
         }
     }
 };
@@ -1093,9 +1090,9 @@ test "operator[] and set keep the first position and the last value" {
     try testing.expectEqualStrings("b", v.object.members.items[0].key);
     try testing.expectEqual(@as(u64, 7), v.object.members.items[0].value.number_unsigned);
     try testing.expectError(error.JsonError, v.atIndex(0));
-    try testing.expectEqualStrings("[json.exception.type_error.304] cannot use at() with object", errors.what());
+    try testing.expectEqualStrings("[json.exception.type_error.304] cannot use at() with object", mod.errors.what());
     try testing.expectError(error.JsonError, v.at("zz"));
-    try testing.expectEqualStrings("[json.exception.out_of_range.403] key 'zz' not found", errors.what());
+    try testing.expectEqualStrings("[json.exception.out_of_range.403] key 'zz' not found", mod.errors.what());
     try v.erase(a, "b");
     try testing.expectEqual(@as(usize, 1), v.size());
 }
@@ -1104,7 +1101,7 @@ test "get follows from_json's two numeric overloads" {
     const t: Value = .{ .boolean = true };
     try testing.expectEqual(@as(i32, 1), try t.get(i32));
     try testing.expectError(error.JsonError, t.get(i64));
-    try testing.expectEqualStrings("[json.exception.type_error.302] type must be number, but is boolean", errors.what());
+    try testing.expectEqualStrings("[json.exception.type_error.302] type must be number, but is boolean", mod.errors.what());
     const f: Value = .{ .number_float = 3.0e10 };
     try testing.expectEqual(@as(i32, std.math.maxInt(i32)), try f.get(i32));
     try testing.expectEqual(@as(i64, 30000000000), try f.get(i64));

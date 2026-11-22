@@ -20,18 +20,11 @@
 //! the values this file bound.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const json = @import("json");
 const jinja = @import("zigjinja");
-const exception = @import("exception.zig");
-const msg_mod = @import("msg.zig");
-const template = @import("template.zig");
-const log = @import("log.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const Template = template.Template;
-const Render = template.Render;
 
 /// `g_jinja_debug` (runtime.h:15 @b1b770d90): the engine's debug switch,
 /// off unless a debugger sets it.
@@ -75,7 +68,7 @@ pub const Caps = struct {
     /// Ports `to_string` (caps.cpp:122 @b1b770d90).
     ///
     /// Return: owned by `a`.
-    pub fn toString(self: Caps, a: Allocator) Error![]u8 {
+    pub fn toString(self: Caps, a: Allocator) mod.exception.Error![]u8 {
         var out: std.ArrayList(u8) = .empty;
         try out.appendSlice(a, "Caps(\n");
         for (self.toMap()) |e| try out.print(a, "  {s}={s}\n", .{ e.name, if (e.value) "true" else "false" });
@@ -84,14 +77,14 @@ pub const Caps = struct {
     }
 
     /// The two of these that `messages_inp_normalizer` reads.
-    pub fn contentCaps(self: Caps) msg_mod.ContentCaps {
+    pub fn contentCaps(self: Caps) mod.msg.ContentCaps {
         return .{ .supports_string_content = self.supports_string_content, .supports_typed_content = self.supports_typed_content };
     }
 };
 
 /// One probe's render: its outcome, and the record of what it touched.
 const Probe = struct {
-    r: Render,
+    r: mod.template.Render,
     stats: jinja.stats.Stats,
     messages: jinja.Value = .null,
     tools: jinja.Value = .null,
@@ -127,7 +120,7 @@ const CtxFn = union(enum) {
 /// first it is retried once with an empty `reasoning_content` on every
 /// assistant turn that lacks one, for templates that require a thinking
 /// field on each (K2 Horizon's). `p` holds the last attempt.
-fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: []const u8, tools_json: ?[]const u8, ctx_fn: CtxFn) Error!?jinja.Value {
+fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const mod.template.Template, messages_json: []const u8, tools_json: ?[]const u8, ctx_fn: CtxFn) mod.exception.Error!?jinja.Value {
     var attempt: usize = 0;
     while (true) : (attempt += 1) {
         p.* = .{ .r = undefined, .stats = jinja.stats.Stats.init(gpa) };
@@ -138,12 +131,12 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
         // whether a failed first attempt has anything to retry with
         const retryable = attempt == 0 and try addEmptyReasoning(null, &msgs);
 
-        var vars = Value.emptyObject();
+        var vars = json.Value.emptyObject();
         try vars.set(a, "messages", msgs);
-        try vars.set(a, "tools", if (tools_json) |t| try json.parse(a, t) else Value.emptyArray());
-        try vars.set(a, "bos_token", try Value.from(a, ""));
-        try vars.set(a, "eos_token", try Value.from(a, ""));
-        try vars.set(a, "add_generation_prompt", try Value.from(a, true));
+        try vars.set(a, "tools", if (tools_json) |t| try json.parse(a, t) else json.Value.emptyArray());
+        try vars.set(a, "bos_token", try json.Value.from(a, ""));
+        try vars.set(a, "eos_token", try json.Value.from(a, ""));
+        try vars.set(a, "add_generation_prompt", try json.Value.from(a, true));
         try p.r.bindJson(&vars, true);
 
         var effort: ?jinja.Value = null;
@@ -151,11 +144,11 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
             .none => {},
             .preserve_reasoning => {
                 try p.r.set("enable_thinking", .{ .boolean = true });
-                try template.capsApplyPreserveReasoning(&p.r, true);
+                try mod.template.capsApplyPreserveReasoning(&p.r, true);
             },
             .reasoning_effort => |level| {
                 try p.r.set("enable_thinking", .{ .boolean = true });
-                effort = try template.capsApplyReasoningEffort(&p.r, level);
+                effort = try mod.template.capsApplyReasoningEffort(&p.r, level);
             },
         }
         p.messages = p.r.vars.get("messages").?;
@@ -187,13 +180,13 @@ fn tryExecute(p: *Probe, gpa: Allocator, tmpl: *const Template, messages_json: [
 /// With `a` null it only reports whether there is one to add.
 ///
 /// Return: whether a message lacked it.
-fn addEmptyReasoning(a: ?Allocator, msgs: *Value) Error!bool {
+fn addEmptyReasoning(a: ?Allocator, msgs: *json.Value) mod.exception.Error!bool {
     var added = false;
     var it = msgs.items();
     while (it.next()) |item| {
         const msg = item.value;
         if (msg.isObject() and std.mem.eql(u8, try msg.value("role", []const u8, ""), "assistant") and !msg.contains("reasoning_content")) {
-            if (a) |alloc| try msg.set(alloc, "reasoning_content", try Value.from(alloc, ""));
+            if (a) |alloc| try msg.set(alloc, "reasoning_content", try json.Value.from(alloc, ""));
             added = true;
         }
     }
@@ -235,7 +228,7 @@ fn toolCallMessages(comptime args: []const u8, comptime second_call: bool) []con
 /// the given effort, nothing when the template raises.
 ///
 /// Return: the text, owned by `gpa`, or null.
-fn renderEffort(gpa: Allocator, tmpl: *const Template, effort: []const u8) Error!?[]u8 {
+fn renderEffort(gpa: Allocator, tmpl: *const mod.template.Template, effort: []const u8) mod.exception.Error!?[]u8 {
     var p: Probe = undefined;
     _ = try tryExecute(&p, gpa, tmpl, "[{\"role\":\"user\",\"content\":\"User message\"}]", null, .{ .reasoning_effort = effort });
     defer p.deinit();
@@ -248,7 +241,7 @@ fn renderEffort(gpa: Allocator, tmpl: *const Template, effort: []const u8) Error
 /// the highest one is kept.
 ///
 /// Return: the levels, owned by `gpa`; the strings are static.
-fn reasoningEffortLevels(gpa: Allocator, tmpl: *const Template) Error![]const []const u8 {
+fn reasoningEffortLevels(gpa: Allocator, tmpl: *const mod.template.Template) mod.exception.Error![]const []const u8 {
     const candidates = [_][]const u8{ "minimal", "low", "medium", "high", "xhigh", "max" };
 
     const unknown = try renderEffort(gpa, tmpl, "REASONING_EFFORT_UNKNOWN");
@@ -283,7 +276,7 @@ fn reasoningEffortLevels(gpa: Allocator, tmpl: *const Template) Error![]const []
 
 /// Ports `caps_get` (caps.cpp:132 @b1b770d90): the template rendered over
 /// the probes, each capability read off what the render touched.
-pub fn capsGet(tmpl: *const Template) Error!Caps {
+pub fn capsGet(tmpl: *const mod.template.Template) mod.exception.Error!Caps {
     const gpa = tmpl.gpa;
     var result: Caps = .{};
 
@@ -407,7 +400,7 @@ pub fn capsGet(tmpl: *const Template) Error!Caps {
     if (jinja_debug) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);
         defer arena_state.deinit();
-        log.dbg("{s}\n", .{try result.toString(arena_state.allocator())});
+        mod.log.dbg("{s}\n", .{try result.toString(arena_state.allocator())});
     }
     return result;
 }
@@ -420,7 +413,7 @@ test {
 }
 
 test "a template that tests content for a string checks typed content too" {
-    var t = try Template.init(std.testing.allocator,
+    var t = try mod.template.Template.init(std.testing.allocator,
         \\{% for m in messages %}{% if m.content is string %}{{ m.content }}{% else %}{% for p in m.content %}{{ p.text }}{% endfor %}{% endif %}{% endfor %}
     , "", "");
     defer t.deinit();

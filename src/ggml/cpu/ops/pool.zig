@@ -21,15 +21,8 @@
 //! bug upstream, not here.
 
 const std = @import("std");
-const libcxx = @import("stdlib").libcxx;
-const impl = @import("../../impl.zig");
-const convert = @import("../convert.zig");
-const common = @import("common.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
-const fp16 = c.ggml_fp16_t;
+const ggml = @import("../../module.zig");
+const stdlib = @import("stdlib");
 
 /// `FLT_MAX`, which the max pools start from negated.
 const flt_max = std.math.floatMax(f32);
@@ -38,7 +31,7 @@ const flt_max = std.math.floatMax(f32);
 inline fn loadF32(is_f32: bool, row: [*]const u8, j: i64) f32 {
     const i: usize = @intCast(j);
     if (is_f32) return @as([*]const f32, @ptrCast(@alignCast(row)))[i];
-    return impl.fp16ToFp32(@as([*]const fp16, @ptrCast(@alignCast(row)))[i]);
+    return ggml.impl.fp16ToFp32(@as([*]const ggml.impl.c.ggml_fp16_t, @ptrCast(@alignCast(row)))[i]);
 }
 
 /// Ports `ggml_compute_forward_pool_1d_ksp` (ops.cpp:7789 @b1b770d90).
@@ -46,18 +39,18 @@ inline fn loadF32(is_f32: bool, row: [*]const u8, j: i64) f32 {
 /// Parameters:
 /// - `op`: `GGML_OP_POOL_AVG` or `GGML_OP_POOL_MAX`.
 /// - `k`, `s`, `p`: kernel size, stride and padding.
-fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i32, p: i32, dst: *Tensor) void {
-    const src = impl.one(Tensor, dst.src[0]);
+fn pool1dKsp(params: *const ggml.cpu.defs.ComputeParams, op: ggml.impl.c.enum_ggml_op_pool, k: i32, s: i32, p: i32, dst: *ggml.impl.c.ggml_tensor) void {
+    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    std.debug.assert(src.type == c.GGML_TYPE_F32 or src.type == c.GGML_TYPE_F16);
+    std.debug.assert(src.type == ggml.impl.c.GGML_TYPE_F32 or src.type == ggml.impl.c.GGML_TYPE_F16);
 
     if (params.ith != 0) return;
 
     const IW = src.ne[0];
     const OW = dst.ne[0];
 
-    const nr: i64 = @intCast(c.ggml_nrows(src));
-    const is_f32 = src.type == c.GGML_TYPE_F32;
+    const nr: i64 = @intCast(ggml.impl.c.ggml_nrows(src));
+    const is_f32 = src.type == ggml.impl.c.GGML_TYPE_F32;
 
     const sd: [*]const u8 = @ptrCast(src.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);
@@ -71,9 +64,9 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
         while (ow < OW) : (ow += 1) {
             var res: f32 = 0;
             switch (op) {
-                c.GGML_OP_POOL_AVG => res = 0.0,
-                c.GGML_OP_POOL_MAX => res = -flt_max,
-                c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                ggml.impl.c.GGML_OP_POOL_AVG => res = 0.0,
+                ggml.impl.c.GGML_OP_POOL_MAX => res = -flt_max,
+                ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                 else => {},
             }
 
@@ -88,9 +81,9 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
                 const v = loadF32(is_f32, srow_bytes, j);
 
                 switch (op) {
-                    c.GGML_OP_POOL_AVG => res += v,
-                    c.GGML_OP_POOL_MAX => res = libcxx.max(f32, v, res),
-                    c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                    ggml.impl.c.GGML_OP_POOL_AVG => res += v,
+                    ggml.impl.c.GGML_OP_POOL_MAX => res = stdlib.libcxx.max(f32, v, res),
+                    ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                     else => {},
                 }
 
@@ -98,9 +91,9 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
             }
 
             switch (op) {
-                c.GGML_OP_POOL_AVG => res = if (count > 0) res / @as(f32, @floatFromInt(count)) else 0.0,
-                c.GGML_OP_POOL_MAX => {},
-                c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                ggml.impl.c.GGML_OP_POOL_AVG => res = if (count > 0) res / @as(f32, @floatFromInt(count)) else 0.0,
+                ggml.impl.c.GGML_OP_POOL_MAX => {},
+                ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                 else => {},
             }
 
@@ -110,9 +103,9 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
 }
 
 /// Ports `ggml_compute_forward_pool_1d` (ops.cpp:7860 @b1b770d90).
-pub export fn ggml_compute_forward_pool_1d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
+pub export fn ggml_compute_forward_pool_1d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
     const opts = dst.op_params;
-    const op: c.enum_ggml_op_pool = @bitCast(opts[0]);
+    const op: ggml.impl.c.enum_ggml_op_pool = @bitCast(opts[0]);
     const k0 = opts[1];
     const s0 = opts[2];
     const p0 = opts[3];
@@ -124,16 +117,16 @@ pub export fn ggml_compute_forward_pool_1d(params: *const ComputeParams, dst: *T
 ///
 /// Walks `src` one `nb[2]` plane at a time until its bytes run out, so the
 /// third and fourth dimensions are flattened together.
-pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_pool_2d(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    std.debug.assert(src.type == c.GGML_TYPE_F32 or src.type == c.GGML_TYPE_F16);
+    std.debug.assert(src.type == ggml.impl.c.GGML_TYPE_F32 or src.type == ggml.impl.c.GGML_TYPE_F16);
 
     if (params.ith != 0) return;
 
     const opts = dst.op_params;
 
-    const op: c.enum_ggml_op_pool = @bitCast(opts[0]);
+    const op: ggml.impl.c.enum_ggml_op_pool = @bitCast(opts[0]);
     const k0 = opts[1];
     const k1 = opts[2];
     const s0 = opts[3];
@@ -141,7 +134,7 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
     const p0 = opts[5];
     const p1 = opts[6];
     var cdata: [*]const u8 = @ptrCast(src.data.?);
-    const data_end = cdata + c.ggml_nbytes(src);
+    const data_end = cdata + ggml.impl.c.ggml_nbytes(src);
 
     const px = dst.ne[0];
     const py = dst.ne[1];
@@ -153,7 +146,7 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
     const offset0 = -p0;
     const offset1 = -p1;
 
-    const is_f32 = src.type == c.GGML_TYPE_F32;
+    const is_f32 = src.type == ggml.impl.c.GGML_TYPE_F32;
 
     while (@intFromPtr(cdata) < @intFromPtr(data_end)) {
         var oy: i32 = 0;
@@ -165,9 +158,9 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
             while (ox < px) : (ox += 1) {
                 var res: f32 = 0;
                 switch (op) {
-                    c.GGML_OP_POOL_AVG => res = 0,
-                    c.GGML_OP_POOL_MAX => res = -flt_max,
-                    c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                    ggml.impl.c.GGML_OP_POOL_AVG => res = 0,
+                    ggml.impl.c.GGML_OP_POOL_MAX => res = -flt_max,
+                    ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                     else => {},
                 }
 
@@ -186,17 +179,17 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
 
                         const srow_j = loadF32(is_f32, srow, j);
                         switch (op) {
-                            c.GGML_OP_POOL_AVG => res += srow_j,
-                            c.GGML_OP_POOL_MAX => res = libcxx.max(f32, srow_j, res),
-                            c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                            ggml.impl.c.GGML_OP_POOL_AVG => res += srow_j,
+                            ggml.impl.c.GGML_OP_POOL_MAX => res = stdlib.libcxx.max(f32, srow_j, res),
+                            ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                             else => {},
                         }
                     }
                 }
                 switch (op) {
-                    c.GGML_OP_POOL_AVG => res /= @as(f32, @floatFromInt(ka)),
-                    c.GGML_OP_POOL_MAX => {},
-                    c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
+                    ggml.impl.c.GGML_OP_POOL_AVG => res /= @as(f32, @floatFromInt(ka)),
+                    ggml.impl.c.GGML_OP_POOL_MAX => {},
+                    ggml.impl.c.GGML_OP_POOL_COUNT => ggml.impl.abort("fatal error"),
                     else => {},
                 }
 
@@ -214,16 +207,16 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
 /// `src` is the gradient of the pooled output and `src[1]` the forward input.
 /// Note the forward tensor is read through `dst`'s type and row stride, as in
 /// the C — the two are the same shape and type by construction.
-pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src = impl.one(Tensor, dst.src[0]);
-    const dstf = impl.one(Tensor, dst.src[1]); // forward tensor of dst
+pub export fn ggml_compute_forward_pool_2d_back(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const dstf = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // forward tensor of dst
 
-    std.debug.assert(dst.type == c.GGML_TYPE_F32 or dst.type == c.GGML_TYPE_F16);
+    std.debug.assert(dst.type == ggml.impl.c.GGML_TYPE_F32 or dst.type == ggml.impl.c.GGML_TYPE_F16);
 
     if (params.ith != 0) return;
 
     const opts = dst.op_params;
-    const op: c.enum_ggml_op_pool = @bitCast(opts[0]);
+    const op: ggml.impl.c.enum_ggml_op_pool = @bitCast(opts[0]);
     const k0 = opts[1];
     const k1 = opts[2];
     const s0 = opts[3];
@@ -233,10 +226,10 @@ pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, ds
 
     var cdata: [*]u8 = @ptrCast(dst.data.?);
     var cdataf: [*]const u8 = @ptrCast(dstf.data.?);
-    const nbytes = c.ggml_nbytes(dst);
+    const nbytes = ggml.impl.c.ggml_nbytes(dst);
     const data_end = cdata + nbytes;
 
-    impl.assert(params.ith == 0, "params->ith == 0");
+    ggml.impl.assert(params.ith == 0, "params->ith == 0");
     @memset(cdata[0..nbytes], 0);
 
     const px = src.ne[0];
@@ -249,7 +242,7 @@ pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, ds
     const offset0 = -p0;
     const offset1 = -p1;
 
-    const is_f32 = dst.type == c.GGML_TYPE_F32;
+    const is_f32 = dst.type == ggml.impl.c.GGML_TYPE_F32;
 
     while (@intFromPtr(cdata) < @intFromPtr(data_end)) {
         var oy: i32 = 0;
@@ -262,7 +255,7 @@ pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, ds
                 const ix = offset0 + ox * s0;
                 const iy = offset1 + oy * s1;
 
-                if (op == c.GGML_OP_POOL_MAX) {
+                if (op == ggml.impl.c.GGML_OP_POOL_MAX) {
                     var maxval: f32 = -flt_max;
                     var kxmax: i32 = -1;
                     var kymax: i32 = -1;
@@ -292,10 +285,10 @@ pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, ds
                     if (is_f32) {
                         @as([*]f32, @ptrCast(@alignCast(drow)))[j] += grad0;
                     } else {
-                        const d16: [*]fp16 = @ptrCast(@alignCast(drow));
-                        d16[j] = convert.cpuFp32ToFp16(grad0 + impl.fp16ToFp32(d16[j]));
+                        const d16: [*]ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(drow));
+                        d16[j] = ggml.cpu.convert.cpuFp32ToFp16(grad0 + ggml.impl.fp16ToFp32(d16[j]));
                     }
-                } else if (op == c.GGML_OP_POOL_AVG) {
+                } else if (op == ggml.impl.c.GGML_OP_POOL_AVG) {
                     const grad = grad0 / @as(f32, @floatFromInt(ka));
 
                     var ky: i32 = 0;
@@ -313,13 +306,13 @@ pub export fn ggml_compute_forward_pool_2d_back(params: *const ComputeParams, ds
                             } else {
                                 // Integer add of two f16 encodings; see the
                                 // file header.
-                                const d16: [*]fp16 = @ptrCast(@alignCast(drow));
-                                d16[jj] +%= convert.cpuFp32ToFp16(grad);
+                                const d16: [*]ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(drow));
+                                d16[jj] +%= ggml.cpu.convert.cpuFp32ToFp16(grad);
                             }
                         }
                     }
                 } else {
-                    impl.assert(false, "false");
+                    ggml.impl.assert(false, "false");
                 }
             }
         }
@@ -339,8 +332,8 @@ test {
 
 test "libcxx.max returns its first argument when either is NaN, as std::max does" {
     const nan = std.math.nan(f32);
-    try std.testing.expect(std.math.isNan(libcxx.max(f32, nan, 1.0)));
-    try std.testing.expectEqual(@as(f32, 1.0), libcxx.max(f32, 1.0, nan));
-    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 1.0, 2.0));
-    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 2.0, 1.0));
+    try std.testing.expect(std.math.isNan(stdlib.libcxx.max(f32, nan, 1.0)));
+    try std.testing.expectEqual(@as(f32, 1.0), stdlib.libcxx.max(f32, 1.0, nan));
+    try std.testing.expectEqual(@as(f32, 2.0), stdlib.libcxx.max(f32, 1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 2.0), stdlib.libcxx.max(f32, 2.0, 1.0));
 }

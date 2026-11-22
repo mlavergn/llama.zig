@@ -13,30 +13,29 @@
 //! step.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
-const stdio = @import("stdlib").stdio;
+const stdlib = @import("stdlib");
 
 /// `fprintf(stream, fmt, ...)`: the C's format, written to `stream`.
-pub fn fprintf(s: *stdio.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
+pub fn fprintf(s: *stdlib.stdio.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
     var stack: [1024]u8 = undefined;
-    const n = @call(.auto, libc.snprintf, .{ &stack, stack.len, fmt } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &stack, stack.len, fmt } ++ args);
     if (n < 0) return;
     const len: usize = @intCast(n);
     if (len < stack.len) return s.write(stack[0..len]);
     const heap = std.heap.page_allocator.alloc(u8, len + 1) catch return;
     defer std.heap.page_allocator.free(heap);
-    _ = @call(.auto, libc.snprintf, .{ heap.ptr, heap.len, fmt } ++ args);
+    _ = @call(.auto, stdlib.libc.snprintf, .{ heap.ptr, heap.len, fmt } ++ args);
     s.write(heap[0..len]);
 }
 
 /// `printf(fmt, ...)`.
 pub fn printf(comptime fmt: [*:0]const u8, args: anytype) void {
-    fprintf(stdio.stdout(), fmt, args);
+    fprintf(stdlib.stdio.stdout(), fmt, args);
 }
 
 /// `fprintf(stderr, fmt, ...)`.
 pub fn eprintf(comptime fmt: [*:0]const u8, args: anytype) void {
-    fprintf(stdio.stderr(), fmt, args);
+    fprintf(stdlib.stdio.stderr(), fmt, args);
 }
 
 // -----------------------------------------------------------------------------

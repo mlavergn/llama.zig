@@ -64,15 +64,11 @@
 //! pre-routing lambda keeps a reference to `common_params`.
 
 const std = @import("std");
+const cli_fit = @import("cli_fit");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const httplib = @import("httplib/module.zig");
 const tools_common = @import("tools_common");
-const json = @import("cli_fit").json;
-const libcxx = @import("stdlib").libcxx;
 const ui = @import("ui.zig");
-
-const log = tools_common.log;
 
 /// `__func__` inside a C++ lambda.
 const lambda = "operator()";
@@ -110,7 +106,7 @@ pub fn throwRuntimeError(msg: []const u8) error{RuntimeError} {
 pub fn what(err: anyerror) ?[]const u8 {
     return switch (err) {
         error.InvalidArgument, error.RuntimeError => what_buf[0..what_len],
-        error.JsonError => json.what(),
+        error.JsonError => cli_fit.json.what(),
         error.OutOfMemory => "std::bad_alloc",
         else => null,
     };
@@ -135,7 +131,7 @@ pub const ErrorType = enum {
 /// `{"code", "message", "type"}`.
 ///
 /// Return: the object, owned by the caller.
-pub fn formatErrorResponse(a: std.mem.Allocator, msg: []const u8, ty: ErrorType) json.Error!json.Value {
+pub fn formatErrorResponse(a: std.mem.Allocator, msg: []const u8, ty: ErrorType) cli_fit.json.Error!cli_fit.json.Value {
     const type_str: []const u8, const code: i64 = switch (ty) {
         .invalid_request => .{ "invalid_request_error", 400 },
         .authentication => .{ "authentication_error", 401 },
@@ -146,11 +142,11 @@ pub fn formatErrorResponse(a: std.mem.Allocator, msg: []const u8, ty: ErrorType)
         .unavailable => .{ "unavailable_error", 503 },
         .exceed_context_size => .{ "exceed_context_size_error", 400 },
     };
-    var v = json.Value.emptyObject();
+    var v = cli_fit.json.Value.emptyObject();
     errdefer v.deinit(a);
-    try v.set(a, "code", try json.Value.from(a, code));
-    try v.set(a, "message", try json.Value.initString(a, msg));
-    try v.set(a, "type", try json.Value.initString(a, type_str));
+    try v.set(a, "code", try cli_fit.json.Value.from(a, code));
+    try v.set(a, "message", try cli_fit.json.Value.initString(a, msg));
+    try v.set(a, "type", try cli_fit.json.Value.initString(a, type_str));
     return v;
 }
 
@@ -158,19 +154,19 @@ pub fn formatErrorResponse(a: std.mem.Allocator, msg: []const u8, ty: ErrorType)
 /// bad UTF-8 replaced.
 ///
 /// Return: allocated by `a`.
-pub fn safeJsonToStr(a: std.mem.Allocator, v: *const json.Value) error{OutOfMemory}![]u8 {
-    return json.dumpSafe(a, v, -1);
+pub fn safeJsonToStr(a: std.mem.Allocator, v: *const cli_fit.json.Value) error{OutOfMemory}![]u8 {
+    return cli_fit.json.dumpSafe(a, v, -1);
 }
 
 /// `{"error": {"message": msg, "type": type_str, "code": code}}`, the
 /// literal `server-http.cpp` writes for its own errors, as text.
-fn errorBody(a: std.mem.Allocator, msg: []const u8, type_str: []const u8, code: i64) json.Error![]u8 {
-    var inner = json.Value.emptyObject();
+fn errorBody(a: std.mem.Allocator, msg: []const u8, type_str: []const u8, code: i64) cli_fit.json.Error![]u8 {
+    var inner = cli_fit.json.Value.emptyObject();
     errdefer inner.deinit(a);
-    try inner.set(a, "message", try json.Value.initString(a, msg));
-    try inner.set(a, "type", try json.Value.initString(a, type_str));
-    try inner.set(a, "code", try json.Value.from(a, code));
-    var outer = json.Value.emptyObject();
+    try inner.set(a, "message", try cli_fit.json.Value.initString(a, msg));
+    try inner.set(a, "type", try cli_fit.json.Value.initString(a, type_str));
+    try inner.set(a, "code", try cli_fit.json.Value.from(a, code));
+    var outer = cli_fit.json.Value.emptyObject();
     defer outer.deinit(a);
     try outer.set(a, "error", inner);
     return safeJsonToStr(a, &outer);
@@ -346,23 +342,23 @@ fn cz(a: std.mem.Allocator, s: []const u8) [*:0]const u8 {
 }
 
 fn srvDbg(comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
-    log.dbg("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
+    tools_common.log.dbg("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
 }
 
 fn srvTrc(comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
-    log.trc("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
+    tools_common.log.trc("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
 }
 
 fn srvInf(comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
-    log.inf("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
+    tools_common.log.inf("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
 }
 
 fn srvWrn(comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
-    log.wrn("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
+    tools_common.log.wrn("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
 }
 
 fn srvErr(comptime func: []const u8, comptime fmt: []const u8, args: anytype) void {
-    log.err("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
+    tools_common.log.err("srv  %12.*s: " ++ fmt, .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") } ++ args);
 }
 
 // -----------------------------------------------------------------------------
@@ -715,7 +711,7 @@ pub const Context = struct {
     managed_by_router: bool = false,
     /// Every route registered, by path without the prefix: libc++'s
     /// `unordered_map`, whose order `register_gcp_compat` reads.
-    handlers: libcxx.StringMap(Handler),
+    handlers: stdlib.libcxx.StringMap(Handler),
     path_prefix: []const u8 = "",
     port: c_int = 9931,
     is_ssl: bool = false,
@@ -740,7 +736,7 @@ pub const Context = struct {
     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!Context {
         return .{
             .allocator = allocator,
-            .handlers = try libcxx.StringMap(Handler).init(allocator),
+            .handlers = try stdlib.libcxx.StringMap(Handler).init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
@@ -1271,7 +1267,7 @@ pub const Context = struct {
         /// The `conn_impl` of `ws`: `ws_conn` over cpp-httplib's socket.
         const ConnImpl = struct {
             sock: *httplib.ws.WebSocket,
-            mutex_send: sync.Mutex = .{},
+            mutex_send: stdlib.sync.Mutex = .{},
 
             fn selfOf(ctx: *anyopaque) *ConnImpl {
                 return @ptrCast(@alignCast(ctx));
@@ -1341,7 +1337,7 @@ pub const Context = struct {
         };
         if (route.kind == .post and try req.isMultipartFormData()) {
             // translate text fields to a JSON object and use it as the body
-            var form_json = json.Value.emptyObject();
+            var form_json = cli_fit.json.Value.emptyObject();
             defer form_json.deinit(a);
             for (req.form.fields.entries.items) |e| {
                 const content = e.value.content.items;
@@ -1350,16 +1346,16 @@ pub const Context = struct {
                     const slot = try form_json.index(a, e.key);
                     if (!slot.isArray()) {
                         const existing_value = try slot.clone(a);
-                        var arr = json.Value.emptyArray();
+                        var arr = cli_fit.json.Value.emptyArray();
                         try arr.pushBack(a, existing_value);
                         slot.assign(a, arr);
                     }
-                    try slot.pushBack(a, try json.Value.initString(a, content));
+                    try slot.pushBack(a, try cli_fit.json.Value.initString(a, content));
                 } else {
-                    try form_json.set(a, e.key, try json.Value.initString(a, content));
+                    try form_json.set(a, e.key, try cli_fit.json.Value.initString(a, content));
                 }
             }
-            request.body = try json.dump(a, &form_json, -1);
+            request.body = try cli_fit.json.dump(a, &form_json, -1);
 
             // populate files from multipart form
             for (req.form.files.entries.items) |e| {
@@ -1387,7 +1383,7 @@ pub const Context = struct {
 
         // camelCase alias -> canonical path (first registration wins on collision)
         const predict = try a.create(Predict);
-        predict.* = .{ .ctx = self, .alias_to_path = try libcxx.StringMap([]const u8).init(a) };
+        predict.* = .{ .ctx = self, .alias_to_path = try stdlib.libcxx.StringMap([]const u8).init(a) };
         var it = self.handlers.iterator();
         while (it.next()) |e| {
             const path = try a.dupe(u8, e.key);
@@ -1531,7 +1527,7 @@ fn processHandlerResponse(request: *Req, response: *Res, res: *httplib.Response)
 /// it captures.
 const Predict = struct {
     ctx: *Context,
-    alias_to_path: libcxx.StringMap([]const u8),
+    alias_to_path: stdlib.libcxx.StringMap([]const u8),
 
     const max_instances: usize = 128;
 
@@ -1542,7 +1538,7 @@ const Predict = struct {
         res.status = 400;
         var err = try formatErrorResponse(a, msg, .invalid_request);
         errdefer err.deinit(a);
-        var outer = json.Value.emptyObject();
+        var outer = cli_fit.json.Value.emptyObject();
         defer outer.deinit(a);
         try outer.set(a, "error", err);
         try res.setData(try safeJsonToStr(a, &outer));
@@ -1550,10 +1546,10 @@ const Predict = struct {
     }
 
     /// `build_error`: `{"error": format_error_response(...)}`.
-    fn buildError(a: std.mem.Allocator, msg: []const u8, ty: ErrorType) json.Error!json.Value {
+    fn buildError(a: std.mem.Allocator, msg: []const u8, ty: ErrorType) cli_fit.json.Error!cli_fit.json.Value {
         var err = try formatErrorResponse(a, msg, ty);
         errdefer err.deinit(a);
-        var outer = json.Value.emptyObject();
+        var outer = cli_fit.json.Value.emptyObject();
         try outer.set(a, "error", err);
         return outer;
     }
@@ -1561,12 +1557,12 @@ const Predict = struct {
     /// Ports `parse_gcp_predict_response` (server-http.cpp:963 @b1b770d90):
     /// a route's body as JSON, as a string when it is not JSON, null when
     /// empty; a stream is refused.
-    fn parseGcpPredictResponse(a: std.mem.Allocator, res: ?*Res) !json.Value {
+    fn parseGcpPredictResponse(a: std.mem.Allocator, res: ?*Res) !cli_fit.json.Value {
         const r = res orelse return throwRuntimeError("empty response from internal handler");
         if (r.isStream()) return throwInvalidArgument("predict route does not support streaming responses");
         if (r.data.items.len == 0) return .null;
-        return json.parse(a, r.data.items) catch |e| switch (e) {
-            error.JsonError => json.Value.initString(a, r.data.items),
+        return cli_fit.json.parse(a, r.data.items) catch |e| switch (e) {
+            error.JsonError => cli_fit.json.Value.initString(a, r.data.items),
             else => e,
         };
     }
@@ -1575,8 +1571,8 @@ const Predict = struct {
     const Job = struct {
         predict: *const Predict,
         req: *const Req,
-        instance: *const json.Value,
-        result: json.Value = .null,
+        instance: *const cli_fit.json.Value,
+        result: cli_fit.json.Value = .null,
         oom: bool = false,
 
         fn run(job: *Job) void {
@@ -1587,7 +1583,7 @@ const Predict = struct {
             };
         }
 
-        fn compute(job: *Job, a: std.mem.Allocator) error{OutOfMemory}!json.Value {
+        fn compute(job: *Job, a: std.mem.Allocator) error{OutOfMemory}!cli_fit.json.Value {
             const instance = job.instance;
             if (!instance.isObject()) return buildError(a, "each instance must be a JSON object", .invalid_request) catch |e| return toOom(e);
             const fmt_val = instance.at("@requestFormat") catch null;
@@ -1600,13 +1596,13 @@ const Predict = struct {
         }
 
         /// A `json.Error` building an error object can only be memory.
-        fn toOom(e: json.Error) error{OutOfMemory} {
+        fn toOom(e: cli_fit.json.Error) error{OutOfMemory} {
             return switch (e) {
                 error.OutOfMemory, error.JsonError => error.OutOfMemory,
             };
         }
 
-        fn dispatch(job: *Job, a: std.mem.Allocator) !json.Value {
+        fn dispatch(job: *Job, a: std.mem.Allocator) !cli_fit.json.Value {
             const self = job.predict;
             var payload = try job.instance.clone(a);
             defer payload.deinit(a);
@@ -1614,7 +1610,7 @@ const Predict = struct {
             try payload.erase(a, "@requestFormat");
             if (payload.contains("stream")) {
                 srvWrn(lambda, "%s", .{@as([*:0]const u8, "ignoring client-provided stream field in instance, streaming is not supported in predict route\n")});
-                try payload.set(a, "stream", try json.Value.from(a, false));
+                try payload.set(a, "stream", try cli_fit.json.Value.from(a, false));
             }
             // accept both camelCase aliases (e.g. "chatCompletions") and direct paths
             var dispatch_path: []const u8 = undefined;
@@ -1631,7 +1627,7 @@ const Predict = struct {
                 .headers = job.req.headers,
                 .path = try std.mem.concat(a, u8, &.{ self.ctx.path_prefix, dispatch_path }),
                 .query_string = job.req.query_string,
-                .body = try json.dump(a, &payload, -1),
+                .body = try cli_fit.json.dump(a, &payload, -1),
                 .should_stop = job.req.should_stop,
             };
             const handler = self.ctx.handlers.get(dispatch_path).?.*;
@@ -1644,8 +1640,8 @@ const Predict = struct {
     fn handle(ctx: ?*anyopaque, req: *const Req) anyerror!*Res {
         const self: *Predict = @ptrCast(@alignCast(ctx.?));
         const a = std.heap.c_allocator;
-        var data = json.parse(a, req.body) catch |e| switch (e) {
-            error.JsonError => return badRequest(json.what()),
+        var data = cli_fit.json.parse(a, req.body) catch |e| switch (e) {
+            error.JsonError => return badRequest(cli_fit.json.what()),
             else => return e,
         };
         defer data.deinit(a);
@@ -1670,7 +1666,7 @@ const Predict = struct {
             threads[i] = std.Thread.spawn(.{}, Job.run, .{&jobs[i]}) catch null;
             if (threads[i] == null) jobs[i].run();
         }
-        var predictions = json.Value.emptyArray();
+        var predictions = cli_fit.json.Value.emptyArray();
         defer predictions.deinit(a);
         var oom = false;
         for (0..n) |i| {
@@ -1685,7 +1681,7 @@ const Predict = struct {
 
         const res = try Res.create(a);
         errdefer res.destroy();
-        var outer = json.Value.emptyObject();
+        var outer = cli_fit.json.Value.emptyObject();
         defer outer.deinit(res.allocator());
         try outer.set(res.allocator(), "predictions", try predictions.clone(res.allocator()));
         try res.setData(try safeJsonToStr(res.allocator(), &outer));

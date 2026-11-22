@@ -7,17 +7,10 @@
 //! Ported from `llama.cpp/src/llama-vocab.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const unicode = @import("../unicode.zig");
-const vm = @import("module.zig");
-
-const allocator = impl.allocator;
-const Vocab = vm.Vocab;
-const Token = vm.Token;
-const token_null = vm.vocab.token_null;
+const llama = @import("../module.zig");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 /// Ports `llm_tokenizer_wpm_session`'s `tokenize` (llama-vocab.cpp:872
@@ -30,15 +23,15 @@ fn oom() noreturn {
 /// - `exc`: receives what is thrown.
 ///
 /// Return: nothing, or `error.Thrown` from `unicode_cpt_to_utf8`.
-pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+pub fn tokenize(vocab: *const llama.vocab.Vocab, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
     var words = try preprocess(text, vocab.normalizer_opts, exc);
     defer {
-        for (words.items) |*w| w.deinit(allocator);
-        words.deinit(allocator);
+        for (words.items) |*w| w.deinit(std.heap.c_allocator);
+        words.deinit(std.heap.c_allocator);
     }
 
     var word1: std.ArrayList(u8) = .empty;
-    defer word1.deinit(allocator);
+    defer word1.deinit(std.heap.c_allocator);
 
     for (words.items) |word| {
         // skip empty words
@@ -46,8 +39,8 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
 
         // prepend phantom space
         word1.clearRetainingCapacity();
-        word1.appendSlice(allocator, "\xe2\x96\x81") catch oom();
-        word1.appendSlice(allocator, word.items) catch oom();
+        word1.appendSlice(std.heap.c_allocator, "\xe2\x96\x81") catch oom();
+        word1.appendSlice(std.heap.c_allocator, word.items) catch oom();
         const n: i32 = @intCast(word1.items.len);
 
         const current_tokens = output.items.len;
@@ -60,8 +53,8 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
             var j: i32 = @min(n, i + vocab.max_token_len + 1);
             while (j > i) : (j -= 1) {
                 const id = vocab.textToToken(word1.items[@intCast(i)..@intCast(j)]);
-                if (id != token_null) {
-                    output.append(allocator, id) catch oom();
+                if (id != llama.vocab.vocab.token_null) {
+                    output.append(std.heap.c_allocator, id) catch oom();
                     match = true;
                     i = j - 1;
                     break;
@@ -75,7 +68,7 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
         }
 
         // we didn't find any matches for this word
-        if (current_tokens == output.items.len) output.append(allocator, vocab.special_unk_id) catch oom();
+        if (current_tokens == output.items.len) output.append(std.heap.c_allocator, vocab.special_unk_id) catch oom();
     }
 }
 
@@ -85,27 +78,27 @@ pub fn tokenize(vocab: *const Vocab, text: []const u8, output: *std.ArrayList(To
 /// Chinese characters each a word of their own.
 ///
 /// Return: the words, the last never empty, owned by the caller.
-pub fn preprocess(text: []const u8, opts: vm.vocab.NormalizerOptions, exc: *impl.Exception) impl.Thrown!std.ArrayList(std.ArrayList(u8)) {
-    var cpts = unicode.cptsFromUtf8(text);
-    defer allocator.free(cpts);
+pub fn preprocess(text: []const u8, opts: llama.vocab.vocab.NormalizerOptions, exc: *llama.impl.Exception) llama.impl.Thrown!std.ArrayList(std.ArrayList(u8)) {
+    var cpts = llama.unicode.cptsFromUtf8(text);
+    defer std.heap.c_allocator.free(cpts);
     if (opts.strip_accents) {
-        const nfd = unicode.cptsNormalizeNfd(cpts);
-        allocator.free(cpts);
+        const nfd = llama.unicode.cptsNormalizeNfd(cpts);
+        std.heap.c_allocator.free(cpts);
         cpts = nfd;
     }
 
     var words: std.ArrayList(std.ArrayList(u8)) = .empty;
     errdefer {
-        for (words.items) |*w| w.deinit(allocator);
-        words.deinit(allocator);
+        for (words.items) |*w| w.deinit(std.heap.c_allocator);
+        words.deinit(std.heap.c_allocator);
     }
-    words.append(allocator, .empty) catch oom();
+    words.append(std.heap.c_allocator, .empty) catch oom();
 
     for (cpts) |cpt| {
-        const flags = unicode.cptFlagsFromCpt(cpt);
+        const flags = llama.unicode.cptFlagsFromCpt(cpt);
 
         if (flags.is_whitespace) {
-            if (last(&words).items.len != 0) words.append(allocator, .empty) catch oom(); // finish previous word if any
+            if (last(&words).items.len != 0) words.append(std.heap.c_allocator, .empty) catch oom(); // finish previous word if any
             continue;
         }
 
@@ -114,22 +107,22 @@ pub fn preprocess(text: []const u8, opts: vm.vocab.NormalizerOptions, exc: *impl
         if (opts.strip_accents and flags.is_accent_mark) continue;
 
         var b: [4]u8 = undefined;
-        const s = unicode.cptToUtf8(if (opts.lowercase) unicode.tolower(cpt) else cpt, &b) catch
+        const s = llama.unicode.cptToUtf8(if (opts.lowercase) llama.unicode.tolower(cpt) else cpt, &b) catch
             return exc.throw(.invalid_argument, "invalid codepoint", .{});
         if (flags.is_punctuation or (cpt < 0x7F and flags.is_symbol) or isChineseChar(cpt)) {
-            if (last(&words).items.len != 0) words.append(allocator, .empty) catch oom(); // finish previous word if any
+            if (last(&words).items.len != 0) words.append(std.heap.c_allocator, .empty) catch oom(); // finish previous word if any
             const w = last(&words);
             w.clearRetainingCapacity();
-            w.appendSlice(allocator, s) catch oom(); // single char word
-            words.append(allocator, .empty) catch oom(); // start a new word
+            w.appendSlice(std.heap.c_allocator, s) catch oom(); // single char word
+            words.append(std.heap.c_allocator, .empty) catch oom(); // start a new word
         } else {
-            last(&words).appendSlice(allocator, s) catch oom(); // append char to word
+            last(&words).appendSlice(std.heap.c_allocator, s) catch oom(); // append char to word
         }
     }
 
     if (last(&words).items.len == 0) {
         var w = words.pop().?;
-        w.deinit(allocator);
+        w.deinit(std.heap.c_allocator);
     }
 
     return words;
@@ -161,11 +154,11 @@ test {
 }
 
 test "preprocess splits on spaces and isolates punctuation" {
-    var exc: impl.Exception = .{};
+    var exc: llama.impl.Exception = .{};
     var words = try preprocess("Hello, World", .{}, &exc);
     defer {
-        for (words.items) |*w| w.deinit(allocator);
-        words.deinit(allocator);
+        for (words.items) |*w| w.deinit(std.heap.c_allocator);
+        words.deinit(std.heap.c_allocator);
     }
     try std.testing.expectEqual(@as(usize, 3), words.items.len);
     try std.testing.expectEqualStrings("hello", words.items[0].items);

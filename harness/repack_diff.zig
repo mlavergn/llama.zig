@@ -72,103 +72,17 @@ fn portedRepackBuft() c.ggml_backend_buffer_type_t {
 const Kernel = fn (c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) callconv(.c) void;
 const QuantizeMat = fn ([*]const f32, *anyopaque, i64) callconv(.c) void;
 
-const ours = struct {
-    extern fn ggml_gemv_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q2_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q4_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q4_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q5_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q5_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q6_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q6_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_iq4_nl_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_iq4_nl_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_mxfp4_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_mxfp4_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q8_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemv_q8_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
+/// The kernel exported as `name` -- the port's, or whatever library a gate
+/// links in its place -- found by that name at link time.
+fn ours(comptime T: type, comptime name: []const u8) *const T {
+    return @extern(*const T, .{ .name = name });
+}
 
-    extern fn ggml_gemm_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q2_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q4_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q4_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q5_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q5_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q6_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q6_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_iq4_nl_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_iq4_nl_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_mxfp4_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_mxfp4_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q8_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ggml_gemm_q8_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-
-    extern fn ggml_quantize_mat_q8_0_4x4([*]const f32, *anyopaque, i64) void;
-    extern fn ggml_quantize_mat_q8_0_4x8([*]const f32, *anyopaque, i64) void;
-    extern fn ggml_quantize_mat_q8_K_4x4([*]const f32, *anyopaque, i64) void;
-    extern fn ggml_quantize_mat_q8_K_4x8([*]const f32, *anyopaque, i64) void;
-};
-
-const reference = struct {
-    extern fn ref_ggml_gemv_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q1_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q1_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q1_0_4x4_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q1_0_4x8_q8_0_generic(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q2_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q4_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q4_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q5_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q5_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q6_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q6_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_iq4_nl_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_iq4_nl_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_mxfp4_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_mxfp4_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q8_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemv_q8_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-
-    extern fn ref_ggml_gemm_q4_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q4_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q4_0_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q2_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q4_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q4_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q5_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q5_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q6_K_8x4_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q6_K_8x8_q8_K(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_iq4_nl_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_iq4_nl_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_mxfp4_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_mxfp4_8x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q8_0_4x4_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-    extern fn ref_ggml_gemm_q8_0_4x8_q8_0(c_int, [*]f32, usize, *const anyopaque, *const anyopaque, c_int, c_int) void;
-
-    extern fn ref_ggml_quantize_mat_q8_0_4x4([*]const f32, *anyopaque, i64) void;
-    extern fn ref_ggml_quantize_mat_q8_0_4x8([*]const f32, *anyopaque, i64) void;
-    extern fn ref_ggml_quantize_mat_q8_K_4x4([*]const f32, *anyopaque, i64) void;
-    extern fn ref_ggml_quantize_mat_q8_K_4x8([*]const f32, *anyopaque, i64) void;
-};
+/// The reference's kernel `name`, which `scripts/repack-diff` renames with a
+/// `ref_` prefix so both sides link into one binary.
+fn reference(comptime T: type, comptime name: []const u8) *const T {
+    return @extern(*const T, .{ .name = "ref_" ++ name });
+}
 
 /// The block layouts, written out from `ggml-cpu/repack.h` and
 /// `ggml-common.h` rather than imported from `src/`.
@@ -489,35 +403,35 @@ pub fn main() !void {
     // (the 4x8 gemm behind i8mm) and the generics run only at `generic`,
     // so the generics are also compared by name: at the baseline nothing
     // else reaches three of them. On x86 the bare names are the generics.
-    try runCase("q1_0_4x4_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0, reference.ref_ggml_gemv_q1_0_4x4_q8_0, ours.ggml_gemm_q1_0_4x4_q8_0, reference.ref_ggml_gemm_q1_0_4x4_q8_0, alloc);
-    try runCase("q1_0_4x8_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0, reference.ref_ggml_gemv_q1_0_4x8_q8_0, ours.ggml_gemm_q1_0_4x8_q8_0, reference.ref_ggml_gemm_q1_0_4x8_q8_0, alloc);
+    try runCase("q1_0_4x4_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours(Kernel, "ggml_gemv_q1_0_4x4_q8_0"), reference(Kernel, "ggml_gemv_q1_0_4x4_q8_0"), ours(Kernel, "ggml_gemm_q1_0_4x4_q8_0"), reference(Kernel, "ggml_gemm_q1_0_4x4_q8_0"), alloc);
+    try runCase("q1_0_4x8_q8_0", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours(Kernel, "ggml_gemv_q1_0_4x8_q8_0"), reference(Kernel, "ggml_gemv_q1_0_4x8_q8_0"), ours(Kernel, "ggml_gemm_q1_0_4x8_q8_0"), reference(Kernel, "ggml_gemm_q1_0_4x8_q8_0"), alloc);
     // `arch-fallback.h` gives x86 no `_generic` names for them at all.
     if (comptime builtin.cpu.arch != .x86_64) {
-        try runCase("q1_0_4x4_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x4_q8_0_generic, ours.ggml_gemm_q1_0_4x4_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x4_q8_0_generic, alloc);
-        try runCase("q1_0_4x8_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours.ggml_gemv_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemv_q1_0_4x8_q8_0_generic, ours.ggml_gemm_q1_0_4x8_q8_0_generic, reference.ref_ggml_gemm_q1_0_4x8_q8_0_generic, alloc);
+        try runCase("q1_0_4x4_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours(Kernel, "ggml_gemv_q1_0_4x4_q8_0_generic"), reference(Kernel, "ggml_gemv_q1_0_4x4_q8_0_generic"), ours(Kernel, "ggml_gemm_q1_0_4x4_q8_0_generic"), reference(Kernel, "ggml_gemm_q1_0_4x4_q8_0_generic"), alloc);
+        try runCase("q1_0_4x8_q8_0_generic", Q1_0x4, Q8_0, Q8_0x4, QK1_0, 4, ours(Kernel, "ggml_gemv_q1_0_4x8_q8_0_generic"), reference(Kernel, "ggml_gemv_q1_0_4x8_q8_0_generic"), ours(Kernel, "ggml_gemm_q1_0_4x8_q8_0_generic"), reference(Kernel, "ggml_gemm_q1_0_4x8_q8_0_generic"), alloc);
     }
-    try runCase("q4_0_4x4_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x4_q8_0, reference.ref_ggml_gemv_q4_0_4x4_q8_0, ours.ggml_gemm_q4_0_4x4_q8_0, reference.ref_ggml_gemm_q4_0_4x4_q8_0, alloc);
-    try runCase("q4_0_4x8_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q4_0_4x8_q8_0, reference.ref_ggml_gemv_q4_0_4x8_q8_0, ours.ggml_gemm_q4_0_4x8_q8_0, reference.ref_ggml_gemm_q4_0_4x8_q8_0, alloc);
-    try runCase("q4_0_8x8_q8_0", Q4_0x8, Q8_0, Q8_0x4, 32, 8, ours.ggml_gemv_q4_0_8x8_q8_0, reference.ref_ggml_gemv_q4_0_8x8_q8_0, ours.ggml_gemm_q4_0_8x8_q8_0, reference.ref_ggml_gemm_q4_0_8x8_q8_0, alloc);
-    try runCase("q8_0_4x4_q8_0", Q8_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q8_0_4x4_q8_0, reference.ref_ggml_gemv_q8_0_4x4_q8_0, ours.ggml_gemm_q8_0_4x4_q8_0, reference.ref_ggml_gemm_q8_0_4x4_q8_0, alloc);
-    try runCase("q8_0_4x8_q8_0", Q8_0x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_q8_0_4x8_q8_0, reference.ref_ggml_gemv_q8_0_4x8_q8_0, ours.ggml_gemm_q8_0_4x8_q8_0, reference.ref_ggml_gemm_q8_0_4x8_q8_0, alloc);
-    try runCase("iq4_nl_4x4_q8_0", IQ4_NLx4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_iq4_nl_4x4_q8_0, reference.ref_ggml_gemv_iq4_nl_4x4_q8_0, ours.ggml_gemm_iq4_nl_4x4_q8_0, reference.ref_ggml_gemm_iq4_nl_4x4_q8_0, alloc);
-    try runCase("iq4_nl_8x8_q8_0", IQ4_NLx8, Q8_0, Q8_0x4, 32, 8, ours.ggml_gemv_iq4_nl_8x8_q8_0, reference.ref_ggml_gemv_iq4_nl_8x8_q8_0, ours.ggml_gemm_iq4_nl_8x8_q8_0, reference.ref_ggml_gemm_iq4_nl_8x8_q8_0, alloc);
-    try runCase("mxfp4_4x4_q8_0", MXFP4x4, Q8_0, Q8_0x4, 32, 4, ours.ggml_gemv_mxfp4_4x4_q8_0, reference.ref_ggml_gemv_mxfp4_4x4_q8_0, ours.ggml_gemm_mxfp4_4x4_q8_0, reference.ref_ggml_gemm_mxfp4_4x4_q8_0, alloc);
-    try runCase("mxfp4_8x8_q8_0", MXFP4x8, Q8_0, Q8_0x4, 32, 8, ours.ggml_gemv_mxfp4_8x8_q8_0, reference.ref_ggml_gemv_mxfp4_8x8_q8_0, ours.ggml_gemm_mxfp4_8x8_q8_0, reference.ref_ggml_gemm_mxfp4_8x8_q8_0, alloc);
+    try runCase("q4_0_4x4_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_q4_0_4x4_q8_0"), reference(Kernel, "ggml_gemv_q4_0_4x4_q8_0"), ours(Kernel, "ggml_gemm_q4_0_4x4_q8_0"), reference(Kernel, "ggml_gemm_q4_0_4x4_q8_0"), alloc);
+    try runCase("q4_0_4x8_q8_0", Q4_0x4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_q4_0_4x8_q8_0"), reference(Kernel, "ggml_gemv_q4_0_4x8_q8_0"), ours(Kernel, "ggml_gemm_q4_0_4x8_q8_0"), reference(Kernel, "ggml_gemm_q4_0_4x8_q8_0"), alloc);
+    try runCase("q4_0_8x8_q8_0", Q4_0x8, Q8_0, Q8_0x4, 32, 8, ours(Kernel, "ggml_gemv_q4_0_8x8_q8_0"), reference(Kernel, "ggml_gemv_q4_0_8x8_q8_0"), ours(Kernel, "ggml_gemm_q4_0_8x8_q8_0"), reference(Kernel, "ggml_gemm_q4_0_8x8_q8_0"), alloc);
+    try runCase("q8_0_4x4_q8_0", Q8_0x4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_q8_0_4x4_q8_0"), reference(Kernel, "ggml_gemv_q8_0_4x4_q8_0"), ours(Kernel, "ggml_gemm_q8_0_4x4_q8_0"), reference(Kernel, "ggml_gemm_q8_0_4x4_q8_0"), alloc);
+    try runCase("q8_0_4x8_q8_0", Q8_0x4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_q8_0_4x8_q8_0"), reference(Kernel, "ggml_gemv_q8_0_4x8_q8_0"), ours(Kernel, "ggml_gemm_q8_0_4x8_q8_0"), reference(Kernel, "ggml_gemm_q8_0_4x8_q8_0"), alloc);
+    try runCase("iq4_nl_4x4_q8_0", IQ4_NLx4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_iq4_nl_4x4_q8_0"), reference(Kernel, "ggml_gemv_iq4_nl_4x4_q8_0"), ours(Kernel, "ggml_gemm_iq4_nl_4x4_q8_0"), reference(Kernel, "ggml_gemm_iq4_nl_4x4_q8_0"), alloc);
+    try runCase("iq4_nl_8x8_q8_0", IQ4_NLx8, Q8_0, Q8_0x4, 32, 8, ours(Kernel, "ggml_gemv_iq4_nl_8x8_q8_0"), reference(Kernel, "ggml_gemv_iq4_nl_8x8_q8_0"), ours(Kernel, "ggml_gemm_iq4_nl_8x8_q8_0"), reference(Kernel, "ggml_gemm_iq4_nl_8x8_q8_0"), alloc);
+    try runCase("mxfp4_4x4_q8_0", MXFP4x4, Q8_0, Q8_0x4, 32, 4, ours(Kernel, "ggml_gemv_mxfp4_4x4_q8_0"), reference(Kernel, "ggml_gemv_mxfp4_4x4_q8_0"), ours(Kernel, "ggml_gemm_mxfp4_4x4_q8_0"), reference(Kernel, "ggml_gemm_mxfp4_4x4_q8_0"), alloc);
+    try runCase("mxfp4_8x8_q8_0", MXFP4x8, Q8_0, Q8_0x4, 32, 8, ours(Kernel, "ggml_gemv_mxfp4_8x8_q8_0"), reference(Kernel, "ggml_gemv_mxfp4_8x8_q8_0"), ours(Kernel, "ggml_gemm_mxfp4_8x8_q8_0"), reference(Kernel, "ggml_gemm_mxfp4_8x8_q8_0"), alloc);
 
-    try runCase("q2_K_8x8_q8_K", Q2_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q2_K_8x8_q8_K, reference.ref_ggml_gemv_q2_K_8x8_q8_K, ours.ggml_gemm_q2_K_8x8_q8_K, reference.ref_ggml_gemm_q2_K_8x8_q8_K, alloc);
-    try runCase("q4_K_8x4_q8_K", Q4_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q4_K_8x4_q8_K, reference.ref_ggml_gemv_q4_K_8x4_q8_K, ours.ggml_gemm_q4_K_8x4_q8_K, reference.ref_ggml_gemm_q4_K_8x4_q8_K, alloc);
-    try runCase("q4_K_8x8_q8_K", Q4_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q4_K_8x8_q8_K, reference.ref_ggml_gemv_q4_K_8x8_q8_K, ours.ggml_gemm_q4_K_8x8_q8_K, reference.ref_ggml_gemm_q4_K_8x8_q8_K, alloc);
-    try runCase("q5_K_8x4_q8_K", Q5_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q5_K_8x4_q8_K, reference.ref_ggml_gemv_q5_K_8x4_q8_K, ours.ggml_gemm_q5_K_8x4_q8_K, reference.ref_ggml_gemm_q5_K_8x4_q8_K, alloc);
-    try runCase("q5_K_8x8_q8_K", Q5_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q5_K_8x8_q8_K, reference.ref_ggml_gemv_q5_K_8x8_q8_K, ours.ggml_gemm_q5_K_8x8_q8_K, reference.ref_ggml_gemm_q5_K_8x8_q8_K, alloc);
-    try runCase("q6_K_8x4_q8_K", Q6_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q6_K_8x4_q8_K, reference.ref_ggml_gemv_q6_K_8x4_q8_K, ours.ggml_gemm_q6_K_8x4_q8_K, reference.ref_ggml_gemm_q6_K_8x4_q8_K, alloc);
-    try runCase("q6_K_8x8_q8_K", Q6_Kx8, Q8K, Q8Kx4, 256, 8, ours.ggml_gemv_q6_K_8x8_q8_K, reference.ref_ggml_gemv_q6_K_8x8_q8_K, ours.ggml_gemm_q6_K_8x8_q8_K, reference.ref_ggml_gemm_q6_K_8x8_q8_K, alloc);
+    try runCase("q2_K_8x8_q8_K", Q2_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q2_K_8x8_q8_K"), reference(Kernel, "ggml_gemv_q2_K_8x8_q8_K"), ours(Kernel, "ggml_gemm_q2_K_8x8_q8_K"), reference(Kernel, "ggml_gemm_q2_K_8x8_q8_K"), alloc);
+    try runCase("q4_K_8x4_q8_K", Q4_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q4_K_8x4_q8_K"), reference(Kernel, "ggml_gemv_q4_K_8x4_q8_K"), ours(Kernel, "ggml_gemm_q4_K_8x4_q8_K"), reference(Kernel, "ggml_gemm_q4_K_8x4_q8_K"), alloc);
+    try runCase("q4_K_8x8_q8_K", Q4_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q4_K_8x8_q8_K"), reference(Kernel, "ggml_gemv_q4_K_8x8_q8_K"), ours(Kernel, "ggml_gemm_q4_K_8x8_q8_K"), reference(Kernel, "ggml_gemm_q4_K_8x8_q8_K"), alloc);
+    try runCase("q5_K_8x4_q8_K", Q5_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q5_K_8x4_q8_K"), reference(Kernel, "ggml_gemv_q5_K_8x4_q8_K"), ours(Kernel, "ggml_gemm_q5_K_8x4_q8_K"), reference(Kernel, "ggml_gemm_q5_K_8x4_q8_K"), alloc);
+    try runCase("q5_K_8x8_q8_K", Q5_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q5_K_8x8_q8_K"), reference(Kernel, "ggml_gemv_q5_K_8x8_q8_K"), ours(Kernel, "ggml_gemm_q5_K_8x8_q8_K"), reference(Kernel, "ggml_gemm_q5_K_8x8_q8_K"), alloc);
+    try runCase("q6_K_8x4_q8_K", Q6_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q6_K_8x4_q8_K"), reference(Kernel, "ggml_gemv_q6_K_8x4_q8_K"), ours(Kernel, "ggml_gemm_q6_K_8x4_q8_K"), reference(Kernel, "ggml_gemm_q6_K_8x4_q8_K"), alloc);
+    try runCase("q6_K_8x8_q8_K", Q6_Kx8, Q8K, Q8Kx4, 256, 8, ours(Kernel, "ggml_gemv_q6_K_8x8_q8_K"), reference(Kernel, "ggml_gemv_q6_K_8x8_q8_K"), ours(Kernel, "ggml_gemm_q6_K_8x8_q8_K"), reference(Kernel, "ggml_gemm_q6_K_8x8_q8_K"), alloc);
 
-    try runQuantizeMat("quantize_mat_q8_0_4x4", Q8_0x4, 32, ours.ggml_quantize_mat_q8_0_4x4, reference.ref_ggml_quantize_mat_q8_0_4x4, alloc);
-    try runQuantizeMat("quantize_mat_q8_0_4x8", Q8_0x4, 32, ours.ggml_quantize_mat_q8_0_4x8, reference.ref_ggml_quantize_mat_q8_0_4x8, alloc);
-    try runQuantizeMat("quantize_mat_q8_K_4x4", Q8Kx4, 256, ours.ggml_quantize_mat_q8_K_4x4, reference.ref_ggml_quantize_mat_q8_K_4x4, alloc);
-    try runQuantizeMat("quantize_mat_q8_K_4x8", Q8Kx4, 256, ours.ggml_quantize_mat_q8_K_4x8, reference.ref_ggml_quantize_mat_q8_K_4x8, alloc);
+    try runQuantizeMat("quantize_mat_q8_0_4x4", Q8_0x4, 32, ours(QuantizeMat, "ggml_quantize_mat_q8_0_4x4"), reference(QuantizeMat, "ggml_quantize_mat_q8_0_4x4"), alloc);
+    try runQuantizeMat("quantize_mat_q8_0_4x8", Q8_0x4, 32, ours(QuantizeMat, "ggml_quantize_mat_q8_0_4x8"), reference(QuantizeMat, "ggml_quantize_mat_q8_0_4x8"), alloc);
+    try runQuantizeMat("quantize_mat_q8_K_4x4", Q8Kx4, 256, ours(QuantizeMat, "ggml_quantize_mat_q8_K_4x4"), reference(QuantizeMat, "ggml_quantize_mat_q8_K_4x4"), alloc);
+    try runQuantizeMat("quantize_mat_q8_K_4x8", Q8Kx4, 256, ours(QuantizeMat, "ggml_quantize_mat_q8_K_4x8"), reference(QuantizeMat, "ggml_quantize_mat_q8_K_4x8"), alloc);
 
     // Both `tensor_traits::repack` implementations log at debug level; the
     // gate compares bytes, so the log is noise here.

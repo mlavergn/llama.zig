@@ -26,15 +26,11 @@
 //! C++'s copy and destructor.
 
 const std = @import("std");
+const llama = @import("llama");
 const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const peg = @import("peg");
-const regex = @import("llama").regex;
 
-const arg = tc.arg;
-const log = tc.log;
-const Arg = arg.Arg;
-const Params = tc.params.Params;
 const Allocator = std.mem.Allocator;
 
 /// Ports `COMMON_PRESET_DEFAULT_NAME` (preset.h:15 @b1b770d90).
@@ -67,11 +63,11 @@ fn upperInPlace(s: []u8) void {
 /// Ports `canonical_tag` (preset.cpp:20 @b1b770d90): a quant tag in upper
 /// case, the part after the last `-` or `.` when that part is a tag.
 fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
-    var re = regex.Regex.compileWith("[-.]([A-Z0-9_]+)$", .{ .icase = true }) catch |err| switch (err) {
+    var re = llama.regex.Regex.compileWith("[-.]([A-Z0-9_]+)$", .{ .icase = true }) catch |err| switch (err) {
         error.Range, error.Collate, error.Ctype, error.Escape, error.Backref, error.Brack, error.Paren, error.Brace, error.BadBrace, error.BadRepeat, error.Complexity, error.Parse => unreachable,
     };
     defer re.deinit();
-    var m = regex.Match.init();
+    var m = llama.regex.Match.init();
     defer m.deinit();
     if (re.search(tag, &m)) {
         const canon = try a.dupe(u8, tag[m.position(1)..][0..m.length(1)]);
@@ -86,21 +82,21 @@ fn canonicalTag(a: Allocator, tag: []const u8) Error![]u8 {
 /// Ports `operator`< (arg.h:91 @b1b770d90), a member of `common_arg`:
 /// `strcmp` of the first spellings. An option with no spellings is never
 /// less.
-fn argLess(x: *const Arg, y: *const Arg) bool {
+fn argLess(x: *const tc.arg.Arg, y: *const tc.arg.Arg) bool {
     if (x.args.len == 0 or y.args.len == 0) return false;
     return std.mem.order(u8, x.args[0], y.args[0]) == .lt;
 }
 
 /// Ports `operator`== (arg.h:97 @b1b770d90), a member of `common_arg`,
 /// which `std::map` reaches as neither being less.
-fn argEql(x: *const Arg, y: *const Arg) bool {
+fn argEql(x: *const tc.arg.Arg, y: *const tc.arg.Arg) bool {
     return !argLess(x, y) and !argLess(y, x);
 }
 
 /// Ports `get_env` (arg.cpp:210 @b1b770d90), a member of `common_arg`: the
 /// variable and, for an option with a negative spelling, its
 /// `LLAMA_ARG_NO_` twin. `string_replace_all` replaces every occurrence.
-fn getEnvs(a: Allocator, opt: *const Arg) Error![]const []const u8 {
+fn getEnvs(a: Allocator, opt: *const tc.arg.Arg) Error![]const []const u8 {
     const env = opt.env orelse return &.{};
     if (opt.args_neg.len == 0) {
         const out = try a.alloc([]const u8, 1);
@@ -118,7 +114,7 @@ fn getEnvs(a: Allocator, opt: *const Arg) Error![]const []const u8 {
 
 /// One entry of `common_preset::options`.
 pub const Option = struct {
-    opt: Arg,
+    opt: tc.arg.Arg,
     value: []const u8,
 };
 
@@ -157,7 +153,7 @@ pub const Preset = struct {
     /// `options[opt] = value`, `value` copied: replaces an equivalent key's
     /// value (the key itself stays, as `std::map` keeps the first one), or
     /// inserts in order.
-    pub fn put(self: *Preset, gpa: Allocator, opt: *const Arg, value: []const u8) Error!void {
+    pub fn put(self: *Preset, gpa: Allocator, opt: *const tc.arg.Arg, value: []const u8) Error!void {
         const v = try gpa.dupe(u8, value);
         errdefer gpa.free(v);
         var lo: usize = 0;
@@ -175,7 +171,7 @@ pub const Preset = struct {
     }
 
     /// `options.find(opt)`.
-    pub fn find(self: *const Preset, opt: *const Arg) ?*Option {
+    pub fn find(self: *const Preset, opt: *const tc.arg.Arg) ?*Option {
         for (self.options.items) |*o| if (argEql(&o.opt, opt)) return o;
         return null;
     }
@@ -206,7 +202,7 @@ pub const Preset = struct {
             // handle value(s)
             if (opt.value_hint == null and opt.value_hint_2 == null) {
                 // flag option, no value
-                if (arg.isFalsey(value)) {
+                if (tc.arg.isFalsey(value)) {
                     // use negative arg if available
                     if (opt.args_neg.len != 0) {
                         args.items[args.items.len - 1] = opt.args_neg[opt.args_neg.len - 1];
@@ -222,7 +218,7 @@ pub const Preset = struct {
                 try args.append(a, value);
             }
             if (opt.value_hint != null and opt.value_hint_2 != null) {
-                return arg.throw("common_preset::to_args(): option '%s' has two values, which is not supported yet", .{opt.args[opt.args.len - 1].ptr});
+                return tc.arg.throw("common_preset::to_args(): option '%s' has two values, which is not supported yet", .{opt.args[opt.args.len - 1].ptr});
             }
         }
 
@@ -265,7 +261,7 @@ pub const Preset = struct {
         const opt = ctx.key_to_opt.getPtr(env) orelse {
             const z = try gpa.dupeSentinel(u8, env, 0);
             defer gpa.free(z);
-            return arg.throw("%s: option with env '%s' not found in ctx_params", .{ @as([*:0]const u8, "set_option"), z.ptr });
+            return tc.arg.throw("%s: option with env '%s' not found in ctx_params", .{ @as([*:0]const u8, "set_option"), z.ptr });
         };
         try self.put(gpa, opt, value);
     }
@@ -304,7 +300,7 @@ pub const Preset = struct {
     /// Ports `apply_to_params` (preset.cpp:142 @b1b770d90), a member of
     /// `common_preset`: each option's handler on `params`, or only those
     /// whose variable is in `handled_keys` when it is not empty.
-    pub fn applyToParams(self: *const Preset, params: *Params, handled_keys: []const []const u8) anyerror!void {
+    pub fn applyToParams(self: *const Preset, params: *tc.params.Params, handled_keys: []const []const u8) anyerror!void {
         for (self.options.items) |*o| {
             const opt = &o.opt;
             if (handled_keys.len != 0) {
@@ -319,10 +315,10 @@ pub const Preset = struct {
             // apply each option to params
             switch (opt.handler) {
                 .string => |h| try h(params, val),
-                .int => |h| try h(params, try arg.stoi(val)),
-                .bool_ => |h| try h(params, arg.isTruthy(val)),
+                .int => |h| try h(params, try tc.arg.stoi(val)),
+                .bool_ => |h| try h(params, tc.arg.isTruthy(val)),
                 // not supported yet
-                .str_str => return arg.throw("%s: option with two values is not supported yet", .{@as([*:0]const u8, "apply_to_params")}),
+                .str_str => return tc.arg.throw("%s: option with two values is not supported yet", .{@as([*:0]const u8, "apply_to_params")}),
                 .void_ => |h| try h(params),
             }
         }
@@ -521,13 +517,13 @@ fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
 
 fn pegThrow(e: peg.Error) Error {
     if (e == error.OutOfMemory) return error.OutOfMemory;
-    return arg.throwStr(peg.what(e));
+    return tc.arg.throwStr(peg.what(e));
 }
 
 /// `throw std::runtime_error(prefix + s)`.
 pub fn throwConcat(a: Allocator, prefix: []const u8, s: []const u8) Error {
     const msg = try std.mem.concat(a, u8, &.{ prefix, s });
-    return arg.throwStr(msg);
+    return tc.arg.throwStr(msg);
 }
 
 // -----------------------------------------------------------------------------
@@ -579,9 +575,9 @@ pub const Context = struct {
     /// Backs the parser context's tables, the options' help text and
     /// `key_to_opt`; lives as long as the context.
     arena: *std.heap.ArenaAllocator,
-    default_params: *Params, // unused for now
-    ctx_params: arg.Context,
-    key_to_opt: std.StringHashMapUnmanaged(Arg) = .empty,
+    default_params: *tc.params.Params, // unused for now
+    ctx_params: tc.arg.Context,
+    key_to_opt: std.StringHashMapUnmanaged(tc.arg.Arg) = .empty,
 
     filter_allowed_keys: bool = false,
     allowed_keys: []const []const u8 = &.{},
@@ -607,14 +603,14 @@ pub const Context = struct {
             gpa.destroy(arena);
         }
         const a = arena.allocator();
-        const dp = try a.create(Params);
-        dp.* = Params.init(a) catch return error.OutOfMemory;
+        const dp = try a.create(tc.params.Params);
+        dp.* = tc.params.Params.init(a) catch return error.OutOfMemory;
         const self = try a.create(Context);
         self.* = .{
             .gpa = gpa,
             .arena = arena,
             .default_params = dp,
-            .ctx_params = arg.parserInit(dp, ex, null) catch |e| return mapErr(e),
+            .ctx_params = tc.arg.parserInit(dp, ex, null) catch |e| return mapErr(e),
         };
         try addPresetOptions(&self.ctx_params);
         try getMapKeyOpt(a, &self.ctx_params, &self.key_to_opt);
@@ -657,7 +653,7 @@ pub const Context = struct {
             }
             try preset.setName(gpa, section_name);
             const name_z = try sa.dupeSentinel(u8, preset.name, 0);
-            log.dbg("loading preset: %s\n", .{name_z.ptr});
+            tc.log.dbg("loading preset: %s\n", .{name_z.ptr});
             for (section.kv.items) |kv| {
                 const key = kv.key;
                 const value = kv.value;
@@ -668,13 +664,13 @@ pub const Context = struct {
 
                 const key_z = try sa.dupeSentinel(u8, key, 0);
                 const value_z = try sa.dupeSentinel(u8, value, 0);
-                log.dbg("option: %s = %s\n", .{ key_z.ptr, value_z.ptr });
+                tc.log.dbg("option: %s = %s\n", .{ key_z.ptr, value_z.ptr });
                 if (self.filter_allowed_keys) {
                     var allowed = false;
                     for (self.allowed_keys) |k| {
                         if (std.mem.eql(u8, k, key)) allowed = true;
                     }
-                    if (!allowed) return arg.throw("option '%s' is not allowed in remote presets", .{key_z.ptr});
+                    if (!allowed) return tc.arg.throw("option '%s' is not allowed in remote presets", .{key_z.ptr});
                 }
                 if (self.key_to_opt.getPtr(key)) |opt| {
                     if (isBoolArg(opt)) {
@@ -683,12 +679,12 @@ pub const Context = struct {
                         try preset.put(gpa, opt, value);
                     }
                     const stored = try sa.dupeSentinel(u8, preset.find(opt).?.value, 0);
-                    log.dbg("accepted option: %s = %s\n", .{ key_z.ptr, stored.ptr });
+                    tc.log.dbg("accepted option: %s = %s\n", .{ key_z.ptr, stored.ptr });
                 } else if (self.ignore_unknown_keys) {
                     const path_z = try sa.dupeSentinel(u8, path, 0);
-                    log.wrn("ignoring option '%s' from %s: not supported by this program\n", .{ key_z.ptr, path_z.ptr });
+                    tc.log.wrn("ignoring option '%s' from %s: not supported by this program\n", .{ key_z.ptr, path_z.ptr });
                 } else {
-                    return arg.throw("option '%s' not recognized in preset '%s'", .{ key_z.ptr, name_z.ptr });
+                    return tc.arg.throw("option '%s' not recognized in preset '%s'", .{ key_z.ptr, name_z.ptr });
                 }
             }
 
@@ -721,7 +717,7 @@ pub const Context = struct {
         const cached_models = @import("download.zig").listCachedModels(scratch.allocator()) catch |e| switch (e) {
             error.OutOfMemory => return error.OutOfMemory,
             // a runtime_error from the cache lookup, carried on as one
-            else => return arg.throwStr(@import("common.zig").what(e)),
+            else => return tc.arg.throwStr(@import("common.zig").what(e)),
         };
         for (cached_models) |model| {
             var preset: Preset = .{};
@@ -746,7 +742,7 @@ pub const Context = struct {
 
         if (!stdlib.fs.exists(models_dir) or !stdlib.fs.isDirectory(models_dir)) {
             const z = try sa.dupeSentinel(u8, models_dir, 0);
-            return arg.throw("error: '%s' does not exist or is not a directory\n", .{z.ptr});
+            return tc.arg.throw("error: '%s' does not exist or is not a directory\n", .{z.ptr});
         }
 
         var models: std.ArrayList(LocalModel) = .empty;
@@ -849,7 +845,7 @@ fn mapErr(e: anyerror) Error {
 /// (arg.cpp:199 @b1b770d90): every option by each of its variables and each
 /// spelling without its dashes; a later option takes a key an earlier one
 /// had.
-fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.StringHashMapUnmanaged(Arg)) Error!void {
+fn getMapKeyOpt(a: Allocator, ctx_params: *const tc.arg.Context, mapping: *std.StringHashMapUnmanaged(tc.arg.Arg)) Error!void {
     for (ctx_params.options.items) |*opt| {
         for (try getEnvs(a, opt)) |env| {
             try mapping.put(a, env, opt.*);
@@ -861,17 +857,17 @@ fn getMapKeyOpt(a: Allocator, ctx_params: *const arg.Context, mapping: *std.Stri
 }
 
 /// Ports `is_bool_arg` (preset.cpp:264 @b1b770d90).
-fn isBoolArg(opt: *const Arg) bool {
+fn isBoolArg(opt: *const tc.arg.Arg) bool {
     return opt.args_neg.len != 0;
 }
 
 /// Ports `parse_bool_arg` (preset.cpp:268 @b1b770d90): a negative spelling
 /// reverses the value.
-fn parseBoolArg(opt: *const Arg, key: []const u8, value: []const u8) []const u8 {
+fn parseBoolArg(opt: *const tc.arg.Arg, key: []const u8, value: []const u8) []const u8 {
     // if this is a negated arg, we need to reverse the value
     for (opt.args_neg) |neg_arg| {
         if (std.mem.eql(u8, rmLeadingDashes(neg_arg), key)) {
-            return if (arg.isTruthy(value)) "false" else "true";
+            return if (tc.arg.isTruthy(value)) "false" else "true";
         }
     }
     // otherwise, not negated
@@ -948,28 +944,28 @@ fn scanSubdir(a: Allocator, models: *std.ArrayList(LocalModel), subdir_path: []c
 
 /// Ports `common_params_add_preset_options` (arg.cpp:4818 @b1b770d90): the
 /// options only a preset can set.
-pub fn addPresetOptions(ctx: *arg.Context) Error!void {
+pub fn addPresetOptions(ctx: *tc.arg.Context) Error!void {
     const a = ctx.params.arena;
     const Unused = struct {
-        fn str(_: *Params, _: [:0]const u8) anyerror!void {}
-        fn int(_: *Params, _: c_int) anyerror!void {}
+        fn str(_: *tc.params.Params, _: [:0]const u8) anyerror!void {}
+        fn int(_: *tc.params.Params, _: c_int) anyerror!void {}
     };
     // arguments below won't be treated as CLI args, only preset options
-    try ctx.options.append(a, (Arg{
+    try ctx.options.append(a, (tc.arg.Arg{
         .args = &.{"load-on-startup"},
         .value_hint = "NAME",
         .help = "in server router mode, autoload this model on startup",
         .handler = .{ .string = Unused.str },
     }).setEnv(env_load_on_startup).setPresetOnly());
 
-    try ctx.options.append(a, (Arg{
+    try ctx.options.append(a, (tc.arg.Arg{
         .args = &.{"stop-timeout"},
         .value_hint = "SECONDS",
         .help = "in server router mode, force-kill model instance after this many seconds of graceful shutdown",
         .handler = .{ .int = Unused.int },
     }).setEnv(env_stop_timeout).setPresetOnly());
 
-    try ctx.options.append(a, (Arg{
+    try ctx.options.append(a, (tc.arg.Arg{
         .args = &.{"dedup-cache-models"},
         .value_hint = "0|1",
         .help = "in server router mode, hide a cached model from the model list when this preset resolves to the same model file",
@@ -986,12 +982,12 @@ pub fn addPresetOptions(ctx: *arg.Context) Error!void {
 /// - `a`: backs the parser context, which the options borrow from and so
 ///   must outlive `out_map`.
 fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.params.Example, out_map: *Preset) Error!void {
-    const dummy_params = try a.create(Params);
-    dummy_params.* = Params.init(a) catch return error.OutOfMemory;
-    const ctx_arg = try a.create(arg.Context);
-    ctx_arg.* = arg.parserInit(dummy_params, ex, null) catch |e| return mapErr(e);
+    const dummy_params = try a.create(tc.params.Params);
+    dummy_params.* = tc.params.Params.init(a) catch return error.OutOfMemory;
+    const ctx_arg = try a.create(tc.arg.Context);
+    ctx_arg.* = tc.arg.parserInit(dummy_params, ex, null) catch |e| return mapErr(e);
 
-    var arg_to_options: std.StringHashMapUnmanaged(*Arg) = .empty;
+    var arg_to_options: std.StringHashMapUnmanaged(*tc.arg.Arg) = .empty;
     for (ctx_arg.options.items) |*opt| {
         for (opt.args) |s| try arg_to_options.put(a, s, opt);
         for (opt.args_neg) |s| try arg_to_options.put(a, s, opt);
@@ -1011,14 +1007,14 @@ fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.
         }
         const s: [:0]const u8 = arg_buf;
         const opt = arg_to_options.get(s) orelse {
-            return arg.throw("error: invalid argument: %s", .{s.ptr});
+            return tc.arg.throw("error: invalid argument: %s", .{s.ptr});
         };
         const gop = try seen_args.getOrPut(a, s);
         if (gop.found_existing) {
             const skip = std.mem.eql(u8, s, "--spec-type");
 
             if (!skip) {
-                log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{s.ptr});
+                tc.log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{s.ptr});
             }
         }
         var val: []const u8 = "";
@@ -1032,13 +1028,13 @@ fn paramsToMap(gpa: Allocator, a: Allocator, argv: []const [:0]const u8, ex: tc.
         }
         if (opt.value_hint != null) {
             // arg with single value
-            if (i + 1 >= argv.len) return arg.throwStr("expected value for argument");
+            if (i + 1 >= argv.len) return tc.arg.throwStr("expected value for argument");
             i += 1;
             val = argv[i];
         }
         if (opt.value_hint_2 != null) {
             // TODO: support arg with 2 values
-            return arg.throwStr("error: argument with 2 values is not yet supported\n");
+            return tc.arg.throwStr("error: argument with 2 values is not yet supported\n");
         }
         try out_map.put(gpa, opt, val);
     }

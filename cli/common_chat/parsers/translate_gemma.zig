@@ -8,30 +8,21 @@
 //! `b1b770d90`).
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const GenerationParams = template.GenerationParams;
 
 /// `p.literal(data.generation_prompt) << p.content(p.rest())`.
-fn parser(generation_prompt: []const u8, p: *chat_peg.ChatBuilder) chat_peg.Error!peg.ParserId {
+fn parser(generation_prompt: []const u8, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
     return p.b.shl(try p.b.literal(generation_prompt), try p.content(try p.b.rest()));
 }
 
 /// `json{{k, v}, ...}` member by member, in order.
-fn obj(a: Allocator, members: []const [2][]const u8) Error!Value {
-    var v = Value.emptyObject();
-    for (members) |m| v.set(a, m[0], try Value.from(a, m[1])) catch |e| return util.fromJson(e);
+fn obj(a: Allocator, members: []const [2][]const u8) common_chat.exception.Error!json.Value {
+    var v = json.Value.emptyObject();
+    for (members) |m| v.set(a, m[0], try json.Value.from(a, m[1])) catch |e| return common_chat.util.fromJson(e);
     return v;
 }
 
@@ -39,15 +30,15 @@ fn obj(a: Allocator, members: []const [2][]const u8) Error!Value {
 /// @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
     // default to chat_template_kwargs, or en-GB if not specified
-    const src_lang = inputs.extra_context.value("source_lang_code", []const u8, "en-GB") catch |e| return util.fromJson(e);
-    const tgt_lang = inputs.extra_context.value("target_lang_code", []const u8, "en-GB") catch |e| return util.fromJson(e);
+    const src_lang = inputs.extra_context.value("source_lang_code", []const u8, "en-GB") catch |e| return common_chat.util.fromJson(e);
+    const tgt_lang = inputs.extra_context.value("target_lang_code", []const u8, "en-GB") catch |e| return common_chat.util.fromJson(e);
     for ([_][]const u8{ "source_lang_code", "target_lang_code" }) |key| {
         if (!inputs.extra_context.contains(key)) {
-            log.wrn("TranslateGemma: {s} not set in chat_template_kwargs, defaulting to en-GB\n", .{key});
+            common_chat.log.wrn("TranslateGemma: {s} not set in chat_template_kwargs, defaulting to en-GB\n", .{key});
         }
     }
 
@@ -55,12 +46,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     var it = messages.items();
     while (it.next()) |item| {
         const message = item.value;
-        if (!std.mem.eql(u8, message.value("role", []const u8, "") catch |e| return util.fromJson(e), "user")) {
+        if (!std.mem.eql(u8, message.value("role", []const u8, "") catch |e| return common_chat.util.fromJson(e), "user")) {
             continue;
         }
         var text: std.ArrayList(u8) = .empty;
-        const null_value: Value = .null;
-        const content: *const Value = if (message.contains("content")) message.at("content") catch |e| return util.fromJson(e) else &null_value;
+        const null_value: json.Value = .null;
+        const content: *const json.Value = if (message.contains("content")) message.at("content") catch |e| return common_chat.util.fromJson(e) else &null_value;
         if (content.isString()) {
             try text.appendSlice(a, content.string);
         } else if (content.isArray()) {
@@ -69,22 +60,22 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
                 if (text.items.len != 0) {
                     try text.appendSlice(a, "\n");
                 }
-                try text.appendSlice(a, part.value.value("text", []const u8, "") catch |e| return util.fromJson(e));
+                try text.appendSlice(a, part.value.value("text", []const u8, "") catch |e| return common_chat.util.fromJson(e));
             }
         }
-        var arr = Value.emptyArray();
+        var arr = json.Value.emptyArray();
         arr.pushBack(a, try obj(a, &.{
             .{ "type", "text" },
             .{ "text", text.items },
             .{ "source_lang_code", src_lang },
             .{ "target_lang_code", tgt_lang },
-        })) catch |e| return util.fromJson(e);
-        const slot = message.index(a, "content") catch |e| return util.fromJson(e);
+        })) catch |e| return common_chat.util.fromJson(e);
+        const slot = message.index(a, "content") catch |e| return common_chat.util.fromJson(e);
         slot.assign(a, arr);
     }
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, &messages, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, &messages, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, &messages, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, &messages, null, null);
     data.format = .peg_native;
     data.supports_thinking = false;
 
@@ -93,7 +84,7 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         try data.prompt.append(a, data.generation_prompt, false);
     }
 
-    data.parser = chat_peg.buildChatPegParser(a, data.generation_prompt, parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, data.generation_prompt, parser) catch |e| return common_chat.util.fromPeg(e);
 
     return data;
 }
@@ -109,9 +100,9 @@ test "a user message's content becomes one text part with both language codes" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    var t = try template.Template.init(std.testing.allocator, "{% for m in messages %}{% if m.content is string %}{{ m.content }}{% else %}{{ m.content[0].source_lang_code }}>{{ m.content[0].target_lang_code }}:{{ m.content[0].text }}{% endif %}{% endfor %}[source_lang_code][target_lang_code]", "", "");
+    var t = try common_chat.template.Template.init(std.testing.allocator, "{% for m in messages %}{% if m.content is string %}{{ m.content }}{% else %}{{ m.content[0].source_lang_code }}>{{ m.content[0].target_lang_code }}:{{ m.content[0].text }}{% endif %}{% endfor %}[source_lang_code][target_lang_code]", "", "");
     defer t.deinit();
-    var p: GenerationParams = .{};
+    var p: common_chat.template.GenerationParams = .{};
     p.messages = try json.parse(a, "[{\"role\":\"system\",\"content\":\"s\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"a\"},{\"type\":\"text\",\"text\":\"b\"}]}]");
     p.extra_context = try json.parse(a, "{\"target_lang_code\":\"fr\"}");
     const data = try init(a, &t, &p);

@@ -30,12 +30,8 @@
 //! against the arithmetic; the GB10 pickup compares them with `nvcc`'s.
 
 const std = @import("std");
-const sync = @import("stdlib").sync;
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const cu = common.cu;
+const ggml = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `ggml_cuda_gdn_mma_args` (gated-delta-net-mma.cuh:7 @b1b770d90).
 /// Passed to the kernel by value, so its size is checked against the
@@ -121,8 +117,8 @@ comptime {
     if (@sizeOf(Shared(16, 128)) != 93312) @compileError("shared<16, 128> is 93312 bytes");
 }
 
-fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: comptime_int) kernels.Kernel {
-    return kernels.get("gated-delta-net-mma", kernels.tmpl("ggml_cuda_gated_delta_net_mma::gdn_single", &.{ kernels.int(C), kernels.int(V), kernels.int(BLOCKS) }));
+fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: comptime_int) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get("gated-delta-net-mma", ggml.cuda.kernels.tmpl("ggml_cuda_gated_delta_net_mma::gdn_single", &.{ ggml.cuda.kernels.int(C), ggml.cuda.kernels.int(V), ggml.cuda.kernels.int(BLOCKS) }));
 }
 
 /// Ports `init` (gated-delta-net-mma.cu:366 @b1b770d90), `init<C, V, BLOCKS>`:
@@ -131,9 +127,9 @@ fn kernel(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: c
 /// device; a refusal is remembered as well as an acceptance.
 fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: comptime_int) type {
     return struct {
-        var mutex: sync.Mutex = .{};
-        var done: [common.max_devices]bool = @splat(false);
-        var available: [common.max_devices]bool = @splat(false);
+        var mutex: stdlib.sync.Mutex = .{};
+        var done: [ggml.cuda.common.max_devices]bool = @splat(false);
+        var available: [ggml.cuda.common.max_devices]bool = @splat(false);
 
         fn get(device: c_int) bool {
             const d: usize = @intCast(device);
@@ -147,18 +143,18 @@ fn Init(comptime C: comptime_int, comptime V: comptime_int, comptime BLOCKS: com
         }
 
         fn run(device: c_int) void {
-            common.setDevice(device);
+            ggml.cuda.common.setDevice(device);
             const size = @sizeOf(Shared(C, V));
-            if (size > common.info().devices[@intCast(device)].smpbo) return;
+            if (size > ggml.cuda.common.info().devices[@intCast(device)].smpbo) return;
             // `cudaFuncSetAttribute((const void *) gdn_single<C, V, BLOCKS>,
             // cudaFuncAttributeMaxDynamicSharedMemorySize, size)` on the
             // device just made current.
-            var dev: cu.CUdevice = 0;
-            common.cuCheck(cu.cuDeviceGet(&dev, common.getDevice()), "cuDeviceGet", @src());
-            const status = cu.cuKernelSetAttribute(cu.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size, kernels.handle(kernel(C, V, BLOCKS)), dev);
-            available[@intCast(device)] = status == cu.CUDA_SUCCESS;
-            if (status != cu.CUDA_SUCCESS) {
-                _ = cu.cudaGetLastError();
+            var dev: ggml.cuda.common.cu.CUdevice = 0;
+            ggml.cuda.common.cuCheck(ggml.cuda.common.cu.cuDeviceGet(&dev, ggml.cuda.common.getDevice()), "cuDeviceGet", @src());
+            const status = ggml.cuda.common.cu.cuKernelSetAttribute(ggml.cuda.common.cu.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size, ggml.cuda.kernels.handle(kernel(C, V, BLOCKS)), dev);
+            available[@intCast(device)] = status == ggml.cuda.common.cu.CUDA_SUCCESS;
+            if (status != ggml.cuda.common.cu.CUDA_SUCCESS) {
+                _ = ggml.cuda.common.cu.cudaGetLastError();
             }
         }
     };
@@ -171,17 +167,17 @@ const Path = enum { ar, slice32_one_block, slice32_two_blocks, slice64, whole_he
 /// CUDA arm: only the architectures upstream benchmarked, a value-split
 /// schedule when whole heads would leave half the SMs idle.
 fn selectPath(device: c_int, a: *const Args) Path {
-    impl.assert(device >= 0 and device < common.max_devices, "device >= 0 && device < GGML_CUDA_MAX_DEVICES");
+    ggml.impl.assert(device >= 0 and device < ggml.cuda.common.max_devices, "device >= 0 && device < GGML_CUDA_MAX_DEVICES");
     if (!a.eligible or a.H_k != 16 or (a.H != 16 and a.H != 32 and a.H != 48 and a.H != 64) or a.n_tokens < 64 or
         a.n_tokens > std.math.maxInt(i64) - 32 or a.rq3 <= 0 or a.n_seqs <= 0 or a.n_seqs > @divTrunc(std.math.maxInt(c_int), a.H * 4))
     {
         return .ar;
     }
-    const inf = &common.info().devices[@intCast(device)];
+    const inf = &ggml.cuda.common.info().devices[@intCast(device)];
     // Enable only architectures benchmarked for this schedule. MMA support alone does not imply a speedup.
-    if (!common.ampereMmaAvailable(inf.cc) or
-        (inf.cc != common.cc.ampere_ga10x and inf.cc != common.cc.ada_lovelace and
-            inf.cc != common.cc.blackwell and inf.cc != common.cc.dgx_spark))
+    if (!ggml.cuda.common.ampereMmaAvailable(inf.cc) or
+        (inf.cc != ggml.cuda.common.cc.ampere_ga10x and inf.cc != ggml.cuda.common.cc.ada_lovelace and
+            inf.cc != ggml.cuda.common.cc.blackwell and inf.cc != ggml.cuda.common.cc.dgx_spark))
     {
         return .ar;
     }
@@ -206,18 +202,18 @@ fn dim(x: i64) u32 {
 ///
 /// Return: whether the chunked kernel ran; false leaves the op to the
 /// recurrent kernel, with nothing launched.
-pub fn launch(device: c_int, a: *const Args, stream: cu.cudaStream_t) bool {
+pub fn launch(device: c_int, a: *const Args, stream: ggml.cuda.common.cu.cudaStream_t) bool {
     if (a.state_out == null) return false;
     const path = selectPath(device, a);
     if (path == .ar) return false;
-    const block: kernels.Dim3 = .{ .x = 32, .y = 8 };
+    const block: ggml.cuda.kernels.Dim3 = .{ .x = 32, .y = 8 };
     if (path == .slice32_two_blocks) {
-        kernels.launch(kernel(16, 32, 2), .{ .grid = .{ .x = dim(a.H * a.n_seqs * 4) }, .block = block, .shmem = @sizeOf(Shared(16, 32)), .stream = stream }, .{a.*});
+        ggml.cuda.kernels.launch(kernel(16, 32, 2), .{ .grid = .{ .x = dim(a.H * a.n_seqs * 4) }, .block = block, .shmem = @sizeOf(Shared(16, 32)), .stream = stream }, .{a.*});
     } else if (path == .slice32_one_block) {
-        kernels.launch(kernel(16, 32, 1), .{ .grid = .{ .x = dim(a.H * a.n_seqs * 4) }, .block = block, .shmem = @sizeOf(Shared(16, 32)), .stream = stream }, .{a.*});
+        ggml.cuda.kernels.launch(kernel(16, 32, 1), .{ .grid = .{ .x = dim(a.H * a.n_seqs * 4) }, .block = block, .shmem = @sizeOf(Shared(16, 32)), .stream = stream }, .{a.*});
     } else {
-        kernels.launch(kernel(16, 128, 1), .{ .grid = .{ .x = dim(a.H * a.n_seqs) }, .block = block, .shmem = @sizeOf(Shared(16, 128)), .stream = stream }, .{a.*});
+        ggml.cuda.kernels.launch(kernel(16, 128, 1), .{ .grid = .{ .x = dim(a.H * a.n_seqs) }, .block = block, .shmem = @sizeOf(Shared(16, 128)), .stream = stream }, .{a.*});
     }
-    common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+    ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
     return true;
 }

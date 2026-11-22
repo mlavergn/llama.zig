@@ -18,8 +18,7 @@
 //! here. Metadata parsing is off (`ma_dr_wav_init_memory` passes no flags).
 
 const std = @import("std");
-const audio_io = @import("audio_io.zig");
-const Io = audio_io.Io;
+const mod = @import("module.zig");
 
 const format_pcm = 0x1;
 const format_adpcm = 0x2;
@@ -62,7 +61,7 @@ fn u32le(b: []const u8) u32 {
 
 /// Ports `ma_dr_wav`'s reading state (miniaudio.h:62462 @b1b770d90).
 pub const Wav = struct {
-    io: Io,
+    io: mod.audio_io.Io,
     fmt: Fmt = .{},
     sample_rate: u32 = 0,
     channels: u16 = 0,
@@ -96,7 +95,7 @@ pub const Wav = struct {
     /// - `io`: the stream, positioned at the start of the buffer.
     ///
     /// Return: the decoder, or null where the C returns `MA_FALSE`.
-    pub fn init(io: Io) ?Wav {
+    pub fn init(io: mod.audio_io.Io) ?Wav {
         var w: Wav = .{ .io = io };
         if (!w.initInternal()) return null;
         return w;

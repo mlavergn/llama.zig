@@ -38,12 +38,10 @@
 //! false, so a bracket's digraphs are parsed but never matched, as there.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-
-const allocator = impl.allocator;
+const mod = @import("module.zig");
 
 fn oom() noreturn {
-    impl.abort("regex", 0, "out of memory");
+    mod.impl.abort("regex", 0, "out of memory");
 }
 
 // -----------------------------------------------------------------------------
@@ -285,7 +283,7 @@ pub fn errorText(err: Error) [:0]const u8 {
 ///
 /// Return: never.
 pub fn throwRegexError(err: Error) noreturn {
-    impl.c.ggml_abort("regex", 0, "terminating due to uncaught exception of type std::__1::regex_error: %s", errorText(err).ptr);
+    mod.impl.c.ggml_abort("regex", 0, "terminating due to uncaught exception of type std::__1::regex_error: %s", errorText(err).ptr);
 }
 
 // -----------------------------------------------------------------------------
@@ -352,20 +350,20 @@ const Bracket = struct {
     icase: bool = false,
 
     fn deinit(self: *Bracket) void {
-        self.chars.deinit(allocator);
-        self.neg_chars.deinit(allocator);
-        self.ranges.deinit(allocator);
-        self.digraphs.deinit(allocator);
-        self.equivalences.deinit(allocator);
+        self.chars.deinit(std.heap.c_allocator);
+        self.neg_chars.deinit(std.heap.c_allocator);
+        self.ranges.deinit(std.heap.c_allocator);
+        self.digraphs.deinit(std.heap.c_allocator);
+        self.equivalences.deinit(std.heap.c_allocator);
     }
 
     fn clone(self: *const Bracket) Bracket {
         var b: Bracket = .{ .mask = self.mask, .neg_mask = self.neg_mask, .negate = self.negate, .icase = self.icase };
-        b.chars.appendSlice(allocator, self.chars.items) catch oom();
-        b.neg_chars.appendSlice(allocator, self.neg_chars.items) catch oom();
-        b.ranges.appendSlice(allocator, self.ranges.items) catch oom();
-        b.digraphs.appendSlice(allocator, self.digraphs.items) catch oom();
-        b.equivalences.appendSlice(allocator, self.equivalences.items) catch oom();
+        b.chars.appendSlice(std.heap.c_allocator, self.chars.items) catch oom();
+        b.neg_chars.appendSlice(std.heap.c_allocator, self.neg_chars.items) catch oom();
+        b.ranges.appendSlice(std.heap.c_allocator, self.ranges.items) catch oom();
+        b.digraphs.appendSlice(std.heap.c_allocator, self.digraphs.items) catch oom();
+        b.equivalences.appendSlice(std.heap.c_allocator, self.equivalences.items) catch oom();
         return b;
     }
 
@@ -374,29 +372,29 @@ const Bracket = struct {
     fn addRange(self: *Bracket, b: []const u32, e: []const u32) Error!void {
         if (b.len != 1 or e.len != 1 or e[0] < b[0]) return error.Range;
         if (self.icase) {
-            self.ranges.append(allocator, .{ translateNocase(b[0]), translateNocase(e[0]) }) catch oom();
+            self.ranges.append(std.heap.c_allocator, .{ translateNocase(b[0]), translateNocase(e[0]) }) catch oom();
             return;
         }
-        self.ranges.append(allocator, .{ b[0], e[0] }) catch oom();
+        self.ranges.append(std.heap.c_allocator, .{ b[0], e[0] }) catch oom();
     }
 
     /// Ports `__bracket_expression::__add_char`.
     fn addChar(self: *Bracket, ch: u32) void {
-        self.chars.append(allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
+        self.chars.append(std.heap.c_allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
     }
 
     /// Ports `__bracket_expression::__add_neg_char`.
     fn addNegChar(self: *Bracket, ch: u32) void {
-        self.neg_chars.append(allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
+        self.neg_chars.append(std.heap.c_allocator, if (self.icase) translateNocase(ch) else ch) catch oom();
     }
 
     fn addStart(self: *Bracket, r: []const u32) void {
         if (r.len == 1) {
             self.addChar(r[0]);
         } else if (self.icase) {
-            self.digraphs.append(allocator, .{ translateNocase(r[0]), translateNocase(r[1]) }) catch oom();
+            self.digraphs.append(std.heap.c_allocator, .{ translateNocase(r[0]), translateNocase(r[1]) }) catch oom();
         } else {
-            self.digraphs.append(allocator, .{ r[0], r[1] }) catch oom();
+            self.digraphs.append(std.heap.c_allocator, .{ r[0], r[1] }) catch oom();
         }
     }
 
@@ -478,13 +476,13 @@ pub fn BasicRegex(comptime CharT: type) type {
         /// Return: nothing.
         pub fn deinit(self: *Self) void {
             for (self.brackets.items) |*b| b.deinit();
-            self.brackets.deinit(allocator);
+            self.brackets.deinit(std.heap.c_allocator);
             for (self.lookaheads.items) |la| {
                 la.deinit();
-                allocator.destroy(la);
+                std.heap.c_allocator.destroy(la);
             }
-            self.lookaheads.deinit(allocator);
-            self.nodes.deinit(allocator);
+            self.lookaheads.deinit(std.heap.c_allocator);
+            self.nodes.deinit(std.heap.c_allocator);
             self.* = .{};
         }
 
@@ -503,12 +501,12 @@ pub fn BasicRegex(comptime CharT: type) type {
                 .loop_count = self.loop_count,
                 .open_count = self.open_count,
             };
-            out.nodes.appendSlice(allocator, self.nodes.items) catch oom();
-            for (self.brackets.items) |*b| out.brackets.append(allocator, b.clone()) catch oom();
+            out.nodes.appendSlice(std.heap.c_allocator, self.nodes.items) catch oom();
+            for (self.brackets.items) |*b| out.brackets.append(std.heap.c_allocator, b.clone()) catch oom();
             for (self.lookaheads.items) |la| {
-                const p = allocator.create(Self) catch oom();
+                const p = std.heap.c_allocator.create(Self) catch oom();
                 p.* = la.clone();
-                out.lookaheads.append(allocator, p) catch oom();
+                out.lookaheads.append(std.heap.c_allocator, p) catch oom();
             }
             return out;
         }
@@ -519,7 +517,7 @@ pub fn BasicRegex(comptime CharT: type) type {
         }
 
         fn addNode(self: *Self, n: Node) u32 {
-            self.nodes.append(allocator, n) catch oom();
+            self.nodes.append(std.heap.c_allocator, n) catch oom();
             return @intCast(self.nodes.items.len - 1);
         }
 
@@ -693,7 +691,7 @@ pub fn BasicRegex(comptime CharT: type) type {
             var states: std.ArrayList(State) = .empty;
             defer {
                 for (states.items) |*s| s.deinit();
-                states.deinit(allocator);
+                states.deinit(std.heap.c_allocator);
             }
 
             const s0: State = .{
@@ -701,15 +699,15 @@ pub fn BasicRegex(comptime CharT: type) type {
                 .first = first,
                 .current = first,
                 .last = last,
-                .sub_matches = allocator.alloc(SubMatch, self.marked_count) catch oom(),
-                .loop_data = allocator.alloc(LoopData, self.loop_count) catch oom(),
+                .sub_matches = std.heap.c_allocator.alloc(SubMatch, self.marked_count) catch oom(),
+                .loop_data = std.heap.c_allocator.alloc(LoopData, self.loop_count) catch oom(),
                 .node = self.start,
                 .flags = flags,
                 .at_first = at_first,
             };
             @memset(s0.sub_matches, .{ .first = last, .second = last, .matched = false });
             @memset(s0.loop_data, .{ .count = 0, .pos = 0 });
-            states.append(allocator, s0) catch oom();
+            states.append(std.heap.c_allocator, s0) catch oom();
 
             var counter: i32 = 0;
             const length: i32 = @intCast(last - first);
@@ -739,13 +737,13 @@ pub fn BasicRegex(comptime CharT: type) type {
                         var snext = s.clone();
                         self.execSplit(true, s);
                         self.execSplit(false, &snext);
-                        states.append(allocator, snext) catch oom();
+                        states.append(std.heap.c_allocator, snext) catch oom();
                     },
                     .reject => {
                         var popped = states.pop().?;
                         popped.deinit();
                     },
-                    .none => impl.abort("regex", 0, "unknown regex state"),
+                    .none => mod.impl.abort("regex", 0, "unknown regex state"),
                 }
                 if (states.items.len == 0) break;
             }
@@ -1037,14 +1035,14 @@ const State = struct {
     at_first: bool,
 
     fn deinit(self: *State) void {
-        allocator.free(self.sub_matches);
-        allocator.free(self.loop_data);
+        std.heap.c_allocator.free(self.sub_matches);
+        std.heap.c_allocator.free(self.loop_data);
     }
 
     fn clone(self: *const State) State {
         var out = self.*;
-        out.sub_matches = allocator.dupe(SubMatch, self.sub_matches) catch oom();
-        out.loop_data = allocator.dupe(LoopData, self.loop_data) catch oom();
+        out.sub_matches = std.heap.c_allocator.dupe(SubMatch, self.sub_matches) catch oom();
+        out.loop_data = std.heap.c_allocator.dupe(LoopData, self.loop_data) catch oom();
         return out;
     }
 };
@@ -1071,11 +1069,11 @@ pub const Match = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *Match) void {
-        self.subs.deinit(allocator);
+        self.subs.deinit(std.heap.c_allocator);
     }
 
     fn reset(self: *Match, n: usize, last: usize) void {
-        self.subs.resize(allocator, n) catch oom();
+        self.subs.resize(std.heap.c_allocator, n) catch oom();
         @memset(self.subs.items, .{ .first = last, .second = last, .matched = false });
     }
 
@@ -1170,7 +1168,7 @@ fn Parser(comptime CharT: type) type {
 
         fn startMatchingList(self: *Self, negate: bool) u32 {
             const re = self.re;
-            re.brackets.append(allocator, .{ .negate = negate, .icase = re.icase }) catch oom();
+            re.brackets.append(std.heap.c_allocator, .{ .negate = negate, .icase = re.icase }) catch oom();
             const idx: u32 = @intCast(re.brackets.items.len - 1);
             _ = re.pushNode(.{ .kind = .bracket, .aux = idx });
             return idx;
@@ -1256,16 +1254,16 @@ fn Parser(comptime CharT: type) type {
                         if (temp != last) {
                             const ch = self.at(temp);
                             if (ch == '=' or ch == '!') {
-                                const sub = allocator.create(BasicRegex(CharT)) catch oom();
+                                const sub = std.heap.c_allocator.create(BasicRegex(CharT)) catch oom();
                                 sub.* = .{ .nosubs = self.re.nosubs, .icase = self.re.icase };
                                 var sp: Self = .{ .re = sub, .pat = self.pat };
                                 temp = sp.parse(temp + 1) catch |err| {
                                     sub.deinit();
-                                    allocator.destroy(sub);
+                                    std.heap.c_allocator.destroy(sub);
                                     return err;
                                 };
                                 const mexp = sub.marked_count;
-                                self.re.lookaheads.append(allocator, sub) catch oom();
+                                self.re.lookaheads.append(std.heap.c_allocator, sub) catch oom();
                                 _ = self.re.pushNode(.{
                                     .kind = .lookahead,
                                     .invert = ch == '!',
@@ -1690,7 +1688,7 @@ fn Parser(comptime CharT: type) type {
             const temp = self.searchClose(first, '=', ']') orelse return error.Brack;
             const collate_name = lookupCollatename(CharT, self.pat[first..temp]) orelse return error.Collate;
             // In the "C" locale `transform_primary` of one byte is that byte.
-            self.bracket(ml).equivalences.append(allocator, collate_name) catch oom();
+            self.bracket(ml).equivalences.append(std.heap.c_allocator, collate_name) catch oom();
             return temp + 2;
         }
 

@@ -21,65 +21,41 @@
 //! a `GGML_CPU_GENERIC` build would use instead of the NEON kernels.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const c = impl.c;
+const ggml = @import("../../module.zig");
 
 // The reference quantizers, ported in `src/ggml/quants/`. Declared as externs
 // rather than imported because they live in a different directory of the port
 // and only their C ABI is wanted here -- exactly as the C reaches them through
 // `ggml-quants.h`.
-const ref = struct {
-    extern fn quantize_row_q1_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q2_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q4_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q4_1_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q5_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q5_1_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q8_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q8_1_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_mxfp4_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_nvfp4_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_f8_e4m3_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q2_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q3_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q4_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q5_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_q6_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_tq1_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_tq2_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-    extern fn quantize_row_iq4_xs_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-};
 
 /// Ports `quantize_row_q1_0` (ggml-cpu/quants.c:26 @b1b770d90).
 pub export fn quantize_row_q1_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q1_0_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q1_0_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q2_0` (ggml-cpu/quants.c:30 @b1b770d90).
 pub export fn quantize_row_q2_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q2_0_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q2_0_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q4_0` (ggml-cpu/quants.c:34 @b1b770d90).
 pub export fn quantize_row_q4_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q4_0_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q4_0_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q4_1` (ggml-cpu/quants.c:38 @b1b770d90).
 pub export fn quantize_row_q4_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q4_1_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q4_1_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q5_0` (ggml-cpu/quants.c:42 @b1b770d90).
 pub export fn quantize_row_q5_0(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q5_0_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q5_0_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q5_1` (ggml-cpu/quants.c:46 @b1b770d90).
 pub export fn quantize_row_q5_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q5_1_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q5_1_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q8_0_generic` (ggml-cpu/quants.c:50 @b1b770d90).
@@ -88,27 +64,27 @@ pub export fn quantize_row_q5_1(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
 /// this target actually uses. Unreachable here, and exported because the symbol
 /// is part of the translation unit's contract.
 pub export fn quantize_row_q8_0_generic(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q8_0_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q8_0_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q8_1_generic` (ggml-cpu/quants.c:54 @b1b770d90).
 pub export fn quantize_row_q8_1_generic(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q8_1_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_q8_1_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_mxfp4` (ggml-cpu/quants.c:58 @b1b770d90).
 pub export fn quantize_row_mxfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_mxfp4_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_mxfp4_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_nvfp4` (ggml-cpu/quants.c:62 @b1b770d90).
 pub export fn quantize_row_nvfp4(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_nvfp4_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_nvfp4_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_f8_e4m3` (ggml-cpu/quants.c:66 @b1b770d90).
 pub export fn quantize_row_f8_e4m3(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_f8_e4m3_ref(x, y, k);
+    ggml.quants.legacy.quantize_row_f8_e4m3_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_q2_K` (ggml-cpu/quants.c:76 @b1b770d90).
@@ -117,61 +93,61 @@ pub export fn quantize_row_f8_e4m3(x: [*c]const f32, y: ?*anyopaque, k: i64) voi
 /// legacy ones do not. Kept, because the reference quantizer would otherwise
 /// walk off the end of a short row.
 pub export fn quantize_row_q2_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_q2_K_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.k.quantize_row_q2_K_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_q3_K` (ggml-cpu/quants.c:82 @b1b770d90).
 pub export fn quantize_row_q3_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_q3_K_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.k.quantize_row_q3_K_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_q4_K` (ggml-cpu/quants.c:88 @b1b770d90).
 pub export fn quantize_row_q4_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_q4_K_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.k.quantize_row_q4_K_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_q5_K` (ggml-cpu/quants.c:96 @b1b770d90).
 pub export fn quantize_row_q5_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_q5_K_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.k.quantize_row_q5_K_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_q6_K` (ggml-cpu/quants.c:104 @b1b770d90).
 pub export fn quantize_row_q6_K(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_q6_K_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.k.quantize_row_q6_K_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_tq1_0` (ggml-cpu/quants.c:112 @b1b770d90).
 pub export fn quantize_row_tq1_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_tq1_0_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.ternary.quantize_row_tq1_0_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_tq2_0` (ggml-cpu/quants.c:118 @b1b770d90).
 pub export fn quantize_row_tq2_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_tq2_0_ref(x, vy, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.ternary.quantize_row_tq2_0_ref(x, @ptrCast(@alignCast(vy)), k);
 }
 
 /// Ports `quantize_row_q8_K_generic` (ggml-cpu/quants.c:126 @b1b770d90).
 pub export fn quantize_row_q8_K_generic(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q8_K_ref(x, y, k);
+    ggml.quants.k.quantize_row_q8_K_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_iq4_nl` (ggml-cpu/quants.c:1379 @b1b770d90).
 pub export fn quantize_row_iq4_nl(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK4_NL) == 0, "k % QK4_NL == 0");
-    ref.quantize_row_iq4_nl_ref(x, y, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK4_NL) == 0, "k % QK4_NL == 0");
+    ggml.quants.iq4.quantize_row_iq4_nl_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 /// Ports `quantize_row_iq4_xs` (ggml-cpu/quants.c:1384 @b1b770d90).
 pub export fn quantize_row_iq4_xs(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    impl.assert(@rem(k, c.QK_K) == 0, "k % QK_K == 0");
-    ref.quantize_row_iq4_xs_ref(x, y, k);
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK_K) == 0, "k % QK_K == 0");
+    ggml.quants.iq4.quantize_row_iq4_xs_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 // -----------------------------------------------------------------------------
@@ -192,7 +168,7 @@ test "a forwarder produces what the reference quantizer produces" {
     var via_ref: [256]u8 align(8) = @splat(0);
 
     quantize_row_q4_0(&x, &via_wrapper, 64);
-    ref.quantize_row_q4_0_ref(&x, &via_ref, 64);
+    ggml.quants.legacy.quantize_row_q4_0_ref(&x, @ptrCast(&via_ref), 64);
     try std.testing.expectEqualSlices(u8, &via_ref, &via_wrapper);
 
     // And a different type must not agree, or the check above proves nothing.
@@ -201,15 +177,12 @@ test "a forwarder produces what the reference quantizer produces" {
     try std.testing.expect(!std.mem.eql(u8, &via_wrapper, &other));
 }
 
-const testing = @import("testing.zig");
-const golden = @import("golden.zig");
-
 test "the generic q8 row quantizers match the C" {
     // These three are the `_generic` fallbacks, unreachable on this target
     // like the generic dot products, so the goldens are their only gate.
-    try testing.checkRow(quantize_row_q8_0_generic, c.GGML_TYPE_Q8_0, golden.row_q8_0);
-    try testing.checkRow(quantize_row_q8_1_generic, c.GGML_TYPE_Q8_1, golden.row_q8_1);
-    try testing.checkRow(quantize_row_q8_K_generic, c.GGML_TYPE_Q8_K, golden.row_q8_K);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_0_generic, ggml.impl.c.GGML_TYPE_Q8_0, ggml.cpu.quants.golden.row_q8_0);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_1_generic, ggml.impl.c.GGML_TYPE_Q8_1, ggml.cpu.quants.golden.row_q8_1);
+    try ggml.cpu.quants.testing.checkRow(quantize_row_q8_K_generic, ggml.impl.c.GGML_TYPE_Q8_K, ggml.cpu.quants.golden.row_q8_K);
 }
 
 test "the K-quant forwarders assert their row length" {
@@ -221,7 +194,7 @@ test "the K-quant forwarders assert their row length" {
     quantize_row_q2_K(&x, &y, 256);
 
     var any = false;
-    for (y[0..@sizeOf(c.block_q2_K)]) |b| {
+    for (y[0..@sizeOf(ggml.impl.c.block_q2_K)]) |b| {
         if (b != 0) any = true;
     }
     try std.testing.expect(any);

@@ -16,26 +16,10 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const hparams_mod = @import("hparams.zig");
-const batch = @import("batch.zig");
-const memory = @import("memory.zig");
-const io = @import("io.zig");
-const kv_cache = @import("kv_cache.zig");
-const model_mod = @import("model.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Hparams = hparams_mod.Hparams;
-const Ubatch = batch.Ubatch;
-const KvCache = kv_cache.KvCache;
-const KvCacheContext = kv_cache.KvCacheContext;
-const SlotInfo = kv_cache.SlotInfo;
+const mod = @import("module.zig");
 
 fn oom() noreturn {
-    impl.abort("llama-kv-cache-dsa.cpp", 0, "out of memory");
+    mod.impl.abort("llama-kv-cache-dsa.cpp", 0, "out of memory");
 }
 
 /// Ports `llama_kv_cache_dsa` (llama-kv-cache-dsa.h:15 @b1b770d90): two
@@ -44,11 +28,11 @@ fn oom() noreturn {
 pub const KvCacheDsa = struct {
     /// The indexer cache's hyperparameters. `llama_kv_cache` keeps only a
     /// pointer to its hyperparameters, so they live here, as long as it.
-    hparams_lid: Hparams,
+    hparams_lid: mod.hparams.Hparams,
     n_stream: u32 = 1,
 
-    kv_mla: *KvCache,
-    kv_lid: *KvCache,
+    kv_mla: *mod.kv_cache.KvCache,
+    kv_lid: *mod.kv_cache.KvCache,
 
     /// Ports the constructor of `llama_kv_cache_dsa` (llama-kv-cache-dsa.cpp:15
     /// @b1b770d90).
@@ -59,26 +43,26 @@ pub const KvCacheDsa = struct {
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
-        model: *const model_mod.Model,
+        model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: c.enum_ggml_type,
-        type_v: c.enum_ggml_type,
+        type_k: mod.impl.c.enum_ggml_type,
+        type_v: mod.impl.c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         unified: bool,
         kv_size: u32,
         n_seq_max: u32,
         n_swa: u32,
-        swa_type: hparams_mod.SwaType,
-        filter_mla: memory.LayerFilter,
-        filter_lid: memory.LayerFilter,
-        reuse: memory.LayerMap,
-        exc: *Exception,
-    ) Thrown!*KvCacheDsa {
+        swa_type: mod.hparams.SwaType,
+        filter_mla: mod.memory.LayerFilter,
+        filter_lid: mod.memory.LayerFilter,
+        reuse: mod.memory.LayerMap,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!*KvCacheDsa {
         const func = "llama_kv_cache_dsa";
 
-        const self = allocator.create(KvCacheDsa) catch oom();
-        errdefer allocator.destroy(self);
+        const self = std.heap.c_allocator.create(KvCacheDsa) catch oom();
+        errdefer std.heap.c_allocator.destroy(self);
         self.* = .{
             .hparams_lid = model.hparams,
             .n_stream = if (unified) 1 else n_seq_max,
@@ -86,9 +70,9 @@ pub const KvCacheDsa = struct {
             .kv_lid = undefined,
         };
 
-        impl.logInfo("%s: creating main KV cache, size = %u cells\n", .{ func, kv_size });
+        mod.impl.logInfo("%s: creating main KV cache, size = %u cells\n", .{ func, kv_size });
 
-        self.kv_mla = try KvCache.create(model, no_alloc, &model.hparams, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_mla, reuse, .{}, exc);
+        self.kv_mla = try mod.kv_cache.KvCache.create(model, no_alloc, &model.hparams, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_mla, reuse, .{}, exc);
         errdefer self.kv_mla.destroy();
 
         // `llama_kv_cache` caches the indexer keys too: hand-tweaked
@@ -103,9 +87,9 @@ pub const KvCacheDsa = struct {
         // KV sharing applies to the MLA cache only: each indexer owns its keys.
         for (&self.hparams_lid.kv_source_impl, 0..) |*src, i| src.* = @intCast(i);
 
-        impl.logInfo("%s: creating indexer KV cache, size = %u cells\n", .{ func, kv_size });
+        mod.impl.logInfo("%s: creating indexer KV cache, size = %u cells\n", .{ func, kv_size });
 
-        self.kv_lid = try KvCache.createTagged(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_lid, .{}, .{}, "", true, exc);
+        self.kv_lid = try mod.kv_cache.KvCache.createTagged(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_lid, .{}, .{}, "", true, exc);
 
         return self;
     }
@@ -114,7 +98,7 @@ pub const KvCacheDsa = struct {
     pub fn destroy(self: *KvCacheDsa) void {
         self.kv_mla.destroy();
         self.kv_lid.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsa`'s `clear` (llama-kv-cache-dsa.cpp:59 @b1b770d90).
@@ -168,7 +152,7 @@ pub const KvCacheDsa = struct {
     }
 
     /// Ports `llama_kv_cache_dsa`'s `memory_breakdown` (llama-kv-cache-dsa.cpp:101 @b1b770d90).
-    pub fn memoryBreakdown(self: *const KvCacheDsa, out: *std.ArrayList(memory.BuftSize)) void {
+    pub fn memoryBreakdown(self: *const KvCacheDsa, out: *std.ArrayList(mod.memory.BuftSize)) void {
         self.kv_mla.memoryBreakdown(out);
         self.kv_lid.memoryBreakdown(out);
     }
@@ -176,17 +160,17 @@ pub const KvCacheDsa = struct {
     /// Ports `llama_kv_cache_dsa`'s `init_batch` (llama-kv-cache-dsa.cpp:109
     /// @b1b770d90): a simple split for a single stream, an equal one
     /// otherwise; every ubatch must find a slot in both caches.
-    pub fn initBatch(self: *KvCacheDsa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *DsaContext {
+    pub fn initBatch(self: *KvCacheDsa, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *DsaContext {
         _ = embd_all;
 
         blk: {
             balloc.splitReset();
 
-            var ubatches: std.ArrayList(Ubatch) = .empty;
+            var ubatches: std.ArrayList(mod.batch.Ubatch) = .empty;
             while (true) {
                 const ub = if (self.n_stream == 1) balloc.splitSimple(n_ubatch) else balloc.splitEqual(n_ubatch, true, 0);
                 if (ub.n_tokens == 0) break;
-                ubatches.append(allocator, ub) catch oom();
+                ubatches.append(std.heap.c_allocator, ub) catch oom();
             }
 
             if (balloc.getNUsed() < balloc.getNTokens()) {
@@ -200,7 +184,7 @@ pub const KvCacheDsa = struct {
                 break :blk;
             };
             if (sinfos_mla.items.len == 0) {
-                sinfos_mla.deinit(allocator);
+                sinfos_mla.deinit(std.heap.c_allocator);
                 releaseAll(&ubatches);
                 break :blk;
             }
@@ -211,7 +195,7 @@ pub const KvCacheDsa = struct {
                 break :blk;
             };
             if (sinfos_lid.items.len == 0) {
-                sinfos_lid.deinit(allocator);
+                sinfos_lid.deinit(std.heap.c_allocator);
                 freeSlotInfos(&sinfos_mla);
                 releaseAll(&ubatches);
                 break :blk;
@@ -244,7 +228,7 @@ pub const KvCacheDsa = struct {
     }
 
     /// Ports `llama_kv_cache_dsa`'s `state_write` (llama-kv-cache-dsa.cpp:167 @b1b770d90).
-    pub fn stateWrite(self: *const KvCacheDsa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateWrite(self: *const KvCacheDsa, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         try self.kv_mla.stateWrite(w, seq_id, flags, exc);
         try self.kv_lid.stateWrite(w, seq_id, flags, exc);
     }
@@ -252,7 +236,7 @@ pub const KvCacheDsa = struct {
     /// Ports `llama_kv_cache_dsa`'s `state_read` (llama-kv-cache-dsa.cpp:172
     /// @b1b770d90): an indexer restore that fails undoes the MLA restore, so
     /// a failed restore leaves nothing behind.
-    pub fn stateRead(self: *KvCacheDsa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateRead(self: *KvCacheDsa, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         try self.kv_mla.stateRead(r, seq_id, flags, exc);
         self.kv_lid.stateRead(r, seq_id, flags, exc) catch |err| {
             self.kv_mla.stateClear(seq_id);
@@ -261,35 +245,35 @@ pub const KvCacheDsa = struct {
     }
 
     /// Ports `llama_kv_cache_dsa`'s `get_mla` (llama-kv-cache-dsa.cpp:185 @b1b770d90).
-    pub fn getMla(self: *const KvCacheDsa) *KvCache {
+    pub fn getMla(self: *const KvCacheDsa) *mod.kv_cache.KvCache {
         return self.kv_mla;
     }
 
     /// Ports `llama_kv_cache_dsa`'s `get_lid` (llama-kv-cache-dsa.cpp:189 @b1b770d90).
-    pub fn getLid(self: *const KvCacheDsa) *KvCache {
+    pub fn getLid(self: *const KvCacheDsa) *mod.kv_cache.KvCache {
         return self.kv_lid;
     }
 
     // -------------------------------------------------------------------------
     // The memory interface
 
-    pub fn memoryOf(self: *KvCacheDsa) memory.Memory {
+    pub fn memoryOf(self: *KvCacheDsa) mod.memory.Memory {
         return .{ .ptr = self, .vtable = &vtable };
     }
 
-    const vtable: memory.Memory.VTable = .{
+    const vtable: mod.memory.Memory.VTable = .{
         .initBatch = struct {
-            fn f(p: *anyopaque, b: *batch.BatchAllocr, n: u32, e: bool) memory.Context {
+            fn f(p: *anyopaque, b: *mod.batch.BatchAllocr, n: u32, e: bool) mod.memory.Context {
                 return from(p).initBatch(b, n, e).contextOf();
             }
         }.f,
         .initFull = struct {
-            fn f(p: *anyopaque) memory.Context {
+            fn f(p: *anyopaque) mod.memory.Context {
                 return from(p).initFull().contextOf();
             }
         }.f,
         .initUpdate = struct {
-            fn f(p: *anyopaque, l: *anyopaque, o: bool) memory.Context {
+            fn f(p: *anyopaque, l: *anyopaque, o: bool) mod.memory.Context {
                 return from(p).initUpdate(l, o).contextOf();
             }
         }.f,
@@ -339,17 +323,17 @@ pub const KvCacheDsa = struct {
             }
         }.f,
         .memoryBreakdown = struct {
-            fn f(p: *anyopaque, out: *std.ArrayList(memory.BuftSize)) void {
+            fn f(p: *anyopaque, out: *std.ArrayList(mod.memory.BuftSize)) void {
                 from(p).memoryBreakdown(out);
             }
         }.f,
         .stateWrite = struct {
-            fn f(p: *anyopaque, w: io.Writer, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, w: mod.io.Writer, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateWrite(w, s, fl, e);
             }
         }.f,
         .stateRead = struct {
-            fn f(p: *anyopaque, r: io.Reader, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, r: mod.io.Reader, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateRead(r, s, fl, e);
             }
         }.f,
@@ -365,19 +349,19 @@ pub const KvCacheDsa = struct {
     }
 };
 
-fn releaseAll(list: *std.ArrayList(Ubatch)) void {
+fn releaseAll(list: *std.ArrayList(mod.batch.Ubatch)) void {
     for (list.items) |*u| u.release();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn freeSlotInfos(list: *std.ArrayList(SlotInfo)) void {
+fn freeSlotInfos(list: *std.ArrayList(mod.kv_cache.SlotInfo)) void {
     for (list.items) |*si| si.deinit();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
-    var out: std.ArrayList(Ubatch) = .empty;
-    out.ensureTotalCapacity(allocator, list.len) catch oom();
+fn retainedCopy(list: []const mod.batch.Ubatch) std.ArrayList(mod.batch.Ubatch) {
+    var out: std.ArrayList(mod.batch.Ubatch) = .empty;
+    out.ensureTotalCapacity(std.heap.c_allocator, list.len) catch oom();
     for (list) |u| {
         u.retain();
         out.appendAssumeCapacity(u);
@@ -389,15 +373,15 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
 pub const DsaContext = struct {
     /// The index of the next ubatch to process.
     i_next: usize = 0,
-    ubatches: std.ArrayList(Ubatch) = .empty,
-    ctx_mla: ?*KvCacheContext = null,
-    ctx_lid: ?*KvCacheContext = null,
-    status: memory.Status,
+    ubatches: std.ArrayList(mod.batch.Ubatch) = .empty,
+    ctx_mla: ?*mod.kv_cache.KvCacheContext = null,
+    ctx_lid: ?*mod.kv_cache.KvCacheContext = null,
+    status: mod.memory.Status,
 
     /// Ports the error constructor of `llama_kv_cache_dsa_context`
     /// (llama-kv-cache-dsa.cpp:197 @b1b770d90).
-    pub fn createStatus(status: memory.Status) *DsaContext {
-        const self = allocator.create(DsaContext) catch oom();
+    pub fn createStatus(status: mod.memory.Status) *DsaContext {
+        const self = std.heap.c_allocator.create(DsaContext) catch oom();
         self.* = .{ .status = status };
         return self;
     }
@@ -405,31 +389,31 @@ pub const DsaContext = struct {
     /// Ports the full-cache constructor of `llama_kv_cache_dsa_context`
     /// (llama-kv-cache-dsa.cpp:199 @b1b770d90).
     pub fn createFull(kv: *KvCacheDsa) *DsaContext {
-        const self = allocator.create(DsaContext) catch oom();
+        const self = std.heap.c_allocator.create(DsaContext) catch oom();
         const m = kv.getMla().initFull();
         const l = kv.getLid().initFull();
-        self.* = .{ .ctx_mla = m, .ctx_lid = l, .status = memory.statusCombine(m.getStatus(), l.getStatus()) };
+        self.* = .{ .ctx_mla = m, .ctx_lid = l, .status = mod.memory.statusCombine(m.getStatus(), l.getStatus()) };
         return self;
     }
 
     /// Ports the update constructor of `llama_kv_cache_dsa_context`
     /// (llama-kv-cache-dsa.cpp:206 @b1b770d90).
     pub fn createUpdate(kv: *KvCacheDsa, lctx: *anyopaque, optimize: bool) *DsaContext {
-        const self = allocator.create(DsaContext) catch oom();
+        const self = std.heap.c_allocator.create(DsaContext) catch oom();
         const m = kv.getMla().initUpdate(lctx, optimize);
         const l = kv.getLid().initUpdate(lctx, optimize);
-        self.* = .{ .ctx_mla = m, .ctx_lid = l, .status = memory.statusCombine(m.getStatus(), l.getStatus()) };
+        self.* = .{ .ctx_mla = m, .ctx_lid = l, .status = mod.memory.statusCombine(m.getStatus(), l.getStatus()) };
         return self;
     }
 
     /// Ports the batch constructor of `llama_kv_cache_dsa_context`
     /// (llama-kv-cache-dsa.cpp:215 @b1b770d90): each cache gets its own copy
     /// of the ubatches, as the C++ copies them.
-    pub fn createBatch(kv: *KvCacheDsa, sinfos_mla: std.ArrayList(SlotInfo), sinfos_lid: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *DsaContext {
-        const self = allocator.create(DsaContext) catch oom();
-        const m = KvCacheContext.createBatch(kv.getMla(), sinfos_mla, retainedCopy(ubatches.items));
-        const l = KvCacheContext.createBatch(kv.getLid(), sinfos_lid, retainedCopy(ubatches.items));
-        self.* = .{ .ubatches = ubatches, .ctx_mla = m, .ctx_lid = l, .status = memory.statusCombine(m.getStatus(), l.getStatus()) };
+    pub fn createBatch(kv: *KvCacheDsa, sinfos_mla: std.ArrayList(mod.kv_cache.SlotInfo), sinfos_lid: std.ArrayList(mod.kv_cache.SlotInfo), ubatches: std.ArrayList(mod.batch.Ubatch)) *DsaContext {
+        const self = std.heap.c_allocator.create(DsaContext) catch oom();
+        const m = mod.kv_cache.KvCacheContext.createBatch(kv.getMla(), sinfos_mla, retainedCopy(ubatches.items));
+        const l = mod.kv_cache.KvCacheContext.createBatch(kv.getLid(), sinfos_lid, retainedCopy(ubatches.items));
+        self.* = .{ .ubatches = ubatches, .ctx_mla = m, .ctx_lid = l, .status = mod.memory.statusCombine(m.getStatus(), l.getStatus()) };
         return self;
     }
 
@@ -438,7 +422,7 @@ pub const DsaContext = struct {
         releaseAll(&self.ubatches);
         if (self.ctx_mla) |m| m.destroy();
         if (self.ctx_lid) |l| l.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_dsa_context`'s `next` (llama-kv-cache-dsa.cpp:229 @b1b770d90).
@@ -453,7 +437,7 @@ pub const DsaContext = struct {
     /// Ports `llama_kv_cache_dsa_context`'s `apply` (llama-kv-cache-dsa.cpp:242
     /// @b1b770d90): both caches apply, whatever the first answers.
     pub fn apply(self: *DsaContext) bool {
-        std.debug.assert(!memory.statusIsFail(self.status));
+        std.debug.assert(!mod.memory.statusIsFail(self.status));
         var res = true;
         res = self.ctx_mla.?.apply() and res;
         res = self.ctx_lid.?.apply() and res;
@@ -461,33 +445,33 @@ pub const DsaContext = struct {
     }
 
     /// Ports `llama_kv_cache_dsa_context`'s `get_status` (llama-kv-cache-dsa.cpp:253 @b1b770d90).
-    pub fn getStatus(self: *const DsaContext) memory.Status {
+    pub fn getStatus(self: *const DsaContext) mod.memory.Status {
         return self.status;
     }
 
     /// Ports `llama_kv_cache_dsa_context`'s `get_ubatch` (llama-kv-cache-dsa.cpp:257 @b1b770d90).
-    pub fn getUbatch(self: *const DsaContext) *const Ubatch {
+    pub fn getUbatch(self: *const DsaContext) *const mod.batch.Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
     /// Ports `llama_kv_cache_dsa_context`'s `get_mla` (llama-kv-cache-dsa.cpp:263 @b1b770d90).
-    pub fn getMla(self: *const DsaContext) *const KvCacheContext {
+    pub fn getMla(self: *const DsaContext) *const mod.kv_cache.KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_mla.?;
     }
 
     /// Ports `llama_kv_cache_dsa_context`'s `get_lid` (llama-kv-cache-dsa.cpp:269 @b1b770d90).
-    pub fn getLid(self: *const DsaContext) *const KvCacheContext {
+    pub fn getLid(self: *const DsaContext) *const mod.kv_cache.KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_lid.?;
     }
 
-    pub fn contextOf(self: *DsaContext) memory.Context {
+    pub fn contextOf(self: *DsaContext) mod.memory.Context {
         return .{ .ptr = self, .vtable = &ctx_vtable };
     }
 
-    const ctx_vtable: memory.Context.VTable = .{
+    const ctx_vtable: mod.memory.Context.VTable = .{
         .next = struct {
             fn f(p: *anyopaque) bool {
                 return cast(p).next();
@@ -499,12 +483,12 @@ pub const DsaContext = struct {
             }
         }.f,
         .getUbatch = struct {
-            fn f(p: *anyopaque) *const Ubatch {
+            fn f(p: *anyopaque) *const mod.batch.Ubatch {
                 return cast(p).getUbatch();
             }
         }.f,
         .getStatus = struct {
-            fn f(p: *anyopaque) memory.Status {
+            fn f(p: *anyopaque) mod.memory.Status {
                 return cast(p).getStatus();
             }
         }.f,

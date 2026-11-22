@@ -40,12 +40,7 @@
 //! exports. Negative-tested by perturbing a field.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-
-const c = impl.c;
-
-pub const Tensor = c.ggml_tensor;
-pub const CGraph = c.ggml_cgraph;
+const ggml = @import("../module.zig");
 
 /// Mirrors `enum ggml_metal_device_id` (ggml-metal-device.h:268 @b1b770d90).
 ///
@@ -156,17 +151,16 @@ pub const DeviceProps = extern struct {
 // ggml-metal-device.h
 
 pub extern fn ggml_metal_device_id_token(id: DeviceId) [*c]const u8;
-pub extern fn ggml_metal_device_get(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_get_props(dev: *Device) *const DeviceProps;
 /// `ggml_metal_device_get_fusion_info` (ggml-metal-device.h:352
 /// @b1b770d90): the device-owned fusion info, defined in `fusion.zig` and
 /// created by `ggml-metal-device.m`.
-pub extern fn ggml_metal_device_get_fusion_info(dev: *Device) ?*@import("fusion.zig").Info;
+pub extern fn ggml_metal_device_get_fusion_info(dev: *Device) ?*ggml.metal.fusion.Info;
 pub extern fn ggml_metal_device_event_init(dev: *Device) ?*Event;
 pub extern fn ggml_metal_device_event_free(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_event_synchronize(dev: *Device, ev: *Event) void;
 pub extern fn ggml_metal_device_get_memory(dev: *Device, free: *usize, total: *usize) void;
-pub extern fn ggml_metal_device_supports_op(dev: *Device, op: *const Tensor) bool;
+pub extern fn ggml_metal_device_supports_op(dev: *Device, op: *const ggml.impl.c.ggml_tensor) bool;
 
 pub extern fn ggml_metal_device_init(device: c_int, n_devices: c_int) ?*Device;
 pub extern fn ggml_metal_device_free(dev: *Device) void;
@@ -225,7 +219,7 @@ pub extern fn ggml_metal_pipeline_max_theads_per_threadgroup(pipeline: PipelineW
 pub extern fn ggml_metal_device_get_library(dev: *Device) ?*Library;
 
 /// `ggml_metal_buffer_get_id` (ggml-metal-device.h:380 @b1b770d90).
-pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const c.ggml_tensor) BufferId;
+pub extern fn ggml_metal_buffer_get_id(buf: *Buffer, t: *const ggml.impl.c.ggml_tensor) BufferId;
 
 pub extern fn ggml_metal_pipeline_init() ?*Pipeline;
 pub extern fn ggml_metal_pipeline_free(pipeline: *Pipeline) void;
@@ -239,13 +233,13 @@ pub extern fn ggml_metal_buffer_map(dev: *Device, ptr: ?*anyopaque, size: usize,
 pub extern fn ggml_metal_buffer_free(buf: *Buffer) void;
 pub extern fn ggml_metal_buffer_get_base(buf: *Buffer) ?*anyopaque;
 pub extern fn ggml_metal_buffer_is_shared(buf: *Buffer) bool;
-pub extern fn ggml_metal_buffer_memset_tensor(buf: *Buffer, tensor: *Tensor, value: u8, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_set_tensor(buf: *Buffer, tensor: *Tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_get_tensor(buf: *Buffer, tensor: *const Tensor, data: ?*anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_buffer_set_tensor_n(buf: *Buffer, tensors: [*c]const [*c]Tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
-pub extern fn ggml_metal_buffer_get_tensor_n(buf: *Buffer, tensors: [*c]const [*c]const Tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
-pub extern fn ggml_metal_buffer_cpy_tensor(buf: *Buffer, src: *const Tensor, dst: *Tensor) bool;
-pub extern fn ggml_metal_buffer_cpy_tensor_n(buf: *Buffer, srcs: [*c]const [*c]const Tensor, dsts: [*c]const [*c]Tensor, n_tensors: usize) bool;
+pub extern fn ggml_metal_buffer_memset_tensor(buf: *Buffer, tensor: *ggml.impl.c.ggml_tensor, value: u8, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_set_tensor(buf: *Buffer, tensor: *ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_get_tensor(buf: *Buffer, tensor: *const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_buffer_set_tensor_n(buf: *Buffer, tensors: [*c]const [*c]ggml.impl.c.ggml_tensor, data: [*c]const ?*const anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
+pub extern fn ggml_metal_buffer_get_tensor_n(buf: *Buffer, tensors: [*c]const [*c]const ggml.impl.c.ggml_tensor, data: [*c]const ?*anyopaque, offsets: [*c]const usize, sizes: [*c]const usize, n_tensors: usize) void;
+pub extern fn ggml_metal_buffer_cpy_tensor(buf: *Buffer, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool;
+pub extern fn ggml_metal_buffer_cpy_tensor_n(buf: *Buffer, srcs: [*c]const [*c]const ggml.impl.c.ggml_tensor, dsts: [*c]const [*c]ggml.impl.c.ggml_tensor, n_tensors: usize) bool;
 pub extern fn ggml_metal_buffer_clear(buf: *Buffer, value: u8) void;
 
 // -----------------------------------------------------------------------------
@@ -255,30 +249,24 @@ pub extern fn ggml_metal_init(dev: *Device) ?*Context;
 pub extern fn ggml_metal_free(ctx: *Context) void;
 pub extern fn ggml_metal_get_name(ctx: *Context) [*c]const u8;
 pub extern fn ggml_metal_synchronize(ctx: *Context) void;
-pub extern fn ggml_metal_set_tensor_async(ctx: *Context, tensor: *Tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_get_tensor_async(ctx: *Context, tensor: *const Tensor, data: ?*anyopaque, offset: usize, size: usize) void;
-pub extern fn ggml_metal_cpy_tensor_async(ctx_src: *Context, ctx_dst: *Context, src: *const Tensor, dst: *Tensor) bool;
-pub extern fn ggml_metal_graph_compute(ctx: *Context, gf: *CGraph) c.enum_ggml_status;
-pub extern fn ggml_metal_graph_optimize(ctx: *Context, gf: *CGraph) void;
+pub extern fn ggml_metal_set_tensor_async(ctx: *Context, tensor: *ggml.impl.c.ggml_tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_get_tensor_async(ctx: *Context, tensor: *const ggml.impl.c.ggml_tensor, data: ?*anyopaque, offset: usize, size: usize) void;
+pub extern fn ggml_metal_cpy_tensor_async(ctx_src: *Context, ctx_dst: *Context, src: *const ggml.impl.c.ggml_tensor, dst: *ggml.impl.c.ggml_tensor) bool;
+pub extern fn ggml_metal_graph_compute(ctx: *Context, gf: *ggml.impl.c.ggml_cgraph) ggml.impl.c.enum_ggml_status;
+pub extern fn ggml_metal_graph_optimize(ctx: *Context, gf: *ggml.impl.c.ggml_cgraph) void;
 pub extern fn ggml_metal_event_record(ctx: *Context, ev: *Event) void;
 pub extern fn ggml_metal_event_wait(ctx: *Context, ev: *Event) void;
 pub extern fn ggml_metal_set_n_cb(ctx: *Context, n_cb: c_int) void;
-pub extern fn ggml_metal_set_abort_callback(ctx: *Context, abort_callback: c.ggml_abort_callback, user_data: ?*anyopaque) void;
+pub extern fn ggml_metal_set_abort_callback(ctx: *Context, abort_callback: ggml.impl.c.ggml_abort_callback, user_data: ?*anyopaque) void;
 pub extern fn ggml_metal_supports_family(ctx: *Context, family: c_int) bool;
 pub extern fn ggml_metal_capture_next_compute(ctx: *Context) void;
 
 // -----------------------------------------------------------------------------
 // ggml-metal-ops.h
-
-pub extern fn ggml_metal_op_mul_mat_id_extra_tpe(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_mul_mat_id_extra_ids(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_pad(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_tmp(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_idx(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_flash_attn_ext_extra_rows(op: *const Tensor) usize;
-pub extern fn ggml_metal_op_argmax_extra(op: *const Tensor) usize;
+//
+// The scratch-size queries are the port's (`ops.zig`), as is
+// `ggml_metal_device_get` (`library.zig`): callers reach them through the
+// barrel; they stay exported for upstream's `ggml-metal.cpp` in `metal-diff`.
 
 // -----------------------------------------------------------------------------
 // The layout gate's view of `DeviceProps`

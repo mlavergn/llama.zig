@@ -21,16 +21,12 @@
 //! their `#if` arms are cited nowhere below.
 
 const std = @import("std");
+const ggml = @import("../module.zig");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
-const builtin = @import("builtin");
 const config = @import("config");
-const impl = @import("../impl.zig");
 
 /// The translated CUDA headers; see `src/ggml/cuda/c_import.h`.
 pub const cu = @import("cuda_c");
-const c = impl.c;
-const Tensor = c.ggml_tensor;
 
 /// The C `new`s every host-side object and nothing hands it an allocator;
 /// libc's is what a C entry point can reach, as in `metal/backend.zig`.
@@ -184,7 +180,7 @@ pub fn fp8MmaHardwareAvailable(x: c_int) bool {
 }
 
 /// Ports `ggml_cuda_is_aligned` (common.cuh:404 @b1b770d90).
-pub fn isAligned(t: *const Tensor, alignment: usize) bool {
+pub fn isAligned(t: *const ggml.impl.c.ggml_tensor, alignment: usize) bool {
     return @intFromPtr(t.data) % alignment == 0 and
         t.nb[1] % alignment == 0 and t.nb[2] % alignment == 0 and t.nb[3] % alignment == 0;
 }
@@ -192,8 +188,8 @@ pub fn isAligned(t: *const Tensor, alignment: usize) bool {
 /// Ports `init_fastdiv_values` (common.cuh:1000 @b1b770d90): `<mp, L, d>`
 /// such that `n / d == (mulhi(n, mp) + n) >> L`.
 pub fn initFastdivValues(d_64: u64) cu.uint3 {
-    impl.assert(d_64 != 0, "d_64 != 0");
-    impl.assert(d_64 <= std.math.maxInt(u32), "d_64 <= std::numeric_limits<uint32_t>::max()");
+    ggml.impl.assert(d_64 != 0, "d_64 != 0");
+    ggml.impl.assert(d_64 <= std.math.maxInt(u32), "d_64 <= std::numeric_limits<uint32_t>::max()");
     const d: u32 = @intCast(d_64);
     var l: u32 = 0;
     while (l < 32 and (@as(u64, 1) << @intCast(l)) < d) l += 1;
@@ -214,12 +210,12 @@ pub fn initFastdivValues(d_64: u64) cu.uint3 {
 pub fn cudaError(stmt: [*:0]const u8, src: std.builtin.SourceLocation, msg: [*:0]const u8) noreturn {
     var id: c_int = -1;
     _ = cu.cudaGetDevice(&id);
-    impl.logError(name ++ " error: %s\n", .{msg});
-    impl.logError("  current device: %d, in function %s at %s:%d\n", .{ id, src.fn_name.ptr, src.file.ptr, @as(c_int, @intCast(src.line)) });
-    impl.logError("  %s\n", .{stmt});
+    ggml.impl.logError(name ++ " error: %s\n", .{msg});
+    ggml.impl.logError("  current device: %d, in function %s at %s:%d\n", .{ id, src.fn_name.ptr, src.file.ptr, @as(c_int, @intCast(src.line)) });
+    ggml.impl.logError("  %s\n", .{stmt});
     // abort with GGML_ABORT to get a stack trace. The C's `__FILE__` is the
     // absolute path nvcc was given; its basename and `__LINE__` are kept.
-    c.ggml_abort("ggml-cuda.cu", 113, name ++ " error");
+    ggml.impl.c.ggml_abort("ggml-cuda.cu", 113, name ++ " error");
     unreachable;
 }
 
@@ -249,7 +245,7 @@ pub fn cuCheck(err: cu.CUresult, stmt: [*:0]const u8, src: std.builtin.SourceLoc
 pub fn Once(comptime f: fn () void) type {
     return struct {
         var done: std.atomic.Value(bool) = .init(false);
-        var mutex: sync.Mutex = .{};
+        var mutex: stdlib.sync.Mutex = .{};
 
         pub fn call() void {
             if (done.load(.acquire)) return;
@@ -369,8 +365,8 @@ pub fn graphDebugEnabled() bool {
 pub fn fatal(comptime fmt: []const u8, args: anytype) noreturn {
     var buf: [512]u8 = undefined;
     const msg = std.fmt.bufPrintSentinel(&buf, fmt, args, 0) catch buf[0 .. buf.len - 1 :0];
-    impl.logError("%s\n", .{msg.ptr});
-    impl.abort("fatal error");
+    ggml.impl.logError("%s\n", .{msg.ptr});
+    ggml.impl.abort("fatal error");
 }
 
 // -----------------------------------------------------------------------------
@@ -427,11 +423,11 @@ fn init() Info {
 
     const err = cu.cudaGetDeviceCount(&inf.physical_device_count);
     if (err != cu.cudaSuccess) {
-        impl.logError("%s: failed to initialize " ++ name ++ ": %s\n", .{ "ggml_cuda_init", cu.cudaGetErrorString(err) });
+        ggml.impl.logError("%s: failed to initialize " ++ name ++ ": %s\n", .{ "ggml_cuda_init", cu.cudaGetErrorString(err) });
         return inf;
     }
 
-    impl.assert(inf.physical_device_count <= max_devices, "info.physical_device_count <= GGML_CUDA_MAX_DEVICES");
+    ggml.impl.assert(inf.physical_device_count <= max_devices, "info.physical_device_count <= GGML_CUDA_MAX_DEVICES");
 
     // by default expose exactly the physical devices; GGML_CUDA_DEVICES can
     // request a different number of (virtual) devices to emulate multi-GPU
@@ -444,19 +440,19 @@ fn init() Info {
             if (requested > 0) {
                 inf.device_count = requested;
             } else {
-                impl.logWarn("%s: ignoring invalid GGML_CUDA_DEVICES=\"%s\"\n", .{ "ggml_cuda_init", devices_env });
+                ggml.impl.logWarn("%s: ignoring invalid GGML_CUDA_DEVICES=\"%s\"\n", .{ "ggml_cuda_init", devices_env });
             }
         }
     }
 
     if (inf.device_count > max_devices) {
-        impl.logWarn("%s: requested %d devices, clamping to GGML_CUDA_MAX_DEVICES=%d\n", .{ "ggml_cuda_init", inf.device_count, @as(c_int, max_devices) });
+        ggml.impl.logWarn("%s: requested %d devices, clamping to GGML_CUDA_MAX_DEVICES=%d\n", .{ "ggml_cuda_init", inf.device_count, @as(c_int, max_devices) });
         inf.device_count = max_devices;
     }
 
     // map each (virtual) device to a backing physical device (round-robin)
     var physical_share_count: [max_devices]c_int = @splat(0);
-    impl.assert(inf.device_count == 0 or inf.physical_device_count > 0, "info.device_count == 0 || info.physical_device_count > 0");
+    ggml.impl.assert(inf.device_count == 0 or inf.physical_device_count > 0, "info.device_count == 0 || info.physical_device_count > 0");
     for (0..@intCast(inf.device_count)) |id| {
         const phys: usize = @intCast(@mod(@as(c_int, @intCast(id)), inf.physical_device_count));
         inf.devices[id].physical_device = @intCast(phys);
@@ -470,9 +466,9 @@ fn init() Info {
         cudaCheck(cu.cudaGetDeviceProperties(&prop, @intCast(id)), "cudaGetDeviceProperties(&prop, id)", @src());
         total_vram += @intCast(prop.totalGlobalMem);
     }
-    impl.logInfo("%s: found %d " ++ name ++ " devices (Total VRAM: %zu MiB):\n", .{ "ggml_cuda_init", inf.physical_device_count, @as(usize, @intCast(@divTrunc(total_vram, 1024 * 1024))) });
+    ggml.impl.logInfo("%s: found %d " ++ name ++ " devices (Total VRAM: %zu MiB):\n", .{ "ggml_cuda_init", inf.physical_device_count, @as(usize, @intCast(@divTrunc(total_vram, 1024 * 1024))) });
     if (inf.device_count != inf.physical_device_count) {
-        impl.logInfo("%s: emulating %d virtual device(s) on %d physical device(s) (GGML_CUDA_DEVICES)\n", .{ "ggml_cuda_init", inf.device_count, inf.physical_device_count });
+        ggml.impl.logInfo("%s: emulating %d virtual device(s) on %d physical device(s) (GGML_CUDA_DEVICES)\n", .{ "ggml_cuda_init", inf.device_count, inf.physical_device_count });
     }
     total_vram = 0;
 
@@ -506,7 +502,7 @@ fn init() Info {
 
         // a virtual device owns only a share of its physical GPU's memory
         const share = physical_share_count[@intCast(physical_id)];
-        impl.assert(share > 0, "physical_share_count[physical_id] > 0");
+        ggml.impl.assert(share > 0, "physical_share_count[physical_id] > 0");
         inf.devices[id].physical_share_count = share;
         const device_vram: usize = prop.totalGlobalMem / @as(usize, @intCast(share));
         const device_vram_mib: usize = device_vram / (1024 * 1024);
@@ -528,7 +524,7 @@ fn init() Info {
 
         inf.devices[id].smpbo = prop.sharedMemPerBlockOptin;
         inf.devices[id].cc = 100 * prop.major + 10 * prop.minor;
-        impl.logInfo("  Device %d: %s, compute capability %d.%d, VMM: %s, VRAM: %zu MiB\n", .{ @as(c_int, @intCast(id)), @as([*:0]const u8, @ptrCast(&prop.name)), prop.major, prop.minor, @as([*:0]const u8, if (device_vmm != 0) "yes" else "no"), device_vram_mib });
+        ggml.impl.logInfo("  Device %d: %s, compute capability %d.%d, VMM: %s, VRAM: %zu MiB\n", .{ @as(c_int, @intCast(id)), @as([*:0]const u8, @ptrCast(&prop.name)), prop.major, prop.minor, @as([*:0]const u8, if (device_vmm != 0) "yes" else "no"), device_vram_mib });
 
         const device_name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&prop.name)), 0);
         if (std.mem.eql(u8, device_name, "NVIDIA GeForce MX450") or
@@ -551,11 +547,11 @@ fn init() Info {
     }
 
     if (highestCompiledArch(cc.turing) >= cc.turing and turing_count != 0) {
-        impl.logInfo("The following devices will have suboptimal performance due to a lack of tensor cores:\n", .{});
+        ggml.impl.logInfo("The following devices will have suboptimal performance due to a lack of tensor cores:\n", .{});
         for (0..turing_count) |i| {
-            impl.logInfo("  Device %d: %s\n", .{ turing_ids[i], @as([*:0]const u8, @ptrCast(&turing_names[i])) });
+            ggml.impl.logInfo("  Device %d: %s\n", .{ turing_ids[i], @as([*:0]const u8, @ptrCast(&turing_names[i])) });
         }
-        impl.logInfo("Consider compiling with CMAKE_CUDA_ARCHITECTURES=61-virtual;80-virtual and DGGML_CUDA_FORCE_MMQ to force the use of the Pascal code for Turing.\n", .{});
+        ggml.impl.logInfo("Consider compiling with CMAKE_CUDA_ARCHITECTURES=61-virtual;80-virtual and DGGML_CUDA_FORCE_MMQ to force the use of the Pascal code for Turing.\n", .{});
     }
 
     for (0..@intCast(inf.device_count)) |id| {
@@ -584,7 +580,7 @@ fn init() Info {
 /// Ports `ggml_cuda_get_physical_device` (ggml-cuda.cu:117 @b1b770d90).
 pub fn physicalDevice(device: c_int) c_int {
     const inf = info();
-    impl.assert(device >= 0 and device < inf.device_count, "device >= 0 && device < info.device_count");
+    ggml.impl.assert(device >= 0 and device < inf.device_count, "device >= 0 && device < info.device_count");
     return inf.devices[@intCast(device)].physical_device;
 }
 
@@ -657,7 +653,7 @@ pub const PoolLeg = struct {
 
     fn deinit(self: *PoolLeg) void {
         self.clearPool();
-        impl.assert(self.pool_size == 0, "pool_size == 0");
+        ggml.impl.assert(self.pool_size == 0, "pool_size == 0");
     }
 
     fn clearPool(self: *PoolLeg) void {
@@ -678,7 +674,7 @@ pub const PoolLeg = struct {
         var n_captured: c_int = 0;
         for (self.ctx.cuda_graphs.values()) |g| n_captured +%= @as(c_int, @truncate(@as(isize, @bitCast(g.instances.items.len))));
         if (n_captured > 0) {
-            impl.logDebug(name ++ " pool[%d]: memory freed, %d captured CUDA graphs must be captured again\n", .{ self.device, n_captured });
+            ggml.impl.logDebug(name ++ " pool[%d]: memory freed, %d captured CUDA graphs must be captured again\n", .{ self.device, n_captured });
         }
         for (self.ctx.cuda_graphs.values()) |g| {
             g.deinit();
@@ -721,13 +717,13 @@ pub const PoolLeg = struct {
         if (err == cu.cudaErrorMemoryAllocation) {
             _ = cu.cudaGetLastError();
             const cached_bytes = self.pool_size;
-            impl.logDebug(name ++ " pool[%d]: alloc of %.2f MiB failed, flushing %.2f MiB of cached buffers and retrying\n", .{ self.device, @as(f64, @floatFromInt(look_ahead_size)) / 1024.0 / 1024.0, @as(f64, @floatFromInt(cached_bytes)) / 1024.0 / 1024.0 });
+            ggml.impl.logDebug(name ++ " pool[%d]: alloc of %.2f MiB failed, flushing %.2f MiB of cached buffers and retrying\n", .{ self.device, @as(f64, @floatFromInt(look_ahead_size)) / 1024.0 / 1024.0, @as(f64, @floatFromInt(cached_bytes)) / 1024.0 / 1024.0 });
             cudaCheck(cu.cudaDeviceSynchronize(), "cudaDeviceSynchronize()", @src());
             self.clearPool();
             self.invalidateCudaGraphs();
             err = deviceMalloc(&ptr, look_ahead_size, self.device);
             if (err == cu.cudaSuccess) {
-                impl.logDebug(name ++ " pool[%d]: retry succeeded\n", .{self.device});
+                ggml.impl.logDebug(name ++ " pool[%d]: retry succeeded\n", .{self.device});
             }
         }
         cudaCheck(err, "err", @src());
@@ -743,7 +739,7 @@ pub const PoolLeg = struct {
                 return;
             }
         }
-        impl.logDebug(name ++ " buffer pool full, increase MAX_CUDA_BUFFERS\n", .{});
+        ggml.impl.logDebug(name ++ " buffer pool full, increase MAX_CUDA_BUFFERS\n", .{});
         setDevice(self.device);
         cudaCheck(cu.cudaFree(ptr), "cudaFree(ptr)", @src());
         self.pool_size -= size;
@@ -807,11 +803,11 @@ pub const PoolVmm = struct {
                 cuCheck(err, "err", @src());
                 if (self.max_size < vmm_max_size) {
                     const gib = 1024.0 * 1024.0 * 1024.0;
-                    impl.logWarn(name ++ " pool[%d]: reserved %.2f GiB of virtual memory instead of %.2f GiB\n", .{ self.device, @as(f64, @floatFromInt(self.max_size)) / gib, @as(f64, @floatFromInt(vmm_max_size)) / gib });
+                    ggml.impl.logWarn(name ++ " pool[%d]: reserved %.2f GiB of virtual memory instead of %.2f GiB\n", .{ self.device, @as(f64, @floatFromInt(self.max_size)) / gib, @as(f64, @floatFromInt(vmm_max_size)) / gib });
                 }
             }
 
-            impl.assert(self.pool_size + reserve_size <= self.max_size, "pool_size + reserve_size <= max_size");
+            ggml.impl.assert(self.pool_size + reserve_size <= self.max_size, "pool_size + reserve_size <= max_size");
 
             // allocate more physical memory
             var prop: cu.CUmemAllocationProp = std.mem.zeroes(cu.CUmemAllocationProp);
@@ -867,7 +863,7 @@ pub const PoolVmm = struct {
             self.pool_size += reserve_size;
         }
 
-        impl.assert(self.pool_addr != 0, "pool_addr != 0");
+        ggml.impl.assert(self.pool_addr != 0, "pool_addr != 0");
 
         const ptr: ?*anyopaque = @ptrFromInt(self.pool_addr + self.pool_used);
         actual_size.* = size;
@@ -878,7 +874,7 @@ pub const PoolVmm = struct {
     fn free(self: *PoolVmm, ptr: ?*anyopaque, size: usize) void {
         self.pool_used -= size;
         // all deallocations must be in reverse order of the allocations
-        impl.assert(@intFromPtr(ptr) == self.pool_addr + self.pool_used, "ptr == (void *) ((char *)(pool_addr) + pool_used)");
+        ggml.impl.assert(@intFromPtr(ptr) == self.pool_addr + self.pool_used, "ptr == (void *) ((char *)(pool_addr) + pool_used)");
     }
 };
 
@@ -891,7 +887,7 @@ pub const PoolDebug = struct {
     pool_size: usize = 0,
 
     fn deinit(self: *PoolDebug) void {
-        impl.assert(self.pool_size == 0, "pool_size == 0");
+        ggml.impl.assert(self.pool_size == 0, "pool_size == 0");
     }
 
     fn alloc(self: *PoolDebug, size: usize, actual_size: *usize) ?*anyopaque {
@@ -921,7 +917,7 @@ pub fn poolDebugEnabled() bool {
 /// Ports `ggml_backend_cuda_context`'s `new_pool_for_device`
 /// (ggml-cuda.cu:775 @b1b770d90).
 fn newPoolForDevice(ctx: *Context, device: c_int) *Pool {
-    const p = allocator.create(Pool) catch impl.abort("ggml-cuda: out of memory");
+    const p = allocator.create(Pool) catch ggml.impl.abort("ggml-cuda: out of memory");
     if (poolDebugEnabled()) {
         p.* = .{ .debug = .{ .device = device } };
     } else if (info().devices[@intCast(device)].vmm) {
@@ -959,8 +955,8 @@ pub fn PoolAlloc(comptime T: type) type {
 
         /// `size` is in elements.
         pub fn alloc(self: *Self, size: usize) [*]T {
-            impl.assert(self.pool != null, "pool != nullptr");
-            impl.assert(self.ptr == null, "ptr == nullptr");
+            ggml.impl.assert(self.pool != null, "pool != nullptr");
+            ggml.impl.assert(self.ptr == null, "ptr == nullptr");
             self.ptr = @ptrCast(@alignCast(self.pool.?.alloc(size * @sizeOf(T), &self.actual_size)));
             return self.ptr.?;
         }
@@ -1016,10 +1012,10 @@ pub const GraphInstance = struct {
 
 /// Ports `ggml_cuda_graph`'s `node_properties` (graph.cuh:57 @b1b770d90).
 pub const NodeProperties = struct {
-    node: Tensor,
-    node_src_data_ptrs: [c.GGML_MAX_SRC]?*anyopaque,
-    node_src_ne: [c.GGML_MAX_SRC][c.GGML_MAX_DIMS]i64,
-    node_src_nb: [c.GGML_MAX_SRC][c.GGML_MAX_DIMS]usize,
+    node: ggml.impl.c.ggml_tensor,
+    node_src_data_ptrs: [ggml.impl.c.GGML_MAX_SRC]?*anyopaque,
+    node_src_ne: [ggml.impl.c.GGML_MAX_SRC][ggml.impl.c.GGML_MAX_DIMS]i64,
+    node_src_nb: [ggml.impl.c.GGML_MAX_SRC][ggml.impl.c.GGML_MAX_DIMS]usize,
 };
 
 /// Ports `ggml_cuda_graph` (graph.cuh:42 @b1b770d90), with
@@ -1071,15 +1067,15 @@ pub const ConcurrentEvent = struct {
     join_events: std.ArrayList(cu.cudaEvent_t) = .empty,
     fork_event: cu.cudaEvent_t = null,
     n_streams: c_int = 0,
-    stream_mapping: std.AutoHashMapUnmanaged(*const Tensor, c_int) = .empty,
+    stream_mapping: std.AutoHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, c_int) = .empty,
     /// Original order of the nodes in this concurrent region, before
     /// interleaving; used to restore grouping for fusion within streams.
-    original_order: std.ArrayList(*const Tensor) = .empty,
-    join_node: ?*const Tensor = null,
+    original_order: std.ArrayList(*const ggml.impl.c.ggml_tensor) = .empty,
+    join_node: ?*const ggml.impl.c.ggml_tensor = null,
 
     pub fn init(n_streams: c_int) ConcurrentEvent {
         var self: ConcurrentEvent = .{ .n_streams = n_streams };
-        self.join_events.resize(allocator, @intCast(n_streams)) catch impl.abort("ggml-cuda: out of memory");
+        self.join_events.resize(allocator, @intCast(n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
         for (self.join_events.items) |*e| {
             cudaCheck(cu.cudaEventCreateWithFlags(e, cu.cudaEventDisableTiming), "cudaEventCreateWithFlags(&join_events[i], cudaEventDisableTiming)", @src());
         }
@@ -1105,17 +1101,17 @@ pub const ConcurrentEvent = struct {
         }
     };
 
-    fn rangeOf(tensor: *const Tensor) Range {
-        const t: *const Tensor = if (tensor.view_src) |v| v else tensor;
+    fn rangeOf(tensor: *const ggml.impl.c.ggml_tensor) Range {
+        const t: *const ggml.impl.c.ggml_tensor = if (tensor.view_src) |v| v else tensor;
         const start: i64 = @intCast(@intFromPtr(t.data));
-        return .{ .start = start, .end = start + @as(i64, @intCast(c.ggml_nbytes(t))) };
+        return .{ .start = start, .end = start + @as(i64, @intCast(ggml.impl.c.ggml_nbytes(t))) };
     }
 
     /// Ports `ggml_cuda_concurrent_event`'s `is_valid` (graph.cuh:113 @b1b770d90):
     /// whether the branches write disjoint memory and read only within
     /// their own branch.
     pub fn isValid(self: *const ConcurrentEvent) bool {
-        var write_ranges = allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch impl.abort("ggml-cuda: out of memory");
+        var write_ranges = allocator.alloc(std.ArrayList(Range), @intCast(self.n_streams)) catch ggml.impl.abort("ggml-cuda: out of memory");
         defer {
             for (write_ranges) |*w| w.deinit(allocator);
             allocator.free(write_ranges);
@@ -1131,7 +1127,7 @@ pub const ConcurrentEvent = struct {
             const r = rangeOf(kv.key_ptr.*);
             if ((r.start <= join.start and join.start < r.end) or (join.start <= r.start and r.start < join.end)) continue;
             // concurrent streams begin from 1
-            write_ranges[@intCast(kv.value_ptr.* - 1)].append(allocator, r) catch impl.abort("ggml-cuda: out of memory");
+            write_ranges[@intCast(kv.value_ptr.* - 1)].append(allocator, r) catch ggml.impl.abort("ggml-cuda: out of memory");
         }
 
         for (write_ranges) |w| std.mem.sort(Range, w.items, {}, Range.lessThan);
@@ -1156,7 +1152,7 @@ pub const ConcurrentEvent = struct {
                     }
                 }.order);
                 if (pos != ranges.len and ranges[pos].start < r.end) {
-                    impl.logDebug("Writes overlap for %s", .{@as([*:0]const u8, @ptrCast(&tensor.name))});
+                    ggml.impl.logDebug("Writes overlap for %s", .{@as([*:0]const u8, @ptrCast(&tensor.name))});
                     writes_overlap = true;
                     break;
                 }
@@ -1180,7 +1176,7 @@ pub const ConcurrentEvent = struct {
 
 /// Ports `ggml_cuda_stream_context` (graph.cuh:215 @b1b770d90).
 pub const StreamContext = struct {
-    concurrent_events: std.AutoArrayHashMapUnmanaged(*const Tensor, ConcurrentEvent) = .empty,
+    concurrent_events: std.AutoArrayHashMapUnmanaged(*const ggml.impl.c.ggml_tensor, ConcurrentEvent) = .empty,
 
     pub fn reset(self: *StreamContext) void {
         for (self.concurrent_events.values()) |*e| e.deinit();
@@ -1227,7 +1223,7 @@ pub const Context = struct {
     /// Ports `ggml_backend_cuda_context`'s constructor (ggml-cuda.cu:789
     /// @b1b770d90): `name(GGML_CUDA_NAME + std::to_string(device))`.
     pub fn create(device: c_int) *Context {
-        const self = allocator.create(Context) catch impl.abort("ggml-cuda: out of memory");
+        const self = allocator.create(Context) catch ggml.impl.abort("ggml-cuda: out of memory");
         self.* = .{ .device = device };
         _ = std.fmt.bufPrintSentinel(&self.name_buf, name ++ "{d}", .{device}, 0) catch unreachable;
         return self;
@@ -1273,7 +1269,7 @@ pub const Context = struct {
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)
     /// with its defaulted `time_now = ggml_time_us()`.
     pub fn cudaGraph(self: *Context, first_node_ptr: ?*const anyopaque) *Graph {
-        return self.cudaGraphAt(first_node_ptr, c.ggml_time_us());
+        return self.cudaGraphAt(first_node_ptr, ggml.impl.c.ggml_time_us());
     }
 
     /// Ports `ggml_backend_cuda_context`'s `cuda_graph` (ggml-cuda.cu:796 @b1b770d90)
@@ -1302,9 +1298,9 @@ pub const Context = struct {
             }
         }
 
-        const gop = self.cuda_graphs.getOrPut(allocator, first_node_ptr) catch impl.abort("ggml-cuda: out of memory");
+        const gop = self.cuda_graphs.getOrPut(allocator, first_node_ptr) catch ggml.impl.abort("ggml-cuda: out of memory");
         if (!gop.found_existing) {
-            gop.value_ptr.* = allocator.create(Graph) catch impl.abort("ggml-cuda: out of memory");
+            gop.value_ptr.* = allocator.create(Graph) catch ggml.impl.abort("ggml-cuda: out of memory");
             gop.value_ptr.*.* = .{};
         }
         gop.value_ptr.*.last_used_time = time_now;
@@ -1390,8 +1386,8 @@ pub const Context = struct {
 /// is being captured in another thread can be a CUDA error, so the context
 /// destructor waits until no capture is in progress.
 pub const lock = struct {
-    var mutex: sync.Mutex = .{};
-    var cv: sync.Condition = .{};
+    var mutex: stdlib.sync.Mutex = .{};
+    var cv: stdlib.sync.Condition = .{};
     pub var counter: std.atomic.Value(c_int) = .init(0);
 
     fn waitIdle() void {
@@ -1423,18 +1419,18 @@ pub const lock = struct {
 /// The `shared_*` fields carry the shared expert MMVQ computes
 /// beside the routed ones (`fusion.zig`'s `matchSharedExpert`).
 pub const MmFusionArgsHost = struct {
-    x_bias: ?*const Tensor = null,
-    gate: ?*const Tensor = null,
-    gate_bias: ?*const Tensor = null,
-    x_scale: ?*const Tensor = null,
-    gate_scale: ?*const Tensor = null,
-    glu_op: c.enum_ggml_glu_op = 0,
+    x_bias: ?*const ggml.impl.c.ggml_tensor = null,
+    gate: ?*const ggml.impl.c.ggml_tensor = null,
+    gate_bias: ?*const ggml.impl.c.ggml_tensor = null,
+    x_scale: ?*const ggml.impl.c.ggml_tensor = null,
+    gate_scale: ?*const ggml.impl.c.ggml_tensor = null,
+    glu_op: ggml.impl.c.enum_ggml_glu_op = 0,
     glu_limit: f32 = 0.0,
     /// The `src1` precision requested by the fused `MUL_MAT`s (MMQ).
-    prec_src1: c.enum_ggml_prec = c.GGML_PREC_UNDEFINED,
-    shared_up: ?*const Tensor = null,
-    shared_gate: ?*const Tensor = null,
-    shared_dst: ?*Tensor = null,
+    prec_src1: ggml.impl.c.enum_ggml_prec = ggml.impl.c.GGML_PREC_UNDEFINED,
+    shared_up: ?*const ggml.impl.c.ggml_tensor = null,
+    shared_gate: ?*const ggml.impl.c.ggml_tensor = null,
+    shared_dst: ?*ggml.impl.c.ggml_tensor = null,
 };
 
 /// Ports `ggml_cuda_mm_fusion_args_device` (common.cuh:1466 @b1b770d90).
@@ -1447,7 +1443,7 @@ pub const MmFusionArgsDevice = extern struct {
     gate_bias: ?*const anyopaque = null,
     x_scale: ?*const anyopaque = null,
     gate_scale: ?*const anyopaque = null,
-    glu_op: c.enum_ggml_glu_op = 0,
+    glu_op: ggml.impl.c.enum_ggml_glu_op = 0,
     glu_limit: f32 = 0.0,
     shared_up: ?*const anyopaque = null,
     shared_gate: ?*const anyopaque = null,
@@ -1468,55 +1464,55 @@ pub const MmFusionArgsDevice = extern struct {
 /// `GGML_COMMON_DECL_C`, which leaves them out.
 pub const q = struct {
     pub const QR1_0 = 1;
-    pub const QI1_0 = c.QK1_0 / 32;
+    pub const QI1_0 = ggml.impl.c.QK1_0 / 32;
     pub const QR2_0 = 1;
-    pub const QI2_0 = c.QK2_0 / 32;
+    pub const QI2_0 = ggml.impl.c.QK2_0 / 32;
     pub const QR4_0 = 2;
-    pub const QI4_0 = c.QK4_0 / (4 * QR4_0);
+    pub const QI4_0 = ggml.impl.c.QK4_0 / (4 * QR4_0);
     pub const QR4_1 = 2;
-    pub const QI4_1 = c.QK4_1 / (4 * QR4_1);
+    pub const QI4_1 = ggml.impl.c.QK4_1 / (4 * QR4_1);
     pub const QR_MXFP4 = 2;
-    pub const QI_MXFP4 = c.QK_MXFP4 / (4 * QR_MXFP4);
+    pub const QI_MXFP4 = ggml.impl.c.QK_MXFP4 / (4 * QR_MXFP4);
     pub const QR_NVFP4 = 2;
-    pub const QI_NVFP4 = c.QK_NVFP4 / (4 * QR_NVFP4);
+    pub const QI_NVFP4 = ggml.impl.c.QK_NVFP4 / (4 * QR_NVFP4);
     pub const QR5_0 = 2;
-    pub const QI5_0 = c.QK5_0 / (4 * QR5_0);
+    pub const QI5_0 = ggml.impl.c.QK5_0 / (4 * QR5_0);
     pub const QR5_1 = 2;
-    pub const QI5_1 = c.QK5_1 / (4 * QR5_1);
+    pub const QI5_1 = ggml.impl.c.QK5_1 / (4 * QR5_1);
     pub const QR8_0 = 1;
-    pub const QI8_0 = c.QK8_0 / (4 * QR8_0);
+    pub const QI8_0 = ggml.impl.c.QK8_0 / (4 * QR8_0);
     pub const QR8_1 = 1;
-    pub const QI8_1 = c.QK8_1 / (4 * QR8_1);
+    pub const QI8_1 = ggml.impl.c.QK8_1 / (4 * QR8_1);
     pub const QR2_K = 4;
-    pub const QI2_K = c.QK_K / (4 * QR2_K);
+    pub const QI2_K = ggml.impl.c.QK_K / (4 * QR2_K);
     pub const QR3_K = 4;
-    pub const QI3_K = c.QK_K / (4 * QR3_K);
+    pub const QI3_K = ggml.impl.c.QK_K / (4 * QR3_K);
     pub const QR4_K = 2;
-    pub const QI4_K = c.QK_K / (4 * QR4_K);
+    pub const QI4_K = ggml.impl.c.QK_K / (4 * QR4_K);
     pub const QR5_K = 2;
-    pub const QI5_K = c.QK_K / (4 * QR5_K);
+    pub const QI5_K = ggml.impl.c.QK_K / (4 * QR5_K);
     pub const QR6_K = 2;
-    pub const QI6_K = c.QK_K / (4 * QR6_K);
+    pub const QI6_K = ggml.impl.c.QK_K / (4 * QR6_K);
     pub const QR2_XXS = 4;
-    pub const QI2_XXS = c.QK_K / (4 * QR2_XXS);
+    pub const QI2_XXS = ggml.impl.c.QK_K / (4 * QR2_XXS);
     pub const QR2_XS = 4;
-    pub const QI2_XS = c.QK_K / (4 * QR2_XS);
+    pub const QI2_XS = ggml.impl.c.QK_K / (4 * QR2_XS);
     pub const QR2_S = 4;
-    pub const QI2_S = c.QK_K / (4 * QR2_S);
+    pub const QI2_S = ggml.impl.c.QK_K / (4 * QR2_S);
     pub const QR3_XXS = 4;
-    pub const QI3_XXS = c.QK_K / (4 * QR3_XXS);
+    pub const QI3_XXS = ggml.impl.c.QK_K / (4 * QR3_XXS);
     pub const QR3_XS = 4;
-    pub const QI3_XS = c.QK_K / (4 * QR3_XS);
+    pub const QI3_XS = ggml.impl.c.QK_K / (4 * QR3_XS);
     pub const QR1_S = 8;
-    pub const QI1_S = c.QK_K / (4 * QR1_S);
+    pub const QI1_S = ggml.impl.c.QK_K / (4 * QR1_S);
     pub const QR1_M = 8;
-    pub const QI1_M = c.QK_K / (4 * QR1_M);
+    pub const QI1_M = ggml.impl.c.QK_K / (4 * QR1_M);
     pub const QR4_NL = 2;
-    pub const QI4_NL = c.QK4_NL / (4 * QR4_NL);
+    pub const QI4_NL = ggml.impl.c.QK4_NL / (4 * QR4_NL);
     pub const QR4_XS = 2;
-    pub const QI4_XS = c.QK_K / (4 * QR4_XS);
+    pub const QI4_XS = ggml.impl.c.QK_K / (4 * QR4_XS);
     pub const QR3_S = 4;
-    pub const QI3_S = c.QK_K / (4 * QR3_S);
+    pub const QI3_S = ggml.impl.c.QK_K / (4 * QR3_S);
 };
 
 /// Ports `ggml_cuda_type_traits` (common.cuh:1057 @b1b770d90): `qk`, `qr`
@@ -1525,32 +1521,32 @@ pub const q = struct {
 /// device code reads it (`mul_mat_vec_q`'s DGX Spark prefetch).
 pub const TypeTraits = struct { qk: comptime_int, qr: comptime_int, qi: comptime_int };
 
-pub fn typeTraits(comptime t: c.enum_ggml_type) TypeTraits {
+pub fn typeTraits(comptime t: ggml.impl.c.enum_ggml_type) TypeTraits {
     return switch (t) {
-        c.GGML_TYPE_F16 => .{ .qk = 1, .qr = 1, .qi = 0 },
-        c.GGML_TYPE_Q1_0 => .{ .qk = c.QK1_0, .qr = q.QR1_0, .qi = q.QI1_0 },
-        c.GGML_TYPE_Q2_0 => .{ .qk = c.QK2_0, .qr = q.QR2_0, .qi = q.QI2_0 },
-        c.GGML_TYPE_Q4_0 => .{ .qk = c.QK4_0, .qr = q.QR4_0, .qi = q.QI4_0 },
-        c.GGML_TYPE_Q4_1 => .{ .qk = c.QK4_1, .qr = q.QR4_1, .qi = q.QI4_1 },
-        c.GGML_TYPE_Q5_0 => .{ .qk = c.QK5_0, .qr = q.QR5_0, .qi = q.QI5_0 },
-        c.GGML_TYPE_Q5_1 => .{ .qk = c.QK5_1, .qr = q.QR5_1, .qi = q.QI5_1 },
-        c.GGML_TYPE_Q8_0 => .{ .qk = c.QK8_0, .qr = q.QR8_0, .qi = q.QI8_0 },
-        c.GGML_TYPE_MXFP4 => .{ .qk = c.QK_MXFP4, .qr = q.QR_MXFP4, .qi = q.QI_MXFP4 },
-        c.GGML_TYPE_NVFP4 => .{ .qk = c.QK_NVFP4, .qr = q.QR_NVFP4, .qi = q.QI_NVFP4 },
-        c.GGML_TYPE_Q2_K => .{ .qk = c.QK_K, .qr = q.QR2_K, .qi = q.QI2_K },
-        c.GGML_TYPE_Q3_K => .{ .qk = c.QK_K, .qr = q.QR3_K, .qi = q.QI3_K },
-        c.GGML_TYPE_Q4_K => .{ .qk = c.QK_K, .qr = q.QR4_K, .qi = q.QI4_K },
-        c.GGML_TYPE_Q5_K => .{ .qk = c.QK_K, .qr = q.QR5_K, .qi = q.QI5_K },
-        c.GGML_TYPE_Q6_K => .{ .qk = c.QK_K, .qr = q.QR6_K, .qi = q.QI6_K },
-        c.GGML_TYPE_IQ2_XXS => .{ .qk = c.QK_K, .qr = q.QR2_XXS, .qi = q.QI2_XXS },
-        c.GGML_TYPE_IQ2_XS => .{ .qk = c.QK_K, .qr = q.QR2_XS, .qi = q.QI2_XS },
-        c.GGML_TYPE_IQ2_S => .{ .qk = c.QK_K, .qr = q.QR2_S, .qi = q.QI2_S },
-        c.GGML_TYPE_IQ3_XXS => .{ .qk = c.QK_K, .qr = q.QR3_XXS, .qi = q.QI3_XXS },
-        c.GGML_TYPE_IQ1_S => .{ .qk = c.QK_K, .qr = q.QR1_S, .qi = q.QI1_S },
-        c.GGML_TYPE_IQ1_M => .{ .qk = c.QK_K, .qr = q.QR1_M, .qi = q.QI1_M },
-        c.GGML_TYPE_IQ4_NL => .{ .qk = c.QK4_NL, .qr = q.QR4_NL, .qi = q.QI4_NL },
-        c.GGML_TYPE_IQ4_XS => .{ .qk = c.QK_K, .qr = q.QR4_XS, .qi = q.QI4_XS },
-        c.GGML_TYPE_IQ3_S => .{ .qk = c.QK_K, .qr = q.QR3_S, .qi = q.QI3_S },
+        ggml.impl.c.GGML_TYPE_F16 => .{ .qk = 1, .qr = 1, .qi = 0 },
+        ggml.impl.c.GGML_TYPE_Q1_0 => .{ .qk = ggml.impl.c.QK1_0, .qr = q.QR1_0, .qi = q.QI1_0 },
+        ggml.impl.c.GGML_TYPE_Q2_0 => .{ .qk = ggml.impl.c.QK2_0, .qr = q.QR2_0, .qi = q.QI2_0 },
+        ggml.impl.c.GGML_TYPE_Q4_0 => .{ .qk = ggml.impl.c.QK4_0, .qr = q.QR4_0, .qi = q.QI4_0 },
+        ggml.impl.c.GGML_TYPE_Q4_1 => .{ .qk = ggml.impl.c.QK4_1, .qr = q.QR4_1, .qi = q.QI4_1 },
+        ggml.impl.c.GGML_TYPE_Q5_0 => .{ .qk = ggml.impl.c.QK5_0, .qr = q.QR5_0, .qi = q.QI5_0 },
+        ggml.impl.c.GGML_TYPE_Q5_1 => .{ .qk = ggml.impl.c.QK5_1, .qr = q.QR5_1, .qi = q.QI5_1 },
+        ggml.impl.c.GGML_TYPE_Q8_0 => .{ .qk = ggml.impl.c.QK8_0, .qr = q.QR8_0, .qi = q.QI8_0 },
+        ggml.impl.c.GGML_TYPE_MXFP4 => .{ .qk = ggml.impl.c.QK_MXFP4, .qr = q.QR_MXFP4, .qi = q.QI_MXFP4 },
+        ggml.impl.c.GGML_TYPE_NVFP4 => .{ .qk = ggml.impl.c.QK_NVFP4, .qr = q.QR_NVFP4, .qi = q.QI_NVFP4 },
+        ggml.impl.c.GGML_TYPE_Q2_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_K, .qi = q.QI2_K },
+        ggml.impl.c.GGML_TYPE_Q3_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_K, .qi = q.QI3_K },
+        ggml.impl.c.GGML_TYPE_Q4_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR4_K, .qi = q.QI4_K },
+        ggml.impl.c.GGML_TYPE_Q5_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR5_K, .qi = q.QI5_K },
+        ggml.impl.c.GGML_TYPE_Q6_K => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR6_K, .qi = q.QI6_K },
+        ggml.impl.c.GGML_TYPE_IQ2_XXS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_XXS, .qi = q.QI2_XXS },
+        ggml.impl.c.GGML_TYPE_IQ2_XS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_XS, .qi = q.QI2_XS },
+        ggml.impl.c.GGML_TYPE_IQ2_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR2_S, .qi = q.QI2_S },
+        ggml.impl.c.GGML_TYPE_IQ3_XXS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_XXS, .qi = q.QI3_XXS },
+        ggml.impl.c.GGML_TYPE_IQ1_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR1_S, .qi = q.QI1_S },
+        ggml.impl.c.GGML_TYPE_IQ1_M => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR1_M, .qi = q.QI1_M },
+        ggml.impl.c.GGML_TYPE_IQ4_NL => .{ .qk = ggml.impl.c.QK4_NL, .qr = q.QR4_NL, .qi = q.QI4_NL },
+        ggml.impl.c.GGML_TYPE_IQ4_XS => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR4_XS, .qi = q.QI4_XS },
+        ggml.impl.c.GGML_TYPE_IQ3_S => .{ .qk = ggml.impl.c.QK_K, .qr = q.QR3_S, .qi = q.QI3_S },
         else => @compileError("no ggml_cuda_type_traits specialisation"),
     };
 }

@@ -11,15 +11,7 @@
 //! The short-sequence kernel goes through `ggml_cuda_kernel_launch` (PDL);
 //! the long-token one through `<<<>>>`. That asymmetry is upstream's.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// A `size_t` passed into an `int` parameter: C++ converts modulo 2^32.
 fn int(x: usize) c_int {
     return @bitCast(@as(u32, @truncate(x)));
@@ -48,16 +40,16 @@ fn ssmConvF32Cuda(
     nr: i64,
     n_t: i64,
     n_s: i64,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     const threads = 128;
-    impl.assert(@rem(nr, threads) == 0, "nr % threads == 0");
+    ggml.impl.assert(@rem(nr, threads) == 0, "nr % threads == 0");
 
     const launchKernel = struct {
         fn f(comptime kNC: comptime_int, a: anytype) void {
             if (a.n_t <= 32) {
-                const blocks: kernels.Dim3 = .{ .x = dim(a.n_s), .y = dim(@divTrunc(a.nr + threads - 1, threads)), .z = 1 };
-                kernels.launchPdl(kernels.get("ssm-conv", kernels.tmpl("ssm_conv_f32", &.{ kernels.boolean(apply_silu), kernels.ulong(threads), kernels.ulong(kNC) })), .{
+                const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(a.n_s), .y = dim(@divTrunc(a.nr + threads - 1, threads)), .z = 1 };
+                ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("ssm-conv", ggml.cuda.kernels.tmpl("ssm_conv_f32", &.{ ggml.cuda.kernels.boolean(apply_silu), ggml.cuda.kernels.ulong(threads), ggml.cuda.kernels.ulong(kNC) })), .{
                     .grid = blocks,
                     .block = .{ .x = threads },
                     .shmem = 0,
@@ -65,9 +57,9 @@ fn ssmConvF32Cuda(
                 }, .{ a.src0, a.src1, a.bias, a.src0_nb0, a.src0_nb1, a.src0_nb2, a.src1_nb1, a.dst, a.dst_nb0, a.dst_nb1, a.dst_nb2, a.n_t });
             } else {
                 const split_n_t: i64 = 32;
-                const blocks: kernels.Dim3 = .{ .x = dim(a.n_s), .y = dim(@divTrunc(a.nr + threads - 1, threads)), .z = dim(@divTrunc(a.n_t + split_n_t - 1, split_n_t)) };
+                const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(a.n_s), .y = dim(@divTrunc(a.nr + threads - 1, threads)), .z = dim(@divTrunc(a.n_t + split_n_t - 1, split_n_t)) };
                 const smem_size: usize = threads * (kNC - 1 + split_n_t) * @sizeOf(f32);
-                kernels.launch(kernels.get("ssm-conv", kernels.tmpl("ssm_conv_long_token_f32", &.{ kernels.boolean(apply_silu), kernels.ulong(threads), kernels.ulong(kNC), kernels.long(split_n_t) })), .{
+                ggml.cuda.kernels.launch(ggml.cuda.kernels.get("ssm-conv", ggml.cuda.kernels.tmpl("ssm_conv_long_token_f32", &.{ ggml.cuda.kernels.boolean(apply_silu), ggml.cuda.kernels.ulong(threads), ggml.cuda.kernels.ulong(kNC), ggml.cuda.kernels.long(split_n_t) })), .{
                     .grid = blocks,
                     .block = .{ .x = threads },
                     .shmem = smem_size,
@@ -102,7 +94,7 @@ fn ssmConvF32Cuda(
         7 => launchKernel(7, a),
         9 => launchKernel(9, a),
         15 => launchKernel(15, a),
-        else => impl.abort("Only support kernel sizes 3, 4, 5, 7, 9, 15 right now."),
+        else => ggml.impl.abort("Only support kernel sizes 3, 4, 5, 7, 9, 15 right now."),
     }
 }
 
@@ -112,33 +104,33 @@ fn ssmConvF32Cuda(
 /// - `bias_add_node`: the fused `ADD` whose other operand is the bias, or
 ///   null; never without `silu_dst`.
 /// - `silu_dst`: the fused `SILU`, which the result is written to, or null.
-pub fn opSsmConv(ctx: *common.Context, dst: *Tensor, bias_add_node: ?*Tensor, silu_dst: ?*Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]); // conv_x
-    const src1 = impl.one(Tensor, dst.src[1]); // conv1d.weight
+pub fn opSsmConv(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, bias_add_node: ?*ggml.impl.c.ggml_tensor, silu_dst: ?*ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // conv_x
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // conv1d.weight
     const fuse_bias = bias_add_node != null;
     const fuse_silu = silu_dst != null;
 
     // bias always comes with silu.
-    impl.assert(!fuse_bias or fuse_silu, "!fuse_bias || fuse_silu");
+    ggml.impl.assert(!fuse_bias or fuse_silu, "!fuse_bias || fuse_silu");
 
     // The bias (when fused) is the non-conv operand of the ADD node.
-    const bias: ?*const Tensor = if (bias_add_node) |b|
-        (if (b.src[0] == @as([*c]Tensor, dst)) impl.one(Tensor, b.src[1]) else impl.one(Tensor, b.src[0]))
+    const bias: ?*const ggml.impl.c.ggml_tensor = if (bias_add_node) |b|
+        (if (b.src[0] == @as([*c]ggml.impl.c.ggml_tensor, dst)) ggml.impl.one(ggml.impl.c.ggml_tensor, b.src[1]) else ggml.impl.one(ggml.impl.c.ggml_tensor, b.src[0]))
     else
         null;
 
     // When fusing, write to silu_dst (the node downstream references).
-    const out: *const Tensor = if (silu_dst) |s| s else dst;
+    const out: *const ggml.impl.c.ggml_tensor = if (silu_dst) |s| s else dst;
 
     const nc = src1.ne[0]; // d_conv
     const nr = src0.ne[1]; // d_inner
     const n_t = out.ne[1]; // tokens per sequence
     const n_s = out.ne[2]; // number of sequences in the batch
 
-    impl.assert(out.ne[0] == nr, "out->ne[0] == nr");
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
-    impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
-    impl.assert(src0.nb[1] == @as(usize, @bitCast(src0.ne[0])) * @sizeOf(f32), "src0->nb[1] == src0->ne[0] * sizeof(float)");
+    ggml.impl.assert(out.ne[0] == nr, "out->ne[0] == nr");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
+    ggml.impl.assert(src0.nb[1] == @as(usize, @bitCast(src0.ne[0])) * @sizeOf(f32), "src0->nb[1] == src0->ne[0] * sizeof(float)");
 
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;
@@ -146,12 +138,12 @@ pub fn opSsmConv(ctx: *common.Context, dst: *Tensor, bias_add_node: ?*Tensor, si
     const dst_d: ?*anyopaque = out.data;
     const stream = ctx.stream();
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(out.type == c.GGML_TYPE_F32, "out->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(out.type == ggml.impl.c.GGML_TYPE_F32, "out->type == GGML_TYPE_F32");
     if (fuse_bias) {
-        impl.assert(bias.?.type == c.GGML_TYPE_F32, "bias->type == GGML_TYPE_F32");
-        impl.assert(c.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
-        impl.assert(c.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
+        ggml.impl.assert(bias.?.type == ggml.impl.c.GGML_TYPE_F32, "bias->type == GGML_TYPE_F32");
+        ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(bias.?), "ggml_is_contiguous(bias)");
+        ggml.impl.assert(ggml.impl.c.ggml_nelements(bias.?) == nr, "ggml_nelements(bias) == nr");
     }
 
     if (fuse_silu) {

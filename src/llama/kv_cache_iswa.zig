@@ -13,27 +13,11 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const impl = @import("impl.zig");
-const hparams_mod = @import("hparams.zig");
-const batch = @import("batch.zig");
-const memory = @import("memory.zig");
-const io = @import("io.zig");
-const kv_cache = @import("kv_cache.zig");
-const model_mod = @import("model.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Hparams = hparams_mod.Hparams;
-const Ubatch = batch.Ubatch;
-const KvCache = kv_cache.KvCache;
-const KvCacheContext = kv_cache.KvCacheContext;
-const SlotInfo = kv_cache.SlotInfo;
 
 fn oom() noreturn {
-    impl.abort("llama-kv-cache-iswa.cpp", 0, "out of memory");
+    mod.impl.abort("llama-kv-cache-iswa.cpp", 0, "out of memory");
 }
 
 /// The chained filter of the constructor's two lambdas: the caller's
@@ -41,8 +25,8 @@ fn oom() noreturn {
 /// constructor's stack, as the C++'s by-reference captures do; the caches
 /// read their filter only while they are built.
 const ChainedFilter = struct {
-    hparams: *const Hparams,
-    outer: memory.LayerFilter,
+    hparams: *const mod.hparams.Hparams,
+    outer: mod.memory.LayerFilter,
     swa: bool,
 
     fn call(ctx: ?*const anyopaque, il: i32) bool {
@@ -51,7 +35,7 @@ const ChainedFilter = struct {
         return self.hparams.isSwa(@intCast(il)) == self.swa;
     }
 
-    fn filter(self: *const ChainedFilter) memory.LayerFilter {
+    fn filter(self: *const ChainedFilter) mod.memory.LayerFilter {
         return .{ .ctx = self, .func = call };
     }
 };
@@ -61,8 +45,8 @@ const ChainedFilter = struct {
 /// the SWA layers.
 pub const KvCacheIswa = struct {
     unified: bool,
-    kv_base: *KvCache,
-    kv_swa: *KvCache,
+    kv_base: *mod.kv_cache.KvCache,
+    kv_swa: *mod.kv_cache.KvCache,
 
     /// Ports the constructor of `llama_kv_cache_iswa` that takes the
     /// hyperparameters (llama-kv-cache-iswa.cpp:34 @b1b770d90); the one
@@ -75,11 +59,11 @@ pub const KvCacheIswa = struct {
     ///
     /// Return: the cache, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
-        model: *const model_mod.Model,
+        model: *const mod.model.Model,
         no_alloc: bool,
-        hparams_: ?*const Hparams,
-        type_k: c.enum_ggml_type,
-        type_v: c.enum_ggml_type,
+        hparams_: ?*const mod.hparams.Hparams,
+        type_k: mod.impl.c.enum_ggml_type,
+        type_v: mod.impl.c.enum_ggml_type,
         v_trans: bool,
         offload: bool,
         swa_full: bool,
@@ -87,12 +71,12 @@ pub const KvCacheIswa = struct {
         kv_size: u32,
         n_seq_max: u32,
         n_ubatch: u32,
-        mem_other: ?memory.Memory,
-        filter: memory.LayerFilter,
-        reuse: memory.LayerMap,
-        share: memory.LayerMap,
-        exc: *Exception,
-    ) Thrown!*KvCacheIswa {
+        mem_other: ?mod.memory.Memory,
+        filter: mod.memory.LayerFilter,
+        reuse: mod.memory.LayerMap,
+        share: mod.memory.LayerMap,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!*KvCacheIswa {
         const func = "llama_kv_cache_iswa";
         const hparams = hparams_ orelse &model.hparams;
 
@@ -110,28 +94,28 @@ pub const KvCacheIswa = struct {
 
         // A full-size SWA cache is as large as the base one.
         if (swa_full) {
-            impl.logWarn("%s: using full-size SWA cache (ref: %s)\n", .{ func, "https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055" });
+            mod.impl.logWarn("%s: using full-size SWA cache (ref: %s)\n", .{ func, "https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055" });
             size_swa = size_base;
         }
 
-        impl.logInfo("%s: creating non-SWA KV cache, size = %u cells\n", .{ func, size_base });
+        mod.impl.logInfo("%s: creating non-SWA KV cache, size = %u cells\n", .{ func, size_base });
 
-        var mem_other_base: ?*KvCache = null;
-        var mem_other_swa: ?*KvCache = null;
+        var mem_other_base: ?*mod.kv_cache.KvCache = null;
+        var mem_other_swa: ?*mod.kv_cache.KvCache = null;
         if (mem_other) |o| {
             mem_other_base = o.cast(KvCacheIswa).getBase();
             mem_other_swa = o.cast(KvCacheIswa).getSwa();
         }
 
-        const kv_base = try KvCache.create(model, no_alloc, hparams, type_k, type_v, v_trans, offload, unified, size_base, n_seq_max, 0, .none, mem_other_base, filter_base.filter(), reuse, share, exc);
+        const kv_base = try mod.kv_cache.KvCache.create(model, no_alloc, hparams, type_k, type_v, v_trans, offload, unified, size_base, n_seq_max, 0, .none, mem_other_base, filter_base.filter(), reuse, share, exc);
         errdefer kv_base.destroy();
 
-        impl.logInfo("%s: creating     SWA KV cache, size = %u cells\n", .{ func, size_swa });
+        mod.impl.logInfo("%s: creating     SWA KV cache, size = %u cells\n", .{ func, size_swa });
 
-        const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(hparams.swa_type));
-        const kv_swa = try KvCache.create(model, no_alloc, hparams, type_k, type_v, v_trans, offload, unified, size_swa, n_seq_max, hparams.n_swa, swa_type, mem_other_swa, filter_swa.filter(), reuse, share, exc);
+        const swa_type: mod.hparams.SwaType = @fromBackingInt(@intCast(hparams.swa_type));
+        const kv_swa = try mod.kv_cache.KvCache.create(model, no_alloc, hparams, type_k, type_v, v_trans, offload, unified, size_swa, n_seq_max, hparams.n_swa, swa_type, mem_other_swa, filter_swa.filter(), reuse, share, exc);
 
-        const self = allocator.create(KvCacheIswa) catch oom();
+        const self = std.heap.c_allocator.create(KvCacheIswa) catch oom();
         self.* = .{ .unified = unified, .kv_base = kv_base, .kv_swa = kv_swa };
         return self;
     }
@@ -140,7 +124,7 @@ pub const KvCacheIswa = struct {
     pub fn destroy(self: *KvCacheIswa) void {
         self.kv_base.destroy();
         self.kv_swa.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `clear` (llama-kv-cache-iswa.cpp:108 @b1b770d90).
@@ -195,7 +179,7 @@ pub const KvCacheIswa = struct {
     }
 
     /// Ports `llama_kv_cache_iswa`'s `memory_breakdown` (llama-kv-cache-iswa.cpp:151 @b1b770d90).
-    pub fn memoryBreakdown(self: *const KvCacheIswa, out: *std.ArrayList(memory.BuftSize)) void {
+    pub fn memoryBreakdown(self: *const KvCacheIswa, out: *std.ArrayList(mod.memory.BuftSize)) void {
         self.kv_base.memoryBreakdown(out);
         self.kv_swa.memoryBreakdown(out);
     }
@@ -204,7 +188,7 @@ pub const KvCacheIswa = struct {
     /// @b1b770d90): a simple split when the cache is unified, then an equal
     /// split -- a sequence split under `embd_all`, which keeps each sequence
     /// whole; each must place every ubatch in both caches.
-    pub fn initBatch(self: *KvCacheIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *IswaContext {
+    pub fn initBatch(self: *KvCacheIswa, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *IswaContext {
         // First the simple split, which needs a unified cache.
         if (self.unified) {
             if (self.tryPrepare(balloc, n_ubatch, false, false)) |ctx| return ctx;
@@ -219,14 +203,14 @@ pub const KvCacheIswa = struct {
     }
 
     /// One `do { ... } while (false)` block of `init_batch`.
-    fn tryPrepare(self: *KvCacheIswa, balloc: *batch.BatchAllocr, n_ubatch: u32, equal: bool, embd_all: bool) ?*IswaContext {
+    fn tryPrepare(self: *KvCacheIswa, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, equal: bool, embd_all: bool) ?*IswaContext {
         balloc.splitReset();
 
-        var ubatches: std.ArrayList(Ubatch) = .empty;
+        var ubatches: std.ArrayList(mod.batch.Ubatch) = .empty;
         while (true) {
             const ub = if (!equal) balloc.splitSimple(n_ubatch) else if (embd_all) balloc.splitSeq(n_ubatch) else balloc.splitEqual(n_ubatch, !self.unified, 0);
             if (ub.n_tokens == 0) break;
-            ubatches.append(allocator, ub) catch oom();
+            ubatches.append(std.heap.c_allocator, ub) catch oom();
         }
 
         if (balloc.getNUsed() < balloc.getNTokens()) {
@@ -240,7 +224,7 @@ pub const KvCacheIswa = struct {
             return null;
         };
         if (sinfos_base.items.len == 0) {
-            sinfos_base.deinit(allocator);
+            sinfos_base.deinit(std.heap.c_allocator);
             releaseAll(&ubatches);
             return null;
         }
@@ -251,7 +235,7 @@ pub const KvCacheIswa = struct {
             return null;
         };
         if (sinfos_swa.items.len == 0) {
-            sinfos_swa.deinit(allocator);
+            sinfos_swa.deinit(std.heap.c_allocator);
             freeSlotInfos(&sinfos_base);
             releaseAll(&ubatches);
             return null;
@@ -283,47 +267,47 @@ pub const KvCacheIswa = struct {
     /// Ports `llama_kv_cache_iswa`'s `state_write` (llama-kv-cache-iswa.cpp:257
     /// @b1b770d90): the base cache, which skips itself for a partial state,
     /// then the SWA one.
-    pub fn stateWrite(self: *const KvCacheIswa, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateWrite(self: *const KvCacheIswa, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         try self.kv_base.stateWrite(w, seq_id, flags, exc);
         try self.kv_swa.stateWrite(w, seq_id, flags, exc);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `state_read` (llama-kv-cache-iswa.cpp:262 @b1b770d90).
-    pub fn stateRead(self: *KvCacheIswa, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateRead(self: *KvCacheIswa, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         try self.kv_base.stateRead(r, seq_id, flags, exc);
         try self.kv_swa.stateRead(r, seq_id, flags, exc);
     }
 
     /// Ports `llama_kv_cache_iswa`'s `get_base` (llama-kv-cache-iswa.cpp:267 @b1b770d90).
-    pub fn getBase(self: *const KvCacheIswa) *KvCache {
+    pub fn getBase(self: *const KvCacheIswa) *mod.kv_cache.KvCache {
         return self.kv_base;
     }
 
     /// Ports `llama_kv_cache_iswa`'s `get_swa` (llama-kv-cache-iswa.cpp:271 @b1b770d90).
-    pub fn getSwa(self: *const KvCacheIswa) *KvCache {
+    pub fn getSwa(self: *const KvCacheIswa) *mod.kv_cache.KvCache {
         return self.kv_swa;
     }
 
     // -------------------------------------------------------------------------
     // The memory interface
 
-    pub fn memoryOf(self: *KvCacheIswa) memory.Memory {
+    pub fn memoryOf(self: *KvCacheIswa) mod.memory.Memory {
         return .{ .ptr = self, .vtable = &vtable };
     }
 
-    const vtable: memory.Memory.VTable = .{
+    const vtable: mod.memory.Memory.VTable = .{
         .initBatch = struct {
-            fn f(p: *anyopaque, b: *batch.BatchAllocr, n: u32, e: bool) memory.Context {
+            fn f(p: *anyopaque, b: *mod.batch.BatchAllocr, n: u32, e: bool) mod.memory.Context {
                 return from(p).initBatch(b, n, e).contextOf();
             }
         }.f,
         .initFull = struct {
-            fn f(p: *anyopaque) memory.Context {
+            fn f(p: *anyopaque) mod.memory.Context {
                 return from(p).initFull().contextOf();
             }
         }.f,
         .initUpdate = struct {
-            fn f(p: *anyopaque, l: *anyopaque, o: bool) memory.Context {
+            fn f(p: *anyopaque, l: *anyopaque, o: bool) mod.memory.Context {
                 return from(p).initUpdate(l, o).contextOf();
             }
         }.f,
@@ -373,17 +357,17 @@ pub const KvCacheIswa = struct {
             }
         }.f,
         .memoryBreakdown = struct {
-            fn f(p: *anyopaque, out: *std.ArrayList(memory.BuftSize)) void {
+            fn f(p: *anyopaque, out: *std.ArrayList(mod.memory.BuftSize)) void {
                 from(p).memoryBreakdown(out);
             }
         }.f,
         .stateWrite = struct {
-            fn f(p: *anyopaque, w: io.Writer, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, w: mod.io.Writer, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateWrite(w, s, fl, e);
             }
         }.f,
         .stateRead = struct {
-            fn f(p: *anyopaque, r: io.Reader, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, r: mod.io.Reader, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateRead(r, s, fl, e);
             }
         }.f,
@@ -399,19 +383,19 @@ pub const KvCacheIswa = struct {
     }
 };
 
-fn releaseAll(list: *std.ArrayList(Ubatch)) void {
+fn releaseAll(list: *std.ArrayList(mod.batch.Ubatch)) void {
     for (list.items) |*u| u.release();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn freeSlotInfos(list: *std.ArrayList(SlotInfo)) void {
+fn freeSlotInfos(list: *std.ArrayList(mod.kv_cache.SlotInfo)) void {
     for (list.items) |*si| si.deinit();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
-    var out: std.ArrayList(Ubatch) = .empty;
-    out.ensureTotalCapacity(allocator, list.len) catch oom();
+fn retainedCopy(list: []const mod.batch.Ubatch) std.ArrayList(mod.batch.Ubatch) {
+    var out: std.ArrayList(mod.batch.Ubatch) = .empty;
+    out.ensureTotalCapacity(std.heap.c_allocator, list.len) catch oom();
     for (list) |u| {
         u.retain();
         out.appendAssumeCapacity(u);
@@ -423,15 +407,15 @@ fn retainedCopy(list: []const Ubatch) std.ArrayList(Ubatch) {
 pub const IswaContext = struct {
     /// The index of the next ubatch to process.
     i_next: usize = 0,
-    ubatches: std.ArrayList(Ubatch) = .empty,
-    ctx_base: ?*KvCacheContext = null,
-    ctx_swa: ?*KvCacheContext = null,
-    status: memory.Status,
+    ubatches: std.ArrayList(mod.batch.Ubatch) = .empty,
+    ctx_base: ?*mod.kv_cache.KvCacheContext = null,
+    ctx_swa: ?*mod.kv_cache.KvCacheContext = null,
+    status: mod.memory.Status,
 
     /// Ports the error constructor of `llama_kv_cache_iswa_context`
     /// (llama-kv-cache-iswa.cpp:279 @b1b770d90).
-    pub fn createStatus(status: memory.Status) *IswaContext {
-        const self = allocator.create(IswaContext) catch oom();
+    pub fn createStatus(status: mod.memory.Status) *IswaContext {
+        const self = std.heap.c_allocator.create(IswaContext) catch oom();
         self.* = .{ .status = status };
         return self;
     }
@@ -439,31 +423,31 @@ pub const IswaContext = struct {
     /// Ports the full-cache constructor of `llama_kv_cache_iswa_context`
     /// (llama-kv-cache-iswa.cpp:288 @b1b770d90).
     pub fn createFull(kv: *KvCacheIswa) *IswaContext {
-        const self = allocator.create(IswaContext) catch oom();
+        const self = std.heap.c_allocator.create(IswaContext) catch oom();
         const b = kv.getBase().initFull();
         const s = kv.getSwa().initFull();
-        self.* = .{ .ctx_base = b, .ctx_swa = s, .status = memory.statusCombine(b.getStatus(), s.getStatus()) };
+        self.* = .{ .ctx_base = b, .ctx_swa = s, .status = mod.memory.statusCombine(b.getStatus(), s.getStatus()) };
         return self;
     }
 
     /// Ports the update constructor of `llama_kv_cache_iswa_context`
     /// (llama-kv-cache-iswa.cpp:281 @b1b770d90).
     pub fn createUpdate(kv: *KvCacheIswa, lctx: *anyopaque, optimize: bool) *IswaContext {
-        const self = allocator.create(IswaContext) catch oom();
+        const self = std.heap.c_allocator.create(IswaContext) catch oom();
         const b = kv.getBase().initUpdate(lctx, optimize);
         const s = kv.getSwa().initUpdate(lctx, optimize);
-        self.* = .{ .ctx_base = b, .ctx_swa = s, .status = memory.statusCombine(b.getStatus(), s.getStatus()) };
+        self.* = .{ .ctx_base = b, .ctx_swa = s, .status = mod.memory.statusCombine(b.getStatus(), s.getStatus()) };
         return self;
     }
 
     /// Ports the batch constructor of `llama_kv_cache_iswa_context`
     /// (llama-kv-cache-iswa.cpp:297 @b1b770d90): each half gets its own copy
     /// of the ubatches, as the C++ copies them.
-    pub fn createBatch(kv: *KvCacheIswa, sinfos_base: std.ArrayList(SlotInfo), sinfos_swa: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *IswaContext {
-        const self = allocator.create(IswaContext) catch oom();
-        const b = KvCacheContext.createBatch(kv.getBase(), sinfos_base, retainedCopy(ubatches.items));
-        const s = KvCacheContext.createBatch(kv.getSwa(), sinfos_swa, retainedCopy(ubatches.items));
-        self.* = .{ .ubatches = ubatches, .ctx_base = b, .ctx_swa = s, .status = memory.statusCombine(b.getStatus(), s.getStatus()) };
+    pub fn createBatch(kv: *KvCacheIswa, sinfos_base: std.ArrayList(mod.kv_cache.SlotInfo), sinfos_swa: std.ArrayList(mod.kv_cache.SlotInfo), ubatches: std.ArrayList(mod.batch.Ubatch)) *IswaContext {
+        const self = std.heap.c_allocator.create(IswaContext) catch oom();
+        const b = mod.kv_cache.KvCacheContext.createBatch(kv.getBase(), sinfos_base, retainedCopy(ubatches.items));
+        const s = mod.kv_cache.KvCacheContext.createBatch(kv.getSwa(), sinfos_swa, retainedCopy(ubatches.items));
+        self.* = .{ .ubatches = ubatches, .ctx_base = b, .ctx_swa = s, .status = mod.memory.statusCombine(b.getStatus(), s.getStatus()) };
         return self;
     }
 
@@ -472,7 +456,7 @@ pub const IswaContext = struct {
         releaseAll(&self.ubatches);
         if (self.ctx_base) |b| b.destroy();
         if (self.ctx_swa) |s| s.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_kv_cache_iswa_context`'s `next` (llama-kv-cache-iswa.cpp:311 @b1b770d90).
@@ -487,7 +471,7 @@ pub const IswaContext = struct {
     /// Ports `llama_kv_cache_iswa_context`'s `apply` (llama-kv-cache-iswa.cpp:324
     /// @b1b770d90): both halves apply, whatever the first answers.
     pub fn apply(self: *IswaContext) bool {
-        std.debug.assert(!memory.statusIsFail(self.status));
+        std.debug.assert(!mod.memory.statusIsFail(self.status));
         var res = true;
         res = res and self.ctx_base.?.apply();
         res = self.ctx_swa.?.apply() and res;
@@ -495,33 +479,33 @@ pub const IswaContext = struct {
     }
 
     /// Ports `llama_kv_cache_iswa_context`'s `get_status` (llama-kv-cache-iswa.cpp:335 @b1b770d90).
-    pub fn getStatus(self: *const IswaContext) memory.Status {
+    pub fn getStatus(self: *const IswaContext) mod.memory.Status {
         return self.status;
     }
 
     /// Ports `llama_kv_cache_iswa_context`'s `get_ubatch` (llama-kv-cache-iswa.cpp:339 @b1b770d90).
-    pub fn getUbatch(self: *const IswaContext) *const Ubatch {
+    pub fn getUbatch(self: *const IswaContext) *const mod.batch.Ubatch {
         std.debug.assert(self.status == .success);
         return &self.ubatches.items[self.i_next];
     }
 
     /// Ports `llama_kv_cache_iswa_context`'s `get_base` (llama-kv-cache-iswa.cpp:345 @b1b770d90).
-    pub fn getBase(self: *const IswaContext) *const KvCacheContext {
+    pub fn getBase(self: *const IswaContext) *const mod.kv_cache.KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_base.?;
     }
 
     /// Ports `llama_kv_cache_iswa_context`'s `get_swa` (llama-kv-cache-iswa.cpp:351 @b1b770d90).
-    pub fn getSwa(self: *const IswaContext) *const KvCacheContext {
+    pub fn getSwa(self: *const IswaContext) *const mod.kv_cache.KvCacheContext {
         std.debug.assert(self.status == .success);
         return self.ctx_swa.?;
     }
 
-    pub fn contextOf(self: *IswaContext) memory.Context {
+    pub fn contextOf(self: *IswaContext) mod.memory.Context {
         return .{ .ptr = self, .vtable = &ctx_vtable };
     }
 
-    const ctx_vtable: memory.Context.VTable = .{
+    const ctx_vtable: mod.memory.Context.VTable = .{
         .next = struct {
             fn f(p: *anyopaque) bool {
                 return cast(p).next();
@@ -533,12 +517,12 @@ pub const IswaContext = struct {
             }
         }.f,
         .getUbatch = struct {
-            fn f(p: *anyopaque) *const Ubatch {
+            fn f(p: *anyopaque) *const mod.batch.Ubatch {
                 return cast(p).getUbatch();
             }
         }.f,
         .getStatus = struct {
-            fn f(p: *anyopaque) memory.Status {
+            fn f(p: *anyopaque) mod.memory.Status {
                 return cast(p).getStatus();
             }
         }.f,

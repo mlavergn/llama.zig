@@ -16,23 +16,19 @@
 //! Ports `llama.cpp/tools/mtmd/models/deepseek4v.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const model_mod = @import("../model.zig");
-const c = impl.c;
+const mtmd = @import("../module.zig");
 
 /// The `add_pos` lambda (deepseek4v.cpp:30 @b1b770d90): a two-section
 /// vision M-RoPE over the `positions` input, rows then columns.
 const Rope = struct {
-    positions: graph.T,
+    positions: mtmd.graph.T,
     sections: [4]c_int,
     rope_theta: f32,
 
-    fn addPos(ctx: ?*anyopaque, g: *graph.Graph, cur: graph.T, layer: *const model_mod.Layer) graph.T {
+    fn addPos(ctx: ?*anyopaque, g: *mtmd.graph.Graph, cur: mtmd.graph.T, layer: *const mtmd.model.Layer) mtmd.graph.T {
         _ = layer;
         const self: *Rope = @ptrCast(@alignCast(ctx.?));
-        return c.ggml_rope_multi(g.ctx0, cur, self.positions, null, @divTrunc(g.d_head, 2), &self.sections, c.GGML_ROPE_TYPE_VISION, 0, self.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
+        return mtmd.impl.c.ggml_rope_multi(g.ctx0, cur, self.positions, null, @divTrunc(g.d_head, 2), &self.sections, mtmd.impl.c.GGML_ROPE_TYPE_VISION, 0, self.rope_theta, 1.0, 0.0, 1.0, 0.0, 0.0);
     }
 };
 
@@ -45,7 +41,7 @@ fn mtmdAlign(x: c_int, n: c_int) c_int {
 /// `mtmd_graph_deepseek4v`. DeepSeek-V4.1-Flash (deepseek41v) shares the encoder
 /// and aligner; its block is plain reading order [START] ([IMAGE]*n_llm_w
 /// [NEWLINE])*n_llm_h [END], no lead pads, no pad row, no IMAGE_PAD tensor.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -53,9 +49,9 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const n_merge = hparams.n_merge;
 
     // 2D input positions
-    const positions = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, g.n_patches * 4);
-    _ = c.ggml_set_name(positions, "positions");
-    c.ggml_set_input(positions);
+    const positions = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, g.n_patches * 4);
+    _ = mtmd.impl.c.ggml_set_name(positions, "positions");
+    mtmd.impl.c.ggml_set_input(positions);
 
     const q = @divTrunc(g.d_head, 4);
     var rope: Rope = .{ .positions = positions, .sections = .{ q, q, 0, 0 }, .rope_theta = hparams.rope_theta };
@@ -68,21 +64,21 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // aligner patch merge: zero-pad the patch grid to a multiple of n_merge
     // then F.unfold == im2col with a dummy kernel (same trick as pixtral)
     {
-        cur = c.ggml_reshape_3d(ctx0, cur, g.n_embd, g.n_patches_x, g.n_patches_y);
-        cur = c.ggml_permute(ctx0, cur, 2, 0, 1, 3); // [x, y, n_embd]
-        cur = c.ggml_cont(ctx0, cur);
+        cur = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, g.n_embd, g.n_patches_x, g.n_patches_y);
+        cur = mtmd.impl.c.ggml_permute(ctx0, cur, 2, 0, 1, 3); // [x, y, n_embd]
+        cur = mtmd.impl.c.ggml_cont(ctx0, cur);
 
         const pad_x = @rem(n_merge - @rem(g.n_patches_x, n_merge), n_merge);
         const pad_y = @rem(n_merge - @rem(g.n_patches_y, n_merge), n_merge);
         if (pad_x != 0 or pad_y != 0) {
-            cur = c.ggml_pad(ctx0, cur, pad_x, pad_y, 0, 0);
+            cur = mtmd.impl.c.ggml_pad(ctx0, cur, pad_x, pad_y, 0, 0);
         }
 
         // contiguous kernel view: CUDA rejects a zero-stride one and im2col falls back to CPU
-        const esz = c.ggml_element_size(cur);
-        const kernel = c.ggml_view_3d(ctx0, cur, n_merge, n_merge, graph.ne(cur, 2), @as(usize, @intCast(n_merge)) * esz, @as(usize, @intCast(n_merge * n_merge)) * esz, 0);
-        cur = c.ggml_im2col(ctx0, kernel, cur, n_merge, n_merge, 0, 0, 1, 1, true, inp.?.type);
-        cur = c.ggml_reshape_2d(ctx0, cur, graph.ne(cur, 0), graph.ne(cur, 1) * graph.ne(cur, 2));
+        const esz = mtmd.impl.c.ggml_element_size(cur);
+        const kernel = mtmd.impl.c.ggml_view_3d(ctx0, cur, n_merge, n_merge, mtmd.graph.ne(cur, 2), @as(usize, @intCast(n_merge)) * esz, @as(usize, @intCast(n_merge * n_merge)) * esz, 0);
+        cur = mtmd.impl.c.ggml_im2col(ctx0, kernel, cur, n_merge, n_merge, 0, 0, 1, 1, true, inp.?.type);
+        cur = mtmd.impl.c.ggml_reshape_2d(ctx0, cur, mtmd.graph.ne(cur, 0), mtmd.graph.ne(cur, 1) * mtmd.graph.ne(cur, 2));
 
         // aligner MLP (F.gelu in the reference == erf-based gelu)
         cur = g.buildFfn(cur, model.mm_1_w, model.mm_1_b, null, null, model.mm_2_w, model.mm_2_b, .gelu_erf, -1);
@@ -92,35 +88,35 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     // assemble the token block: append the sentinel embeddings as extra rows
     // then reorder everything with the precomputed layout index
     {
-        const n_embd_out = graph.ne(cur, 0);
-        const n_grid = graph.ne(cur, 1); // n_llm_w * n_llm_h
+        const n_embd_out = mtmd.graph.ne(cur, 0);
+        const n_grid = mtmd.graph.ne(cur, 1); // n_llm_w * n_llm_h
 
         // rows n_grid + 0..3, keep in sync with the index computation in set_input
         const is_v41 = g.proj_type == .deepseek41v;
-        const sentinels = [_]graph.T{
+        const sentinels = [_]mtmd.graph.T{
             model.token_embd_img_start,
             model.token_embd_img_end,
             model.image_newline,
             if (is_v41) null else model.token_embd_img_pad,
         };
         for (sentinels) |tok| {
-            if (tok != null) cur = c.ggml_concat(ctx0, cur, c.ggml_reshape_2d(ctx0, tok, n_embd_out, 1), 1);
+            if (tok != null) cur = mtmd.impl.c.ggml_concat(ctx0, cur, mtmd.impl.c.ggml_reshape_2d(ctx0, tok, n_embd_out, 1), 1);
         }
 
         const n_llm_w = @divTrunc(mtmdAlign(g.n_patches_x, n_merge), n_merge);
         const n_llm_h = @divTrunc(mtmdAlign(g.n_patches_y, n_merge), n_merge);
-        const n_out = if (is_v41) impl.dsv41NBlockTokens(n_llm_w, n_llm_h) else impl.dsv4GetBlockLayout(n_llm_w, n_llm_h, g.img.lead_pad).n_out;
-        impl.ggmlAssert(n_grid == @as(i64, n_llm_w) * n_llm_h, "deepseek4v.cpp", 99, "n_grid == n_llm_w * n_llm_h");
+        const n_out = if (is_v41) mtmd.impl.dsv41NBlockTokens(n_llm_w, n_llm_h) else mtmd.impl.dsv4GetBlockLayout(n_llm_w, n_llm_h, g.img.lead_pad).n_out;
+        mtmd.impl.ggmlAssert(n_grid == @as(i64, n_llm_w) * n_llm_h, "deepseek4v.cpp", 99, "n_grid == n_llm_w * n_llm_h");
 
-        const layout_idx = c.ggml_new_tensor_1d(ctx0, c.GGML_TYPE_I32, n_out);
-        _ = c.ggml_set_name(layout_idx, "layout_idx");
-        c.ggml_set_input(layout_idx);
+        const layout_idx = mtmd.impl.c.ggml_new_tensor_1d(ctx0, mtmd.impl.c.GGML_TYPE_I32, n_out);
+        _ = mtmd.impl.c.ggml_set_name(layout_idx, "layout_idx");
+        mtmd.impl.c.ggml_set_input(layout_idx);
 
-        cur = c.ggml_get_rows(ctx0, cur, layout_idx);
+        cur = mtmd.impl.c.ggml_get_rows(ctx0, cur, layout_idx);
     }
 
     // build the graph
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

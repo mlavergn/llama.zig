@@ -10,22 +10,10 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const hparams_mod = @import("../hparams.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const RopeParams = model_mod.RopeParams;
-const Cparams = @import("../cparams.zig").Cparams;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_limite`'s `load_arch_hparams` (models/limite.cpp:7 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;
@@ -33,7 +21,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(f32, .attention_xsa_eps, false, exc)) |v| hp.f_xsa_eps = v;
     _ = try meta.getArr(f32, .final_logit_sigmoid_capping, &hp.final_logit_sigmoid_capping, false, exc);
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     hp.n_swa = (try meta.getKey(u32, .attention_sliding_window, true, exc)).?;
     try self.loadSwaPattern(ml, 4, false, exc);
     hp.rope_pattern = hp.is_swa_impl;
@@ -52,7 +40,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_limite`'s `load_arch_tensors` (models/limite.cpp:31 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     _ = ml;
     const hp = &self.hparams;
     const n_layer: i32 = @intCast(hp.nLayer());
@@ -64,7 +52,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     const n_embd_head_k: i64 = hp.nEmbdHeadK(0);
     const n_ff: i64 = hp.nFf(0);
     const n_vocab: i64 = self.vocab.nTokens();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ n_embd, n_vocab }, 0, exc);
     self.value_embd = try self.createTensor(.{ .tensor = .value_embd, .suffix = "weight" }, &.{ n_embd_v_gqa, n_vocab }, 0, exc);
@@ -72,7 +60,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ n_embd, n_vocab }, nr, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ n_embd, n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ n_embd, n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     const n_taps: i64 = hp.n_mudd_taps;
@@ -117,7 +105,7 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     res.freq_base = cparams.rope_freq_base;
@@ -127,7 +115,7 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 }
 
 /// Ports `llama_model_limite`'s `build_arch_graph` (models/limite.cpp:82 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     _ = params;
     buildGraph(model, b);
 }
@@ -135,18 +123,18 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 /// `mix`, a lambda of the `graph` constructor (models/limite.cpp:86
 /// @b1b770d90): the taps weighted by one half of the MUDD weights, the
 /// fused hyper-connection kernel when there are exactly four.
-fn mix(b: *const graph.Builder, stack: *Tensor, w: *Tensor, n_taps: i64, offset: usize) *Tensor {
+fn mix(b: *const llama.graph.Builder, stack: *llama.impl.c.ggml_tensor, w: *llama.impl.c.ggml_tensor, n_taps: i64, offset: usize) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     if (n_taps == 4) {
-        return c.ggml_dsv4_hc_pre(ctx, stack, c.ggml_cont(ctx, c.ggml_view_2d(ctx, w, n_taps, b.n_tokens, w.nb[1], offset)));
+        return llama.impl.c.ggml_dsv4_hc_pre(ctx, stack, llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, w, n_taps, b.n_tokens, w.nb[1], offset)));
     }
-    const wj = c.ggml_view_3d(ctx, w, 1, n_taps, b.n_tokens, w.nb[0], w.nb[1], offset);
-    const m = c.ggml_cont(ctx, c.ggml_permute(ctx, c.ggml_mul(ctx, stack, wj), 1, 0, 2, 3));
-    return c.ggml_reshape_2d(ctx, c.ggml_sum_rows(ctx, m), b.n_embd, b.n_tokens);
+    const wj = llama.impl.c.ggml_view_3d(ctx, w, 1, n_taps, b.n_tokens, w.nb[0], w.nb[1], offset);
+    const m = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, llama.impl.c.ggml_mul(ctx, stack, wj), 1, 0, 2, 3));
+    return llama.impl.c.ggml_reshape_2d(ctx, llama.impl.c.ggml_sum_rows(ctx, m), b.n_embd, b.n_tokens);
 }
 
 /// Ports the constructor of `llama_model_limite`'s `graph` (models/limite.cpp:86 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
@@ -156,13 +144,13 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_tokens = b.n_tokens;
     const n_embd = b.n_embd;
 
-    impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/limite.cpp", 90, "n_embd_head == hparams.n_embd_head_v()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadV(0), "models/limite.cpp", 90, "n_embd_head == hparams.n_embd_head_v()");
 
     var inpL = b.buildInpEmbd(model.tok_embd.?);
 
     // Value embeddings are looked up by token id; embeddings input is not supported.
-    var inp_ve = c.ggml_get_rows(ctx, model.value_embd, b.res.t_inp_tokens);
-    inp_ve = c.ggml_reshape_3d(ctx, inp_ve, n_embd_head, n_head_kv, n_tokens);
+    var inp_ve = llama.impl.c.ggml_get_rows(ctx, model.value_embd, b.res.t_inp_tokens);
+    inp_ve = llama.impl.c.ggml_reshape_3d(ctx, inp_ve, n_embd_head, n_head_kv, n_tokens);
     b.cb(inp_ve, "inp_ve", -1);
 
     inpL = b.buildNorm(inpL, null, null, .rms, -1);
@@ -175,9 +163,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_out_ids = b.buildInpOutIds();
 
     // hist[il] is the input of layer il, read by the dense connections.
-    var hist: [hparams_mod.max_layers]?*Tensor = @splat(null);
+    var hist: [llama.hparams.max_layers]?*llama.impl.c.ggml_tensor = @splat(null);
 
-    var cur: *Tensor = undefined;
+    var cur: *llama.impl.c.ggml_tensor = undefined;
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
         const layer = &model.layers[@intCast(il)];
@@ -190,16 +178,16 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const taps = hp.mudd_tap_idx[@as(usize, @intCast(il)) * @as(usize, @intCast(n_taps)) ..];
 
             var w = b.buildNorm(inpL, null, null, .rms, il);
-            w = c.ggml_gelu_erf(ctx, b.buildLoraMm(layer.mudd_down.?, w, null));
-            w = c.ggml_add(ctx, b.buildLoraMm(layer.mudd_up.?, w, null), layer.mudd_up_b);
+            w = llama.impl.c.ggml_gelu_erf(ctx, b.buildLoraMm(layer.mudd_down.?, w, null));
+            w = llama.impl.c.ggml_add(ctx, b.buildLoraMm(layer.mudd_up.?, w, null), layer.mudd_up_b);
             b.cb(w, "mudd_w", il);
 
-            var stack: ?*Tensor = null;
+            var stack: ?*llama.impl.c.ggml_tensor = null;
             var j: usize = 0;
             while (j < n_taps) : (j += 1) {
-                impl.assert(taps[j] >= 0 and taps[j] <= il, "models/limite.cpp", 131, "taps[j] >= 0 && taps[j] <= il");
-                const h = c.ggml_reshape_3d(ctx, hist[@intCast(taps[j])], n_embd, 1, n_tokens);
-                stack = if (stack) |s| c.ggml_concat(ctx, s, h, 1) else h;
+                llama.impl.assert(taps[j] >= 0 and taps[j] <= il, "models/limite.cpp", 131, "taps[j] >= 0 && taps[j] <= il");
+                const h = llama.impl.c.ggml_reshape_3d(ctx, hist[@intCast(taps[j])], n_embd, 1, n_tokens);
+                stack = if (stack) |s| llama.impl.c.ggml_concat(ctx, s, h, 1) else h;
             }
 
             cur = mix(b, stack.?, w, n_taps, 0);
@@ -221,15 +209,15 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             var Vcur = qkv.v;
 
             if (layer.attn_ve_gate) |ve_gate| {
-                var gate = c.ggml_sigmoid(ctx, b.buildLoraMm(ve_gate, attn_in, null));
-                gate = c.ggml_reshape_3d(ctx, gate, 1, n_head_kv, n_tokens);
+                var gate = llama.impl.c.ggml_sigmoid(ctx, b.buildLoraMm(ve_gate, attn_in, null));
+                gate = llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head_kv, n_tokens);
 
-                Vcur = c.ggml_add(ctx, Vcur, c.ggml_mul(ctx, inp_ve, gate));
+                Vcur = llama.impl.c.ggml_add(ctx, Vcur, llama.impl.c.ggml_mul(ctx, inp_ve, gate));
                 b.cb(Vcur, "Vcur_ve", il);
             }
 
-            Qcur = c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
-            Kcur = c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
+            Qcur = llama.impl.c.ggml_rms_norm(ctx, Qcur, hp.f_norm_rms_eps);
+            Kcur = llama.impl.c.ggml_rms_norm(ctx, Kcur, hp.f_norm_rms_eps);
             b.cb(Qcur, "Qcur_normed", il);
             b.cb(Kcur, "Kcur_normed", il);
 
@@ -246,37 +234,37 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 // Remove from each head output its projection on the token's own value.
                 const n_group = @divTrunc(n_head, n_head_kv);
 
-                const y = c.ggml_reshape_4d(ctx, cur, n_embd_head, n_group, n_head_kv, n_tokens);
-                var vn = c.ggml_l2_norm(ctx, Vcur, hp.f_xsa_eps);
-                vn = c.ggml_reshape_4d(ctx, vn, n_embd_head, 1, n_head_kv, n_tokens);
-                vn = c.ggml_repeat(ctx, vn, y);
+                const y = llama.impl.c.ggml_reshape_4d(ctx, cur, n_embd_head, n_group, n_head_kv, n_tokens);
+                var vn = llama.impl.c.ggml_l2_norm(ctx, Vcur, hp.f_xsa_eps);
+                vn = llama.impl.c.ggml_reshape_4d(ctx, vn, n_embd_head, 1, n_head_kv, n_tokens);
+                vn = llama.impl.c.ggml_repeat(ctx, vn, y);
 
-                var proj = c.ggml_sum_rows(ctx, c.ggml_mul(ctx, y, vn));
-                proj = c.ggml_mul(ctx, proj, c.ggml_reshape_4d(ctx, xsa_alpha, 1, n_group, n_head_kv, 1));
+                var proj = llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_mul(ctx, y, vn));
+                proj = llama.impl.c.ggml_mul(ctx, proj, llama.impl.c.ggml_reshape_4d(ctx, xsa_alpha, 1, n_group, n_head_kv, 1));
 
-                cur = c.ggml_sub(ctx, y, c.ggml_mul(ctx, vn, proj));
+                cur = llama.impl.c.ggml_sub(ctx, y, llama.impl.c.ggml_mul(ctx, vn, proj));
                 b.cb(cur, "attn_xsa", il);
             }
 
-            cur = c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head, n_tokens);
+            cur = llama.impl.c.ggml_reshape_3d(ctx, cur, n_embd_head, n_head, n_tokens);
 
             if (layer.wqkv_gate) |wqkv_gate| {
-                const gate = c.ggml_sigmoid(ctx, b.buildLoraMm(wqkv_gate, attn_in, null));
-                cur = c.ggml_mul(ctx, cur, c.ggml_reshape_3d(ctx, gate, 1, n_head, n_tokens));
+                const gate = llama.impl.c.ggml_sigmoid(ctx, b.buildLoraMm(wqkv_gate, attn_in, null));
+                cur = llama.impl.c.ggml_mul(ctx, cur, llama.impl.c.ggml_reshape_3d(ctx, gate, 1, n_head, n_tokens));
                 b.cb(cur, "attn_gated", il);
             }
 
-            cur = c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head, n_tokens);
+            cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_embd_head * n_head, n_tokens);
             cur = b.buildLoraMm(layer.wo.?, cur, layer.wo_s);
             b.cb(cur, "attn_out", il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            resid = c.ggml_get_rows(ctx, resid, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            resid = llama.impl.c.ggml_get_rows(ctx, resid, inp_out_ids);
         }
 
-        cur = c.ggml_add(ctx, c.ggml_mul(ctx, resid, layer.attn_resid_scale), cur);
+        cur = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, resid, layer.attn_resid_scale), cur);
         b.cb(cur, "attn_resid", il);
 
         const ffn_inp = cur;
@@ -287,7 +275,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildFfn(cur, layer.ffn_up, null, null, layer.ffn_gate, null, null, layer.ffn_down, null, null, null, .silu, .par, il);
         b.cb(cur, "ffn_out", il);
 
-        cur = c.ggml_add(ctx, c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_scale), cur);
+        cur = llama.impl.c.ggml_add(ctx, llama.impl.c.ggml_mul(ctx, ffn_inp, layer.ffn_resid_scale), cur);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -305,9 +293,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // scale * sigmoid((x + shift) / temperature)
     const cap = &hp.final_logit_sigmoid_capping;
     if (cap[0] != 0.0 and cap[2] != 0.0) {
-        cur = c.ggml_scale_bias(ctx, cur, 1.0 / cap[2], cap[1] / cap[2]);
-        cur = c.ggml_sigmoid(ctx, cur);
-        cur = c.ggml_scale(ctx, cur, cap[0]);
+        cur = llama.impl.c.ggml_scale_bias(ctx, cur, 1.0 / cap[2], cap[1] / cap[2]);
+        cur = llama.impl.c.ggml_sigmoid(ctx, cur);
+        cur = llama.impl.c.ggml_scale(ctx, cur, cap[0]);
     }
 
     b.cb(cur, "result_output", -1);

@@ -7,15 +7,7 @@
 //! `llama.cpp/ggml/src/ggml-cuda/pad.cuh` at v1.0.0 (`b1b770d90`). The
 //! kernel, `pad_f32`, stays CUDA.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `CUDA_PAD_BLOCK_SIZE` (pad.cuh:3 @b1b770d90).
 const block_size = 256;
 
@@ -42,11 +34,11 @@ fn padF32Cuda(
     ne2: c_int,
     ne3: c_int,
     circular: bool,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     const num_blocks: c_int = @divTrunc(ne0 + block_size - 1, block_size);
-    const grid: kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(@min(ne1, 65535)), .z = @bitCast(@min(ne2 *% ne3, 65535)) };
-    kernels.launch(kernels.get("pad", "pad_f32"), .{ .grid = grid, .block = .{ .x = block_size }, .stream = stream }, .{
+    const grid: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(num_blocks), .y = @bitCast(@min(ne1, 65535)), .z = @bitCast(@min(ne2 *% ne3, 65535)) };
+    ggml.cuda.kernels.launch(ggml.cuda.kernels.get("pad", "pad_f32"), .{ .grid = grid, .block = .{ .x = block_size }, .stream = stream }, .{
         src,      s00, s01, s02, s03, dst,
         lp0,      rp0, lp1, rp1, lp2, rp2,
         lp3,      rp3, ne0, ne1, ne2, ne3,
@@ -55,8 +47,8 @@ fn padF32Cuda(
 }
 
 /// Ports `ggml_cuda_op_pad` (pad.cu:79 @b1b770d90).
-pub fn opPad(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub fn opPad(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
     const src0_d: ?*const anyopaque = src0.data;
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
@@ -67,8 +59,8 @@ pub fn opPad(ctx: *common.Context, dst: *Tensor) void {
     const nb02 = src0.nb[2];
     const nb03 = src0.nb[3];
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     const lp0: i32 = dst.op_params[0];
     const rp0: i32 = dst.op_params[1];
@@ -80,7 +72,7 @@ pub fn opPad(ctx: *common.Context, dst: *Tensor) void {
     const rp3: i32 = dst.op_params[7];
     const circular: i32 = dst.op_params[8];
 
-    const ts = c.ggml_type_size(src0.type);
+    const ts = ggml.impl.c.ggml_type_size(src0.type);
     const s00: usize = nb00 / ts;
     const s01: usize = nb01 / ts;
     const s02: usize = nb02 / ts;

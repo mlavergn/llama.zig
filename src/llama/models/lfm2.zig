@@ -23,30 +23,11 @@
 //! `lfm_base.zig`'s. LFM2-MoE (`lfm2moe.zig`) builds the same graph.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-const memory_hybrid = @import("../memory_hybrid.zig");
-const memory_hybrid_iswa = @import("../memory_hybrid_iswa.zig");
-const lfm_base = @import("lfm_base.zig");
-
-const batch = @import("../batch.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const RopeParams = model_mod.RopeParams;
-const Cparams = @import("../cparams.zig").Cparams;
-const Tensor = c.ggml_tensor;
-const Ubatch = batch.Ubatch;
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("models/lfm2.cpp", 0, "out of memory");
+    llama.impl.abort("models/lfm2.cpp", 0, "out of memory");
 }
 
 /// Ports `N_DECISION_TYPES` (models/lfm2.cpp:8 @b1b770d90): the question
@@ -54,7 +35,7 @@ fn oom() noreturn {
 const n_decision_types: u32 = 3;
 
 /// Ports `llama_model_lfm2`'s `load_arch_hparams` (models/lfm2.cpp:10 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     hp.n_shortconv_l_cache = (try meta.getKey(u32, .shortconv_l_cache, true, exc)).?;
@@ -88,7 +69,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .attention_sliding_window, false, exc)) |v| {
         hp.n_swa = v;
         if (hp.n_swa > 0) {
-            hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+            hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
             il = 0;
             while (il < hp.nLayer()) : (il += 1) {
                 hp.is_swa_impl[il] = @intFromBool(hp.is_recr_impl[il] == 0);
@@ -101,16 +82,16 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 /// @b1b770d90); LFM2-MoE's (models/lfm2moe.cpp:23 @b1b770d90) is the same
 /// body without the decision head, which it never reaches: LFM2-MoE reads
 /// no decision block count, so its `n_layer_decision` is 0.
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     try loadTensors(self, "models/lfm2.cpp", 102, 120, exc);
 }
 
 /// The body both `load_arch_tensors` share, with the lines its two
 /// assertions are at in each file.
-pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe: c_int, comptime line_gqa: c_int, exc: *Exception) Thrown!void {
+pub fn loadTensors(self: *llama.model.Model, comptime file: [:0]const u8, comptime line_moe: c_int, comptime line_gqa: c_int, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -156,7 +137,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
         self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
 
         if (self.output == null) {
-            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+            self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
         }
     }
 
@@ -169,7 +150,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
         // The FFN or MoE is the same for the attention and conv layers.
         layer.ffn_norm = try self.createTensor(.{ .tensor = .ffn_norm, .suffix = "weight", .bid = i }, &.{l.n_embd}, 0, exc);
         if (is_moe_layer) {
-            impl.assert(l.n_expert != 0 and l.n_expert_used != 0, file, line_moe, "n_expert && n_expert_used");
+            llama.impl.assert(l.n_expert != 0 and l.n_expert_used != 0, file, line_moe, "n_expert && n_expert_used");
             layer.ffn_gate_inp = try self.createTensor(.{ .tensor = .ffn_gate_inp, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_expert }, 0, exc);
             layer.ffn_gate_exps = try self.createTensor(.{ .tensor = .ffn_gate_exps, .suffix = "weight", .bid = i }, &.{ l.n_embd, hp.nFfExp(0), l.n_expert }, 0, exc);
             layer.ffn_down_exps = try self.createTensor(.{ .tensor = .ffn_down_exps, .suffix = "weight", .bid = i }, &.{ hp.nFfExp(0), l.n_embd, l.n_expert }, 0, exc);
@@ -188,7 +169,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
         if (!hp.isRecr(@intCast(i))) {
             layer.attn_q_norm = try self.createTensor(.{ .tensor = .attn_q_norm, .suffix = "weight", .bid = i }, &.{l.n_embd_head_k}, 0, exc);
             layer.attn_k_norm = try self.createTensor(.{ .tensor = .attn_k_norm, .suffix = "weight", .bid = i }, &.{l.n_embd_head_k}, 0, exc);
-            impl.assert(l.n_embd_v_gqa == l.n_embd_k_gqa, file, line_gqa, "n_embd_v_gqa == n_embd_k_gqa");
+            llama.impl.assert(l.n_embd_v_gqa == l.n_embd_k_gqa, file, line_gqa, "n_embd_v_gqa == n_embd_k_gqa");
 
             try self.createTensorQkv(layer, i, l.n_embd, l.n_embd, hp.nEmbdKGqa(@intCast(i)), hp.nEmbdVGqa(@intCast(i)), 0, exc);
 
@@ -214,7 +195,7 @@ pub fn loadTensors(self: *Model, comptime file: [:0]const u8, comptime line_moe:
 /// - `il`: the layer.
 ///
 /// Return: the layer's RoPE.
-pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) RopeParams {
+pub fn getRopeParams(model: *const llama.model.Model, cparams: *const llama.cparams.Cparams, il: u32) llama.model.RopeParams {
     var res = model.getRopeParamsBase(cparams, il);
 
     res.freq_base = cparams.rope_freq_base;
@@ -227,12 +208,12 @@ pub fn getRopeParams(model: *const Model, cparams: *const Cparams, il: u32) Rope
 /// @b1b770d90); LFM2-MoE's (models/lfm2moe.cpp:78 @b1b770d90) is the same
 /// without the decision graph, which its `n_layer_decision` of 0 never
 /// takes.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     if (model.hparams.n_layer_decision > 0) {
         buildGraphDecision(model, b);
         return;
     }
-    const swa_type: hparams_mod.SwaType = @fromBackingInt(@intCast(model.hparams.swa_type));
+    const swa_type: llama.hparams.SwaType = @fromBackingInt(@intCast(model.hparams.swa_type));
     if (swa_type == .standard) {
         buildGraph(true, model, b);
     } else {
@@ -242,10 +223,10 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// The constructor's `build_attn_block` lambda (models/lfm2.cpp:165
 /// @b1b770d90): Q/K norms, RoPE and attention.
-fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, inp_pos: *Tensor, inp_attn: anytype, il: c_int) *Tensor {
+fn buildAttnBlock(model: *const llama.model.Model, b: *const llama.graph.Builder, cur_: *llama.impl.c.ggml_tensor, inp_pos: *llama.impl.c.ggml_tensor, inp_attn: anytype, il: c_int) *llama.impl.c.ggml_tensor {
     const hp = b.hparams;
     const layer = &model.layers[@intCast(il)];
-    impl.assert(hp.nEmbdVGqa(@intCast(il)) == hp.nEmbdKGqa(@intCast(il)), "models/lfm2.cpp", 169, "hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il)");
+    llama.impl.assert(hp.nEmbdVGqa(@intCast(il)) == hp.nEmbdKGqa(@intCast(il)), "models/lfm2.cpp", 169, "hparams.n_embd_v_gqa(il) == hparams.n_embd_k_gqa(il)");
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
     const n_head_kv: i64 = hp.nHeadKv(@intCast(il));
 
@@ -264,7 +245,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
     q = b.buildRope(q, inp_pos, il);
     k = b.buildRope(k, inp_pos, il);
 
-    const cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, q, k, v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+    const cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, q, k, v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
 
     b.cb(cur, "model.layers.{}.self_attn.out_proj", il);
 
@@ -273,15 +254,15 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
 
 /// Ports the constructor of `llama_model_lfm2`'s `graph<iswa>`
 /// (models/lfm2.cpp:159 @b1b770d90).
-fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(comptime iswa: bool, model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    const MemHybridCtx = if (iswa) memory_hybrid_iswa.HybridIswaContext else memory_hybrid.HybridContext;
+    const MemHybridCtx = if (iswa) llama.memory_hybrid_iswa.HybridIswaContext else llama.memory_hybrid.HybridContext;
 
     var cur = b.buildInpEmbd(model.tok_embd.?);
     b.cb(cur, "model.embed_tokens", -1);
 
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 
     const inp_hybrid = if (iswa) b.buildInpMemHybridIswa() else b.buildInpMemHybrid();
 
@@ -301,26 +282,26 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
         if (hp.isRecr(@intCast(il))) {
             const mctx_recr = b.mctx.?.cast(MemHybridCtx).getRecr();
-            cur = lfm_base.buildLfmShortconv(model, b, mctx_recr, inp_hybrid.getRecr(), cur, il);
+            cur = llama.models.lfm_base.buildLfmShortconv(model, b, mctx_recr, inp_hybrid.getRecr(), cur, il);
         } else {
             cur = buildAttnBlock(model, b, cur, inp_pos, inp_hybrid.getAttn(), il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            prev_cur = c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            prev_cur = llama.impl.c.ggml_get_rows(ctx, prev_cur, inp_out_ids);
         }
 
-        cur = c.ggml_add(ctx, prev_cur, cur);
+        cur = llama.impl.c.ggml_add(ctx, prev_cur, cur);
 
         const ffn_norm_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         b.cb(ffn_norm_out, "model.layers.{}.ffn_norm", il);
 
-        const ffn_out = if (is_moe_layer) lfm_base.buildLfmMoeFfn(model, b, ffn_norm_out, il) else lfm_base.buildLfmDenseFfn(model, b, ffn_norm_out, il);
+        const ffn_out = if (is_moe_layer) llama.models.lfm_base.buildLfmMoeFfn(model, b, ffn_norm_out, il) else llama.models.lfm_base.buildLfmDenseFfn(model, b, ffn_norm_out, il);
         // The C++ names the norm's output here, not the FFN's.
         b.cb(ffn_norm_out, "model.layers.{}.ffn_out", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
@@ -343,7 +324,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
 
 /// Ports `lfm2_is_media` (models/lfm2.cpp:259 @b1b770d90): a media entry
 /// (an image or audio prefix) is an embedding, a text entry a token.
-fn isMedia(ubatch: *const Ubatch, i: usize) bool {
+fn isMedia(ubatch: *const llama.batch.Ubatch, i: usize) bool {
     return if (ubatch.isMixed()) ubatch.type[i] != 0 else ubatch.token == null;
 }
 
@@ -354,11 +335,11 @@ fn isMedia(ubatch: *const Ubatch, i: usize) bool {
 /// `llm_graph_input_attn_no_cache` and overrides `set_input`; here the
 /// base is a member the attention reads.
 const InpAttnMedia = struct {
-    base: graph.InpAttnNoCache,
+    base: llama.graph.InpAttnNoCache,
     is_head: bool,
 
     /// The `fill_mask` lambda of `set_input`.
-    fn fillMask(self: *const InpAttnMedia, comptime T: type, data: [*]T, ubatch: *const Ubatch, is_media: []const bool, zero: T, ninf: T) void {
+    fn fillMask(self: *const InpAttnMedia, comptime T: type, data: [*]T, ubatch: *const llama.batch.Ubatch, is_media: []const bool, zero: T, ninf: T) void {
         const n_tokens: usize = ubatch.n_tokens;
         for (0..n_tokens) |j1| {
             for (0..n_tokens) |j0| {
@@ -375,18 +356,18 @@ const InpAttnMedia = struct {
 
     /// Ports `llm_graph_input_attn_media`'s `set_input` (models/lfm2.cpp:270
     /// @b1b770d90).
-    pub fn setInput(self: *InpAttnMedia, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpAttnMedia, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
 
-        const is_media = allocator.alloc(bool, n_tokens) catch oom();
-        defer allocator.free(is_media);
+        const is_media = std.heap.c_allocator.alloc(bool, n_tokens) catch oom();
+        defer std.heap.c_allocator.free(is_media);
         for (is_media, 0..) |*m, i| m.* = isMedia(ubatch, i);
 
         const m = self.base.self_attn_mask.raw.?;
-        impl.assert(c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 292, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
-        if (m.type == c.GGML_TYPE_F16) {
-            self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, c.ggml_fp32_to_fp16(0.0), c.ggml_fp32_to_fp16(-std.math.inf(f32)));
+        llama.impl.assert(llama.impl.c.ggml_backend_buffer_is_host(m.buffer), "models/lfm2.cpp", 292, "ggml_backend_buffer_is_host(self_attn_mask.raw->buffer)");
+        if (m.type == llama.impl.c.GGML_TYPE_F16) {
+            self.fillMask(u16, @ptrCast(@alignCast(m.data)), ubatch, is_media, llama.impl.c.ggml_fp32_to_fp16(0.0), llama.impl.c.ggml_fp32_to_fp16(-std.math.inf(f32)));
         } else {
             self.fillMask(f32, @ptrCast(@alignCast(m.data)), ubatch, is_media, 0.0, -std.math.inf(f32));
         }
@@ -399,20 +380,20 @@ const InpAttnMedia = struct {
 /// right.
 const InpConvMask = struct {
     /// F32 `[1, n_tokens]`.
-    left: ?*Tensor = null,
+    left: ?*llama.impl.c.ggml_tensor = null,
     /// F32 `[1, n_tokens]`.
-    right: ?*Tensor = null,
+    right: ?*llama.impl.c.ggml_tensor = null,
 
     /// Ports `llm_graph_input_conv_mask`'s `set_input` (models/lfm2.cpp:307
     /// @b1b770d90).
-    pub fn setInput(self: *InpConvMask, ubatch_: ?*const Ubatch) void {
+    pub fn setInput(self: *InpConvMask, ubatch_: ?*const llama.batch.Ubatch) void {
         const ubatch = ubatch_.?;
         const n_tokens: usize = ubatch.n_tokens;
 
-        const data_left = allocator.alloc(f32, n_tokens) catch oom();
-        defer allocator.free(data_left);
-        const data_right = allocator.alloc(f32, n_tokens) catch oom();
-        defer allocator.free(data_right);
+        const data_left = std.heap.c_allocator.alloc(f32, n_tokens) catch oom();
+        defer std.heap.c_allocator.free(data_left);
+        const data_right = std.heap.c_allocator.alloc(f32, n_tokens) catch oom();
+        defer std.heap.c_allocator.free(data_right);
         @memset(data_left, 0.0);
         @memset(data_right, 0.0);
         var i: usize = 0;
@@ -421,8 +402,8 @@ const InpConvMask = struct {
             data_right[i] = @floatFromInt(@intFromBool(is_next and !(isMedia(ubatch, i) and !isMedia(ubatch, i + 1))));
             data_left[i + 1] = @floatFromInt(@intFromBool(is_next));
         }
-        c.ggml_backend_tensor_set(self.left, data_left.ptr, 0, c.ggml_nbytes(self.left));
-        c.ggml_backend_tensor_set(self.right, data_right.ptr, 0, c.ggml_nbytes(self.right));
+        llama.impl.c.ggml_backend_tensor_set(self.left, data_left.ptr, 0, llama.impl.c.ggml_nbytes(self.left));
+        llama.impl.c.ggml_backend_tensor_set(self.right, data_right.ptr, 0, llama.impl.c.ggml_nbytes(self.right));
     }
 };
 
@@ -432,7 +413,7 @@ const InpConvMask = struct {
 /// centred three-tap one over the batch, a tap outside the sequence
 /// reading 0. `llama_model_lfm2` declares it as `graph_decision`
 /// (src/models/models.h:2363 @b1b770d90).
-fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphDecision(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -446,23 +427,23 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
     const inp_pos = b.buildInpPos();
     const inp_out_ids = b.buildInpOutIds();
 
-    const type_mask: c.enum_ggml_type = if (b.cparams.flash_attn) c.GGML_TYPE_F16 else c.GGML_TYPE_F32;
+    const type_mask: llama.impl.c.enum_ggml_type = if (b.cparams.flash_attn) llama.impl.c.GGML_TYPE_F16 else llama.impl.c.GGML_TYPE_F32;
 
-    var inp_attn: [2]*graph.InpAttnNoCache = undefined;
+    var inp_attn: [2]*llama.graph.InpAttnNoCache = undefined;
     for ([_]bool{ false, true }) |is_head| {
-        const inp = allocator.create(InpAttnMedia) catch oom();
+        const inp = std.heap.c_allocator.create(InpAttnMedia) catch oom();
         inp.* = .{ .base = .{ .hparams = hp, .cparams = b.cparams.*, .debug = 0 }, .is_head = is_head };
-        inp.base.self_attn_mask.raw = c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
-        c.ggml_set_input(inp.base.self_attn_mask.raw);
+        inp.base.self_attn_mask.raw = llama.impl.c.ggml_new_tensor_4d(ctx, type_mask, n_tokens, n_tokens, 1, 1);
+        llama.impl.c.ggml_set_input(inp.base.self_attn_mask.raw);
         inp_attn[@intFromBool(is_head)] = &b.res.addInput(InpAttnMedia, inp).base;
     }
 
-    const inp_conv = allocator.create(InpConvMask) catch oom();
+    const inp_conv = std.heap.c_allocator.create(InpConvMask) catch oom();
     inp_conv.* = .{};
-    inp_conv.left = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, n_tokens);
-    inp_conv.right = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, 1, n_tokens);
-    c.ggml_set_input(inp_conv.left);
-    c.ggml_set_input(inp_conv.right);
+    inp_conv.left = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_tokens);
+    inp_conv.right = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_tokens);
+    llama.impl.c.ggml_set_input(inp_conv.left);
+    llama.impl.c.ggml_set_input(inp_conv.right);
     const conv_left = inp_conv.left.?;
     const conv_right = inp_conv.right.?;
     _ = b.res.addInput(InpConvMask, inp_conv);
@@ -479,30 +460,30 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
             const bcx = b.buildLoraMm(layer.shortconv.in_proj.?, cur, null);
             b.cb(bcx, "model.layers.{}.conv.in_proj", il);
 
-            const es: usize = c.ggml_element_size(bcx);
+            const es: usize = llama.impl.c.ggml_element_size(bcx);
             const row: usize = @intCast(n_embd);
-            const bv: *Tensor = c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 0 * row * es);
-            const cv: *Tensor = c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 1 * row * es);
-            const xv: *Tensor = c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 2 * row * es);
+            const bv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 0 * row * es);
+            const cv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 1 * row * es);
+            const xv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bcx, n_embd, n_tokens, bcx.nb[1], 2 * row * es);
 
             // A centred 3-tap conv; a tap outside the sequence reads 0.
-            const bx: *Tensor = c.ggml_mul(ctx, bv, xv);
-            const bxp: *Tensor = c.ggml_pad_ext(ctx, bx, 0, 0, 1, 1, 0, 0, 0, 0);
-            const prv: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
-            const nxt: *Tensor = c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
+            const bx: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, bv, xv);
+            const bxp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_pad_ext(ctx, bx, 0, 0, 1, 1, 0, 0, 0, 0);
+            const prv: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 0);
+            const nxt: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_2d(ctx, bxp, n_embd, n_tokens, bxp.nb[1], 2 * bxp.nb[1]);
 
-            impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 376, "hparams.n_shortconv_l_cache == 3");
-            const taps: *Tensor = c.ggml_cont(ctx, c.ggml_transpose(ctx, layer.shortconv.conv));
-            const tap0: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
-            const tap1: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
-            const tap2: *Tensor = c.ggml_view_1d(ctx, taps, n_embd, 2 * taps.nb[1]);
+            llama.impl.assert(hp.n_shortconv_l_cache == 3, "models/lfm2.cpp", 376, "hparams.n_shortconv_l_cache == 3");
+            const taps: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_transpose(ctx, layer.shortconv.conv));
+            const tap0: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 0 * taps.nb[1]);
+            const tap1: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 1 * taps.nb[1]);
+            const tap2: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, taps, n_embd, 2 * taps.nb[1]);
 
-            var y: *Tensor = c.ggml_mul(ctx, bx, tap1);
-            y = c.ggml_add(ctx, y, c.ggml_mul(ctx, c.ggml_mul(ctx, prv, tap0), conv_left));
-            y = c.ggml_add(ctx, y, c.ggml_mul(ctx, c.ggml_mul(ctx, nxt, tap2), conv_right));
+            var y: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, bx, tap1);
+            y = llama.impl.c.ggml_add(ctx, y, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_mul(ctx, prv, tap0), conv_left));
+            y = llama.impl.c.ggml_add(ctx, y, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_mul(ctx, nxt, tap2), conv_right));
             b.cb(y, "model.layers.{}.conv.conv", il);
 
-            cur = b.buildLoraMm(layer.shortconv.out_proj.?, c.ggml_mul(ctx, cv, y), null);
+            cur = b.buildLoraMm(layer.shortconv.out_proj.?, llama.impl.c.ggml_mul(ctx, cv, y), null);
             b.cb(cur, "model.layers.{}.conv.out_proj", il);
         } else {
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, hp.nHeadKv(@intCast(il)), il);
@@ -515,16 +496,16 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
             q = b.buildRope(q, inp_pos, il);
             k = b.buildRope(k, inp_pos, il);
 
-            cur = b.buildAttn(inp_attn[0], layer.wo, null, layer.wo_s, q, k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn[0], layer.wo, null, layer.wo_s, q, k, qkv.v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "model.layers.{}.self_attn.out_proj", il);
         }
 
-        cur = c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
 
         var ffn_out = b.buildNorm(cur, layer.ffn_norm, null, .rms, il);
         ffn_out = b.buildFfn(ffn_out, layer.ffn_up, null, layer.ffn_up_s, layer.ffn_gate, null, layer.ffn_gate_s, layer.ffn_down, null, layer.ffn_down_s, null, .silu, .par, il);
 
-        cur = c.ggml_add(ctx, cur, ffn_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_out);
         b.cb(cur, "l_out", il);
     }
 
@@ -534,7 +515,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
     cur = buildDecisionHead(model, b, cur, inp_attn[1], inp_out_ids);
 
     b.res.t_embd = cur;
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports `llama_model_lfm2::graph_decision`'s `build_decision_head`
@@ -542,7 +523,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
 /// (`modern_bert.zig`'s `buildDecisionHead`) with the head counts of the
 /// head layers. The question type is not a graph input, so the head is
 /// evaluated once per type: `[n_decision_types, n_outputs]`.
-fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor, inp_attn: *graph.InpAttnNoCache, inp_out_ids: *Tensor) *Tensor {
+fn buildDecisionHead(model: *const llama.model.Model, b: *const llama.graph.Builder, inp: *llama.impl.c.ggml_tensor, inp_attn: *llama.graph.InpAttnNoCache, inp_out_ids: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -550,12 +531,12 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
     const n_layer_enc: c_int = n_layer - @as(c_int, @intCast(hp.n_layer_decision));
     const type_embd = model.type_embd.?;
 
-    var scores: ?*Tensor = null;
+    var scores: ?*llama.impl.c.ggml_tensor = null;
 
     var it: u32 = 0;
     while (it < n_decision_types) : (it += 1) {
-        const type_row = c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
-        var inpL: *Tensor = c.ggml_add(ctx, inp, type_row);
+        const type_row = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, it * type_embd.nb[1]);
+        var inpL: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, inp, type_row);
 
         var il: c_int = n_layer_enc;
         while (il < n_layer) : (il += 1) {
@@ -567,15 +548,15 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
             // No positional encoding in the head.
             const qkv = b.buildQkv(layer, cur, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "kqv_out", il);
 
             if (il == n_layer - 1) {
-                cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-                inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+                cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+                inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
             }
 
-            const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpL);
+            const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
             b.cb(ffn_inp, "ffn_inp", il);
 
             cur = b.buildNorm(ffn_inp, layer.ffn_norm, layer.ffn_norm_b, .norm, il);
@@ -583,16 +564,16 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
 
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, null, null, null, layer.ffn_down, layer.ffn_down_b, null, null, .relu, .seq, il);
 
-            inpL = c.ggml_add(ctx, cur, ffn_inp);
+            inpL = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         }
 
         // The scorer.
         var cur = b.buildNorm(inpL, model.cls_norm, model.cls_norm_b, .norm, -1);
-        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
-        cur = c.ggml_gelu_erf(ctx, cur);
-        cur = c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
+        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls.?, cur, null), model.cls_b);
+        cur = llama.impl.c.ggml_gelu_erf(ctx, cur);
+        cur = llama.impl.c.ggml_add(ctx, b.buildLoraMm(model.cls_out.?, cur, null), model.cls_out_b);
 
-        scores = if (scores) |s| c.ggml_concat(ctx, s, cur, 0) else cur;
+        scores = if (scores) |s| llama.impl.c.ggml_concat(ctx, s, cur, 0) else cur;
     }
     b.cb(scores.?, "decision_scores", -1);
 

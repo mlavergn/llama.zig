@@ -18,13 +18,7 @@
 //! which is why it takes the block sizes as parameters.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const blocks = @import("blocks.zig");
-const h = @import("helpers.zig");
-const c = impl.c;
-
-const fp16 = impl.fp32ToFp16;
-const QK_K = c.QK_K;
+const ggml = @import("../module.zig");
 
 /// Ports `best_index_iq4nl` (ggml-quants.c:30 @b1b770d90).
 ///
@@ -61,7 +55,7 @@ pub fn quantizeRowIq4NlImpl(
     super_block_size: usize,
     block_size: usize,
     x: [*]const f32,
-    dh: *blocks.Half,
+    dh: *ggml.quants.blocks.Half,
     q4: [*]u8,
     scales_h: *u16,
     scales_l: ?[*]u8,
@@ -77,7 +71,7 @@ pub fn quantizeRowIq4NlImpl(
     sigma2 *= 2.0 / @as(f32, @floatFromInt(super_block_size));
 
     @memset(q4[0 .. super_block_size / 2], 0);
-    dh.* = fp16(0.0);
+    dh.* = ggml.impl.fp32ToFp16(0.0);
 
     var mid: [15]f32 = undefined;
     var fval: [16]f32 = undefined;
@@ -106,7 +100,7 @@ pub fn quantizeRowIq4NlImpl(
                 max = xb[j];
             }
         }
-        if (amax < h.group_max_eps) {
+        if (amax < ggml.quants.helpers.group_max_eps) {
             scales[ib] = 0;
             continue;
         }
@@ -154,10 +148,10 @@ pub fn quantizeRowIq4NlImpl(
     if (n_blocks > 1) {
         @memset(@as([*]u8, @ptrCast(scales_h))[0 .. ((n_blocks + 7) / 8) * @sizeOf(u16)], 0);
         const d = -max_scale / 32;
-        dh.* = fp16(d);
+        dh.* = ggml.impl.fp32ToFp16(d);
         const id: f32 = if (d != 0) 1 / d else 0.0;
         for (0..n_blocks) |ib| {
-            var l = h.nearestInt(id * scales[ib]);
+            var l = ggml.quants.helpers.nearestInt(id * scales[ib]);
             l = @max(-32, @min(31, l));
             const dl = d * @as(f32, @floatFromInt(l));
             const idl: f32 = if (dl != 0) 1 / dl else 0.0;
@@ -175,7 +169,7 @@ pub fn quantizeRowIq4NlImpl(
             scales_h.* |= @as(u16, l_h) << @intCast(2 * (ib % 8));
         }
     } else {
-        dh.* = fp16(scales[0]);
+        dh.* = ggml.impl.fp32ToFp16(scales[0]);
         if (ntry > 0) {
             const id: f32 = if (scales[0] != 0) 1 / scales[0] else 0;
             for (0..super_block_size) |j| {
@@ -195,9 +189,9 @@ pub fn quantizeRowIq4NlImpl(
 ///
 /// Note `ntry = -1`: no search, and the initial scale keeps the sign of `max`
 /// rather than flipping it. The chunk entry point uses `7` instead.
-pub export fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: [*c]blocks.IQ4_NL, k: i64) void {
-    impl.assert(@rem(k, c.QK4_NL) == 0, "k%QK4_NL == 0");
-    const nblock: usize = @intCast(@divExact(k, c.QK4_NL));
+pub export fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.IQ4_NL, k: i64) void {
+    ggml.impl.assert(@rem(k, ggml.impl.c.QK4_NL) == 0, "k%QK4_NL == 0");
+    const nblock: usize = @intCast(@divExact(k, ggml.impl.c.QK4_NL));
 
     // **Zeroed, where the C leaves this uninitialized.** For an all-zero block
     // the impl takes its `amax < eps` early-out, never writes `L`, and then
@@ -209,16 +203,16 @@ pub export fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: [*c]blocks.IQ4_NL, k:
     // defined answer instead: an all-zero block quantizes to all-zero quants.
     // The `zeros` golden for IQ4_NL is skipped in the tests for the same
     // reason -- it captured one sample of that garbage.
-    var l_buf: [c.QK4_NL]u8 = @splat(0);
-    var weight: [c.QK4_NL]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK4_NL]u8 = @splat(0);
+    var weight: [ggml.impl.c.QK4_NL]f32 = undefined;
     var unused_h: u16 = undefined;
     var scale: f32 = undefined;
 
     for (0..nblock) |ibl| {
         quantizeRowIq4NlImpl(
-            c.QK4_NL,
+            ggml.impl.c.QK4_NL,
             32,
-            x + c.QK4_NL * ibl,
+            x + ggml.impl.c.QK4_NL * ibl,
             @ptrCast(&y[ibl].d),
             @ptrCast(&y[ibl].qs),
             &unused_h,
@@ -226,7 +220,7 @@ pub export fn quantize_row_iq4_nl_ref(x: [*c]const f32, y: [*c]blocks.IQ4_NL, k:
             @ptrCast(&scale),
             &weight,
             &l_buf,
-            @ptrCast(&c.kvalues_iq4nl),
+            @ptrCast(&ggml.impl.c.kvalues_iq4nl),
             null,
             -1,
         );
@@ -241,12 +235,12 @@ pub export fn quantize_iq4_nl(
     n_per_row: i64,
     quant_weights: [*c]const f32,
 ) usize {
-    impl.assert(@rem(n_per_row, c.QK4_NL) == 0, "n_per_row%QK4_NL == 0");
-    const nblock: usize = @intCast(@divExact(n_per_row, c.QK4_NL));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK4_NL) == 0, "n_per_row%QK4_NL == 0");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK4_NL));
 
     // Zeroed for the same reason as in `quantize_row_iq4_nl_ref` above.
-    var l_buf: [c.QK4_NL]u8 = @splat(0);
-    var weight: [c.QK4_NL]f32 = undefined;
+    var l_buf: [ggml.impl.c.QK4_NL]u8 = @splat(0);
+    var weight: [ggml.impl.c.QK4_NL]f32 = undefined;
     var unused_h: u16 = undefined;
     var scale: f32 = undefined;
 
@@ -254,13 +248,13 @@ pub export fn quantize_iq4_nl(
     var s = src;
 
     for (0..@intCast(nrow)) |_| {
-        const iq4: [*]blocks.IQ4_NL = @ptrCast(@alignCast(qrow));
+        const iq4: [*]ggml.quants.blocks.IQ4_NL = @ptrCast(@alignCast(qrow));
         for (0..nblock) |ibl| {
-            const qw: ?[*]const f32 = if (quant_weights != null) quant_weights + c.QK4_NL * ibl else null;
+            const qw: ?[*]const f32 = if (quant_weights != null) quant_weights + ggml.impl.c.QK4_NL * ibl else null;
             quantizeRowIq4NlImpl(
-                c.QK4_NL,
+                ggml.impl.c.QK4_NL,
                 32,
-                s + c.QK4_NL * ibl,
+                s + ggml.impl.c.QK4_NL * ibl,
                 &iq4[ibl].d,
                 &iq4[ibl].qs,
                 &unused_h,
@@ -268,15 +262,15 @@ pub export fn quantize_iq4_nl(
                 @ptrCast(&scale),
                 &weight,
                 &l_buf,
-                @ptrCast(&c.kvalues_iq4nl),
+                @ptrCast(&ggml.impl.c.kvalues_iq4nl),
                 qw,
                 7,
             );
         }
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ4_NL);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ4_NL);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ4_NL);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ4_NL);
 }
 
 /// Ports `quantize_iq4_xs` (ggml-quants.c:5103 @b1b770d90).
@@ -287,24 +281,24 @@ pub export fn quantize_iq4_xs(
     n_per_row: i64,
     quant_weights: [*c]const f32,
 ) usize {
-    impl.assert(@rem(n_per_row, QK_K) == 0, "n_per_row%QK_K == 0");
-    const nblock: usize = @intCast(@divExact(n_per_row, QK_K));
+    ggml.impl.assert(@rem(n_per_row, ggml.impl.c.QK_K) == 0, "n_per_row%QK_K == 0");
+    const nblock: usize = @intCast(@divExact(n_per_row, ggml.impl.c.QK_K));
 
-    var l_buf: [QK_K]u8 = undefined;
+    var l_buf: [ggml.impl.c.QK_K]u8 = undefined;
     var weight: [32]f32 = undefined;
-    var scales: [QK_K / 32]f32 = undefined;
+    var scales: [ggml.impl.c.QK_K / 32]f32 = undefined;
 
     var qrow: [*]u8 = @ptrCast(dst.?);
     var s = src;
 
     for (0..@intCast(nrow)) |_| {
-        const iq4: [*]blocks.IQ4_XS = @ptrCast(@alignCast(qrow));
+        const iq4: [*]ggml.quants.blocks.IQ4_XS = @ptrCast(@alignCast(qrow));
         for (0..nblock) |ibl| {
-            const qw: ?[*]const f32 = if (quant_weights != null) quant_weights + QK_K * ibl else null;
+            const qw: ?[*]const f32 = if (quant_weights != null) quant_weights + ggml.impl.c.QK_K * ibl else null;
             quantizeRowIq4NlImpl(
-                QK_K,
+                ggml.impl.c.QK_K,
                 32,
-                s + QK_K * ibl,
+                s + ggml.impl.c.QK_K * ibl,
                 &iq4[ibl].d,
                 &iq4[ibl].qs,
                 &iq4[ibl].scales_h,
@@ -312,28 +306,25 @@ pub export fn quantize_iq4_xs(
                 &scales,
                 &weight,
                 &l_buf,
-                @ptrCast(&c.kvalues_iq4nl),
+                @ptrCast(&ggml.impl.c.kvalues_iq4nl),
                 qw,
                 7,
             );
         }
         s += @intCast(n_per_row);
-        qrow += nblock * @sizeOf(blocks.IQ4_XS);
+        qrow += nblock * @sizeOf(ggml.quants.blocks.IQ4_XS);
     }
-    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(blocks.IQ4_XS);
+    return @as(usize, @intCast(nrow)) * nblock * @sizeOf(ggml.quants.blocks.IQ4_XS);
 }
 
 /// Ports `quantize_row_iq4_xs_ref` (ggml-quants.c:5123 @b1b770d90).
-pub export fn quantize_row_iq4_xs_ref(x: [*c]const f32, y: [*c]blocks.IQ4_XS, k: i64) void {
-    std.debug.assert(@rem(k, QK_K) == 0);
+pub export fn quantize_row_iq4_xs_ref(x: [*c]const f32, y: [*c]ggml.quants.blocks.IQ4_XS, k: i64) void {
+    std.debug.assert(@rem(k, ggml.impl.c.QK_K) == 0);
     _ = quantize_iq4_xs(x, @ptrCast(y), 1, k, null);
 }
 
 // -----------------------------------------------------------------------------
 // Unit Tests
-
-const t = @import("testing.zig");
-const iq_dequant = @import("iq_dequant.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -353,47 +344,47 @@ fn checkIq4(
     chunk: *const fn ([*c]const f32, ?*anyopaque, i64, i64, [*c]const f32) callconv(.c) usize,
     dequant: *const fn ([*c]const Block, [*c]f32, i64) callconv(.c) void,
 ) !void {
-    for (t.all_patterns) |pattern| {
+    for (ggml.quants.testing.all_patterns) |pattern| {
         // `quantize_row_iq4_nl_ref` reads uninitialized memory for an all-zero
         // block -- see the note in the function. The golden recorded one
         // sample of it, and the C does not even agree with itself across two
         // calls, so there is nothing here to match.
         if (std.mem.eql(u8, name, "IQ4_NL") and pattern == .zeros) continue;
 
-        const g = t.find(name, pattern);
+        const g = ggml.quants.testing.find(name, pattern);
 
-        var src: [t.n_elem]f32 = undefined;
-        var imatrix: [t.n_per_row]f32 = undefined;
-        t.fillSrc(pattern, &src);
-        t.fillImatrix(&imatrix);
+        var src: [ggml.quants.testing.n_elem]f32 = undefined;
+        var imatrix: [ggml.quants.golden.n_per_row]f32 = undefined;
+        ggml.quants.testing.fillSrc(pattern, &src);
+        ggml.quants.testing.fillImatrix(&imatrix);
 
-        var buf: [t.n_elem * 4]u8 align(16) = undefined;
+        var buf: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
 
         @memset(&buf, 0);
-        ref(&src, @ptrCast(@alignCast(&buf)), @intCast(t.n_elem));
-        const used = g.row_size * t.n_rows;
+        ref(&src, @ptrCast(@alignCast(&buf)), @intCast(ggml.quants.testing.n_elem));
+        const used = g.row_size * ggml.quants.golden.n_rows;
         std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
             std.debug.print("{s}: quantize_row_*_ref differs on '{s}'\n", .{ name, pattern.name() });
             return e;
         };
 
-        var out: [t.n_elem]f32 = undefined;
+        var out: [ggml.quants.testing.n_elem]f32 = undefined;
         @memset(&out, 0);
-        dequant(@ptrCast(@alignCast(&buf)), &out, @intCast(t.n_elem));
+        dequant(@ptrCast(@alignCast(&buf)), &out, @intCast(ggml.quants.testing.n_elem));
         std.testing.expectEqual(g.deq.?, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
             std.debug.print("{s}: dequantize differs on '{s}'\n", .{ name, pattern.name() });
             return e;
         };
 
         @memset(&buf, 0);
-        const n0 = chunk(&src, &buf, t.n_rows, t.n_per_row, null);
+        const n0 = chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, null);
         std.testing.expectEqual(g.chunk.?, std.hash.Fnv1a_64.hash(buf[0..n0])) catch |e| {
             std.debug.print("{s}: quantize_* differs on '{s}'\n", .{ name, pattern.name() });
             return e;
         };
 
         @memset(&buf, 0);
-        const n1 = chunk(&src, &buf, t.n_rows, t.n_per_row, &imatrix);
+        const n1 = chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, &imatrix);
         std.testing.expectEqual(g.chunk_imatrix.?, std.hash.Fnv1a_64.hash(buf[0..n1])) catch |e| {
             std.debug.print("{s}: quantize_* with imatrix differs on '{s}'\n", .{ name, pattern.name() });
             return e;
@@ -402,11 +393,11 @@ fn checkIq4(
 }
 
 test "iq4_nl matches the C on every pattern, ref and chunk" {
-    try checkIq4("IQ4_NL", blocks.IQ4_NL, quantize_row_iq4_nl_ref, quantize_iq4_nl, iq_dequant.dequantize_row_iq4_nl);
+    try checkIq4("IQ4_NL", ggml.quants.blocks.IQ4_NL, quantize_row_iq4_nl_ref, quantize_iq4_nl, ggml.quants.iq_dequant.dequantize_row_iq4_nl);
 }
 
 test "iq4_xs matches the C on every pattern, ref and chunk" {
-    try checkIq4("IQ4_XS", blocks.IQ4_XS, quantize_row_iq4_xs_ref, quantize_iq4_xs, iq_dequant.dequantize_row_iq4_xs);
+    try checkIq4("IQ4_XS", ggml.quants.blocks.IQ4_XS, quantize_row_iq4_xs_ref, quantize_iq4_xs, ggml.quants.iq_dequant.dequantize_row_iq4_xs);
 }
 
 test "the level table is sorted, which is what the midpoint count needs" {
@@ -414,7 +405,7 @@ test "the level table is sorted, which is what the midpoint count needs" {
     // search only over a sorted table. kvalues_mxfp4 is *not* sorted, which is
     // why legacy.zig searches that one linearly.
     var prev: i8 = std.math.minInt(i8);
-    for (c.kvalues_iq4nl) |v| {
+    for (ggml.impl.c.kvalues_iq4nl) |v| {
         try std.testing.expect(v > prev);
         prev = v;
     }
@@ -422,13 +413,13 @@ test "the level table is sorted, which is what the midpoint count needs" {
 
 test "bestIndexIq4nl picks the nearer level and breaks ties high" {
     var mid: [15]f32 = undefined;
-    for (0..15) |k| mid[k] = 0.5 * @as(f32, @floatFromInt(@as(i32, c.kvalues_iq4nl[k]) + c.kvalues_iq4nl[k + 1]));
+    for (0..15) |k| mid[k] = 0.5 * @as(f32, @floatFromInt(@as(i32, ggml.impl.c.kvalues_iq4nl[k]) + ggml.impl.c.kvalues_iq4nl[k + 1]));
     // Below the table and above it clamp to the ends.
     try std.testing.expectEqual(@as(usize, 0), bestIndexIq4nl(&mid, -1000.0));
     try std.testing.expectEqual(@as(usize, 15), bestIndexIq4nl(&mid, 1000.0));
     // An exact hit returns that level.
     for (0..16) |i| {
-        const x: f32 = @floatFromInt(c.kvalues_iq4nl[i]);
+        const x: f32 = @floatFromInt(ggml.impl.c.kvalues_iq4nl[i]);
         try std.testing.expectEqual(i, bestIndexIq4nl(&mid, x));
     }
     // Exactly halfway goes to the *higher* index, as the binary search it

@@ -27,12 +27,19 @@ const std = @import("std");
 
 pub const fallback = @import("fallback.zig");
 
+pub const quantize = @import("quantize.zig");
+pub const q4_b32 = @import("q4_b32.zig");
+pub const q4_k = @import("q4_k.zig");
+pub const q2_k = @import("q2_k.zig");
+pub const common = @import("common.zig");
+pub const wide = @import("wide.zig");
+
 comptime {
     _ = fallback;
-    _ = @import("quantize.zig");
-    _ = @import("q4_b32.zig");
-    _ = @import("q4_k.zig");
-    _ = @import("q2_k.zig");
+    _ = quantize;
+    _ = q4_b32;
+    _ = q4_k;
+    _ = q2_k;
 }
 
 // -----------------------------------------------------------------------------
@@ -40,10 +47,6 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("common.zig");
-    _ = @import("wide.zig");
-    _ = @import("quantize.zig");
-    _ = @import("q4_b32.zig");
-    _ = @import("q4_k.zig");
-    _ = @import("q2_k.zig");
+    _ = common;
+    _ = wide;
 }

@@ -918,7 +918,7 @@ fn runForked(prog: ?[]const u8, out: *std.ArrayList(u8), seconds: c_uint) bool {
         _ = libc.close(fds[0]);
         // the converter's warnings go to stderr, as do the port's; the
         // debug trace is captured apart
-        const devnull = libc.open("/dev/null", 1);
+        const devnull = libc.open("/dev/null", .{ .ACCMODE = .WRONLY });
         if (devnull >= 0) _ = libc.dup2(devnull, 2);
         _ = alarm(seconds);
         var len: usize = 0;
@@ -1647,8 +1647,8 @@ pub fn main(init: std.process.Init) !void {
     // Windows: this process may be the reference's child (win_child.zig),
     // with stderr dropped as `runForked`'s fork drops it
     if (comptime builtin.os.tag == .windows) if (win_child.childArgs(argv)) |c| {
-        const devnull = libc.open("NUL", 1);
-        if (devnull >= 0) _ = libc.dup2(devnull, 2);
+        const devnull = libc._open("NUL", 1); // _O_WRONLY
+        if (devnull >= 0) _ = libc._dup2(devnull, 2);
         var len: usize = 0;
         const p = if (std.mem.eql(u8, c.mode, "upstream")) ref_peg_upstream(&len) else ref_peg_run(c.input.ptr, c.input.len, &len);
         std.process.exit(if (win_child.writeFile(c.out.ptr, p[0..len])) 0 else 3);

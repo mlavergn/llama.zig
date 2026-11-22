@@ -14,14 +14,14 @@
 //! `compiler_rt` with it, which shadows libm's `expf`.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const builtin = @import("builtin");
-const file = @import("file.zig");
 
 /// `steady_clock`'s clock, as libc++ reads it on this target.
 const steady: std.Io.Clock = if (builtin.os.tag.isDarwin()) .boot else .awake;
 
 fn nowNs(clock: std.Io.Clock) i64 {
-    return @intCast(clock.now(file.defaultIo()).nanoseconds);
+    return @intCast(clock.now(mod.file.defaultIo()).nanoseconds);
 }
 
 /// The system clock.
@@ -74,7 +74,7 @@ pub fn isoUtc(buf: *[32]u8, t: i64) error{NoSpaceLeft}![]const u8 {
 /// `std::this_thread::sleep_for(std::chrono::microseconds(us))`, `usleep`.
 pub fn sleepUs(us: u64) void {
     const d: std.Io.Clock.Duration = .{ .raw = .fromMicroseconds(@intCast(us)), .clock = .awake };
-    d.sleep(file.defaultIo()) catch |err| switch (err) {
+    d.sleep(mod.file.defaultIo()) catch |err| switch (err) {
         error.Canceled => {}, // the global Io cannot be canceled
     };
 }
@@ -82,7 +82,7 @@ pub fn sleepUs(us: u64) void {
 /// `std::this_thread::sleep_for(std::chrono::milliseconds(ms))`.
 pub fn sleepMs(ms: u64) void {
     const d: std.Io.Clock.Duration = .{ .raw = .fromMilliseconds(@intCast(ms)), .clock = .awake };
-    d.sleep(file.defaultIo()) catch |err| switch (err) {
+    d.sleep(mod.file.defaultIo()) catch |err| switch (err) {
         error.Canceled => {}, // the global Io cannot be canceled
     };
 }
@@ -93,7 +93,7 @@ pub fn sleepMs(ms: u64) void {
 /// canceled.
 pub fn sleepSeconds(seconds: u32) std.Io.Cancelable!void {
     const d: std.Io.Clock.Duration = .{ .raw = .fromSeconds(seconds), .clock = .awake };
-    try d.sleep(file.defaultIo());
+    try d.sleep(mod.file.defaultIo());
 }
 
 // -----------------------------------------------------------------------------

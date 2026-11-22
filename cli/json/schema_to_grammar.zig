@@ -30,16 +30,9 @@
 //! is a shallow copy of the map.
 
 const std = @import("std");
+const llama = @import("llama");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const json = @import("module.zig");
-const schema = @import("schema.zig");
-const trie_mod = @import("trie.zig");
-const regex = @import("llama").regex;
-
-const Value = json.Value;
-const Node = schema.Node;
-pub const Error = schema.Error;
-const raise = schema.raise;
 
 /// Ports `common_grammar_options` (json-schema-to-grammar.h:17 @b1b770d90).
 pub const Options = struct {
@@ -55,18 +48,18 @@ pub var warning_sink: ?*const fn (line: []const u8) void = null;
 // common.cpp's string helpers
 
 /// Ports `string_join` (common/common.cpp:550 @b1b770d90).
-fn stringJoin(a: std.mem.Allocator, values: []const []const u8, sep: []const u8) Error![]u8 {
+fn stringJoin(a: std.mem.Allocator, values: []const []const u8, sep: []const u8) mod.schema.Error![]u8 {
     return std.mem.join(a, sep, values);
 }
 
 /// Ports `string_repeat` (common/common.cpp:577 @b1b770d90).
-fn stringRepeat(a: std.mem.Allocator, s: []const u8, n: usize) Error![]u8 {
+fn stringRepeat(a: std.mem.Allocator, s: []const u8, n: usize) mod.schema.Error![]u8 {
     const out = try a.alloc(u8, s.len * n);
     for (0..n) |k| @memcpy(out[k * s.len ..][0..s.len], s);
     return out;
 }
 
-fn intText(a: std.mem.Allocator, v: anytype) Error![]u8 {
+fn intText(a: std.mem.Allocator, v: anytype) mod.schema.Error![]u8 {
     return std.fmt.allocPrint(a, "{d}", .{v});
 }
 
@@ -76,7 +69,7 @@ fn intText(a: std.mem.Allocator, v: anytype) Error![]u8 {
 /// Ports `build_repetition` (json-schema-to-grammar.cpp:18 @b1b770d90).
 /// `max_items == maxInt(c_int)` means unbounded. The C++'s `int`
 /// arithmetic wraps here, where a pattern's `{-1,}` reaches it.
-fn buildRepetition(a: std.mem.Allocator, item_rule: []const u8, min_items: c_int, max_items: c_int, separator_rule: []const u8) Error![]u8 {
+fn buildRepetition(a: std.mem.Allocator, item_rule: []const u8, min_items: c_int, max_items: c_int, separator_rule: []const u8) mod.schema.Error![]u8 {
     const has_max = max_items != std.math.maxInt(c_int);
 
     if (max_items == 0) return a.dupe(u8, "");
@@ -107,20 +100,20 @@ const Out = struct {
     a: std.mem.Allocator,
     buf: std.ArrayList(u8) = .empty,
 
-    fn s(self: *Out, text: []const u8) Error!void {
+    fn s(self: *Out, text: []const u8) mod.schema.Error!void {
         try self.buf.appendSlice(self.a, text);
     }
 
-    fn ch(self: *Out, c: u8) Error!void {
+    fn ch(self: *Out, c: u8) mod.schema.Error!void {
         try self.buf.append(self.a, c);
     }
 
-    fn int(self: *Out, v: anytype) Error!void {
+    fn int(self: *Out, v: anytype) mod.schema.Error!void {
         try self.buf.print(self.a, "{d}", .{v});
     }
 
     /// the `digit_range` lambda (json-schema-to-grammar.cpp:49 @b1b770d90)
-    fn digitRange(self: *Out, from: u8, to: u8) Error!void {
+    fn digitRange(self: *Out, from: u8, to: u8) mod.schema.Error!void {
         try self.ch('[');
         if (from == to) {
             try self.ch(from);
@@ -133,7 +126,7 @@ const Out = struct {
     }
 
     /// the `more_digits` lambda (json-schema-to-grammar.cpp:58 @b1b770d90)
-    fn moreDigits(self: *Out, min_digits: c_int, max_digits: c_int) Error!void {
+    fn moreDigits(self: *Out, min_digits: c_int, max_digits: c_int) mod.schema.Error!void {
         try self.s("[0-9]");
         if (min_digits == max_digits and min_digits == 1) return;
         try self.ch('{');
@@ -146,7 +139,7 @@ const Out = struct {
     }
 
     /// the `uniform_range` lambda (json-schema-to-grammar.cpp:73 @b1b770d90)
-    fn uniformRange(self: *Out, from: []const u8, to: []const u8) Error!void {
+    fn uniformRange(self: *Out, from: []const u8, to: []const u8) mod.schema.Error!void {
         var i: usize = 0;
         while (i < from.len and i < to.len and from[i] == to[i]) i += 1;
         if (i > 0) {
@@ -211,7 +204,7 @@ const Out = struct {
 /// `minInt(i64)` and `maxInt(i64)` mean unbounded. Negating a bound is
 /// signed overflow in the C++ at `minInt(i64)`, which wraps; so it does
 /// here.
-fn buildMinMaxInt(min_in: i64, max_value: i64, out: *Out, decimals_left: c_int, top_level: bool) Error!void {
+fn buildMinMaxInt(min_in: i64, max_value: i64, out: *Out, decimals_left: c_int, top_level: bool) mod.schema.Error!void {
     var min_value = min_in;
     const has_min = min_value != std.math.minInt(i64);
     const has_max = max_value != std.math.maxInt(i64);
@@ -318,7 +311,7 @@ fn buildMinMaxInt(min_in: i64, max_value: i64, out: *Out, decimals_left: c_int, 
         return;
     }
 
-    return raise(error.RuntimeError, &.{"At least one of min_value or max_value must be set"});
+    return mod.schema.raise(error.RuntimeError, &.{"At least one of min_value or max_value must be set"});
 }
 
 // -----------------------------------------------------------------------------
@@ -405,15 +398,15 @@ fn grammarLiteralEscape(c: u8) []const u8 {
     };
 }
 
-fn compileRegex(pattern: []const u8) regex.Regex {
-    return regex.Regex.compile(pattern) catch |e| regex.throwRegexError(e);
+fn compileRegex(pattern: []const u8) llama.regex.Regex {
+    return llama.regex.Regex.compile(pattern) catch |e| llama.regex.throwRegexError(e);
 }
 
 /// Ports `replacePattern` (json-schema-to-grammar.cpp:284 @b1b770d90):
 /// `regex_search` from each match's end, each match replaced by
 /// `replacement` of its first character.
-fn replacePattern(a: std.mem.Allocator, input: []const u8, re: *const regex.Regex, comptime replacement: fn (u8) []const u8) Error![]u8 {
-    var m: regex.Match = .{};
+fn replacePattern(a: std.mem.Allocator, input: []const u8, re: *const llama.regex.Regex, comptime replacement: fn (u8) []const u8) mod.schema.Error![]u8 {
+    var m: llama.regex.Match = .{};
     defer m.deinit();
     var out: std.ArrayList(u8) = .empty;
     var start: usize = 0;
@@ -428,7 +421,7 @@ fn replacePattern(a: std.mem.Allocator, input: []const u8, re: *const regex.Rege
 }
 
 /// Ports `format_literal` (json-schema-to-grammar.cpp:302 @b1b770d90).
-fn formatLiteral(a: std.mem.Allocator, re: *const regex.Regex, literal: []const u8) Error![]u8 {
+fn formatLiteral(a: std.mem.Allocator, re: *const llama.regex.Regex, literal: []const u8) mod.schema.Error![]u8 {
     const escaped = try replacePattern(a, literal, re, grammarLiteralEscape);
     return std.mem.concat(a, u8, &.{ "\"", escaped, "\"" });
 }
@@ -440,7 +433,7 @@ fn formatLiteral(a: std.mem.Allocator, re: *const regex.Regex, literal: []const 
 /// - `literal`: any bytes.
 ///
 /// Return: the GBNF string literal, owned by the caller.
-pub fn gbnfFormatLiteral(gpa: std.mem.Allocator, literal: []const u8) Error![]u8 {
+pub fn gbnfFormatLiteral(gpa: std.mem.Allocator, literal: []const u8) mod.schema.Error![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var re = compileRegex(grammar_literal_escape_re);
@@ -480,7 +473,7 @@ const LitOrRule = struct {
 /// A property as `_build_object_rule` takes it.
 const PropRef = struct {
     name: []const u8,
-    schema: *const Node,
+    schema: *const mod.schema.Node,
 };
 
 const StringSet = std.StringHashMapUnmanaged(void);
@@ -494,7 +487,7 @@ const RuleMap = std.StringHashMapUnmanaged([]const u8);
 /// - `name`: the name.
 ///
 /// Return: the rule name, owned by `a`.
-pub fn gbnfFormatRuleName(a: std.mem.Allocator, name: []const u8) Error![]u8 {
+pub fn gbnfFormatRuleName(a: std.mem.Allocator, name: []const u8) mod.schema.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     var in_invalid = false;
     for (name) |c| {
@@ -519,7 +512,7 @@ pub const Converter = struct {
     warnings: std.ArrayList([]const u8) = .empty,
     /// `_depth`: how deep `visit` is, `depth_guard` (json-schema-to-grammar.cpp:365 @b1b770d90)
     depth: c_int = 0,
-    re_literal_escape: regex.Regex,
+    re_literal_escape: llama.regex.Regex,
 
     /// Ports `common_chat_schema_converter` (json-schema-to-grammar.cpp:843 @b1b770d90),
     /// the constructor.
@@ -529,7 +522,7 @@ pub const Converter = struct {
     /// - `dotall`: whether a pattern's `.` matches newlines.
     ///
     /// Return: the converter, freed with `deinit` and its arena.
-    pub fn init(a: std.mem.Allocator, dotall: bool) Error!Converter {
+    pub fn init(a: std.mem.Allocator, dotall: bool) mod.schema.Error!Converter {
         var self: Converter = .{
             .a = a,
             .dotall = dotall,
@@ -544,18 +537,18 @@ pub const Converter = struct {
         self.re_literal_escape.deinit();
     }
 
-    fn cat(self: *Converter, parts: []const []const u8) Error![]u8 {
+    fn cat(self: *Converter, parts: []const []const u8) mod.schema.Error![]u8 {
         return std.mem.concat(self.a, u8, parts);
     }
 
-    fn cati(self: *Converter, prefix: []const u8, i: anytype) Error![]u8 {
+    fn cati(self: *Converter, prefix: []const u8, i: anytype) mod.schema.Error![]u8 {
         return std.fmt.allocPrint(self.a, "{s}{d}", .{ prefix, i });
     }
 
     /// Ports `_add_rule` (json-schema-to-grammar.cpp:380 @b1b770d90).
     ///
     /// Return: the rule's name, borrowed from the converter's arena.
-    pub fn addRule(self: *Converter, name: []const u8, rule: []const u8) Error![]const u8 {
+    pub fn addRule(self: *Converter, name: []const u8, rule: []const u8) mod.schema.Error![]const u8 {
         const esc_name = try gbnfFormatRuleName(self.a, name);
         if (self.rules.get(esc_name)) |existing| {
             if (!std.mem.eql(u8, existing, rule)) {
@@ -575,7 +568,7 @@ pub const Converter = struct {
     }
 
     /// Ports `_generate_union_rule` (json-schema-to-grammar.cpp:395 @b1b770d90).
-    fn generateUnionRule(self: *Converter, name: []const u8, alts: []const *Node) Error![]u8 {
+    fn generateUnionRule(self: *Converter, name: []const u8, alts: []const *mod.schema.Node) mod.schema.Error![]u8 {
         const rules = try self.a.alloc([]const u8, alts.len);
         for (alts, 0..) |alt, i| {
             const prefix = try self.cat(&.{ name, if (name.len == 0) "alternative-" else "-" });
@@ -587,7 +580,7 @@ pub const Converter = struct {
     /// Ports `_visit_pattern` (json-schema-to-grammar.cpp:414 @b1b770d90):
     /// a pattern with no grammar equivalent degrades to any string with a
     /// warning; an invalid one is an error.
-    fn visitPattern(self: *Converter, pattern: []const u8, name: []const u8) Error![]const u8 {
+    fn visitPattern(self: *Converter, pattern: []const u8, name: []const u8) mod.schema.Error![]const u8 {
         const snapshot = try self.rules.clone(self.a);
         var p: PatternState = .{ .conv = self, .name = name, .sub = undefined };
         if (p.toRule(pattern)) |rule| {
@@ -603,14 +596,14 @@ pub const Converter = struct {
                 try self.errors.append(self.a, try self.cat(&.{ "Invalid pattern ", pattern, ": ", std.mem.sliceTo(p.message, 0) }));
                 return "";
             },
-            else => |other| return @as(Error, @errorCast(other)),
+            else => |other| return @as(mod.schema.Error, @errorCast(other)),
         }
     }
 
     /// Ports `_not_strings` (json-schema-to-grammar.cpp:665 @b1b770d90): a
     /// rule matching a JSON string that is none of `strings`.
-    fn notStrings(self: *Converter, strings: []const []const u8) Error![]u8 {
-        var t = try trie_mod.Trie.init(self.a, strings);
+    fn notStrings(self: *Converter, strings: []const []const u8) mod.schema.Error![]u8 {
+        var t = try mod.trie.Trie.init(self.a, strings);
         const char_rule = try self.addPrimitive("char", primitive("char"));
         var out: Out = .{ .a = self.a };
         try out.s("[\"] ( ");
@@ -623,17 +616,17 @@ pub const Converter = struct {
 
     /// Ports the lambda `visit` (json-schema-to-grammar.cpp:672 @b1b770d90), in
     /// `_not_strings`: one level per char of the longest name.
-    fn notStringsVisit(self: *Converter, t: *const trie_mod.Trie, idx: usize, depth: c_int, char_rule: []const u8, out: *Out) Error!void {
-        if (depth >= schema.recursive_limit) {
-            return raise(error.InvalidArgument, &.{"JSON schema property name is longer than " ++ schema.recursive_limit_text ++ " chars"});
+    fn notStringsVisit(self: *Converter, t: *const mod.trie.Trie, idx: usize, depth: c_int, char_rule: []const u8, out: *Out) mod.schema.Error!void {
+        if (depth >= mod.schema.recursive_limit) {
+            return mod.schema.raise(error.InvalidArgument, &.{"JSON schema property name is longer than " ++ mod.schema.recursive_limit_text ++ " chars"});
         }
         const node = &t.nodes.items[idx];
         var rejects: std.ArrayList(u8) = .empty;
         var first = true;
         for (node.children.items) |edge| {
             var buf: [4]u8 = undefined;
-            const c = trie_mod.cptToUtf8(edge.cpt, &buf) catch
-                return raise(error.InvalidArgument, &.{"invalid codepoint"});
+            const c = mod.trie.cptToUtf8(edge.cpt, &buf) catch
+                return mod.schema.raise(error.InvalidArgument, &.{"invalid codepoint"});
             try rejects.appendSlice(self.a, c);
             if (first) {
                 first = false;
@@ -663,7 +656,7 @@ pub const Converter = struct {
     }
 
     /// Ports `_resolve_ref` (json-schema-to-grammar.cpp:710 @b1b770d90).
-    fn resolveRef(self: *Converter, ref: *const schema.Ref) Error![]const u8 {
+    fn resolveRef(self: *Converter, ref: *const mod.schema.Ref) mod.schema.Error![]const u8 {
         const fragment = if (std.mem.indexOfScalar(u8, ref.ref, '#')) |at| ref.ref[at + 1 ..] else ref.ref;
         var ref_name: []const u8 = try self.cat(&.{ "ref", try gbnfFormatRuleName(self.a, fragment) });
         if (!self.rules.contains(ref_name) and !self.refs_being_resolved.contains(ref.ref)) {
@@ -691,8 +684,8 @@ pub const Converter = struct {
         properties: []const PropRef,
         required: []const []const u8,
         name: []const u8,
-        additional_properties: ?*const Node,
-    ) Error![]u8 {
+        additional_properties: ?*const mod.schema.Node,
+    ) mod.schema.Error![]u8 {
         var required_props: std.ArrayList([]const u8) = .empty;
         var optional_props: std.ArrayList([]const u8) = .empty;
         var kv_names: RuleMap = .empty;
@@ -759,7 +752,7 @@ pub const Converter = struct {
 
     /// Ports the lambda `get_recursive_refs` (json-schema-to-grammar.cpp:784 @b1b770d90),
     /// in `_build_object_rule`.
-    fn recursiveRefs(self: *Converter, kv_names: *const RuleMap, name: []const u8, ks: []const []const u8, first_is_optional: bool) Error![]u8 {
+    fn recursiveRefs(self: *Converter, kv_names: *const RuleMap, name: []const u8, ks: []const []const u8, first_is_optional: bool) mod.schema.Error![]u8 {
         if (ks.len == 0) return self.a.dupe(u8, "");
         const k = ks[0];
         const star = std.mem.eql(u8, k, "*");
@@ -779,7 +772,7 @@ pub const Converter = struct {
     }
 
     /// Ports `_add_primitive` (json-schema-to-grammar.cpp:823 @b1b770d90).
-    fn addPrimitive(self: *Converter, name: []const u8, rule: *const BuiltinRule) Error![]const u8 {
+    fn addPrimitive(self: *Converter, name: []const u8, rule: *const BuiltinRule) mod.schema.Error![]const u8 {
         const n = try self.addRule(name, rule.content);
         for (rule.deps) |dep| {
             const dep_rule = findRule(&primitive_rules, dep) orelse findRule(&string_format_rules, dep) orelse {
@@ -794,31 +787,31 @@ pub const Converter = struct {
     /// Ports `add_schema` (json-schema-to-grammar.cpp:847 @b1b770d90).
     ///
     /// Return: the rule's name, borrowed from the converter's arena.
-    pub fn addSchema(self: *Converter, name: []const u8, node: *const Node) Error![]const u8 {
+    pub fn addSchema(self: *Converter, name: []const u8, node: *const mod.schema.Node) mod.schema.Error![]const u8 {
         return self.visit(node, name);
     }
 
     /// `common_json(s).dump()` of a string: its JSON text, which fails on
     /// invalid UTF-8.
-    fn dumpString(self: *Converter, s: []const u8) Error![]u8 {
-        const v: Value = .{ .string = @constCast(s) };
-        return json.dump(self.a, &v, -1) catch |e| schema.fromJson(e);
+    fn dumpString(self: *Converter, s: []const u8) mod.schema.Error![]u8 {
+        const v: mod.Value = .{ .string = @constCast(s) };
+        return mod.dump(self.a, &v, -1) catch |e| mod.schema.fromJson(e);
     }
 
     /// Ports `_generate_constant_rule` (json-schema-to-grammar.cpp:851 @b1b770d90).
-    fn generateConstantRule(self: *Converter, value: *const Value) Error![]u8 {
-        const text = json.dump(self.a, value, -1) catch |e| return schema.fromJson(e);
+    fn generateConstantRule(self: *Converter, value: *const mod.Value) mod.schema.Error![]u8 {
+        const text = mod.dump(self.a, value, -1) catch |e| return mod.schema.fromJson(e);
         return formatLiteral(self.a, &self.re_literal_escape, text);
     }
 
     /// Ports `_visit_primitive` (json-schema-to-grammar.cpp:855 @b1b770d90).
-    fn visitPrimitive(self: *Converter, rule_name: []const u8, type_name: []const u8) Error![]const u8 {
+    fn visitPrimitive(self: *Converter, rule_name: []const u8, type_name: []const u8) mod.schema.Error![]const u8 {
         const n: []const u8 = if (std.mem.eql(u8, rule_name, "root")) "root" else type_name;
         return self.addPrimitive(n, primitive(type_name));
     }
 
     /// Ports `_visit_all_of` (json-schema-to-grammar.cpp:859 @b1b770d90).
-    fn visitAllOf(self: *Converter, children: []const *Node, name: []const u8, rule_name: []const u8) Error![]const u8 {
+    fn visitAllOf(self: *Converter, children: []const *mod.schema.Node, name: []const u8, rule_name: []const u8) mod.schema.Error![]const u8 {
         var st: AllOfState = .{ .conv = self };
         for (children) |child| {
             if (child.* == .any_of) {
@@ -858,9 +851,9 @@ pub const Converter = struct {
                 }
             }
             if (all_numeric) {
-                if (lo > hi) return raise(error.InvalidArgument, &.{"allOf has an empty numeric range"});
+                if (lo > hi) return mod.schema.raise(error.InvalidArgument, &.{"allOf has an empty numeric range"});
                 if (any_integer) {
-                    const merged: Node = .{ .integer = .{ .minimum = lo, .maximum = hi } };
+                    const merged: mod.schema.Node = .{ .integer = .{ .minimum = lo, .maximum = hi } };
                     return self.visit(&merged, name);
                 }
                 return self.visit(st.leaves.items[0], name);
@@ -870,9 +863,9 @@ pub const Converter = struct {
     }
 
     /// Ports `visit` (json-schema-to-grammar.cpp:944 @b1b770d90).
-    pub fn visit(self: *Converter, node: *const Node, name: []const u8) Error![]const u8 {
+    pub fn visit(self: *Converter, node: *const mod.schema.Node, name: []const u8) mod.schema.Error![]const u8 {
         // the $ref targets are visited too, a $ref chain is not bounded by the builder
-        try schema.depthEnter(&self.depth);
+        try mod.schema.depthEnter(&self.depth);
         defer self.depth -= 1;
 
         const rule_name: []const u8 = if (isReservedName(name))
@@ -960,15 +953,15 @@ pub const Converter = struct {
     }
 
     /// Ports `check_errors` (json-schema-to-grammar.cpp:1044 @b1b770d90).
-    pub fn checkErrors(self: *Converter) Error!void {
+    pub fn checkErrors(self: *Converter) mod.schema.Error!void {
         if (self.errors.items.len != 0) {
-            return raise(error.InvalidArgument, &.{ "JSON schema conversion failed:\n", try stringJoin(self.a, self.errors.items, "\n") });
+            return mod.schema.raise(error.InvalidArgument, &.{ "JSON schema conversion failed:\n", try stringJoin(self.a, self.errors.items, "\n") });
         }
         if (self.warnings.items.len != 0) {
             // `fprintf(stderr, "...%s\n", ...c_str())`: the `%s` stops at a NUL
             const joined = try stringJoin(self.a, self.warnings.items, "; ");
             const line = try self.cat(&.{ "WARNING: JSON schema conversion was incomplete: ", std.mem.sliceTo(joined, 0), "\n" });
-            if (warning_sink) |sink| sink(line) else json.errors.writeStderr(line);
+            if (warning_sink) |sink| sink(line) else mod.errors.writeStderr(line);
         }
     }
 
@@ -976,7 +969,7 @@ pub const Converter = struct {
     /// every rule, in `std::map` order.
     ///
     /// Return: the grammar, in the converter's arena.
-    pub fn formatGrammar(self: *Converter) Error![]u8 {
+    pub fn formatGrammar(self: *Converter) mod.schema.Error![]u8 {
         var keys: std.ArrayList([]const u8) = .empty;
         var it = self.rules.keyIterator();
         while (it.next()) |k| try keys.append(self.a, k.*);
@@ -999,13 +992,13 @@ const AllOfState = struct {
     properties: std.ArrayList(PropRef) = .empty,
     enum_values: std.StringHashMapUnmanaged(usize) = .empty,
     /// the direct non-structural required children, for merging
-    leaves: std.ArrayList(*const Node) = .empty,
+    leaves: std.ArrayList(*const mod.schema.Node) = .empty,
 
     /// Ports the lambda `add_component` (json-schema-to-grammar.cpp:864 @b1b770d90),
     /// in `_visit_all_of`.
-    fn addComponent(self: *AllOfState, comp: *const Node, is_required: bool, depth: c_int) Error!void {
-        if (depth >= schema.recursive_limit) {
-            return raise(error.InvalidArgument, &.{"JSON schema is nested more than " ++ schema.recursive_limit_text ++ " levels deep"});
+    fn addComponent(self: *AllOfState, comp: *const mod.schema.Node, is_required: bool, depth: c_int) mod.schema.Error!void {
+        if (depth >= mod.schema.recursive_limit) {
+            return mod.schema.raise(error.InvalidArgument, &.{"JSON schema is nested more than " ++ mod.schema.recursive_limit_text ++ " levels deep"});
         }
         const a = self.conv.a;
         switch (comp.*) {
@@ -1040,7 +1033,7 @@ const PatternState = struct {
     /// the `what()` of the `unsupported_pattern` or `invalid_pattern` thrown
     message: []const u8 = "",
 
-    const PatternError = Error || error{ UnsupportedPattern, InvalidPattern };
+    const PatternError = mod.schema.Error || error{ UnsupportedPattern, InvalidPattern };
 
     fn unsupported(self: *PatternState, parts: []const []const u8) PatternError {
         self.message = try std.mem.concat(self.conv.a, u8, parts);
@@ -1052,7 +1045,7 @@ const PatternState = struct {
         return error.InvalidPattern;
     }
 
-    fn toRuleText(ls: LitOrRule, a: std.mem.Allocator) Error![]const u8 {
+    fn toRuleText(ls: LitOrRule, a: std.mem.Allocator) mod.schema.Error![]const u8 {
         return if (ls.literal) std.mem.concat(a, u8, &.{ "\"", ls.s, "\"" }) else ls.s;
     }
 
@@ -1068,14 +1061,14 @@ const PatternState = struct {
     }
 
     /// the `get_dot` lambda (json-schema-to-grammar.cpp:450 @b1b770d90)
-    fn getDot(self: *PatternState) Error![]const u8 {
+    fn getDot(self: *PatternState) mod.schema.Error![]const u8 {
         const rule: []const u8 = if (self.conv.dotall) "[\\U00000000-\\U0010FFFF]" else "[^\\x0A\\x0D]";
         return self.conv.addRule("dot", rule);
     }
 
     /// the `join_seq` lambda (json-schema-to-grammar.cpp:461 @b1b770d90):
     /// consecutive literals merge into one.
-    fn joinSeq(self: *PatternState, seq: []const LitOrRule) Error!LitOrRule {
+    fn joinSeq(self: *PatternState, seq: []const LitOrRule) mod.schema.Error!LitOrRule {
         const a = self.conv.a;
         var results: std.ArrayList([]const u8) = .empty;
         var literal: std.ArrayList(u8) = .empty;
@@ -1117,7 +1110,7 @@ const PatternState = struct {
                     }
                 }
                 self.paren_depth += 1;
-                if (self.paren_depth > schema.recursive_limit) return self.unsupported(&.{"pattern nesting too deep"});
+                if (self.paren_depth > mod.schema.recursive_limit) return self.unsupported(&.{"pattern nesting too deep"});
                 const inner = try toRuleText(try self.transform(), a);
                 try seq.append(a, .{ .s = try std.mem.concat(a, u8, &.{ "(", inner, ")" }), .literal = false });
             } else if (c == ')') {
@@ -1246,15 +1239,15 @@ const PatternState = struct {
 ///
 /// Return: the grammar, owned by the caller; `error.InvalidArgument` with
 /// `schema.what()` set when conversion fails.
-pub fn jsonSchemaToGrammar(gpa: std.mem.Allocator, value: *const Value, force_gbnf: bool) Error![]u8 {
+pub fn jsonSchemaToGrammar(gpa: std.mem.Allocator, value: *const mod.Value, force_gbnf: bool) mod.schema.Error![]u8 {
     _ = force_gbnf;
     const wrapped = blk: {
-        var doc = schema.fromJsonSchema(gpa, value) catch |e| break :blk e;
+        var doc = mod.schema.fromJsonSchema(gpa, value) catch |e| break :blk e;
         defer doc.deinit();
         return documentToGrammar(gpa, &doc) catch |e| break :blk e;
     };
     return switch (wrapped) {
-        error.RuntimeError, error.JsonError => raise(error.InvalidArgument, &.{ "JSON schema conversion failed:\n", schema.what() }),
+        error.RuntimeError, error.JsonError => mod.schema.raise(error.InvalidArgument, &.{ "JSON schema conversion failed:\n", mod.schema.what() }),
         else => |e| e,
     };
 }
@@ -1268,7 +1261,7 @@ pub fn jsonSchemaToGrammar(gpa: std.mem.Allocator, value: *const Value, force_gb
 ///
 /// Return: the grammar, owned by the caller; on failure the error and
 /// `schema.what()`, unwrapped.
-pub fn documentToGrammar(gpa: std.mem.Allocator, doc: *const schema.Document) Error![]u8 {
+pub fn documentToGrammar(gpa: std.mem.Allocator, doc: *const mod.schema.Document) mod.schema.Error![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var conv = try Converter.init(arena.allocator(), false);
@@ -1286,14 +1279,14 @@ pub const GrammarBuilder = struct {
     /// The `add_rule` member: `_add_rule`.
     ///
     /// Return: the rule's name, valid until `buildGrammar` returns.
-    pub fn addRule(self: *GrammarBuilder, name: []const u8, rule: []const u8) Error![]const u8 {
+    pub fn addRule(self: *GrammarBuilder, name: []const u8, rule: []const u8) mod.schema.Error![]const u8 {
         return self.conv.addRule(name, rule);
     }
 
     /// The `add_schema` member: `add_schema`, with "root" meaning the root.
     ///
     /// Return: the rule's name, valid until `buildGrammar` returns.
-    pub fn addSchema(self: *GrammarBuilder, name: []const u8, node: *const Node) Error![]const u8 {
+    pub fn addSchema(self: *GrammarBuilder, name: []const u8, node: *const mod.schema.Node) mod.schema.Error![]const u8 {
         return self.conv.addSchema(if (std.mem.eql(u8, name, "root")) "" else name, node);
     }
 };
@@ -1313,8 +1306,8 @@ pub fn buildGrammar(
     gpa: std.mem.Allocator,
     options: Options,
     ctx: anytype,
-    comptime cb: fn (@TypeOf(ctx), *GrammarBuilder) Error!void,
-) Error![]u8 {
+    comptime cb: fn (@TypeOf(ctx), *GrammarBuilder) mod.schema.Error!void,
+) mod.schema.Error![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var conv = try Converter.init(arena.allocator(), options.dotall);
@@ -1345,7 +1338,7 @@ test {
 
 fn expectGrammar(schema_text: []const u8, expected: []const u8) !void {
     const a = std.testing.allocator;
-    var v = try json.parse(a, schema_text);
+    var v = try mod.parse(a, schema_text);
     defer v.deinit(a);
     const g = try jsonSchemaToGrammar(a, &v, true);
     defer a.free(g);

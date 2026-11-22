@@ -19,14 +19,7 @@
 //! created, so the result is the same; the port does not add the call.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-const half = kernels.half;
+const ggml = @import("../module.zig");
 
 /// Ports `SSM_SSD_MIN_TOKENS` (ssm-scan.cu:15 @b1b770d90).
 const ssd_min_tokens = 128;
@@ -107,7 +100,7 @@ fn ssmScanF32Cuda(
     n_seq: i64,
     K: i64,
     cache: ?*const FusedCache,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     // when fused, the states go straight into the recurrent cache and the dst tail is left alone
     const s_base: ?*anyopaque = if (cache) |ch| @ptrCast(ch.data) else @ptrCast(@as([*]u8, @ptrCast(dst.?)) + @as(usize, @bitCast(s_off)));
@@ -120,10 +113,10 @@ fn ssmScanF32Cuda(
         // Mamba-2
         if (d_state == 64) { // Zamba2
             const threads = 64;
-            const num_warps = threads / common.warp_size;
+            const num_warps = threads / ggml.cuda.common.warp_size;
 
-            const blocks: kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
-            kernels.launchPdl(kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32_group", &.{ kernels.int(64 / common.warp_size), kernels.int(64) })), .{
+            const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
+            ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_scan_f32_group", &.{ ggml.cuda.kernels.int(64 / ggml.cuda.common.warp_size), ggml.cuda.kernels.int(64) })), .{
                 .grid = blocks,
                 .block = .{ .x = threads },
                 .shmem = 0,
@@ -131,10 +124,10 @@ fn ssmScanF32Cuda(
             }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else if (d_state == 96) {
             const threads = 96;
-            const num_warps = threads / common.warp_size;
+            const num_warps = threads / ggml.cuda.common.warp_size;
 
-            const blocks: kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
-            kernels.launchPdl(kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32_group", &.{ kernels.int(96 / common.warp_size), kernels.int(96) })), .{
+            const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
+            ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_scan_f32_group", &.{ ggml.cuda.kernels.int(96 / ggml.cuda.common.warp_size), ggml.cuda.kernels.int(96) })), .{
                 .grid = blocks,
                 .block = .{ .x = threads },
                 .shmem = 0,
@@ -142,10 +135,10 @@ fn ssmScanF32Cuda(
             }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else if (d_state == 128) {
             const threads = 128;
-            const num_warps = threads / common.warp_size;
+            const num_warps = threads / ggml.cuda.common.warp_size;
 
-            const blocks: kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
-            kernels.launchPdl(kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32_group", &.{ kernels.int(128 / common.warp_size), kernels.int(128) })), .{
+            const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
+            ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_scan_f32_group", &.{ ggml.cuda.kernels.int(128 / ggml.cuda.common.warp_size), ggml.cuda.kernels.int(128) })), .{
                 .grid = blocks,
                 .block = .{ .x = threads },
                 .shmem = 0,
@@ -153,41 +146,41 @@ fn ssmScanF32Cuda(
             }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else if (d_state == 256) { // Falcon-H1
             const threads = 256;
-            const num_warps = threads / common.warp_size;
+            const num_warps = threads / ggml.cuda.common.warp_size;
 
-            const blocks: kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
-            kernels.launchPdl(kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32_group", &.{ kernels.int(256 / common.warp_size), kernels.int(256) })), .{
+            const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(n_head * head_dim + (num_warps - 1), num_warps)), .y = dim(n_seq), .z = 1 };
+            ggml.cuda.kernels.launchPdl(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_scan_f32_group", &.{ ggml.cuda.kernels.int(256 / ggml.cuda.common.warp_size), ggml.cuda.kernels.int(256) })), .{
                 .grid = blocks,
                 .block = .{ .x = threads },
                 .shmem = 0,
                 .stream = stream,
             }, ptrs ++ nbs ++ .{ s_base, s_slot_bytes, n_head, head_dim, n_group, n_tok, K });
         } else {
-            impl.abort("doesn't support d_state!=(64, 96, 128 or 256).");
+            ggml.impl.abort("doesn't support d_state!=(64, 96, 128 or 256).");
         }
     } else {
         // Mamba-1
-        impl.assert(K == 1, "K == 1");
+        ggml.impl.assert(K == 1, "K == 1");
         const threads = 128;
-        impl.assert(@rem(n_head, threads) == 0, "n_head % threads == 0");
-        impl.assert(head_dim == 1, "head_dim == 1");
-        impl.assert(n_group == 1, "n_group == 1");
-        const blocks: kernels.Dim3 = .{ .x = dim(n_seq), .y = dim(@divTrunc(n_head + threads - 1, threads)), .z = 1 };
+        ggml.impl.assert(@rem(n_head, threads) == 0, "n_head % threads == 0");
+        ggml.impl.assert(head_dim == 1, "head_dim == 1");
+        ggml.impl.assert(n_group == 1, "n_group == 1");
+        const blocks: ggml.cuda.kernels.Dim3 = .{ .x = dim(n_seq), .y = dim(@divTrunc(n_head + threads - 1, threads)), .z = 1 };
         if (d_state == 16) {
-            const params: kernels.LaunchParams = .{ .grid = blocks, .block = .{ .x = threads }, .shmem = 0, .stream = stream };
+            const params: ggml.cuda.kernels.LaunchParams = .{ .grid = blocks, .block = .{ .x = threads }, .shmem = 0, .stream = stream };
             const args = ptrs ++ nbs ++ .{ s_off, n_head, n_tok };
             switch (n_tok) {
-                inline 1...8 => |l| kernels.launchPdl(scanKernel(threads, l), params, args),
-                else => kernels.launchPdl(scanKernel(threads, 0), params, args),
+                inline 1...8 => |l| ggml.cuda.kernels.launchPdl(scanKernel(threads, l), params, args),
+                else => ggml.cuda.kernels.launchPdl(scanKernel(threads, 0), params, args),
             }
         } else {
-            impl.abort("doesn't support d_state!=16.");
+            ggml.impl.abort("doesn't support d_state!=16.");
         }
     }
 }
 
-fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.Kernel {
-    return kernels.get("ssm-scan", kernels.tmpl("ssm_scan_f32", &.{ kernels.ulong(threads), kernels.ulong(16), kernels.ulong(l) }));
+fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) ggml.cuda.kernels.Kernel {
+    return ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_scan_f32", &.{ ggml.cuda.kernels.ulong(threads), ggml.cuda.kernels.ulong(16), ggml.cuda.kernels.ulong(l) }));
 }
 
 /// Ports `ssm_scan_ssd_f32_cuda` (ssm-scan.cu:607 @b1b770d90): the SSD
@@ -195,7 +188,7 @@ fn scanKernel(comptime threads: comptime_int, comptime l: comptime_int) kernels.
 /// The caller passes the state, `s_cur`: the dst state tail,
 /// or the cache when fused.
 fn ssmScanSsdF32Cuda(
-    ctx: *common.Context,
+    ctx: *ggml.cuda.common.Context,
     src0_d: ?*const anyopaque,
     src1_d: ?*const anyopaque,
     src2_d: ?*const anyopaque,
@@ -230,7 +223,7 @@ fn ssmScanSsdF32Cuda(
 
     const state_per_head = d_state * head_dim;
 
-    const matmul_dtype = cu.CUDA_R_16F;
+    const matmul_dtype = ggml.cuda.common.cu.CUDA_R_16F;
 
     const sz = struct {
         fn f(x: i64) usize {
@@ -238,17 +231,17 @@ fn ssmScanSsdF32Cuda(
         }
     }.f;
 
-    var dt_sp_buf = common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(n_tok * n_head * n_seq));
+    var dt_sp_buf = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(n_tok * n_head * n_seq));
     defer dt_sp_buf.deinit();
-    var cs_buf = common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(n_tok * n_head * n_seq));
+    var cs_buf = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(n_tok * n_head * n_seq));
     defer cs_buf.deinit();
-    var CB_buf = common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(chunk_size * chunk_size * n_group * n_seq));
+    var CB_buf = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(chunk_size * chunk_size * n_group * n_seq));
     defer CB_buf.deinit();
-    var X_dt_buf = common.PoolAlloc(half).initAlloc(ctx.pool(), sz(chunk_size * head_dim * n_head * n_seq));
+    var X_dt_buf = ggml.cuda.common.PoolAlloc(ggml.cuda.kernels.half).initAlloc(ctx.pool(), sz(chunk_size * head_dim * n_head * n_seq));
     defer X_dt_buf.deinit();
-    var B_w_buf = common.PoolAlloc(half).initAlloc(ctx.pool(), sz(d_state * chunk_size * n_head * n_seq));
+    var B_w_buf = ggml.cuda.common.PoolAlloc(ggml.cuda.kernels.half).initAlloc(ctx.pool(), sz(d_state * chunk_size * n_head * n_seq));
     defer B_w_buf.deinit();
-    var C_s_buf = common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(d_state * chunk_size * n_head * n_seq));
+    var C_s_buf = ggml.cuda.common.PoolAlloc(f32).initAlloc(ctx.pool(), sz(d_state * chunk_size * n_head * n_seq));
     defer C_s_buf.deinit();
     const dt_sp = dt_sp_buf.get().?;
     const cs = cs_buf.get().?;
@@ -259,28 +252,28 @@ fn ssmScanSsdF32Cuda(
 
     // Step 1: softplus(dt) and parallel prefix sum over full sequence
     {
-        const grid: kernels.Dim3 = .{ .x = dim(n_head), .y = dim(n_seq) };
-        kernels.launch(kernels.get("ssm-scan", kernels.tmpl("ssm_ssd_prepare_dt_kernel", &.{ kernels.int(ssd_dt_block), kernels.int(ssd_dt_max_items) })), .{
+        const grid: ggml.cuda.kernels.Dim3 = .{ .x = dim(n_head), .y = dim(n_seq) };
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_ssd_prepare_dt_kernel", &.{ ggml.cuda.kernels.int(ssd_dt_block), ggml.cuda.kernels.int(ssd_dt_max_items) })), .{
             .grid = grid,
             .block = .{ .x = ssd_dt_block },
             .shmem = 0,
             .stream = stream,
         }, .{ src2_d, @as(?*anyopaque, dt_sp), @as(?*anyopaque, cs), int(n_head), int(n_tok), dt_stride_tok, dt_stride_seq });
-        common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     // Step 2: initialize running state from src0[ids[s]]
     {
         const BLOCK = 256;
         const state_size = d_state * head_dim * n_head;
-        const grid: kernels.Dim3 = .{ .x = dim(@divTrunc(state_size + BLOCK - 1, BLOCK)), .y = dim(n_seq) };
-        kernels.launch(kernels.get("ssm-scan", kernels.tmpl("ssm_ssd_init_state_kernel", &.{kernels.int(BLOCK)})), .{
+        const grid: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(state_size + BLOCK - 1, BLOCK)), .y = dim(n_seq) };
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_ssd_init_state_kernel", &.{ggml.cuda.kernels.int(BLOCK)})), .{
             .grid = grid,
             .block = .{ .x = BLOCK },
             .shmem = 0,
             .stream = stream,
         }, .{ src0_d, src6_d, @as(?*anyopaque, s_cur), int(state_size), s0_stride_seq });
-        common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
     }
 
     // Step 3: chunked SSD loop
@@ -294,7 +287,7 @@ fn ssmScanSsdF32Cuda(
 
     // Scratch buffer for causal M matrix, reused across chunks (max size at chunk_size)
     const n_M_max = chunk_size * chunk_size;
-    var M_buf = common.PoolAlloc(half).initAlloc(ctx.pool(), sz(n_M_max * n_head * n_seq));
+    var M_buf = ggml.cuda.common.PoolAlloc(ggml.cuda.kernels.half).initAlloc(ctx.pool(), sz(n_M_max * n_head * n_seq));
     defer M_buf.deinit();
     const M_mat = M_buf.get().?;
 
@@ -312,9 +305,9 @@ fn ssmScanSsdF32Cuda(
                 const CB_s = at(CB, s * chunk_len * chunk_len * n_group);
 
                 if (n_group == 1) {
-                    common.cublasCheck(cu.cublasSgemm_v2(handle, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, int(chunk_len)), "cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, (int)chunk_len)", @src());
+                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemm_v2(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, int(chunk_len)), "cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, lda_C_src, B_s, ldb_B_src, &beta_zero, CB_s, (int)chunk_len)", @src());
                 } else {
-                    common.cublasCheck(cu.cublasGemmStridedBatchedEx(handle, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, cu.CUDA_R_32F, lda_C_src, d_state, B_s, cu.CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, cu.CUDA_R_32F, int(chunk_len), chunk_len * chunk_len, int(n_group), cu.CUBLAS_COMPUTE_32F, cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, CUDA_R_32F, lda_C_src, d_state, B_s, CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, CUDA_R_32F, (int)chunk_len, (long long)(chunk_len * chunk_len), n_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                    ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(chunk_len), int(chunk_len), int(d_state), &alpha_one, C_s, ggml.cuda.common.cu.CUDA_R_32F, lda_C_src, d_state, B_s, ggml.cuda.common.cu.CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, ggml.cuda.common.cu.CUDA_R_32F, int(chunk_len), chunk_len * chunk_len, int(n_group), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, chunk_len, chunk_len, d_state, &alpha_one, C_s, CUDA_R_32F, lda_C_src, d_state, B_s, CUDA_R_32F, ldb_B_src, d_state, &beta_zero, CB_s, CUDA_R_32F, (int)chunk_len, (long long)(chunk_len * chunk_len), n_group, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
                 }
             }
         }
@@ -328,8 +321,8 @@ fn ssmScanSsdF32Cuda(
             var max_work = n_xdt;
             if (n_bw > max_work) max_work = n_bw;
             if (n_M > max_work) max_work = n_M;
-            const grid: kernels.Dim3 = .{ .x = dim(@divTrunc(max_work + BLOCK - 1, BLOCK)), .y = dim(n_head), .z = dim(n_seq) };
-            kernels.launch(kernels.get("ssm-scan", kernels.tmpl("ssm_ssd_pre_matmul_kernel", &.{ kernels.int(BLOCK), kernels.typeName(half) })), .{
+            const grid: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(max_work + BLOCK - 1, BLOCK)), .y = dim(n_head), .z = dim(n_seq) };
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_ssd_pre_matmul_kernel", &.{ ggml.cuda.kernels.int(BLOCK), ggml.cuda.kernels.typeName(ggml.cuda.kernels.half) })), .{
                 .grid = grid,
                 .block = .{ .x = BLOCK },
                 .shmem = 0,
@@ -345,7 +338,7 @@ fn ssmScanSsdF32Cuda(
                 C_stride_tok,               C_stride_seq,                   int(chunk_offset),
                 int(n_tok),
             });
-            common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
         }
 
         // 3c: dst = S_cur^T @ C_scaled (state contribution)
@@ -357,7 +350,7 @@ fn ssmScanSsdF32Cuda(
             while (s < n_seq) : (s += 1) {
                 const dst_chunk = at(dst_d, s * d_inner * n_tok + chunk_offset * d_inner);
 
-                common.cublasCheck(cu.cublasGemmStridedBatchedEx(handle, cu.CUBLAS_OP_T, cu.CUBLAS_OP_N, int(head_dim), int(chunk_len), int(d_state), &alpha_one, at(s_cur, s * stride_S * n_head), cu.CUDA_R_32F, int(d_state), stride_S, at(C_scaled, s * stride_Cs * n_head), cu.CUDA_R_32F, int(d_state), stride_Cs, &beta_zero, dst_chunk, cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), cu.CUBLAS_COMPUTE_32F, cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, head_dim, chunk_len, d_state, &alpha_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, C_scaled + s * stride_Cs * n_head, CUDA_R_32F, d_state, stride_Cs, &beta_zero, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_T, ggml.cuda.common.cu.CUBLAS_OP_N, int(head_dim), int(chunk_len), int(d_state), &alpha_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_S, at(C_scaled, s * stride_Cs * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_Cs, &beta_zero, dst_chunk, ggml.cuda.common.cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, head_dim, chunk_len, d_state, &alpha_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, C_scaled + s * stride_Cs * n_head, CUDA_R_32F, d_state, stride_Cs, &beta_zero, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
 
@@ -370,7 +363,7 @@ fn ssmScanSsdF32Cuda(
             var s: i64 = 0;
             while (s < n_seq) : (s += 1) {
                 const dst_chunk = at(dst_d, s * d_inner * n_tok + chunk_offset * d_inner);
-                common.cublasCheck(cu.cublasGemmStridedBatchedEx(handle, cu.CUBLAS_OP_N, cu.CUBLAS_OP_T, int(head_dim), int(chunk_len), int(chunk_len), &alpha_one, at(X_dt, s * stride_X_h * n_head), matmul_dtype, int(head_dim), stride_X_h, at(M_mat, s * stride_M * n_head), matmul_dtype, int(chunk_len), stride_M, &beta_one, dst_chunk, cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), cu.CUBLAS_COMPUTE_32F, cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, head_dim, chunk_len, chunk_len, &alpha_one, X_dt + s * stride_X_h * n_head, matmul_dtype, head_dim, stride_X_h, M_mat + s * stride_M * n_head, matmul_dtype, chunk_len, stride_M, &beta_one, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_N, ggml.cuda.common.cu.CUBLAS_OP_T, int(head_dim), int(chunk_len), int(chunk_len), &alpha_one, at(X_dt, s * stride_X_h * n_head), matmul_dtype, int(head_dim), stride_X_h, at(M_mat, s * stride_M * n_head), matmul_dtype, int(chunk_len), stride_M, &beta_one, dst_chunk, ggml.cuda.common.cu.CUDA_R_32F, int(d_inner), head_dim, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, head_dim, chunk_len, chunk_len, &alpha_one, X_dt + s * stride_X_h * n_head, matmul_dtype, head_dim, stride_X_h, M_mat + s * stride_M * n_head, matmul_dtype, chunk_len, stride_M, &beta_one, dst_chunk, CUDA_R_32F, d_inner, head_dim, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
 
@@ -378,8 +371,8 @@ fn ssmScanSsdF32Cuda(
         {
             // Scale s_cur in-place by per-head decay_total BEFORE cuBLAS overwrites it
             const BLOCK = 256;
-            const grid: kernels.Dim3 = .{ .x = dim(@divTrunc(state_per_head + BLOCK - 1, BLOCK)), .y = dim(n_head), .z = dim(n_seq) };
-            kernels.launch(kernels.get("ssm-scan", kernels.tmpl("ssm_ssd_scale_state_kernel", &.{kernels.int(BLOCK)})), .{
+            const grid: ggml.cuda.kernels.Dim3 = .{ .x = dim(@divTrunc(state_per_head + BLOCK - 1, BLOCK)), .y = dim(n_head), .z = dim(n_seq) };
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("ssm-scan", ggml.cuda.kernels.tmpl("ssm_ssd_scale_state_kernel", &.{ggml.cuda.kernels.int(BLOCK)})), .{
                 .grid = grid,
                 .block = .{ .x = BLOCK },
                 .shmem = 0,
@@ -390,7 +383,7 @@ fn ssmScanSsdF32Cuda(
                 int(chunk_offset),       int(chunk_len),             int(n_tok),
                 A_stride,
             });
-            common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+            ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
 
             // cuBLAS with beta=1: s_cur = B_weighted @ X_dt^T + 1.0 * s_cur (already scaled)
             const stride_Bw = d_state * chunk_len;
@@ -400,7 +393,7 @@ fn ssmScanSsdF32Cuda(
             var s: i64 = 0;
             while (s < n_seq) : (s += 1) {
                 // X_dt is d-fastest {hd, C}, read as OP_T to get {C, hd}
-                common.cublasCheck(cu.cublasGemmStridedBatchedEx(handle, cu.CUBLAS_OP_N, cu.CUBLAS_OP_T, int(d_state), int(head_dim), int(chunk_len), &alpha_one, at(B_weighted, s * stride_Bw * n_head), matmul_dtype, int(d_state), stride_Bw, at(X_dt, s * stride_X * n_head), matmul_dtype, int(head_dim), stride_X, &beta_one, at(s_cur, s * stride_S * n_head), cu.CUDA_R_32F, int(d_state), stride_S, int(n_head), cu.CUBLAS_COMPUTE_32F, cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, d_state, head_dim, chunk_len, &alpha_one, B_weighted + s * stride_Bw * n_head, matmul_dtype, d_state, stride_Bw, X_dt + s * stride_X * n_head, matmul_dtype, head_dim, stride_X, &beta_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmStridedBatchedEx(handle, ggml.cuda.common.cu.CUBLAS_OP_N, ggml.cuda.common.cu.CUBLAS_OP_T, int(d_state), int(head_dim), int(chunk_len), &alpha_one, at(B_weighted, s * stride_Bw * n_head), matmul_dtype, int(d_state), stride_Bw, at(X_dt, s * stride_X * n_head), matmul_dtype, int(head_dim), stride_X, &beta_one, at(s_cur, s * stride_S * n_head), ggml.cuda.common.cu.CUDA_R_32F, int(d_state), stride_S, int(n_head), ggml.cuda.common.cu.CUBLAS_COMPUTE_32F, ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT), "cublasGemmStridedBatchedEx(handle, CUBLAS_OP_N, CUBLAS_OP_T, d_state, head_dim, chunk_len, &alpha_one, B_weighted + s * stride_Bw * n_head, matmul_dtype, d_state, stride_Bw, X_dt + s * stride_X * n_head, matmul_dtype, head_dim, stride_X, &beta_one, s_cur + s * stride_S * n_head, CUDA_R_32F, d_state, stride_S, n_head, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)", @src());
             }
         }
     }
@@ -409,14 +402,14 @@ fn ssmScanSsdF32Cuda(
 /// Ports `ggml_cuda_op_ssm_scan_impl` (ssm-scan.cu:798 @b1b770d90), the
 /// body of `ggml_cuda_op_ssm_scan`, separate so that the fused entry
 /// point can pass a cache.
-fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) void {
-    const src0 = impl.one(Tensor, dst.src[0]); // s
-    const src1 = impl.one(Tensor, dst.src[1]); // x
-    const src2 = impl.one(Tensor, dst.src[2]); // dt
-    const src3 = impl.one(Tensor, dst.src[3]); // A
-    const src4 = impl.one(Tensor, dst.src[4]); // B
-    const src5 = impl.one(Tensor, dst.src[5]); // C
-    const src6 = impl.one(Tensor, dst.src[6]); // ids
+fn opSsmScanImpl(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: ?*const FusedCache) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]); // s
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]); // x
+    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]); // dt
+    const src3 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[3]); // A
+    const src4 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[4]); // B
+    const src5 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[5]); // C
+    const src6 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[6]); // ids
 
     const nc = src0.ne[0]; // d_state
     const nr = src0.ne[1]; // head_dim or 1
@@ -424,20 +417,20 @@ fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) 
     const ng = src4.ne[1]; // n_group
     const n_t = src1.ne[2]; // number of tokens per sequence
     const n_s = src1.ne[3]; // number of sequences in the batch
-    const K_param = impl.getOpParamsI32(dst, 0);
+    const K_param = ggml.impl.getOpParamsI32(dst, 0);
     const K: i64 = if (K_param > 0) K_param else 1;
 
-    const s_off: i64 = @bitCast(@as(usize, @bitCast(c.ggml_nelements(src1))) * @sizeOf(f32));
+    const s_off: i64 = @bitCast(@as(usize, @bitCast(ggml.impl.c.ggml_nelements(src1))) * @sizeOf(f32));
 
-    impl.assert(c.ggml_nelements(src1) + K * nc * nr * nh * n_s == c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
-    impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
-    impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
-    impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");
-    impl.assert(src3.nb[0] == @sizeOf(f32), "src3->nb[0] == sizeof(float)");
-    impl.assert(src4.nb[0] == @sizeOf(f32), "src4->nb[0] == sizeof(float)");
-    impl.assert(src5.nb[0] == @sizeOf(f32), "src5->nb[0] == sizeof(float)");
-    impl.assert(src6.nb[0] == @sizeOf(i32), "src6->nb[0] == sizeof(int32_t)");
-    impl.assert(src3.ne[0] == 1 or K == 1, "src3->ne[0] == 1 || K == 1");
+    ggml.impl.assert(ggml.impl.c.ggml_nelements(src1) + K * nc * nr * nh * n_s == ggml.impl.c.ggml_nelements(dst), "ggml_nelements(src1) + K*nc*nr*nh*n_s == ggml_nelements(dst)");
+    ggml.impl.assert(src0.nb[0] == @sizeOf(f32), "src0->nb[0] == sizeof(float)");
+    ggml.impl.assert(src1.nb[0] == @sizeOf(f32), "src1->nb[0] == sizeof(float)");
+    ggml.impl.assert(src2.nb[0] == @sizeOf(f32), "src2->nb[0] == sizeof(float)");
+    ggml.impl.assert(src3.nb[0] == @sizeOf(f32), "src3->nb[0] == sizeof(float)");
+    ggml.impl.assert(src4.nb[0] == @sizeOf(f32), "src4->nb[0] == sizeof(float)");
+    ggml.impl.assert(src5.nb[0] == @sizeOf(f32), "src5->nb[0] == sizeof(float)");
+    ggml.impl.assert(src6.nb[0] == @sizeOf(i32), "src6->nb[0] == sizeof(int32_t)");
+    ggml.impl.assert(src3.ne[0] == 1 or K == 1, "src3->ne[0] == 1 || K == 1");
 
     const src0_d: ?*const anyopaque = src0.data;
     const src1_d: ?*const anyopaque = src1.data;
@@ -449,40 +442,40 @@ fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) 
     const dst_d: ?*anyopaque = dst.data;
     const stream = ctx.stream();
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(src6.type == c.GGML_TYPE_I32, "src6->type == GGML_TYPE_I32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src6.type == ggml.impl.c.GGML_TYPE_I32, "src6->type == GGML_TYPE_I32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type == GGML_TYPE_F32");
 
     // Byte strides are narrowed to int for both scan and SSD paths.
-    impl.assert(src0.nb[2] <= int_max, "src0->nb[2] <= (size_t)INT_MAX");
-    impl.assert(src0.nb[3] <= int_max, "src0->nb[3] <= (size_t)INT_MAX");
-    impl.assert(src1.nb[2] <= int_max, "src1->nb[2] <= (size_t)INT_MAX");
-    impl.assert(src1.nb[3] <= int_max, "src1->nb[3] <= (size_t)INT_MAX");
-    impl.assert(src2.nb[1] <= int_max, "src2->nb[1] <= (size_t)INT_MAX");
-    impl.assert(src2.nb[2] <= int_max, "src2->nb[2] <= (size_t)INT_MAX");
-    impl.assert(src3.nb[1] <= int_max, "src3->nb[1] <= (size_t)INT_MAX");
-    impl.assert(src4.nb[2] <= int_max, "src4->nb[2] <= (size_t)INT_MAX");
-    impl.assert(src4.nb[3] <= int_max, "src4->nb[3] <= (size_t)INT_MAX");
-    impl.assert(src5.nb[2] <= int_max, "src5->nb[2] <= (size_t)INT_MAX");
-    impl.assert(src5.nb[3] <= int_max, "src5->nb[3] <= (size_t)INT_MAX");
+    ggml.impl.assert(src0.nb[2] <= int_max, "src0->nb[2] <= (size_t)INT_MAX");
+    ggml.impl.assert(src0.nb[3] <= int_max, "src0->nb[3] <= (size_t)INT_MAX");
+    ggml.impl.assert(src1.nb[2] <= int_max, "src1->nb[2] <= (size_t)INT_MAX");
+    ggml.impl.assert(src1.nb[3] <= int_max, "src1->nb[3] <= (size_t)INT_MAX");
+    ggml.impl.assert(src2.nb[1] <= int_max, "src2->nb[1] <= (size_t)INT_MAX");
+    ggml.impl.assert(src2.nb[2] <= int_max, "src2->nb[2] <= (size_t)INT_MAX");
+    ggml.impl.assert(src3.nb[1] <= int_max, "src3->nb[1] <= (size_t)INT_MAX");
+    ggml.impl.assert(src4.nb[2] <= int_max, "src4->nb[2] <= (size_t)INT_MAX");
+    ggml.impl.assert(src4.nb[3] <= int_max, "src4->nb[3] <= (size_t)INT_MAX");
+    ggml.impl.assert(src5.nb[2] <= int_max, "src5->nb[2] <= (size_t)INT_MAX");
+    ggml.impl.assert(src5.nb[3] <= int_max, "src5->nb[3] <= (size_t)INT_MAX");
 
     // Mamba-2 with scalar A per head: use SSD matmul path for long sequences.
     // Requires NVIDIA Turing+ otherwise fallback to scan.
     const is_mamba2 = src3.nb[1] == @sizeOf(f32);
-    const cc = common.info().devices[@intCast(common.getDevice())].cc;
+    const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
     const use_ssd = is_mamba2 and n_t > ssd_min_tokens and
         K == 1 and
         n_t <= ssd_max_tokens and
-        common.cc.isNvidia(cc) and
-        cc >= common.cc.turing and
+        ggml.cuda.common.cc.isNvidia(cc) and
+        cc >= ggml.cuda.common.cc.turing and
         @rem(nr, 8) == 0; // cuBLAS requires 8-element (16-byte) alignment
 
     if (use_ssd) {
         // ssm_ssd_init_state_kernel uses flat linear indexing within each sequence,
         // so src0 must be fully contiguous across all inner dimensions.
         // The scan path handles non-contiguous nb[2] via src0_nb2 but does not handle nb[1].
-        impl.assert(src0.nb[1] == @as(usize, @bitCast(nc)) * @sizeOf(f32), "src0->nb[1] == nc         * sizeof(float)");
-        impl.assert(src0.nb[2] == @as(usize, @bitCast(nc * nr)) * @sizeOf(f32), "src0->nb[2] == nc * nr    * sizeof(float)");
+        ggml.impl.assert(src0.nb[1] == @as(usize, @bitCast(nc)) * @sizeOf(f32), "src0->nb[1] == nc         * sizeof(float)");
+        ggml.impl.assert(src0.nb[2] == @as(usize, @bitCast(nc * nr)) * @sizeOf(f32), "src0->nb[2] == nc * nr    * sizeof(float)");
 
         const f = @sizeOf(f32);
         ssmScanSsdF32Cuda(
@@ -519,12 +512,12 @@ fn opSsmScanImpl(ctx: *common.Context, dst: *Tensor, cache: ?*const FusedCache) 
 }
 
 /// Ports `ggml_cuda_op_ssm_scan` (ssm-scan.cu:893 @b1b770d90).
-pub fn opSsmScan(ctx: *common.Context, dst: *Tensor) void {
+pub fn opSsmScan(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     opSsmScanImpl(ctx, dst, null);
 }
 
 /// Ports `ggml_cuda_op_ssm_scan_fused_cache` (ssm-scan.cu:897 @b1b770d90):
 /// the same op, writing the state snapshots into the cache instead of dst.
-pub fn opSsmScanFusedCache(ctx: *common.Context, dst: *Tensor, cache: FusedCache) void {
+pub fn opSsmScanFusedCache(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor, cache: FusedCache) void {
     opSsmScanImpl(ctx, dst, &cache);
 }

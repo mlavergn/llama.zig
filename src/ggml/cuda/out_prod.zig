@@ -13,13 +13,7 @@
 //! was bound to the context's current stream when it was created.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
+const ggml = @import("../module.zig");
 
 /// An `int64_t` into an `int` parameter.
 fn int(x: i64) c_int {
@@ -37,9 +31,9 @@ fn u(x: i64) u64 {
 }
 
 /// Ports `ggml_cuda_out_prod` (out-prod.cu:27 @b1b770d90).
-pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
+pub fn outProd(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
 
     const ne00 = src0.ne[0];
     const ne01 = src0.ne[1];
@@ -62,19 +56,19 @@ pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
     const nb2 = dst.nb[2];
     const nb3 = dst.nb[3];
 
-    impl.assert(src0.type == c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
-    impl.assert(src1.type == c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
-    impl.assert(dst.type == c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
+    ggml.impl.assert(src0.type == ggml.impl.c.GGML_TYPE_F32, "src0->type == GGML_TYPE_F32");
+    ggml.impl.assert(src1.type == ggml.impl.c.GGML_TYPE_F32, "src1->type == GGML_TYPE_F32");
+    ggml.impl.assert(dst.type == ggml.impl.c.GGML_TYPE_F32, "dst->type  == GGML_TYPE_F32");
 
-    impl.assert(ne01 == ne11, "ne01 == ne11");
-    impl.assert(ne0 == ne00, "ne0 == ne00");
-    impl.assert(ne1 == ne10, "ne1 == ne10");
+    ggml.impl.assert(ne01 == ne11, "ne01 == ne11");
+    ggml.impl.assert(ne0 == ne00, "ne0 == ne00");
+    ggml.impl.assert(ne1 == ne10, "ne1 == ne10");
 
-    impl.assert(@rem(ne2, src0.ne[2]) == 0, "ne2 % src0->ne[2] == 0");
-    impl.assert(@rem(ne3, src0.ne[3]) == 0, "ne3 % src0->ne[3] == 0");
+    ggml.impl.assert(@rem(ne2, src0.ne[2]) == 0, "ne2 % src0->ne[2] == 0");
+    ggml.impl.assert(@rem(ne3, src0.ne[3]) == 0, "ne3 % src0->ne[3] == 0");
 
-    impl.assert(ne2 == src1.ne[2], "ne2 == src1->ne[2]");
-    impl.assert(ne3 == src1.ne[3], "ne3 == src1->ne[3]");
+    ggml.impl.assert(ne2 == src1.ne[2], "ne2 == src1->ne[2]");
+    ggml.impl.assert(ne3 == src1.ne[3], "ne3 == src1->ne[3]");
 
     const src0_d: [*c]const f32 = @ptrCast(@alignCast(src0.data));
     const src1_d: [*c]const f32 = @ptrCast(@alignCast(src1.data));
@@ -89,10 +83,10 @@ pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
     const lda: i64 = @bitCast(nb01 / @sizeOf(f32));
     const ldc: i64 = @bitCast(nb1 / @sizeOf(f32));
 
-    const src1_T = c.ggml_is_transposed(src1);
-    const src1_cublas_op: cu.cublasOperation_t = if (src1_T) cu.CUBLAS_OP_N else cu.CUBLAS_OP_T;
+    const src1_T = ggml.impl.c.ggml_is_transposed(src1);
+    const src1_cublas_op: ggml.cuda.common.cu.cublasOperation_t = if (src1_T) ggml.cuda.common.cu.CUBLAS_OP_N else ggml.cuda.common.cu.CUBLAS_OP_T;
     const ldb: i64 = @bitCast((if (src1_T) nb10 else nb11) / @sizeOf(f32));
-    impl.assert((if (src1_T) nb11 else nb10) == @sizeOf(f32), "(src1_T ?        nb11 :        nb10) == sizeof(float)");
+    ggml.impl.assert((if (src1_T) nb11 else nb10) == @sizeOf(f32), "(src1_T ?        nb11 :        nb10) == sizeof(float)");
 
     // data strides in dimensions 2/3
     const s02 = nb02 / @sizeOf(f32);
@@ -109,32 +103,32 @@ pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
     const int_max: i64 = std.math.maxInt(c_int);
     if (dps2 == 1 and ne2 > 1) {
         // src0 has uniform stride s02 along dim 2; batch the inner loop with a strided GEMM
-        impl.assert(ne2 <= int_max, "ne2 <= std::numeric_limits<int>::max()");
+        ggml.impl.assert(ne2 <= int_max, "ne2 <= std::numeric_limits<int>::max()");
         const batch_count: c_int = @intCast(ne2);
         var j3: i64 = 0; // the C's `i3`; Zig reserves the name
         while (j3 < ne3) : (j3 += 1) {
-            common.cublasCheck(cu.cublasSgemmStridedBatched(handle, cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, at(src0_d, u(@divTrunc(j3, dps3)) *% s03), int(lda), @bitCast(s02), at(src1_d, u(j3) *% s13), int(ldb), @bitCast(s12), &beta, at(dst_d, u(j3) *% s3), int(ldc), @bitCast(s2), batch_count), "cublasSgemmStridedBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d + (i3/dps3)*s03, lda, s02, src1_d +  i3     *s13, ldb, s12, &beta,  dst_d  +  i3     *s3,  ldc, s2, batch_count)", @src());
+            ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemmStridedBatched(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, at(src0_d, u(@divTrunc(j3, dps3)) *% s03), int(lda), @bitCast(s02), at(src1_d, u(j3) *% s13), int(ldb), @bitCast(s12), &beta, at(dst_d, u(j3) *% s3), int(ldc), @bitCast(s2), batch_count), "cublasSgemmStridedBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d + (i3/dps3)*s03, lda, s02, src1_d +  i3     *s13, ldb, s12, &beta,  dst_d  +  i3     *s3,  ldc, s2, batch_count)", @src());
         }
     } else if (ne2 > 1 or ne3 > 1) {
         // dps2 > 1 (src0 broadcast along dim 2 with non-uniform stride) or multiple GEMMs
         // along dim 3: compute per-GEMM pointers on the device and use a single batched GEMM.
-        impl.assert(ne3 > 0, "ne3 > 0");
-        impl.assert(ne2 <= @divTrunc(int_max, ne3), "ne2 <= (int64_t) std::numeric_limits<int>::max() / ne3");
+        ggml.impl.assert(ne3 > 0, "ne3 > 0");
+        ggml.impl.assert(ne2 <= @divTrunc(int_max, ne3), "ne2 <= (int64_t) std::numeric_limits<int>::max() / ne3");
         const batch_count: c_int = @intCast(ne2 * ne3);
 
-        var ptrs_a = common.PoolAlloc(?*const f32).initAlloc(ctx.pool(), @intCast(batch_count));
+        var ptrs_a = ggml.cuda.common.PoolAlloc(?*const f32).initAlloc(ctx.pool(), @intCast(batch_count));
         defer ptrs_a.deinit();
-        var ptrs_b = common.PoolAlloc(?*const f32).initAlloc(ctx.pool(), @intCast(batch_count));
+        var ptrs_b = ggml.cuda.common.PoolAlloc(?*const f32).initAlloc(ctx.pool(), @intCast(batch_count));
         defer ptrs_b.deinit();
-        var ptrs_c = common.PoolAlloc(?*f32).initAlloc(ctx.pool(), @intCast(batch_count));
+        var ptrs_c = ggml.cuda.common.PoolAlloc(?*f32).initAlloc(ctx.pool(), @intCast(batch_count));
         defer ptrs_c.deinit();
 
-        const block_dims: kernels.Dim3 = .{ .x = 16, .y = 16 };
-        const grid_dims: kernels.Dim3 = .{
+        const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = 16, .y = 16 };
+        const grid_dims: ggml.cuda.kernels.Dim3 = .{
             .x = @truncate(u(@divTrunc(ne2 + block_dims.x - 1, block_dims.x))),
             .y = @truncate(u(@divTrunc(ne3 + block_dims.y - 1, block_dims.y))),
         };
-        kernels.launch(kernels.get("out-prod", "k_compute_out_prod_ptrs"), .{
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("out-prod", "k_compute_out_prod_ptrs"), .{
             .grid = grid_dims,
             .block = block_dims,
             .shmem = 0,
@@ -147,11 +141,11 @@ pub fn outProd(ctx: *common.Context, dst: *Tensor) void {
             s12,                                      s13,                                      s2,
             s3,
         });
-        common.cudaCheck(cu.cudaGetLastError(), "cudaGetLastError()", @src());
+        ggml.cuda.common.cudaCheck(ggml.cuda.common.cu.cudaGetLastError(), "cudaGetLastError()", @src());
 
-        common.cublasCheck(cu.cublasSgemmBatched(handle, cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, @ptrCast(ptrs_a.get()), int(lda), @ptrCast(ptrs_b.get()), int(ldb), &beta, @ptrCast(ptrs_c.get()), int(ldc), batch_count), "cublasSgemmBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, ptrs_a.get(), lda, ptrs_b.get(), ldb, &beta,  ptrs_c.get(), ldc, batch_count)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemmBatched(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, @ptrCast(ptrs_a.get()), int(lda), @ptrCast(ptrs_b.get()), int(ldb), &beta, @ptrCast(ptrs_c.get()), int(ldc), batch_count), "cublasSgemmBatched(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, ptrs_a.get(), lda, ptrs_b.get(), ldb, &beta,  ptrs_c.get(), ldc, batch_count)", @src());
     } else {
         // ne2 == 1 && ne3 == 1: single GEMM
-        common.cublasCheck(cu.cublasSgemm_v2(handle, cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, src0_d, int(lda), src1_d, int(ldb), &beta, dst_d, int(ldc)), "cublasSgemm(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d, lda, src1_d, ldb, &beta,  dst_d,  ldc)", @src());
+        ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasSgemm_v2(handle, ggml.cuda.common.cu.CUBLAS_OP_N, src1_cublas_op, int(ne0), int(ne1), int(ne01), &alpha, src0_d, int(lda), src1_d, int(ldb), &beta, dst_d, int(ldc)), "cublasSgemm(handle, CUBLAS_OP_N, src1_cublas_op, ne0, ne1, ne01, &alpha, src0_d, lda, src1_d, ldb, &beta,  dst_d,  ldc)", @src());
     }
 }

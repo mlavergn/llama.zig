@@ -12,9 +12,8 @@
 //! spinning.
 
 const std = @import("std");
-const futex = @import("futex.zig");
+const stdlib = @import("../module.zig");
 const Mutex = @import("mutex.zig").Mutex;
-const clock = @import("../clock.zig");
 
 /// A condition variable. `.{}` is ready to use and needs no teardown.
 ///
@@ -49,7 +48,7 @@ pub const Condition = extern struct {
         _ = self.waiters.fetchAdd(1, .seq_cst);
         const seq = self.seq.load(.seq_cst);
         m.unlock();
-        const result = futex.wait(&self.seq, seq, timeout_ns);
+        const result = stdlib.sync.futex.wait(&self.seq, seq, timeout_ns);
         m.lock();
         _ = self.waiters.fetchSub(1, .monotonic);
         return result != .timed_out;
@@ -65,7 +64,7 @@ pub const Condition = extern struct {
     /// Return: false when the deadline passed, true otherwise -- which
     /// includes a spurious wakeup.
     pub fn waitUntil(self: *Condition, m: *Mutex, deadline_ns: i64) bool {
-        const now = clock.steadyNs();
+        const now = stdlib.clock.steadyNs();
         if (now >= deadline_ns) return false;
         return self.timedWait(m, @intCast(deadline_ns - now));
     }
@@ -86,7 +85,7 @@ pub const Condition = extern struct {
 
     fn wake(self: *Condition, max_waiters: u32) void {
         _ = self.seq.fetchAdd(1, .seq_cst);
-        if (self.waiters.load(.seq_cst) != 0) futex.wake(&self.seq, max_waiters);
+        if (self.waiters.load(.seq_cst) != 0) stdlib.sync.futex.wake(&self.seq, max_waiters);
     }
 };
 

@@ -11,24 +11,14 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// A `runtime_error` whose `what()` is upstream's `format(...)`, which is
 /// `snprintf`: `%g` has no `std.fmt` equivalent.
-fn throwC(exc: *Exception, comptime fmt: [:0]const u8, args: anytype) Thrown {
+fn throwC(exc: *llama.impl.Exception, comptime fmt: [:0]const u8, args: anytype) llama.impl.Thrown {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
+    const n = @call(.auto, llama.impl.c.snprintf, .{ &buf, buf.len, fmt.ptr } ++ args);
     const len: usize = @min(@as(usize, @intCast(n)), buf.len - 1);
     return exc.throw(.runtime_error, "{s}", .{buf[0..len]});
 }
@@ -41,7 +31,7 @@ fn throwC(exc: *Exception, comptime fmt: [:0]const u8, args: anytype) Thrown {
 /// - `exc`: where a throw is recorded.
 ///
 /// Return: nothing; `error.Thrown` for a malformed file.
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -66,7 +56,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (hp.n_swa == 0) {
         return exc.throw(.runtime_error, "ricursive: sliding_window must be > 0", .{});
     }
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     if (try meta.getArr(u32, .attention_sliding_window_pattern, &hp.is_swa_impl, false, exc)) {
         // load_swa_pattern bounds the array only by LLAMA_MAX_LAYERS: a short
         // one would leave the last layers dense and without RoPE.
@@ -115,16 +105,16 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 ///
 /// Return: nothing; `error.Thrown` when a tensor is missing or the gate or
 /// value residual is present on some layers only.
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
     self.output_norm = try self.createTensor(.{ .tensor = .output_norm, .suffix = "weight" }, &.{l.n_embd}, 0, exc);
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, nr, exc);
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     const n_embd_q: i64 = l.n_embd_head_k * l.n_head;
@@ -180,7 +170,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 /// - `b`: the graph builder.
 ///
 /// Return: nothing; the graph is built into `b`.
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
@@ -197,7 +187,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -219,15 +209,15 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             // per layer.
             var v_in = attn_in;
             if (layer.attn_vres_lambda) |lambda| {
-                const mix = c.ggml_sigmoid(ctx, lambda);
-                v_in = c.ggml_add(ctx, inp_vres, c.ggml_mul(ctx, c.ggml_sub(ctx, attn_in, inp_vres), mix));
+                const mix = llama.impl.c.ggml_sigmoid(ctx, lambda);
+                v_in = llama.impl.c.ggml_add(ctx, inp_vres, llama.impl.c.ggml_mul(ctx, llama.impl.c.ggml_sub(ctx, attn_in, inp_vres), mix));
                 b.cb(v_in, "vres_in", il);
             }
             var Vcur = b.buildLoraMm(layer.wv.?, v_in, layer.wv_s);
 
-            Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-            Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-            Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+            Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+            Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
             Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
             Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
@@ -247,9 +237,9 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
             if (layer.wqkv_gate) |wg| {
                 var gate = b.buildLoraMm(wg, attn_in, layer.wqkv_gate_s);
-                gate = c.ggml_sigmoid(ctx, gate);
+                gate = llama.impl.c.ggml_sigmoid(ctx, gate);
                 b.cb(gate, "attn_gate", il);
-                cur = c.ggml_mul(ctx, cur, gate);
+                cur = llama.impl.c.ggml_mul(ctx, cur, gate);
                 b.cb(cur, "attn_gated", il);
             }
 
@@ -258,14 +248,14 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
         // `inp_out_ids` is never null here.
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         cur = b.buildNorm(ffn_inp, layer.ffn_norm, null, .rms, il);
@@ -275,9 +265,9 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             const gate = b.buildLoraMm(layer.ffn_gate.?, cur, layer.ffn_gate_s);
             const up = b.buildLoraMm(layer.ffn_up.?, cur, layer.ffn_up_s);
             cur = if (hp.swiglu_clamp[ilu] > 0.0)
-                c.ggml_swiglu_clamp(ctx, gate, up, hp.swiglu_clamp[ilu])
+                llama.impl.c.ggml_swiglu_clamp(ctx, gate, up, hp.swiglu_clamp[ilu])
             else
-                c.ggml_swiglu_split(ctx, gate, up);
+                llama.impl.c.ggml_swiglu_split(ctx, gate, up);
             b.cb(cur, "ffn_swiglu", il);
             cur = b.buildLoraMm(layer.ffn_down.?, cur, layer.ffn_down_s);
             b.cb(cur, "ffn_out", il);
@@ -286,7 +276,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

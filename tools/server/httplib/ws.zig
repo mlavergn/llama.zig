@@ -20,15 +20,9 @@
 //! `set_proxy*`, TLS and `set_*timeout` setters are not ported.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const builtin = @import("builtin");
-const detail = @import("detail.zig");
-const socket = @import("socket.zig");
-const message = @import("message.zig");
-
-const SocketStream = socket.SocketStream;
-const Headers = detail.Headers;
 
 /// `CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH` (httplib.h:247 @b1b770d90).
 const max_payload_length: usize = 16777216;
@@ -137,7 +131,7 @@ fn isValidClosePayload(payload: []const u8) bool {
 /// Ports `read_exact` (httplib.cpp:1007 @b1b770d90): exactly `buf.len`
 /// bytes. A timeout is reported only when nothing at all was consumed: once a
 /// byte has been taken the stream sits mid-field and cannot be resumed.
-fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
+fn readExact(strm: *mod.socket.SocketStream, buf: []u8) FrameRead {
     var total: usize = 0;
     while (total < buf.len) {
         const n = strm.read(buf[total..]);
@@ -152,7 +146,7 @@ fn readExact(strm: *SocketStream, buf: []u8) FrameRead {
 
 /// Ports `read_websocket_frame` (httplib.cpp:1021 @b1b770d90): one frame into
 /// `payload`, cleared first and left unmasked.
-fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode, payload: *std.ArrayList(u8), fin: *bool, expect_masked: bool, max_len: usize) error{OutOfMemory}!FrameRead {
+fn readWebsocketFrame(a: std.mem.Allocator, strm: *mod.socket.SocketStream, opcode: *Opcode, payload: *std.ArrayList(u8), fin: *bool, expect_masked: bool, max_len: usize) error{OutOfMemory}!FrameRead {
     // Read first 2 bytes. This is the only read that may report a timeout: it
     // sits on a frame boundary, where nothing has been consumed yet.
     var header: [2]u8 = undefined;
@@ -208,7 +202,7 @@ fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode
     const len: usize = @intCast(payload_len);
     while (payload.items.len < len) {
         const offset = payload.items.len;
-        const n = @min(len - offset, detail.recv_bufsiz);
+        const n = @min(len - offset, mod.detail.recv_bufsiz);
         try payload.resize(a, offset + n);
         if (readExact(strm, payload.items[offset..][0..n]) != .ok) return .fail;
     }
@@ -224,7 +218,7 @@ fn readWebsocketFrame(a: std.mem.Allocator, strm: *SocketStream, opcode: *Opcode
 /// Ports `write_websocket_frame` (httplib.cpp:926 @b1b770d90): the header,
 /// and the payload, masked in chunks when `mask` is set, each piece written
 /// whole (`write_data`), however many writes it takes.
-fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fin: bool, mask: bool) bool {
+fn writeWebsocketFrame(strm: *mod.socket.SocketStream, opcode: Opcode, data: []const u8, fin: bool, mask: bool) bool {
     // First byte: FIN + opcode
     var header: [2]u8 = undefined;
     header[0] = (if (fin) @as(u8, 0x80) else 0) | (@backingInt(opcode) & 0x0F);
@@ -234,27 +228,27 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
     if (len < 126) {
         header[1] = @intCast(len);
         if (mask) header[1] |= 0x80;
-        if (!message.writeData(strm, &header)) return false;
+        if (!mod.message.writeData(strm, &header)) return false;
     } else if (len <= 0xFFFF) {
         header[1] = 126;
         if (mask) header[1] |= 0x80;
-        if (!message.writeData(strm, &header)) return false;
+        if (!mod.message.writeData(strm, &header)) return false;
         const ext: [2]u8 = .{ @intCast((len >> 8) & 0xFF), @intCast(len & 0xFF) };
-        if (!message.writeData(strm, &ext)) return false;
+        if (!mod.message.writeData(strm, &ext)) return false;
     } else {
         header[1] = 127;
         if (mask) header[1] |= 0x80;
-        if (!message.writeData(strm, &header)) return false;
+        if (!mod.message.writeData(strm, &header)) return false;
         var ext: [8]u8 = undefined;
         std.mem.writeInt(u64, &ext, len, .big);
-        if (!message.writeData(strm, &ext)) return false;
+        if (!mod.message.writeData(strm, &ext)) return false;
     }
 
     if (mask) {
         // Generate random mask key
         var mask_key: [4]u8 = undefined;
         fillRandomBytes(&mask_key);
-        if (!message.writeData(strm, &mask_key)) return false;
+        if (!mod.message.writeData(strm, &mask_key)) return false;
 
         // Write masked payload in chunks
         const chunk_size = 4096;
@@ -263,10 +257,10 @@ fn writeWebsocketFrame(strm: *SocketStream, opcode: Opcode, data: []const u8, fi
         while (offset < len) : (offset += chunk_size) {
             const n = @min(chunk_size, len - offset);
             for (0..n) |i| buf[i] = data[offset + i] ^ mask_key[(offset + i) % 4];
-            if (!message.writeData(strm, buf[0..n])) return false;
+            if (!mod.message.writeData(strm, buf[0..n])) return false;
         }
     } else if (len > 0) {
-        if (!message.writeData(strm, data)) return false;
+        if (!mod.message.writeData(strm, data)) return false;
     }
 
     return true;
@@ -287,22 +281,22 @@ pub fn websocketAcceptKey(client_key: []const u8, out: *[28]u8) []const u8 {
 /// Ports `WebSocket` (httplib.h:4659 @b1b770d90).
 pub const WebSocket = struct {
     a: std.mem.Allocator,
-    strm: *SocketStream,
+    strm: *mod.socket.SocketStream,
     is_server: bool,
     ping_interval_sec: i64 = ping_interval_second,
     closed: std.atomic.Value(bool) = .init(false),
-    write_mutex: sync.Mutex = .{},
+    write_mutex: stdlib.sync.Mutex = .{},
     /// Owned by whichever thread is parsing frames off `strm`. Only one
     /// thread may do so: a second parser stealing bytes silently corrupts
     /// the message the first one is assembling.
-    read_mutex: sync.Mutex = .{},
+    read_mutex: stdlib.sync.Mutex = .{},
     ping_thread: ?std.Thread = null,
-    ping_mutex: sync.Mutex = .{},
-    ping_cv: sync.Condition = .{},
+    ping_mutex: stdlib.sync.Mutex = .{},
+    ping_cv: stdlib.sync.Condition = .{},
 
     /// Ports `WebSocket` (httplib.h:4689 @b1b770d90), the constructor,
     /// into `self`, which its ping thread points at.
-    pub fn init(self: *WebSocket, a: std.mem.Allocator, strm: *SocketStream, is_server: bool) void {
+    pub fn init(self: *WebSocket, a: std.mem.Allocator, strm: *mod.socket.SocketStream, is_server: bool) void {
         self.* = .{ .a = a, .strm = strm, .is_server = is_server };
         self.startHeartbeat();
     }
@@ -546,10 +540,10 @@ pub const WebSocketClient = struct {
     host: []const u8 = "",
     port: c_int = 0,
     path: []const u8 = "",
-    headers: Headers,
+    headers: mod.detail.Headers,
     is_valid: bool = false,
-    sock: socket.Socket = socket.invalid_socket,
-    strm: ?*SocketStream = null,
+    sock: mod.socket.Socket = mod.socket.invalid_socket,
+    strm: ?*mod.socket.SocketStream = null,
     ws: ?*WebSocket = null,
 
     const client = @import("client.zig");
@@ -557,7 +551,7 @@ pub const WebSocketClient = struct {
     /// Ports `WebSocketClient` (httplib.cpp:18949 @b1b770d90), the
     /// constructor: a scheme other than `ws` throws in the C, which no
     /// caller here reaches; this leaves the client invalid.
-    pub fn init(a: std.mem.Allocator, scheme_host_port_path: []const u8, headers: Headers) WebSocketClient {
+    pub fn init(a: std.mem.Allocator, scheme_host_port_path: []const u8, headers: mod.detail.Headers) WebSocketClient {
         var self: WebSocketClient = .{ .a = a, .headers = headers };
         var uc: client.UrlComponents = undefined;
         if (client.parseUrl(scheme_host_port_path, &uc) and uc.scheme.len != 0 and uc.host.len != 0 and uc.path.len != 0) {
@@ -593,10 +587,10 @@ pub const WebSocketClient = struct {
             self.a.destroy(s);
             self.strm = null;
         }
-        if (self.sock != socket.invalid_socket) {
-            _ = socket.shutdownSocket(self.sock);
-            _ = socket.closeSocket(self.sock);
-            self.sock = socket.invalid_socket;
+        if (self.sock != mod.socket.invalid_socket) {
+            _ = mod.socket.shutdownSocket(self.sock);
+            _ = mod.socket.closeSocket(self.sock);
+            self.sock = mod.socket.invalid_socket;
         }
     }
 
@@ -617,9 +611,9 @@ pub const WebSocketClient = struct {
         impl.read_timeout_sec = 0;
         var err: client.Error = .success;
         self.sock = try impl.createClientSocket(&err);
-        if (self.sock == socket.invalid_socket) return false;
+        if (self.sock == mod.socket.invalid_socket) return false;
 
-        const strm = try self.a.create(SocketStream);
+        const strm = try self.a.create(mod.socket.SocketStream);
         errdefer self.a.destroy(strm);
         strm.* = .{
             .sock = self.sock,
@@ -649,7 +643,7 @@ pub const WebSocketClient = struct {
     /// `read_websocket_upgrade_response` (httplib.cpp:3709 @b1b770d90), with
     /// `prepare_default_headers` (httplib.cpp:19114 @b1b770d90) before them,
     /// whose `add_authorization_header` adds nothing with no credentials set.
-    fn performHandshake(self: *WebSocketClient, strm: *SocketStream) error{OutOfMemory}!bool {
+    fn performHandshake(self: *WebSocketClient, strm: *mod.socket.SocketStream) error{OutOfMemory}!bool {
         const a = self.a;
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
@@ -677,14 +671,14 @@ pub const WebSocketClient = struct {
 
         // `write_request_head` (httplib.cpp:5760 @b1b770d90): built in memory
         // first, so a rejected header never leaves a partial request on the wire
-        var bstrm: socket.BufferStream = .{ .a = ar };
-        if (!detail.isRequestTarget(self.path)) return false;
+        var bstrm: mod.socket.BufferStream = .{ .a = ar };
+        if (!mod.detail.isRequestTarget(self.path)) return false;
         _ = bstrm.write(try std.mem.concat(ar, u8, &.{ "GET ", self.path, " HTTP/1.1\r\n" }));
         for (headers.entries.items) |h| {
-            if (!detail.isFieldValid(h.key, h.value)) return false;
+            if (!mod.detail.isFieldValid(h.key, h.value)) return false;
         }
-        if (try message.writeHeaders(ar, &bstrm, &headers) <= 0) return false;
-        if (!message.writeData(strm, bstrm.buffer.items)) return false;
+        if (try mod.message.writeHeaders(ar, &bstrm, &headers) <= 0) return false;
+        if (!mod.message.writeData(strm, bstrm.buffer.items)) return false;
 
         // Verify 101 response and Sec-WebSocket-Accept header
         var accept_buf: [28]u8 = undefined;
@@ -692,19 +686,19 @@ pub const WebSocketClient = struct {
 
         // `read_response_head` (httplib.cpp:3694 @b1b770d90)
         var buf: [2048]u8 = undefined;
-        var lr = socket.LineReader.init(ar, strm, &buf);
+        var lr = mod.socket.LineReader.init(ar, strm, &buf);
         if (!try lr.getline()) return false;
         var version: []const u8 = "";
         var reason: []const u8 = "";
         var status: c_int = -1;
-        var res_headers: Headers = .{};
+        var res_headers: mod.detail.Headers = .{};
         if (try client.parseStatusLine(ar, lr.cstr(), &version, &status, &reason)) {
-            if (!try message.readHeaders(ar, strm, &res_headers)) return false;
+            if (!try mod.message.readHeaders(ar, strm, &res_headers)) return false;
         }
 
         if (status != 101) return false;
-        if (!detail.hasHeaderToken(&res_headers, "Upgrade", "websocket")) return false;
-        if (!detail.hasHeaderToken(&res_headers, "Connection", "upgrade")) return false;
+        if (!mod.detail.hasHeaderToken(&res_headers, "Upgrade", "websocket")) return false;
+        if (!mod.detail.hasHeaderToken(&res_headers, "Connection", "upgrade")) return false;
         const accept = res_headers.get("Sec-WebSocket-Accept", 0) orelse return false;
         if (!std.mem.eql(u8, accept, expected_accept)) return false;
         // no subprotocol is offered, so none may come back

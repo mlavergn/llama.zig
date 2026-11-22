@@ -17,15 +17,8 @@
 //! them is the arena's, and nothing in them is freed before it is.
 
 const std = @import("std");
-const libcxx = @import("stdlib").libcxx;
-const detail = @import("detail.zig");
-const socket = @import("socket.zig");
-
-const Headers = detail.Headers;
-const Params = detail.Params;
-const Range = detail.Range;
-const SocketStream = socket.SocketStream;
-const LineReader = socket.LineReader;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `FormData` (httplib.h:1523 @b1b770d90): one file part.
 pub const FormData = struct {
@@ -33,21 +26,21 @@ pub const FormData = struct {
     content: std.ArrayList(u8) = .empty,
     filename: []const u8 = "",
     content_type: []const u8 = "",
-    headers: Headers = .{},
+    headers: mod.detail.Headers = .{},
 };
 
 /// Ports `FormField` (httplib.h:1531 @b1b770d90): one text part.
 pub const FormField = struct {
     name: []const u8 = "",
     content: std.ArrayList(u8) = .empty,
-    headers: Headers = .{},
+    headers: mod.detail.Headers = .{},
 };
 
 /// Ports `MultipartFormData` (httplib.h:1547 @b1b770d90): the parts of a
 /// `multipart/form-data` body, in the order sent.
 pub const MultipartFormData = struct {
-    fields: detail.OrderedMultimap(FormField, false) = .{},
-    files: detail.OrderedMultimap(FormData, false) = .{},
+    fields: mod.detail.OrderedMultimap(FormField, false) = .{},
+    files: mod.detail.OrderedMultimap(FormData, false) = .{},
 };
 
 /// Ports `Request` (httplib.h:1820 @b1b770d90): the members the server
@@ -57,9 +50,9 @@ pub const Request = struct {
     method: []const u8 = "",
     path: []const u8 = "",
     matched_route: []const u8 = "",
-    params: Params = .{},
-    headers: Headers = .{},
-    trailers: Headers = .{},
+    params: mod.detail.Params = .{},
+    headers: mod.detail.Headers = .{},
+    trailers: mod.detail.Headers = .{},
     body: std.ArrayList(u8) = .empty,
     remote_addr: []const u8 = "",
     remote_port: c_int = -1,
@@ -68,13 +61,13 @@ pub const Request = struct {
     version: []const u8 = "",
     target: []const u8 = "",
     form: MultipartFormData = .{},
-    ranges: std.ArrayList(Range) = .empty,
+    ranges: std.ArrayList(mod.detail.Range) = .empty,
     /// `path_params`: an `unordered_map` in the C, whose readers copy it
     /// into a `std::map`, so its order is never seen.
-    path_params: std.ArrayList(Params.Entry) = .empty,
+    path_params: std.ArrayList(mod.detail.Params.Entry) = .empty,
     /// The socket `is_connection_closed` polls; -1 until `process_request`
     /// sets it up, where the C's default answers "closed".
-    sock: socket.Socket = -1,
+    sock: mod.socket.Socket = -1,
     /// `body_read_started_`: a second read would start where the first stopped.
     body_read_started: bool = false,
     body_consumed: bool = false,
@@ -85,33 +78,33 @@ pub const Request = struct {
     /// Ports `has_header` (httplib.cpp:7188 @b1b770d90), a member of
     /// `Request`.
     pub fn hasHeader(self: *const Request, key: []const u8) bool {
-        return detail.hasHeader(&self.headers, key);
+        return mod.detail.hasHeader(&self.headers, key);
     }
 
     /// Ports `get_header_value` (httplib.cpp:7192 @b1b770d90), a member of
     /// `Request`.
     pub fn getHeaderValue(self: *const Request, key: []const u8) []const u8 {
-        return detail.getHeaderValue(&self.headers, key);
+        return mod.detail.getHeaderValue(&self.headers, key);
     }
 
     /// `get_header_value_u64` with its defaults, a member of `Request`.
     pub fn getHeaderValueU64(self: *const Request, key: []const u8) usize {
         var invalid = false;
-        return detail.getHeaderValueU64(&self.headers, key, 0, &invalid);
+        return mod.detail.getHeaderValueU64(&self.headers, key, 0, &invalid);
     }
 
     /// Ports `is_multipart_form_data` (httplib.cpp:7243 @b1b770d90), a
     /// member of `Request`.
     pub fn isMultipartFormData(self: *const Request) error{OutOfMemory}!bool {
         const content_type = self.getHeaderValue("Content-Type");
-        return detail.caseIgnoreEqual(try detail.extractMediaType(self.a, content_type, null), "multipart/form-data");
+        return mod.detail.caseIgnoreEqual(try mod.detail.extractMediaType(self.a, content_type, null), "multipart/form-data");
     }
 
     /// `is_connection_closed`, as `process_request` sets it up: whether
     /// the peer has gone.
     pub fn isConnectionClosed(self: *const Request) bool {
         if (self.sock < 0) return true;
-        return !socket.isSocketAlive(self.sock);
+        return !mod.socket.isSocketAlive(self.sock);
     }
 };
 
@@ -152,7 +145,7 @@ pub const Releaser = struct {
 pub const Response = struct {
     a: std.mem.Allocator,
     status: c_int = -1,
-    headers: Headers = .{},
+    headers: mod.detail.Headers = .{},
     body: std.ArrayList(u8) = .empty,
     content_length: usize = 0,
     content_provider: ?ContentProvider = null,
@@ -211,14 +204,14 @@ pub const Response = struct {
     /// Ports `get_header_value` (httplib.cpp:7453 @b1b770d90), a member of
     /// `Response`.
     pub fn getHeaderValue(self: *const Response, key: []const u8) []const u8 {
-        return detail.getHeaderValue(&self.headers, key);
+        return mod.detail.getHeaderValue(&self.headers, key);
     }
 
     /// Ports `set_header` (httplib.cpp:7463 @b1b770d90), a member of
     /// `Response`: appends, so a name set twice is sent twice; an invalid
     /// name or value is dropped. Both strings are copied.
     pub fn setHeader(self: *Response, key: []const u8, val: []const u8) error{OutOfMemory}!void {
-        if (!detail.isFieldValid(key, val)) return;
+        if (!mod.detail.isFieldValid(key, val)) return;
         _ = try self.headers.emplace(self.a, try self.a.dupe(u8, key), try self.a.dupe(u8, val));
     }
 
@@ -252,18 +245,18 @@ pub const Response = struct {
 /// Return: the two, borrowed from `line`, or null where the C returns false.
 pub fn parseHeader(line: []const u8) ?struct { key: []const u8, val: []const u8 } {
     var end = line.len;
-    while (0 < end and detail.isSpaceOrTab(line[end - 1])) end -= 1;
+    while (0 < end and mod.detail.isSpaceOrTab(line[end - 1])) end -= 1;
     var p: usize = 0;
     while (p < end and line[p] != ':') p += 1;
     const name = line[0..p];
-    if (!detail.isFieldName(name)) return null;
+    if (!mod.detail.isFieldName(name)) return null;
     if (p == end) return null;
     const key_end = p;
     p += 1;
-    while (p < end and detail.isSpaceOrTab(line[p])) p += 1;
+    while (p < end and mod.detail.isSpaceOrTab(line[p])) p += 1;
     if (key_end == 0) return null;
     const val = line[p..end];
-    if (!detail.isFieldValue(val)) return null;
+    if (!mod.detail.isFieldValue(val)) return null;
     return .{ .key = line[0..key_end], .val = val };
 }
 
@@ -271,9 +264,9 @@ pub fn parseHeader(line: []const u8) ?struct { key: []const u8, val: []const u8 
 /// the blank one, each at most `CPPHTTPLIB_HEADER_MAX_LENGTH`, at most
 /// `CPPHTTPLIB_HEADER_MAX_COUNT` of them, and no two `Content-Length`s that
 /// differ.
-pub fn readHeaders(a: std.mem.Allocator, strm: *SocketStream, headers: *Headers) error{OutOfMemory}!bool {
+pub fn readHeaders(a: std.mem.Allocator, strm: *mod.socket.SocketStream, headers: *mod.detail.Headers) error{OutOfMemory}!bool {
     var buf: [2048]u8 = undefined;
-    var lr = LineReader.init(a, strm, &buf);
+    var lr = mod.socket.LineReader.init(a, strm, &buf);
     defer lr.deinit();
     var header_count: usize = 0;
     while (true) {
@@ -284,8 +277,8 @@ pub fn readHeaders(a: std.mem.Allocator, strm: *SocketStream, headers: *Headers)
         } else {
             continue; // Skip invalid line.
         }
-        if (line.len > detail.header_max_length) return false;
-        if (header_count >= detail.header_max_count) return false;
+        if (line.len > mod.detail.header_max_length) return false;
+        if (header_count >= mod.detail.header_max_count) return false;
         const h = parseHeader(line[0 .. line.len - 2]) orelse return false;
         _ = try headers.emplace(a, try a.dupe(u8, h.key), try a.dupe(u8, h.val));
         header_count += 1;
@@ -314,10 +307,10 @@ const prohibited_trailers = [_][]const u8{
 /// the last chunk, until the blank one, kept in `dest` only where
 /// `Trailer` declared them. At most `CPPHTTPLIB_HEADER_MAX_COUNT` names are
 /// declared, and every field received counts toward the same limit.
-fn parseTrailers(a: std.mem.Allocator, lr: *LineReader, dest: *Headers, src_headers: *const Headers) error{OutOfMemory}!bool {
+fn parseTrailers(a: std.mem.Allocator, lr: *mod.socket.LineReader, dest: *mod.detail.Headers, src_headers: *const mod.detail.Headers) error{OutOfMemory}!bool {
     var declared: std.ArrayList([]const u8) = .empty;
     defer declared.deinit(a);
-    const trailer_header = try detail.getCombinedHeaderValue(a, src_headers, "Trailer");
+    const trailer_header = try mod.detail.getCombinedHeaderValue(a, src_headers, "Trailer");
     if (trailer_header.len != 0) {
         const Ctx = struct {
             a: std.mem.Allocator,
@@ -325,24 +318,24 @@ fn parseTrailers(a: std.mem.Allocator, lr: *LineReader, dest: *Headers, src_head
             pub fn call(self: *@This(), key: []const u8) error{OutOfMemory}!void {
                 // A legitimate message declares only a handful of trailers. Cap the
                 // set so a peer cannot grow it without bound.
-                if (self.declared.items.len >= detail.header_max_count) return;
-                for (prohibited_trailers) |p| if (detail.caseIgnoreEqual(p, key)) return;
-                for (self.declared.items) |d| if (detail.caseIgnoreEqual(d, key)) return;
+                if (self.declared.items.len >= mod.detail.header_max_count) return;
+                for (prohibited_trailers) |p| if (mod.detail.caseIgnoreEqual(p, key)) return;
+                for (self.declared.items) |d| if (mod.detail.caseIgnoreEqual(d, key)) return;
                 try self.declared.append(self.a, key);
             }
         };
         var ctx: Ctx = .{ .a = a, .declared = &declared };
-        try detail.split(trailer_header, ',', std.math.maxInt(usize), &ctx);
+        try mod.detail.split(trailer_header, ',', std.math.maxInt(usize), &ctx);
     }
     var trailer_header_count: usize = 0;
     while (!std.mem.eql(u8, lr.cstr(), "\r\n")) {
         const line = lr.line();
-        if (line.len > detail.header_max_length) return false;
-        if (trailer_header_count >= detail.header_max_count) return false;
+        if (line.len > mod.detail.header_max_length) return false;
+        if (trailer_header_count >= mod.detail.header_max_count) return false;
         if (line.len < 2) return false;
         const h = parseHeader(line[0 .. line.len - 2]) orelse return false;
         for (declared.items) |d| {
-            if (detail.caseIgnoreEqual(d, h.key)) {
+            if (mod.detail.caseIgnoreEqual(d, h.key)) {
                 _ = try dest.emplace(a, try a.dupe(u8, h.key), try a.dupe(u8, h.val));
                 break;
             }
@@ -364,7 +357,7 @@ const ReadContentResult = enum { success, payload_too_large, err };
 /// Ports `ChunkedDecoder` (httplib.h:4074 @b1b770d90): a chunked body's
 /// payload, one chunk-size line and its data at a time.
 const ChunkedDecoder = struct {
-    strm: *SocketStream,
+    strm: *mod.socket.SocketStream,
     chunk_remaining: usize = 0,
     finished: bool = false,
     line_buf: [64]u8 = undefined,
@@ -381,7 +374,7 @@ const ChunkedDecoder = struct {
     fn readPayload(self: *ChunkedDecoder, a: std.mem.Allocator, buf: []u8) error{OutOfMemory}!isize {
         if (self.finished) return 0;
         if (self.chunk_remaining == 0) {
-            var lr = LineReader.init(a, self.strm, &self.line_buf);
+            var lr = mod.socket.LineReader.init(a, self.strm, &self.line_buf);
             defer lr.deinit();
             if (!try lr.getline()) return -1;
 
@@ -399,21 +392,21 @@ const ChunkedDecoder = struct {
             // RFC 9112 §7.1: chunk-size = 1*HEXDIG
             const s = line;
             var p: usize = 0;
-            if (p == eol or detail.isHex(s[p]) == null) return -1;
+            if (p == eol or mod.detail.isHex(s[p]) == null) return -1;
             var chunk_len: usize = 0;
             while (p < eol) : (p += 1) {
-                const v = detail.isHex(s[p]) orelse break;
+                const v = mod.detail.isHex(s[p]) orelse break;
                 if (chunk_len > (std.math.maxInt(usize) >> 4)) return -1;
                 chunk_len = (chunk_len << 4) | v;
             }
-            while (p < eol and detail.isSpaceOrTab(s[p])) p += 1;
+            while (p < eol and mod.detail.isSpaceOrTab(s[p])) p += 1;
 
             // RFC 9112 §7.1.1: only a chunk-ext may sit between the size and the line
             // terminator, built from tokens and quoted-strings, so never a CR, LF or
             // any other control character (request smuggling).
             if (p < eol and s[p] != ';') return -1;
             while (p < eol) : (p += 1) {
-                if (!detail.isSpaceOrTab(s[p]) and !detail.isFieldVchar(s[p])) return -1;
+                if (!mod.detail.isSpaceOrTab(s[p]) and !mod.detail.isFieldVchar(s[p])) return -1;
             }
 
             // The bytes around the data are no payload, so they are counted on their
@@ -423,7 +416,7 @@ const ChunkedDecoder = struct {
             self.overhead += line.len + 2;
             self.overhead = if (self.overhead > 16) self.overhead - 16 else 0;
             self.overhead = if (chunk_len > self.overhead / 2) 0 else self.overhead - 2 * chunk_len;
-            if (self.overhead > detail.header_max_length) return -1;
+            if (self.overhead > mod.detail.header_max_length) return -1;
 
             if (chunk_len == 0) {
                 self.chunk_remaining = 0;
@@ -437,7 +430,7 @@ const ChunkedDecoder = struct {
         if (n <= 0) return -1;
         self.chunk_remaining -= @intCast(n);
         if (self.chunk_remaining == 0) {
-            var lr = LineReader.init(a, self.strm, &self.line_buf);
+            var lr = mod.socket.LineReader.init(a, self.strm, &self.line_buf);
             defer lr.deinit();
             if (!try lr.getline()) return -1;
             if (!std.mem.eql(u8, lr.cstr(), "\r\n")) return -1;
@@ -447,8 +440,8 @@ const ChunkedDecoder = struct {
 
     /// Ports `parse_trailers_into` (httplib.cpp:11389 @b1b770d90), a member
     /// of `ChunkedDecoder`.
-    fn parseTrailersInto(self: *ChunkedDecoder, a: std.mem.Allocator, dest: *Headers, src_headers: *const Headers) error{OutOfMemory}!bool {
-        var lr = LineReader.init(a, self.strm, &self.line_buf);
+    fn parseTrailersInto(self: *ChunkedDecoder, a: std.mem.Allocator, dest: *mod.detail.Headers, src_headers: *const mod.detail.Headers) error{OutOfMemory}!bool {
+        var lr = mod.socket.LineReader.init(a, self.strm, &self.line_buf);
         defer lr.deinit();
         if (!try lr.getline()) return false;
         return parseTrailers(a, &lr, dest, src_headers);
@@ -458,12 +451,12 @@ const ChunkedDecoder = struct {
 /// Ports `read_content_with_length` (httplib.cpp:3777 @b1b770d90), with
 /// the `BodyReader` it reads through (`BodyReader::read`, httplib.cpp:7584
 /// @b1b770d90): `len` bytes, failing past `payload_max_length`.
-fn readContentWithLength(strm: *SocketStream, len: usize, out: anytype, payload_max_length: usize) !ReadContentResult {
-    var buf: [detail.recv_bufsiz]u8 = undefined;
+fn readContentWithLength(strm: *mod.socket.SocketStream, len: usize, out: anytype, payload_max_length: usize) !ReadContentResult {
+    var buf: [mod.detail.recv_bufsiz]u8 = undefined;
     var bytes_read: usize = 0;
     var r: usize = 0;
     while (r < len) {
-        const to_read = @min(len - r, detail.recv_bufsiz);
+        const to_read = @min(len - r, mod.detail.recv_bufsiz);
         // BodyReader::read
         if (bytes_read >= len) return .err;
         const n = strm.read(buf[0..@min(to_read, len - bytes_read)]);
@@ -478,8 +471,8 @@ fn readContentWithLength(strm: *SocketStream, len: usize, out: anytype, payload_
 
 /// Ports `read_content_without_length` (httplib.cpp:3819 @b1b770d90): to
 /// end of stream. A `payload_max_length` of 0 is no limit, since 0.60.0.
-fn readContentWithoutLength(strm: *SocketStream, payload_max_length: usize, out: anytype) !ReadContentResult {
-    var buf: [detail.recv_bufsiz]u8 = undefined;
+fn readContentWithoutLength(strm: *mod.socket.SocketStream, payload_max_length: usize, out: anytype) !ReadContentResult {
+    var buf: [mod.detail.recv_bufsiz]u8 = undefined;
     var r: usize = 0;
     while (true) {
         const n = strm.read(&buf);
@@ -496,9 +489,9 @@ fn readContentWithoutLength(strm: *SocketStream, payload_max_length: usize, out:
 /// Ports `read_content_chunked` (httplib.cpp:3845 @b1b770d90): the chunks,
 /// then the trailers into `req.trailers`. A `payload_max_length` of 0 is
 /// no limit, since 0.60.0.
-fn readContentChunked(strm: *SocketStream, req: anytype, payload_max_length: usize, out: anytype) !ReadContentResult {
+fn readContentChunked(strm: *mod.socket.SocketStream, req: anytype, payload_max_length: usize, out: anytype) !ReadContentResult {
     var dec: ChunkedDecoder = .{ .strm = strm };
-    var buf: [detail.recv_bufsiz]u8 = undefined;
+    var buf: [mod.detail.recv_bufsiz]u8 = undefined;
     var total_len: usize = 0;
     while (true) {
         const n = try dec.readPayload(req.a, &buf);
@@ -525,17 +518,17 @@ fn readContentChunked(strm: *SocketStream, req: anytype, payload_max_length: usi
 /// `out` has `receive([]const u8) !bool`. `req` is any message with `a`,
 /// `headers` and `trailers`: a server's request, or a client's response
 /// (`client.zig`), as the C's template takes either.
-pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize, status: *c_int, out: anytype, decompress: bool) !bool {
+pub fn readContent(strm: *mod.socket.SocketStream, req: anytype, payload_max_length: usize, status: *c_int, out: anytype, decompress: bool) !bool {
     if (decompress) {
-        const encoding = try detail.getCombinedHeaderValue(req.a, &req.headers, "Content-Encoding");
-        if (encoding.len != 0 and detail.isKnownContentEncoding(encoding)) {
-            status.* = detail.StatusCode.unsupported_media_type_415;
+        const encoding = try mod.detail.getCombinedHeaderValue(req.a, &req.headers, "Content-Encoding");
+        if (encoding.len != 0 and mod.detail.isKnownContentEncoding(encoding)) {
+            status.* = mod.detail.StatusCode.unsupported_media_type_415;
             return false;
         }
     }
     var exceed_payload_max_length = false;
     var ret = true;
-    if (detail.isChunkedTransferEncoding(&req.headers)) {
+    if (mod.detail.isChunkedTransferEncoding(&req.headers)) {
         switch (try readContentChunked(strm, req, payload_max_length, out)) {
             .success => ret = true,
             .payload_too_large => {
@@ -544,7 +537,7 @@ pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize,
             },
             .err => ret = false,
         }
-    } else if (!detail.hasHeader(&req.headers, "Content-Length")) {
+    } else if (!mod.detail.hasHeader(&req.headers, "Content-Length")) {
         switch (try readContentWithoutLength(strm, payload_max_length, out)) {
             .success => ret = true,
             .payload_too_large => {
@@ -555,7 +548,7 @@ pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize,
         }
     } else {
         var is_invalid_value = false;
-        const len = detail.getHeaderValueU64(&req.headers, "Content-Length", std.math.maxInt(usize), &is_invalid_value);
+        const len = mod.detail.getHeaderValueU64(&req.headers, "Content-Length", std.math.maxInt(usize), &is_invalid_value);
         if (is_invalid_value) {
             ret = false;
         } else if (len > 0) {
@@ -564,13 +557,13 @@ pub fn readContent(strm: *SocketStream, req: anytype, payload_max_length: usize,
             if (result == .payload_too_large) exceed_payload_max_length = true;
         }
     }
-    if (!ret) status.* = if (exceed_payload_max_length) detail.StatusCode.payload_too_large_413 else detail.StatusCode.bad_request_400;
+    if (!ret) status.* = if (exceed_payload_max_length) mod.detail.StatusCode.payload_too_large_413 else mod.detail.StatusCode.bad_request_400;
     return ret;
 }
 
 /// Ports `has_framed_body` (httplib.cpp:5543 @b1b770d90).
 pub fn hasFramedBody(req: *const Request) bool {
-    return detail.isChunkedTransferEncoding(&req.headers) or req.getHeaderValueU64("Content-Length") > 0;
+    return mod.detail.isChunkedTransferEncoding(&req.headers) or req.getHeaderValueU64("Content-Length") > 0;
 }
 
 /// Ports `expect_content` (httplib.cpp:5548 @b1b770d90).
@@ -648,7 +641,7 @@ pub const FormDataParser = struct {
 
     fn startWithCaseIgnore(a: []const u8, b: []const u8, offset: usize) bool {
         if (a.len < offset + b.len) return false;
-        for (b, 0..) |ch, i| if (detail.toLower(a[offset + i]) != detail.toLower(ch)) return false;
+        for (b, 0..) |ch, i| if (mod.detail.toLower(a[offset + i]) != mod.detail.toLower(ch)) return false;
         return true;
     }
 
@@ -696,7 +689,7 @@ pub const FormDataParser = struct {
                     // Resume where the last call stopped looking, so that a line arriving
                     // a few bytes at a time is not searched from its start each time.
                     var pos = self.bufFindFrom(crlf, self.header_searched);
-                    if (pos > detail.header_max_length) return false;
+                    if (pos > mod.detail.header_max_length) return false;
                     while (pos < self.bufSize()) {
                         if (pos == 0) {
                             if (!try cb.header(&self.file)) {
@@ -707,7 +700,7 @@ pub const FormDataParser = struct {
                             self.state = 3;
                             break;
                         }
-                        if (self.header_count >= detail.header_max_count) {
+                        if (self.header_count >= mod.detail.header_max_count) {
                             self.is_valid = false;
                             return false;
                         }
@@ -721,10 +714,10 @@ pub const FormDataParser = struct {
 
                         const header_content_type = "Content-Type:";
                         if (startWithCaseIgnore(header, header_content_type, 0)) {
-                            self.file.content_type = detail.trimCopy(header[header_content_type.len..]);
+                            self.file.content_type = mod.detail.trimCopy(header[header_content_type.len..]);
                         } else if (parseContentDisposition(header)) |disposition_params| {
-                            var params: Params = .{};
-                            try detail.parseDispositionParams(self.a, disposition_params, &params);
+                            var params: mod.detail.Params = .{};
+                            try mod.detail.parseDispositionParams(self.a, disposition_params, &params);
                             self.file.name = params.get("name", 0) orelse {
                                 self.is_valid = false;
                                 return false;
@@ -733,7 +726,7 @@ pub const FormDataParser = struct {
                             if (params.get("filename*", 0)) |val| {
                                 const utf8_prefix = "UTF-8''";
                                 if (val.len > utf8_prefix.len and startWithCaseIgnore(val, utf8_prefix, 0)) {
-                                    self.file.filename = try detail.decodePathComponent(self.a, val[utf8_prefix.len..]);
+                                    self.file.filename = try mod.detail.decodePathComponent(self.a, val[utf8_prefix.len..]);
                                 } else {
                                     self.is_valid = false;
                                     return false;
@@ -798,16 +791,16 @@ pub const FormDataParser = struct {
 /// Ports `coalesce_ranges` (httplib.cpp:5294 @b1b770d90): ranges sorted by
 /// start with libc++'s `std::sort`, normalized, overlapping or adjacent ones
 /// merged -- identical ones kept.
-fn coalesceRanges(a: std.mem.Allocator, ranges: *std.ArrayList(Range), content_length: usize) error{OutOfMemory}!void {
+fn coalesceRanges(a: std.mem.Allocator, ranges: *std.ArrayList(mod.detail.Range), content_length: usize) error{OutOfMemory}!void {
     if (ranges.items.len <= 1) return;
     const S = struct {
-        fn lt(_: void, x: Range, y: Range) bool {
+        fn lt(_: void, x: mod.detail.Range, y: mod.detail.Range) bool {
             return x.first < y.first;
         }
     };
-    libcxx.sort(Range, ranges.items, {}, S.lt);
+    stdlib.libcxx.sort(mod.detail.Range, ranges.items, {}, S.lt);
     const cl: isize = @intCast(content_length);
-    var coalesced: std.ArrayList(Range) = .empty;
+    var coalesced: std.ArrayList(mod.detail.Range) = .empty;
     for (ranges.items) |r| {
         var first_pos = r.first;
         var last_pos = r.second;
@@ -841,14 +834,14 @@ pub fn rangeError(req: *Request, res: *Response) error{OutOfMemory}!bool {
     if (req.ranges.items.len != 0 and 200 <= res.status and res.status < 300) {
         if (res.body.items.len == 0 and res.content_provider != null and res.content_length == 0) {
             req.ranges.clearRetainingCapacity();
-            if (res.status == detail.StatusCode.partial_content_206) res.status = detail.StatusCode.ok_200;
+            if (res.status == mod.detail.StatusCode.partial_content_206) res.status = mod.detail.StatusCode.ok_200;
             return false;
         }
         const content_len: isize = @intCast(if (res.content_length != 0) res.content_length else res.body.items.len);
-        var processed: std.ArrayList(Range) = .empty;
+        var processed: std.ArrayList(mod.detail.Range) = .empty;
         defer processed.deinit(req.a);
         var overwrapping_count: usize = 0;
-        if (req.ranges.items.len > detail.range_max_count) return true;
+        if (req.ranges.items.len > mod.detail.range_max_count) return true;
         for (req.ranges.items) |*r| {
             if (r.first == -1 and r.second == -1) {
                 r.first = 0;
@@ -880,8 +873,8 @@ pub fn rangeError(req: *Request, res: *Response) error{OutOfMemory}!bool {
 /// 9112 6.1: a message framed by Transfer-Encoding next to a Content-Length,
 /// or in HTTP/1.0, leaves the connection unfit to carry another one.
 pub fn hasFaultyTransferEncoding(msg: anytype) bool {
-    return detail.hasHeader(&msg.headers, "Transfer-Encoding") and
-        (detail.hasHeader(&msg.headers, "Content-Length") or std.mem.eql(u8, msg.version, "HTTP/1.0"));
+    return mod.detail.hasHeader(&msg.headers, "Transfer-Encoding") and
+        (mod.detail.hasHeader(&msg.headers, "Content-Length") or std.mem.eql(u8, msg.version, "HTTP/1.0"));
 }
 
 /// Ports `body_allowed_for_status` (httplib.cpp:7384 @b1b770d90): RFC 9112
@@ -911,7 +904,7 @@ pub fn setFramingHeaders(req: *const Request, res: *Response) error{OutOfMemory}
             } else if (!is_head) {
                 // RFC 9112 6.3: a body with neither ends where the connection does.
                 _ = res.headers.eraseKey("Keep-Alive");
-                if (!detail.hasHeaderToken(&res.headers, "Connection", "close")) try res.setHeader("Connection", "close");
+                if (!mod.detail.hasHeaderToken(&res.headers, "Connection", "close")) try res.setHeader("Connection", "close");
             }
             return;
         }
@@ -926,7 +919,7 @@ pub fn setFramingHeaders(req: *const Request, res: *Response) error{OutOfMemory}
 }
 
 /// Ports `get_range_offset_and_length` (httplib.cpp:5432 @b1b770d90).
-pub fn getRangeOffsetAndLength(r: Range) struct { offset: usize, length: usize } {
+pub fn getRangeOffsetAndLength(r: mod.detail.Range) struct { offset: usize, length: usize } {
     return .{ .offset = @intCast(r.first), .length = @as(usize, @intCast(r.second - r.first)) + 1 };
 }
 
@@ -953,7 +946,7 @@ pub fn makeMultipartDataBoundary(a: std.mem.Allocator) error{OutOfMemory}![]u8 {
 /// range of `body` as its own part.
 ///
 /// Return: the multipart body, allocated by `a`.
-pub fn makeMultipartRangesData(a: std.mem.Allocator, ranges: []const Range, boundary: []const u8, content_type: []const u8, body: []const u8) error{OutOfMemory}![]u8 {
+pub fn makeMultipartRangesData(a: std.mem.Allocator, ranges: []const mod.detail.Range, boundary: []const u8, content_type: []const u8, body: []const u8) error{OutOfMemory}![]u8 {
     var data: std.ArrayList(u8) = .empty;
     for (ranges) |r| {
         try data.appendSlice(a, "--");
@@ -984,7 +977,7 @@ pub fn makeMultipartRangesData(a: std.mem.Allocator, ranges: []const Range, boun
 /// Ports `write_response_line` (httplib.cpp:4060 @b1b770d90).
 pub fn writeResponseLine(strm: anytype, status: c_int) isize {
     var buf: [128]u8 = undefined;
-    const s = std.fmt.bufPrint(&buf, "HTTP/1.1 {d} {s}\r\n", .{ status, detail.statusMessage(status) }) catch |err| switch (err) {
+    const s = std.fmt.bufPrint(&buf, "HTTP/1.1 {d} {s}\r\n", .{ status, mod.detail.statusMessage(status) }) catch |err| switch (err) {
         error.NoSpaceLeft => unreachable,
     };
     return strm.write(s);
@@ -994,7 +987,7 @@ pub fn writeResponseLine(strm: anytype, status: c_int) isize {
 /// own write, then the blank line. Since 0.64.0 it writes what it is given:
 /// the server drops invalid fields first (`erase_invalid_fields`), and a
 /// client checks its own before writing.
-pub fn writeHeaders(a: std.mem.Allocator, strm: anytype, headers: *const Headers) error{OutOfMemory}!isize {
+pub fn writeHeaders(a: std.mem.Allocator, strm: anytype, headers: *const mod.detail.Headers) error{OutOfMemory}!isize {
     var write_len: isize = 0;
     for (headers.entries.items) |x| {
         const s = try std.mem.concat(a, u8, &.{ x.key, ": ", x.value, "\r\n" });
@@ -1028,10 +1021,10 @@ pub fn writeData(strm: anytype, d: []const u8) bool {
 ///
 /// Return: false when the peer went away, the provider failed or wrote
 /// short, or the server shut down first; an error the provider raised.
-pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: ContentProvider, svr_sock: *const std.atomic.Value(socket.Socket)) anyerror!bool {
+pub fn writeContentChunked(a: std.mem.Allocator, strm: *mod.socket.SocketStream, provider: ContentProvider, svr_sock: *const std.atomic.Value(mod.socket.Socket)) anyerror!bool {
     const State = struct {
         a: std.mem.Allocator,
-        strm: *SocketStream,
+        strm: *mod.socket.SocketStream,
         offset: usize = 0,
         data_available: bool = true,
         ok: bool = true,
@@ -1041,7 +1034,7 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
             if (self.ok and d.len > 0) {
                 self.offset += d.len;
                 var hex_buf: [16]u8 = undefined;
-                const hex = detail.fromIToHex(&hex_buf, d.len);
+                const hex = mod.detail.fromIToHex(&hex_buf, d.len);
                 const chunk = std.mem.concat(self.a, u8, &.{ hex, "\r\n", d, "\r\n" }) catch {
                     self.ok = false;
                     return false;
@@ -1062,7 +1055,7 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
     };
     var state: State = .{ .a = a, .strm = strm };
     var sink: DataSink = .{ .ctx = &state, .write_fn = State.write, .done_fn = State.done };
-    while (state.data_available and svr_sock.load(.seq_cst) != socket.invalid_socket) {
+    while (state.data_available and svr_sock.load(.seq_cst) != mod.socket.invalid_socket) {
         if (!strm.waitWritable() or !strm.isPeerAlive()) {
             return false;
         } else if (!try provider.func(provider.ctx, state.offset, &sink)) {
@@ -1084,9 +1077,9 @@ pub fn writeContentChunked(a: std.mem.Allocator, strm: *SocketStream, provider: 
 ///
 /// Return: false when the provider stops, ends early or makes no
 /// progress, or a write fails.
-pub fn writeContent(strm: *SocketStream, provider: ContentProvider, offset_in: usize, length: usize, svr_sock: *const std.atomic.Value(socket.Socket)) anyerror!bool {
+pub fn writeContent(strm: *mod.socket.SocketStream, provider: ContentProvider, offset_in: usize, length: usize, svr_sock: *const std.atomic.Value(mod.socket.Socket)) anyerror!bool {
     const State = struct {
-        strm: *SocketStream,
+        strm: *mod.socket.SocketStream,
         offset: usize,
         end_offset: usize,
         ok: bool = true,
@@ -1121,7 +1114,7 @@ pub fn writeContent(strm: *SocketStream, provider: ContentProvider, offset_in: u
     const end_offset = offset_in + length;
     var state: State = .{ .strm = strm, .offset = offset_in, .end_offset = end_offset };
     var sink: DataSink = .{ .ctx = &state, .write_fn = State.write, .done_fn = State.done };
-    while (state.offset < end_offset and !state.finished and svr_sock.load(.seq_cst) != socket.invalid_socket) {
+    while (state.offset < end_offset and !state.finished and svr_sock.load(.seq_cst) != mod.socket.invalid_socket) {
         const last_offset = state.offset;
         if (!strm.waitWritable() or !strm.isPeerAlive()) {
             return false;

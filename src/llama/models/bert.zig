@@ -13,20 +13,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_bert`'s `load_arch_hparams` (models/bert.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
 
@@ -44,7 +35,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_bert`'s `load_arch_tensors` (models/bert.cpp:23 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     return loadBertTensors(self, .{ .pos_cls = true, .moe = false, .gate = false }, exc);
 }
 
@@ -56,10 +47,10 @@ pub const BertTensors = struct { pos_cls: bool, moe: bool, gate: bool };
 /// The body BERT, Jina-BERT v3, Nomic-BERT and Nomic-BERT MoE share in
 /// their `load_arch_tensors`, each citing its own; `v` picks the lines that
 /// differ.
-pub fn loadBertTensors(self: *Model, comptime v: BertTensors, exc: *Exception) Thrown!void {
+pub fn loadBertTensors(self: *llama.model.Model, comptime v: BertTensors, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     if (l.n_token_types == 0) {
         return exc.throw(.runtime_error, "{s} model needs to define token type count", .{self.archName()});
@@ -113,7 +104,7 @@ pub fn loadBertTensors(self: *Model, comptime v: BertTensors, exc: *Exception) T
 }
 
 /// Ports `llama_model_bert`'s `build_arch_graph` (models/bert.cpp:64 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
@@ -124,15 +115,15 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 /// Parameters:
 /// - `model`: the model; its architecture picks the variant.
 /// - `b`: the graph being built.
-pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+pub fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bert.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/bert.cpp", 71, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inp_pos: ?*Tensor = null;
-    var embd_pos: ?*Tensor = null;
+    var inp_pos: ?*llama.impl.c.ggml_tensor = null;
+    var embd_pos: ?*llama.impl.c.ggml_tensor = null;
 
     if (model.arch != .jina_bert_v2) {
         inp_pos = b.buildInpPos();
@@ -141,8 +132,8 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     // The position rows are ordered ahead of the input embeddings, without
     // marking them for compute.
     if (model.arch == .bert) {
-        embd_pos = c.ggml_get_rows(ctx, model.pos_embd, inp_pos);
-        c.ggml_build_forward_order(b.gf, embd_pos);
+        embd_pos = llama.impl.c.ggml_get_rows(ctx, model.pos_embd, inp_pos);
+        llama.impl.c.ggml_build_forward_order(b.gf, embd_pos);
     }
 
     // The input embeddings: token, type and position.
@@ -150,11 +141,11 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // The token types are hardcoded to zero ("Sentence A").
     if (model.type_embd) |type_embd| {
-        const type_row0: *Tensor = c.ggml_view_1d(ctx, type_embd, b.n_embd, 0);
-        inpL = c.ggml_add(ctx, inpL, type_row0);
+        const type_row0: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, type_embd, b.n_embd, 0);
+        inpL = llama.impl.c.ggml_add(ctx, inpL, type_row0);
     }
     if (model.arch == .bert) {
-        inpL = c.ggml_add(ctx, embd_pos, inpL);
+        inpL = llama.impl.c.ggml_add(ctx, embd_pos, inpL);
     }
     b.cb(inpL, "inp_embd", -1);
 
@@ -178,19 +169,19 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const Vcur = qkv.v;
 
             if (layer.attn_q_norm != null) {
-                Qcur = c.ggml_reshape_2d(ctx, Qcur, n_embd_head * b.n_head, b.n_tokens);
+                Qcur = llama.impl.c.ggml_reshape_2d(ctx, Qcur, n_embd_head * b.n_head, b.n_tokens);
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, layer.attn_q_norm_b, .norm, il);
 
-                Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
             }
 
             if (layer.attn_k_norm != null) {
-                Kcur = c.ggml_reshape_2d(ctx, Kcur, n_embd_head * b.n_head_kv, b.n_tokens);
+                Kcur = llama.impl.c.ggml_reshape_2d(ctx, Kcur, n_embd_head * b.n_head_kv, b.n_tokens);
 
                 Kcur = b.buildNorm(Kcur, layer.attn_k_norm, layer.attn_k_norm_b, .norm, il);
 
-                Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+                Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
             }
 
             // RoPE.
@@ -204,23 +195,23 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / stdlib.libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "kqv_out", il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         // Re-add the layer input.
-        cur = c.ggml_add(ctx, cur, inpL);
+        cur = llama.impl.c.ggml_add(ctx, cur, inpL);
 
         // The attention's layer norm.
         cur = b.buildNorm(cur, layer.attn_out_norm, layer.attn_out_norm_b, .norm, il);
 
         if (layer.attn_norm_2 != null) {
-            cur = c.ggml_add(ctx, cur, inpL); // Re-add the layer input.
+            cur = llama.impl.c.ggml_add(ctx, cur, inpL); // Re-add the layer input.
             cur = b.buildNorm(cur, layer.attn_norm_2, layer.attn_norm_2_b, .norm, il);
         }
 
@@ -248,7 +239,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "ffn_out", il);
         } else if (model.arch == .jina_bert_v2) {
             const up_contains_gate = layer.ffn_gate == null and layer.ffn_up.?.ne[1] != hp.nFf(0);
-            const type_op: graph.FfnOp = if (up_contains_gate) .geglu else .gelu;
+            const type_op: llama.graph.FfnOp = if (up_contains_gate) .geglu else .gelu;
             cur = b.buildFfn(cur, layer.ffn_up, layer.ffn_up_b, null, layer.ffn_gate, null, null, layer.ffn_down, layer.ffn_down_b, null, null, type_op, .par, il);
             b.cb(cur, "ffn_out", il);
         } else {
@@ -257,7 +248,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
 
         // The attention output bypasses the feed-forward.
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
 
         // The output's layer norm.
         cur = b.buildNorm(cur, layer.layer_out_norm, layer.layer_out_norm_b, .norm, il);

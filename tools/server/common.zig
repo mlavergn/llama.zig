@@ -26,18 +26,13 @@
 //! gate masks them (`server-task-diff` and `server-diff` both do).
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
+const llama = @import("llama");
 const stdlib = @import("stdlib");
-const sync = stdlib.sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const libcxx = @import("stdlib").libcxx;
-const llama_api = @import("llama").api;
-const LlamaException = @import("llama").impl.Exception;
 
 pub const c = tools.c;
-const log = tools.log;
 pub const exception = chat.exception;
 
 pub const Value = json.Value;
@@ -91,11 +86,11 @@ pub fn srv(comptime level: SrvLevel, comptime func: []const u8, comptime fmt: []
     const f = "srv  %12.*s: " ++ fmt;
     const pre = .{ @as(c_int, 12), @as([*:0]const u8, func ++ "") };
     switch (level) {
-        .dbg => log.dbg(f, pre ++ args),
-        .trc => log.trc(f, pre ++ args),
-        .inf => log.inf(f, pre ++ args),
-        .wrn => log.wrn(f, pre ++ args),
-        .err => log.err(f, pre ++ args),
+        .dbg => tools.log.dbg(f, pre ++ args),
+        .trc => tools.log.trc(f, pre ++ args),
+        .inf => tools.log.inf(f, pre ++ args),
+        .wrn => tools.log.wrn(f, pre ++ args),
+        .err => tools.log.err(f, pre ++ args),
     }
 }
 
@@ -186,7 +181,7 @@ fn wrongType(key: []const u8) void {
     defer freeZ(k);
     const w = dupZ(json.what());
     defer freeZ(w);
-    log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k, w });
+    tools.log.wrn("Wrong type supplied for parameter '%s', using default value: %s\n", .{ k, w });
 }
 
 // -----------------------------------------------------------------------------
@@ -374,7 +369,7 @@ pub const GrammarTrigger = struct {
 /// Return: owned by the caller.
 pub fn randomString(a: Allocator) Error![]u8 {
     const str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    var generator = libcxx.Mt19937.init(libcxx.randomDevice());
+    var generator = stdlib.libcxx.Mt19937.init(stdlib.libcxx.randomDevice());
     const result = try a.alloc(u8, 32);
     for (result) |*ch| ch.* = str[generator.next() % str.len];
     return result;
@@ -392,7 +387,7 @@ pub fn genToolCallId(a: Allocator) Error![]u8 {
     return randomString(a);
 }
 
-var media_marker_mutex: sync.Mutex = .{};
+var media_marker_mutex: stdlib.sync.Mutex = .{};
 var media_marker_done = false;
 var media_marker_buf: [64]u8 = undefined;
 var media_marker: [:0]const u8 = "";
@@ -1000,7 +995,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
         n_top = cur.len;
     }
     if (n_top > 0) {
-        libcxx.partialSort(TokenData, cur, n_top, {}, logitGreater);
+        stdlib.libcxx.partialSort(TokenData, cur, n_top, {}, logitGreater);
     }
 
     // apply softmax
@@ -1014,7 +1009,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
     }
     var cum_sum: f32 = 0.0;
     for (cur) |*t| {
-        const p = libm.expf(t.logit - max_l);
+        const p = stdlib.libm.expf(t.logit - max_l);
         t.p = p;
         cum_sum += p;
     }
@@ -1067,15 +1062,15 @@ pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, ad
     // text -- reaches the caller as an exception, which the handlers'
     // `ex_wrapper` answers with 500, as upstream's does. `llama_tokenize`
     // itself would terminate: an exception cannot leave its C ABI.
-    var exc: LlamaException = .{};
-    n_tokens = llama_api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
+    var exc: llama.impl.Exception = .{};
+    n_tokens = llama.api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
         return throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_tokens == std.math.minInt(i32)) {
         return throw(error.RuntimeError, "Tokenization failed: input text too large, tokenization result exceeds int32_t limit", .{});
     }
     if (n_tokens < 0) {
         result = try a.realloc(result, @intCast(-n_tokens));
-        const check = llama_api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
+        const check = llama.api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
         tools.ggml.ggmlAssert(check == -n_tokens, "common.cpp", 1881, "check == -n_tokens");
     } else {
@@ -1092,12 +1087,12 @@ pub fn detokenize(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const To
     var text = try a.alloc(u8, @max(22, tokens.len));
     errdefer a.free(text);
     // A token outside the vocabulary throws in libllama, as in `tokenize`.
-    var exc: LlamaException = .{};
-    var n_chars = llama_api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
+    var exc: llama.impl.Exception = .{};
+    var n_chars = llama.api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
         return throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_chars < 0) {
         text = try a.realloc(text, @intCast(-n_chars));
-        n_chars = llama_api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
+        n_chars = llama.api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
         tools.ggml.ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1923, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
     }
@@ -1113,13 +1108,13 @@ pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
     var buf: [22]u8 = undefined;
     // A token outside the vocabulary -- `/detokenize` takes them from the
     // client -- throws in libllama, as in `tokenize`.
-    var exc: LlamaException = .{};
-    const n_chars = llama_api.vocab.tokenToPiece(@ptrCast(vocab), t, &buf, 0, true, &exc) catch
+    var exc: llama.impl.Exception = .{};
+    const n_chars = llama.api.vocab.tokenToPiece(@ptrCast(vocab), t, &buf, 0, true, &exc) catch
         return throw(error.RuntimeError, "{s}", .{exc.what()});
     if (n_chars < 0) {
         const out = try a.alloc(u8, @intCast(-n_chars));
         errdefer a.free(out);
-        const check = llama_api.vocab.tokenToPiece(@ptrCast(vocab), t, out, 0, true, &exc) catch
+        const check = llama.api.vocab.tokenToPiece(@ptrCast(vocab), t, out, 0, true, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
         tools.ggml.ggmlAssert(check == -n_chars, "common.cpp", 1901, "check == -n_chars");
         return out;
@@ -1234,8 +1229,8 @@ pub fn Pipe(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        mutex: sync.Mutex = .{},
-        cv: sync.Condition = .{},
+        mutex: stdlib.sync.Mutex = .{},
+        cv: stdlib.sync.Condition = .{},
         queue: std.ArrayList(T) = .empty,
         head: usize = 0,
         writer_closed: std.atomic.Value(bool) = .init(false),

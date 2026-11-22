@@ -22,24 +22,18 @@
 //! `static_cast`s.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const batch = @import("batch.zig");
-const io = @import("io.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
+const mod = @import("module.zig");
 
 fn oom() noreturn {
-    impl.abort("llama-memory.cpp", 0, "out of memory");
+    mod.impl.abort("llama-memory.cpp", 0, "out of memory");
 }
 
 /// Mirrors `llama_memory_params` (llama-memory.h:18 @b1b770d90).
 pub const Params = struct {
-    type_k: c.enum_ggml_type,
-    type_v: c.enum_ggml_type,
+    type_k: mod.impl.c.enum_ggml_type,
+    type_v: mod.impl.c.enum_ggml_type,
     swa_full: bool,
-    ctx_type: c.enum_llama_context_type,
+    ctx_type: mod.impl.c.enum_llama_context_type,
     /// `mem_other`: the memory this one shares cells with, or null.
     mem_other: ?Memory,
     /// Only simulate the memory allocations.
@@ -51,7 +45,7 @@ pub const Params = struct {
 /// buffers are attached instead of allocating the tensor data, so the memory
 /// use can still be measured.
 pub const Bufs = struct {
-    pub const Entry = struct { ctx: *c.ggml_context, buf: c.ggml_backend_buffer_t };
+    pub const Entry = struct { ctx: *mod.impl.c.ggml_context, buf: mod.impl.c.ggml_backend_buffer_t };
 
     bufs: std.ArrayList(Entry) = .empty,
     no_alloc: bool,
@@ -65,16 +59,16 @@ pub const Bufs = struct {
     /// - `exc`: receives the failure.
     ///
     /// Return: the buffer, the caller's; or `error.Thrown`.
-    pub fn allocBuf(ctx: *c.ggml_context, buft: c.ggml_backend_buffer_type_t, no_alloc: bool, name: [*:0]const u8, exc: *Exception) Thrown!c.ggml_backend_buffer_t {
-        var buf: c.ggml_backend_buffer_t = null;
+    pub fn allocBuf(ctx: *mod.impl.c.ggml_context, buft: mod.impl.c.ggml_backend_buffer_type_t, no_alloc: bool, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_t {
+        var buf: mod.impl.c.ggml_backend_buffer_t = null;
         if (no_alloc) {
-            buf = c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
-            var t: ?*c.ggml_tensor = c.ggml_get_first_tensor(ctx);
+            buf = mod.impl.c.ggml_backend_buft_alloc_buffer(buft, 0); // dummy buffer
+            var t: ?*mod.impl.c.ggml_tensor = mod.impl.c.ggml_get_first_tensor(ctx);
             // a dummy buffer, so that the backend scheduler won't try to
             // allocate the tensors
-            while (t) |cur| : (t = c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
+            while (t) |cur| : (t = mod.impl.c.ggml_get_next_tensor(ctx, cur)) cur.buffer = buf;
         } else {
-            buf = c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft); // real buffer
+            buf = mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft); // real buffer
         }
         if (buf == null) return exc.throw(.runtime_error, "failed to allocate buffer for {s}", .{name});
         return buf;
@@ -86,13 +80,13 @@ pub const Bufs = struct {
     /// `error.Thrown` it stays the caller's.
     ///
     /// Return: the buffer, for logging; borrowed.
-    pub fn emplace(self: *Bufs, ctx: *c.ggml_context, buft: c.ggml_backend_buffer_type_t, name: [*:0]const u8, exc: *Exception) Thrown!c.ggml_backend_buffer_t {
+    pub fn emplace(self: *Bufs, ctx: *mod.impl.c.ggml_context, buft: mod.impl.c.ggml_backend_buffer_type_t, name: [*:0]const u8, exc: *mod.impl.Exception) mod.impl.Thrown!mod.impl.c.ggml_backend_buffer_t {
         const buf = try allocBuf(ctx, buft, self.no_alloc, name, exc);
 
         // initialize the buffer to avoid NaNs in the padding
-        c.ggml_backend_buffer_clear(buf, 0);
+        mod.impl.c.ggml_backend_buffer_clear(buf, 0);
 
-        self.bufs.append(impl.allocator, .{ .ctx = ctx, .buf = buf }) catch oom();
+        self.bufs.append(std.heap.c_allocator, .{ .ctx = ctx, .buf = buf }) catch oom();
 
         return buf;
     }
@@ -102,12 +96,12 @@ pub const Bufs = struct {
     /// simulated sizes if `no_alloc` is set.
     pub fn memoryBreakdown(self: *const Bufs, out: *std.ArrayList(BuftSize)) void {
         for (self.bufs.items) |e| {
-            const buft = c.ggml_backend_buffer_get_type(e.buf);
+            const buft = mod.impl.c.ggml_backend_buffer_get_type(e.buf);
             if (self.no_alloc) {
-                impl.assert(c.ggml_backend_buffer_get_base(e.buf) == null, "llama-memory.cpp", 106, "ggml_backend_buffer_get_base(buf.get()) == nullptr");
-                addBuftSize(out, buft, c.ggml_backend_alloc_ctx_tensors_from_buft_size(e.ctx, buft));
+                mod.impl.assert(mod.impl.c.ggml_backend_buffer_get_base(e.buf) == null, "llama-memory.cpp", 106, "ggml_backend_buffer_get_base(buf.get()) == nullptr");
+                addBuftSize(out, buft, mod.impl.c.ggml_backend_alloc_ctx_tensors_from_buft_size(e.ctx, buft));
             } else {
-                addBuftSize(out, buft, c.ggml_backend_buffer_get_size(e.buf));
+                addBuftSize(out, buft, mod.impl.c.ggml_backend_buffer_get_size(e.buf));
             }
         }
     }
@@ -115,10 +109,10 @@ pub const Bufs = struct {
     /// Frees every buffer and context.
     pub fn deinit(self: *Bufs) void {
         for (self.bufs.items) |e| {
-            c.ggml_backend_buffer_free(e.buf);
-            c.ggml_free(e.ctx);
+            mod.impl.c.ggml_backend_buffer_free(e.buf);
+            mod.impl.c.ggml_free(e.ctx);
         }
-        self.bufs.deinit(impl.allocator);
+        self.bufs.deinit(std.heap.c_allocator);
     }
 };
 
@@ -158,7 +152,7 @@ pub fn statusIsFail(status: Status) bool {
 /// One entry of `memory_breakdown`: bytes per buffer type, in the
 /// `std`'s `map`'s pointer order.
 pub const BuftSize = struct {
-    buft: c.ggml_backend_buffer_type_t,
+    buft: mod.impl.c.ggml_backend_buffer_type_t,
     size: usize,
 };
 
@@ -166,7 +160,7 @@ pub const BuftSize = struct {
 /// `std::map<ggml_backend_buffer_type_t, size_t>::operator[]` does.
 ///
 /// Return: nothing.
-pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_type_t, size: usize) void {
+pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: mod.impl.c.ggml_backend_buffer_type_t, size: usize) void {
     var pos: usize = 0;
     while (pos < list.items.len) : (pos += 1) {
         if (list.items[pos].buft == buft) {
@@ -175,7 +169,7 @@ pub fn addBuftSize(list: *std.ArrayList(BuftSize), buft: c.ggml_backend_buffer_t
         }
         if (@intFromPtr(list.items[pos].buft) > @intFromPtr(buft)) break;
     }
-    list.insert(impl.allocator, pos, .{ .buft = buft, .size = size }) catch impl.abort("llama-memory.h", 151, "out of memory");
+    list.insert(std.heap.c_allocator, pos, .{ .buft = buft, .size = size }) catch mod.impl.abort("llama-memory.h", 151, "out of memory");
 }
 
 /// Mirrors `llama_memory_context_i` (llama-memory.h:82 @b1b770d90): the
@@ -190,7 +184,7 @@ pub const Context = struct {
         next: *const fn (ptr: *anyopaque) bool,
         /// Applies the memory state for the current ubatch; false on error.
         apply: *const fn (ptr: *anyopaque) bool,
-        getUbatch: *const fn (ptr: *anyopaque) *const batch.Ubatch,
+        getUbatch: *const fn (ptr: *anyopaque) *const mod.batch.Ubatch,
         getStatus: *const fn (ptr: *anyopaque) Status,
         destroy: *const fn (ptr: *anyopaque) void,
     };
@@ -206,7 +200,7 @@ pub const Context = struct {
     }
 
     /// Return: the current ubatch, borrowed from the context.
-    pub fn getUbatch(self: Context) *const batch.Ubatch {
+    pub fn getUbatch(self: Context) *const mod.batch.Ubatch {
         return self.vtable.getUbatch(self.ptr);
     }
 
@@ -234,7 +228,7 @@ pub const Memory = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        initBatch: *const fn (ptr: *anyopaque, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) Context,
+        initBatch: *const fn (ptr: *anyopaque, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) Context,
         initFull: *const fn (ptr: *anyopaque) Context,
         /// `lctx` is the `llama_context`, opaque here to keep this module
         /// below the context in the import graph.
@@ -250,12 +244,12 @@ pub const Memory = struct {
         seqPosMax: *const fn (ptr: *anyopaque, seq_id: i32) i32,
         /// Appends to `out`, keeping it in pointer order.
         memoryBreakdown: *const fn (ptr: *anyopaque, out: *std.ArrayList(BuftSize)) void,
-        stateWrite: *const fn (ptr: *anyopaque, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void,
-        stateRead: *const fn (ptr: *anyopaque, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void,
+        stateWrite: *const fn (ptr: *anyopaque, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void,
+        stateRead: *const fn (ptr: *anyopaque, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void,
         destroy: *const fn (ptr: *anyopaque) void,
     };
 
-    pub fn initBatch(self: Memory, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) Context {
+    pub fn initBatch(self: Memory, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) Context {
         return self.vtable.initBatch(self.ptr, balloc, n_ubatch, embd_all);
     }
     pub fn initFull(self: Memory) Context {
@@ -294,10 +288,10 @@ pub const Memory = struct {
     pub fn memoryBreakdown(self: Memory, out: *std.ArrayList(BuftSize)) void {
         self.vtable.memoryBreakdown(self.ptr, out);
     }
-    pub fn stateWrite(self: Memory, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateWrite(self: Memory, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.stateWrite(self.ptr, w, seq_id, flags, exc);
     }
-    pub fn stateRead(self: Memory, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateRead(self: Memory, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         return self.vtable.stateRead(self.ptr, r, seq_id, flags, exc);
     }
     pub fn destroy(self: Memory) void {
@@ -310,7 +304,7 @@ pub const Memory = struct {
     }
 
     /// The batch allocator's view: the memory's position bounds.
-    pub fn posView(self: *const Memory) batch.MemoryPos {
+    pub fn posView(self: *const Memory) mod.batch.MemoryPos {
         return .{ .ctx = self.ptr, .seq_pos_min = self.vtable.seqPosMin, .seq_pos_max = self.vtable.seqPosMax };
     }
 };
@@ -341,21 +335,21 @@ pub const LayerMap = struct {
 /// write visits.
 const BuffersWriter = struct {
     /// `std::set<ggml_backend_buffer_t>`: kept sorted by address.
-    buffers: std.ArrayList(c.ggml_backend_buffer_t) = .empty,
+    buffers: std.ArrayList(mod.impl.c.ggml_backend_buffer_t) = .empty,
     size: usize = 0,
 
-    fn write(ptr: *anyopaque, src: []const u8, _: *Exception) Thrown!void {
+    fn write(ptr: *anyopaque, src: []const u8, _: *mod.impl.Exception) mod.impl.Thrown!void {
         const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
         self.size += src.len;
     }
 
-    fn writeTensor(ptr: *anyopaque, tensor: *const c.ggml_tensor, _: usize, n: usize, _: *Exception) Thrown!void {
+    fn writeTensor(ptr: *anyopaque, tensor: *const mod.impl.c.ggml_tensor, _: usize, n: usize, _: *mod.impl.Exception) mod.impl.Thrown!void {
         const self: *BuffersWriter = @ptrCast(@alignCast(ptr));
         const buf = tensor.buffer;
         var at: usize = 0;
         while (at < self.buffers.items.len and @intFromPtr(self.buffers.items[at]) < @intFromPtr(buf)) at += 1;
         if (at == self.buffers.items.len or self.buffers.items[at] != buf) {
-            self.buffers.insert(impl.allocator, at, buf) catch impl.abort("llama-memory.cpp", 0, "out of memory");
+            self.buffers.insert(std.heap.c_allocator, at, buf) catch mod.impl.abort("llama-memory.cpp", 0, "out of memory");
         }
         self.size += n;
     }
@@ -365,7 +359,7 @@ const BuffersWriter = struct {
         return self.size;
     }
 
-    const vtable: io.Writer.VTable = .{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes };
+    const vtable: mod.io.Writer.VTable = .{ .write = write, .writeTensor = writeTensor, .nBytes = nBytes };
 };
 
 /// Ports `llama_memory_get_buffers` (llama-memory.cpp:134 @b1b770d90), from
@@ -379,13 +373,13 @@ const BuffersWriter = struct {
 ///
 /// Return: the buffers in address order, the caller's to free with
 /// `impl.allocator`; or `error.Thrown`.
-pub fn getBuffers(mem: Memory, exc: *Exception) Thrown![]c.ggml_backend_buffer_t {
+pub fn getBuffers(mem: Memory, exc: *mod.impl.Exception) mod.impl.Thrown![]mod.impl.c.ggml_backend_buffer_t {
     var writer: BuffersWriter = .{};
-    errdefer writer.buffers.deinit(impl.allocator);
+    errdefer writer.buffers.deinit(std.heap.c_allocator);
 
     try mem.stateWrite(.{ .ptr = &writer, .vtable = &BuffersWriter.vtable }, -1, 0, exc);
 
-    return writer.buffers.toOwnedSlice(impl.allocator) catch impl.abort("llama-memory.cpp", 0, "out of memory");
+    return writer.buffers.toOwnedSlice(std.heap.c_allocator) catch mod.impl.abort("llama-memory.cpp", 0, "out of memory");
 }
 
 // -----------------------------------------------------------------------------

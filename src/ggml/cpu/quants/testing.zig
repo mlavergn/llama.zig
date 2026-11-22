@@ -27,13 +27,7 @@
 //! a golden captured from the C is to catch exactly that.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const golden = @import("golden.zig");
-const c = impl.c;
-
-/// Elements per dot product, from the generator. Divisible by every block size
-/// in play: 256 (`QK_K`), 128 (`QK1_0`), 64 (`QK2_0`, `QK_NVFP4`) and 32.
-pub const nelem = golden.nelem;
+const ggml = @import("../../module.zig");
 
 /// The input patterns, in the generator's order.
 ///
@@ -144,33 +138,19 @@ pub const DotFn = *const fn (
     nrc: c_int,
 ) callconv(.c) void;
 
-extern fn quantize_row_q8_0_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-extern fn quantize_row_q8_1_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-
 /// Ports `quant_y`, which quantizes the right operand
 /// (vecdot_golden.c:225).
 ///
 /// The reference quantizer, not `ggml_quantize_chunk`: that has no case for
 /// `q8_1` or `q8_K` at all, and one path for all three is less to get wrong.
-fn quantY(t: c.enum_ggml_type, src: [*c]const f32, dst: *anyopaque, n: i64) !void {
+fn quantY(t: ggml.impl.c.enum_ggml_type, src: [*c]const f32, dst: *anyopaque, n: i64) !void {
     switch (t) {
-        c.GGML_TYPE_Q8_0 => quantize_row_q8_0_ref(src, dst, n),
-        c.GGML_TYPE_Q8_1 => quantize_row_q8_1_ref(src, dst, n),
-        c.GGML_TYPE_Q8_K => quantize_row_q8_K_ref(src, dst, n),
+        ggml.impl.c.GGML_TYPE_Q8_0 => ggml.quants.legacy.quantize_row_q8_0_ref(src, @ptrCast(@alignCast(dst)), n),
+        ggml.impl.c.GGML_TYPE_Q8_1 => ggml.quants.legacy.quantize_row_q8_1_ref(src, @ptrCast(@alignCast(dst)), n),
+        ggml.impl.c.GGML_TYPE_Q8_K => ggml.quants.k.quantize_row_q8_K_ref(src, @ptrCast(@alignCast(dst)), n),
         else => return error.UnexpectedVecDotType,
     }
 }
-
-extern fn ggml_quantize_chunk(
-    t: c.enum_ggml_type,
-    src: [*c]const f32,
-    dst: ?*anyopaque,
-    start: i64,
-    nrows: i64,
-    n_per_row: i64,
-    imatrix: [*c]const f32,
-) usize;
 
 /// Runs one kernel against its goldens, on every pattern.
 ///
@@ -182,11 +162,11 @@ extern fn ggml_quantize_chunk(
 ///
 /// Return: nothing; fails the test on the first pattern that differs, naming
 /// the pattern and printing both values in decimal and in hex.
-pub fn check(dot: DotFn, xt: c.enum_ggml_type, yt: c.enum_ggml_type, g: anytype) !void {
+pub fn check(dot: DotFn, xt: ggml.impl.c.enum_ggml_type, yt: ggml.impl.c.enum_ggml_type, g: anytype) !void {
     // The NEON `nvfp4` kernel reads `ggml_table_f32_ue4m3`, which only
     // `ggml_cpu_init` fills. A test binary never runs a graph, so nothing else
     // would call it, and every scale would be zero. Idempotent.
-    ggml_cpu_init();
+    ggml.cpu.features.ggml_cpu_init();
 
     // No kernel's goldens may be entirely zero. That is not a style rule: the
     // `nvfp4` ARM goldens *were* all zero once, captured before the harness
@@ -196,16 +176,16 @@ pub fn check(dot: DotFn, xt: c.enum_ggml_type, yt: c.enum_ggml_type, g: anytype)
 
     // Sized for the widest quantized row plus slack; a block layout that grew
     // would overrun otherwise, and this is a test, so the memory is free.
-    var xf: [nelem]f32 = undefined;
-    var yf: [nelem]f32 = undefined;
-    var xq: [nelem * 4]u8 align(8) = undefined;
-    var yq: [nelem * 4]u8 align(8) = undefined;
+    var xf: [ggml.cpu.quants.golden.nelem]f32 = undefined;
+    var yf: [ggml.cpu.quants.golden.nelem]f32 = undefined;
+    var xq: [ggml.cpu.quants.golden.nelem * 4]u8 align(8) = undefined;
+    var yq: [ggml.cpu.quants.golden.nelem * 4]u8 align(8) = undefined;
 
     // All-ones, and passed for every type rather than only the ones
     // `ggml_quantize_requires_imatrix` names -- matching the generator. What
     // the test needs from x is deterministic bytes; how they were arrived at
     // does not matter.
-    const imatrix: [nelem]f32 = @splat(1.0);
+    const imatrix: [ggml.cpu.quants.golden.nelem]f32 = @splat(1.0);
 
     inline for (comptime std.enums.values(Pattern)) |p| {
         fill(p, &xf, &yf);
@@ -213,11 +193,11 @@ pub fn check(dot: DotFn, xt: c.enum_ggml_type, yt: c.enum_ggml_type, g: anytype)
         @memset(&xq, 0);
         @memset(&yq, 0);
 
-        _ = ggml_quantize_chunk(xt, &xf, &xq, 0, 1, nelem, &imatrix);
-        try quantY(yt, &yf, &yq, nelem);
+        _ = ggml.quantize.ggml_quantize_chunk(xt, &xf, &xq, 0, 1, ggml.cpu.quants.golden.nelem, &imatrix);
+        try quantY(yt, &yf, &yq, ggml.cpu.quants.golden.nelem);
 
         var s: f32 = 0;
-        dot(nelem, &s, 0, &xq, 0, &yq, 0, 1);
+        dot(ggml.cpu.quants.golden.nelem, &s, 0, &xq, 0, &yq, 0, 1);
 
         const want = p.pick(g);
         const got: u32 = @bitCast(s);
@@ -234,9 +214,6 @@ pub fn check(dot: DotFn, xt: c.enum_ggml_type, yt: c.enum_ggml_type, g: anytype)
 /// The signature every `quantize_row_*` has.
 pub const RowFn = *const fn (x: [*c]const f32, y: ?*anyopaque, k: i64) callconv(.c) void;
 
-extern fn ggml_row_size(t: c.enum_ggml_type, ne: i64) usize;
-extern fn ggml_cpu_init() void;
-
 /// Runs one row quantizer against its goldens, on every pattern.
 ///
 /// Parameters:
@@ -245,21 +222,21 @@ extern fn ggml_cpu_init() void;
 /// - `g`: the golden row for this quantizer.
 ///
 /// Return: nothing; fails on the first pattern whose output checksum differs.
-pub fn checkRow(quant: RowFn, t: c.enum_ggml_type, g: anytype) !void {
-    ggml_cpu_init();
+pub fn checkRow(quant: RowFn, t: ggml.impl.c.enum_ggml_type, g: anytype) !void {
+    ggml.cpu.features.ggml_cpu_init();
     try expectNotAllZero(g);
 
-    var xf: [nelem]f32 = undefined;
-    var yf: [nelem]f32 = undefined;
-    var out: [nelem * 4]u8 align(8) = undefined;
+    var xf: [ggml.cpu.quants.golden.nelem]f32 = undefined;
+    var yf: [ggml.cpu.quants.golden.nelem]f32 = undefined;
+    var out: [ggml.cpu.quants.golden.nelem * 4]u8 align(8) = undefined;
 
     inline for (comptime std.enums.values(Pattern)) |p| {
         fill(p, &xf, &yf);
         @memset(&out, 0);
 
-        quant(&xf, &out, nelem);
+        quant(&xf, &out, ggml.cpu.quants.golden.nelem);
 
-        const bytes = ggml_row_size(t, nelem);
+        const bytes = ggml.types.ggml_row_size(t, ggml.cpu.quants.golden.nelem);
         const got = std.hash.Fnv1a_64.hash(out[0..bytes]);
         const want = p.pick(g);
         if (got != want) {
@@ -306,8 +283,8 @@ test "the LCG matches the generator's first values" {
 }
 
 test "only the zeros pattern is all-zero on both sides" {
-    var x: [nelem]f32 = undefined;
-    var y: [nelem]f32 = undefined;
+    var x: [ggml.cpu.quants.golden.nelem]f32 = undefined;
+    var y: [ggml.cpu.quants.golden.nelem]f32 = undefined;
 
     fill(.zeros, &x, &y);
     for (x, y) |xi, yi| {
@@ -332,12 +309,12 @@ test "the goldens are not mostly zero" {
     // The gate this file is: 25 kernels times 5 patterns. If most of the
     // expected values were zero, a kernel that wrote nothing but 0 would pass,
     // which is how the first version of the generator behaved.
-    const rows = [_]golden.Dot{
-        golden.q1_0,  golden.q2_0,    golden.q4_0,   golden.q4_1,   golden.q5_0,
-        golden.q5_1,  golden.q8_0,    golden.mxfp4,  golden.nvfp4,  golden.q2_K,
-        golden.q3_K,  golden.q4_K,    golden.q5_K,   golden.q6_K,   golden.tq1_0,
-        golden.tq2_0, golden.iq2_xxs, golden.iq2_xs, golden.iq2_s,  golden.iq3_xxs,
-        golden.iq3_s, golden.iq1_s,   golden.iq1_m,  golden.iq4_nl, golden.iq4_xs,
+    const rows = [_]ggml.cpu.quants.golden.Dot{
+        ggml.cpu.quants.golden.q1_0,  ggml.cpu.quants.golden.q2_0,    ggml.cpu.quants.golden.q4_0,   ggml.cpu.quants.golden.q4_1,   ggml.cpu.quants.golden.q5_0,
+        ggml.cpu.quants.golden.q5_1,  ggml.cpu.quants.golden.q8_0,    ggml.cpu.quants.golden.mxfp4,  ggml.cpu.quants.golden.nvfp4,  ggml.cpu.quants.golden.q2_K,
+        ggml.cpu.quants.golden.q3_K,  ggml.cpu.quants.golden.q4_K,    ggml.cpu.quants.golden.q5_K,   ggml.cpu.quants.golden.q6_K,   ggml.cpu.quants.golden.tq1_0,
+        ggml.cpu.quants.golden.tq2_0, ggml.cpu.quants.golden.iq2_xxs, ggml.cpu.quants.golden.iq2_xs, ggml.cpu.quants.golden.iq2_s,  ggml.cpu.quants.golden.iq3_xxs,
+        ggml.cpu.quants.golden.iq3_s, ggml.cpu.quants.golden.iq1_s,   ggml.cpu.quants.golden.iq1_m,  ggml.cpu.quants.golden.iq4_nl, ggml.cpu.quants.golden.iq4_xs,
     };
 
     var zeros: usize = 0;

@@ -23,25 +23,19 @@
 //! `add_rel_pos` is renamed `jj` to keep it apart from them.
 
 const std = @import("std");
-const impl = @import("../../impl.zig");
-const common = @import("common.zig");
-const threading = @import("../threading.zig");
-
-const c = impl.c;
-const Tensor = common.Tensor;
-const ComputeParams = common.ComputeParams;
+const ggml = @import("../../module.zig");
 
 /// Ports `ggml_compute_forward_win_part_f32` (ops.cpp:10121 @b1b770d90).
-fn winPartF32(params: *const ComputeParams, dst: *Tensor) void {
+fn winPartF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
     _ = params;
 
-    const src0 = impl.one(Tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const nep0: i64 = impl.getOpParamsI32(dst, 0);
-    const nep1: i64 = impl.getOpParamsI32(dst, 1);
-    const w: i64 = impl.getOpParamsI32(dst, 2);
+    const nep0: i64 = ggml.impl.getOpParamsI32(dst, 0);
+    const nep1: i64 = ggml.impl.getOpParamsI32(dst, 1);
+    const w: i64 = ggml.impl.getOpParamsI32(dst, 2);
 
     // assert(ne00 == ne0);
     // assert(ne3  == nep0*nep1);
@@ -81,24 +75,24 @@ fn winPartF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_win_part` (ops.cpp:10164 @b1b770d90).
-pub export fn ggml_compute_forward_win_part(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_win_part(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => winPartF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => winPartF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_win_unpart_f32` (ops.cpp:10184 @b1b770d90).
-fn winUnpartF32(params: *const ComputeParams, dst: *Tensor) void {
+fn winUnpartF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
     _ = params;
 
-    const src0 = impl.one(Tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
-    const w: i64 = impl.getOpParamsI32(dst, 0);
+    const w: i64 = ggml.impl.getOpParamsI32(dst, 0);
 
     // padding
     const px = @rem(w - @rem(l.ne1, w), w);
@@ -136,12 +130,12 @@ fn winUnpartF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_win_unpart` (ops.cpp:10225 @b1b770d90).
-pub export fn ggml_compute_forward_win_unpart(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_win_unpart(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => winUnpartF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => winUnpartF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
@@ -149,19 +143,19 @@ pub export fn ggml_compute_forward_win_unpart(params: *const ComputeParams, dst:
 ///
 /// A pure copy of 16-bit elements, which is why the dispatcher sends `BF16`
 /// here too: the bits move unchanged whatever they encode.
-fn getRelPosF16(params: *const ComputeParams, dst: *Tensor) void {
+fn getRelPosF16(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
     _ = params;
 
-    const src0 = impl.one(Tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     // ref: https://github.com/facebookresearch/segment-anything/blob/main/segment_anything/modeling/image_encoder.py#L292-L322
 
-    const l = common.UnaryLocals.of(src0, dst);
+    const l = ggml.cpu.defs.UnaryLocals.of(src0, dst);
 
     const w = l.ne1;
 
-    const src0_data: [*]const c.ggml_fp16_t = @ptrCast(@alignCast(src0.data.?));
-    const dst_data: [*]c.ggml_fp16_t = @ptrCast(@alignCast(dst.data.?));
+    const src0_data: [*]const ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(src0.data.?));
+    const dst_data: [*]ggml.impl.c.ggml_fp16_t = @ptrCast(@alignCast(dst.data.?));
 
     var j2: i64 = 0;
     while (j2 < l.ne2) : (j2 += 1) {
@@ -177,30 +171,30 @@ fn getRelPosF16(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_get_rel_pos` (ops.cpp:10419 @b1b770d90).
-pub export fn ggml_compute_forward_get_rel_pos(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_get_rel_pos(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F16, c.GGML_TYPE_BF16 => getRelPosF16(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F16, ggml.impl.c.GGML_TYPE_BF16 => getRelPosF16(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 
 /// Ports `ggml_compute_forward_add_rel_pos_f32` (ops.cpp:10440 @b1b770d90).
-fn addRelPosF32(params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
-    const src1 = impl.one(Tensor, dst.src[1]);
-    const src2 = impl.one(Tensor, dst.src[2]);
+fn addRelPosF32(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const src1 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
+    const src2 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[2]);
 
-    const inplace = impl.getOpParamsI32(dst, 0) != 0;
+    const inplace = ggml.impl.getOpParamsI32(dst, 0) != 0;
     if (!inplace) {
         if (params.ith == 0) {
-            const n = c.ggml_nbytes(dst);
+            const n = ggml.impl.c.ggml_nbytes(dst);
             const dd: [*]u8 = @ptrCast(dst.data.?);
             const ss: [*]const u8 = @ptrCast(src0.data.?);
             @memcpy(dd[0..n], ss[0..n]);
         }
-        threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
+        ggml.cpu.threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
     }
     // ref: https://github.com/facebookresearch/segment-anything/blob/main/segment_anything/modeling/image_encoder.py#L357-L359
 
@@ -254,12 +248,12 @@ fn addRelPosF32(params: *const ComputeParams, dst: *Tensor) void {
 }
 
 /// Ports `ggml_compute_forward_add_rel_pos` (ops.cpp:10501 @b1b770d90).
-pub export fn ggml_compute_forward_add_rel_pos(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub export fn ggml_compute_forward_add_rel_pos(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
     switch (src0.type) {
-        c.GGML_TYPE_F32 => addRelPosF32(params, dst),
-        else => impl.abort("fatal error"),
+        ggml.impl.c.GGML_TYPE_F32 => addRelPosF32(params, dst),
+        else => ggml.impl.abort("fatal error"),
     }
 }
 

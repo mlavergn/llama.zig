@@ -33,14 +33,7 @@
 //! polymorphic, and nothing here is ever deleted through a base pointer.
 //! The instances are `static` or leaked `new`s that live for the process.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const defs = @import("defs.zig");
-
-const c = impl.c;
-
-pub const Tensor = defs.Tensor;
-pub const ComputeParams = defs.ComputeParams;
+const ggml = @import("../module.zig");
 
 /// Ports `tensor_traits` (ggml-cpu/traits.h:20 @b1b770d90).
 ///
@@ -53,10 +46,10 @@ pub const TensorTraits = extern struct {
         ///
         /// The C++ takes `size_t &`; a reference is a pointer in the ABI, so
         /// it is spelled as one here.
-        work_size: *const fn (self: *const TensorTraits, n_threads: c_int, op: *const Tensor, size: *usize) callconv(.c) bool,
+        work_size: *const fn (self: *const TensorTraits, n_threads: c_int, op: *const ggml.impl.c.ggml_tensor, size: *usize) callconv(.c) bool,
 
         /// `virtual bool compute_forward(ggml_compute_params *, ggml_tensor *)`.
-        compute_forward: *const fn (self: *const TensorTraits, params: *ComputeParams, op: *Tensor) callconv(.c) bool,
+        compute_forward: *const fn (self: *const TensorTraits, params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) callconv(.c) bool,
     };
 };
 
@@ -67,10 +60,10 @@ pub const ExtraBufferType = extern struct {
 
     pub const VTable = extern struct {
         /// `virtual bool supports_op(ggml_backend_dev_t, const ggml_tensor *)`.
-        supports_op: *const fn (self: *const ExtraBufferType, dev: c.ggml_backend_dev_t, op: *const Tensor) callconv(.c) bool,
+        supports_op: *const fn (self: *const ExtraBufferType, dev: ggml.impl.c.ggml_backend_dev_t, op: *const ggml.impl.c.ggml_tensor) callconv(.c) bool,
 
         /// `virtual tensor_traits * get_tensor_traits(const ggml_tensor *)`.
-        get_tensor_traits: *const fn (self: *const ExtraBufferType, op: *const Tensor) callconv(.c) ?*const TensorTraits,
+        get_tensor_traits: *const fn (self: *const ExtraBufferType, op: *const ggml.impl.c.ggml_tensor) callconv(.c) ?*const TensorTraits,
     };
 };
 
@@ -81,8 +74,6 @@ pub const ExtraBufferType = extern struct {
 /// The C returns `std::vector<ggml_backend_buffer_type_t> &`; the port
 /// returns a slice over a static array, which is what that vector is once
 /// its one-time initialiser has run.
-const cpu_backend = @import("cpu_backend.zig");
-
 /// Ports `ggml_cpu_extra_compute_forward` (traits.cpp:12 @b1b770d90).
 ///
 /// Parameters:
@@ -91,8 +82,8 @@ const cpu_backend = @import("cpu_backend.zig");
 ///
 /// Return: true when an accelerator claimed the op and has computed it, in
 /// which case the caller skips its own kernel.
-pub export fn ggml_cpu_extra_compute_forward(params: *ComputeParams, op: *Tensor) callconv(.c) bool {
-    for (cpu_backend.getExtraBufferTypes()) |extra| {
+pub export fn ggml_cpu_extra_compute_forward(params: *ggml.cpu.defs.ComputeParams, op: *ggml.impl.c.ggml_tensor) callconv(.c) bool {
+    for (ggml.cpu.cpu_backend.getExtraBufferTypes()) |extra| {
         const buft = extra orelse continue;
         const ctx = buft.*.context orelse continue;
         const buf_extra: *const ExtraBufferType = @ptrCast(@alignCast(ctx));
@@ -111,8 +102,8 @@ pub export fn ggml_cpu_extra_compute_forward(params: *ComputeParams, op: *Tensor
 /// - `size`: receives the work-buffer bytes the accelerator needs.
 ///
 /// Return: true when an accelerator claimed the op and set `size`.
-pub export fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const Tensor, size: *usize) callconv(.c) bool {
-    for (cpu_backend.getExtraBufferTypes()) |extra| {
+pub export fn ggml_cpu_extra_work_size(n_threads: c_int, op: *const ggml.impl.c.ggml_tensor, size: *usize) callconv(.c) bool {
+    for (ggml.cpu.cpu_backend.getExtraBufferTypes()) |extra| {
         const buft = extra orelse continue;
         const ctx = buft.*.context orelse continue;
         const buf_extra: *const ExtraBufferType = @ptrCast(@alignCast(ctx));

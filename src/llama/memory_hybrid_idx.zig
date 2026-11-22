@@ -40,46 +40,21 @@
 //! unchanged, and `fromBase` recovers the extension, the C++'s downcast.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const hparams_mod = @import("hparams.zig");
-const batch = @import("batch.zig");
-const memory = @import("memory.zig");
-const io = @import("io.zig");
-const kv_cache = @import("kv_cache.zig");
-const kv_cells = @import("kv_cells.zig");
-const memory_hybrid = @import("memory_hybrid.zig");
-const memory_recurrent = @import("memory_recurrent.zig");
-const model_mod = @import("model.zig");
-
-const c = impl.c;
-const allocator = impl.allocator;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Hparams = hparams_mod.Hparams;
-const Ubatch = batch.Ubatch;
-const Tensor = c.ggml_tensor;
-const KvCache = kv_cache.KvCache;
-const KvCells = kv_cells.KvCells;
-const PosCell = kv_cells.PosCell;
-const SlotInfo = kv_cache.SlotInfo;
-const MemoryHybrid = memory_hybrid.MemoryHybrid;
-const HybridContext = memory_hybrid.HybridContext;
+const mod = @import("module.zig");
 
 /// `LLAMA_MAX_SEQ` (llama-cparams.h:8 @b1b770d90).
-const max_seq = kv_cells.max_seq;
-
 fn oom() noreturn {
-    impl.abort("llama-memory-hybrid-idx.cpp", 0, "out of memory");
+    mod.impl.abort("llama-memory-hybrid-idx.cpp", 0, "out of memory");
 }
 
-fn deinitSinfos(list: *std.ArrayList(SlotInfo)) void {
+fn deinitSinfos(list: *std.ArrayList(mod.kv_cache.SlotInfo)) void {
     for (list.items) |*si| si.deinit();
-    list.deinit(allocator);
+    list.deinit(std.heap.c_allocator);
 }
 
-fn cloneSinfos(list: []const SlotInfo) std.ArrayList(SlotInfo) {
-    var out: std.ArrayList(SlotInfo) = .empty;
-    out.ensureTotalCapacity(allocator, list.len) catch oom();
+fn cloneSinfos(list: []const mod.kv_cache.SlotInfo) std.ArrayList(mod.kv_cache.SlotInfo) {
+    var out: std.ArrayList(mod.kv_cache.SlotInfo) = .empty;
+    out.ensureTotalCapacity(std.heap.c_allocator, list.len) catch oom();
     for (list) |*si| out.appendAssumeCapacity(si.clone());
     return out;
 }
@@ -90,7 +65,7 @@ pub const pos_clean: i32 = std.math.maxInt(i32);
 
 /// Ports `llama_memory_hybrid_idx`'s `stale_pos_t`: per sequence, the
 /// position its pooled keys are stale from.
-pub const StalePos = [max_seq]i32;
+pub const StalePos = [mod.kv_cells.max_seq]i32;
 
 /// Ports `llama_memory_hybrid_idx`'s `stale_pos_clean`
 /// (llama-memory-hybrid-idx.h:101 @b1b770d90).
@@ -98,12 +73,12 @@ pub fn stalePosClean() StalePos {
     return @splat(pos_clean);
 }
 
-fn lessPosCell(a: PosCell, b: PosCell) bool {
+fn lessPosCell(a: mod.kv_cells.PosCell, b: mod.kv_cells.PosCell) bool {
     return a.pos < b.pos or (a.pos == b.pos and a.cell < b.cell);
 }
 
 /// `std::lower_bound` over (position, cell) pairs.
-fn lowerBoundPosCell(cells: []const PosCell, k: PosCell) usize {
+fn lowerBoundPosCell(cells: []const mod.kv_cells.PosCell, k: mod.kv_cells.PosCell) usize {
     var lo: usize = 0;
     var hi: usize = cells.len;
     while (lo < hi) {
@@ -114,7 +89,7 @@ fn lowerBoundPosCell(cells: []const PosCell, k: PosCell) usize {
 }
 
 /// `std::upper_bound` over (position, cell) pairs.
-fn upperBoundPosCell(cells: []const PosCell, k: PosCell) usize {
+fn upperBoundPosCell(cells: []const mod.kv_cells.PosCell, k: mod.kv_cells.PosCell) usize {
     var lo: usize = 0;
     var hi: usize = cells.len;
     while (lo < hi) {
@@ -128,7 +103,7 @@ fn upperBoundPosCell(cells: []const PosCell, k: PosCell) usize {
 /// kept.
 fn resizeU32(list: *std.ArrayList(u32), n: usize) void {
     if (list.items.len < n) {
-        list.appendNTimes(allocator, 0, n - list.items.len) catch oom();
+        list.appendNTimes(std.heap.c_allocator, 0, n - list.items.len) catch oom();
     } else {
         list.shrinkRetainingCapacity(n);
     }
@@ -144,7 +119,7 @@ fn kpoolPad(n_pool: u32) u32 {
 /// of (pos, cell) among a sequence's cells, ordered by position then cell,
 /// or -1 when absent. In order mode the rank alone places a token: cells
 /// sharing a position (an M-RoPE image) have distinct ranks.
-fn kpoolRank(cells: []const PosCell, pos: i32, cell: u32) i64 {
+fn kpoolRank(cells: []const mod.kv_cells.PosCell, pos: i32, cell: u32) i64 {
     const it = lowerBoundPosCell(cells, .{ .pos = pos, .cell = cell });
     return if (it != cells.len and cells[it].cell == cell and cells[it].pos == pos) @intCast(it) else -1;
 }
@@ -160,15 +135,15 @@ pub const KpoolLayout = struct {
         /// The stream holding this sequence's cells.
         strm: u32 = 0,
         /// (position, stream-local cell) pairs, ordered by position.
-        cells: std.ArrayList(PosCell) = .empty,
+        cells: std.ArrayList(mod.kv_cells.PosCell) = .empty,
         /// Each pool's first index into `cells`.
         pools: std.ArrayList(u32) = .empty,
         /// Where the pool scan stopped, so an append resumes there.
         j_next: usize = 0,
 
         fn deinit(self: *Seq) void {
-            self.cells.deinit(allocator);
-            self.pools.deinit(allocator);
+            self.cells.deinit(std.heap.c_allocator);
+            self.pools.deinit(std.heap.c_allocator);
         }
 
         /// `seq()`: back to the default.
@@ -178,7 +153,7 @@ pub const KpoolLayout = struct {
         }
     };
 
-    seqs: [max_seq]Seq = @splat(.{}),
+    seqs: [mod.kv_cells.max_seq]Seq = @splat(.{}),
     n_pool_real: u32 = 0,
 
     fn deinit(self: *KpoolLayout) void {
@@ -201,21 +176,21 @@ const KpoolState = struct {
     n_new_g: u32 = 1,
 
     fn deinit(self: *KpoolState) void {
-        self.is_new.deinit(allocator);
-        self.rep_gen.deinit(allocator);
+        self.is_new.deinit(std.heap.c_allocator);
+        self.rep_gen.deinit(std.heap.c_allocator);
     }
 };
 
 /// Ports `llama_memory_hybrid_idx` (llama-memory-hybrid-idx.h:17 @b1b770d90).
 pub const MemoryHybridIdx = struct {
     /// The `llama_memory_hybrid` this extends.
-    base: *MemoryHybrid,
+    base: *mod.memory_hybrid.MemoryHybrid,
     /// The indexer cache holds one key head per layer, so it needs its own
     /// hparams, and the cache keeps a pointer to what it is given: this
     /// struct is heap-allocated and does not move.
-    hparams_idx: Hparams,
+    hparams_idx: mod.hparams.Hparams,
     /// Null when the model carries no indexer.
-    mem_idx: ?*KvCache = null,
+    mem_idx: ?*mod.kv_cache.KvCache = null,
 
     /// Null until the first `kpoolLayoutUpdate`.
     kpool_lay: ?*KpoolLayout = null,
@@ -236,45 +211,45 @@ pub const MemoryHybridIdx = struct {
     ///
     /// Return: the memory, the caller's to `destroy`, or `error.Thrown`.
     pub fn create(
-        model: *const model_mod.Model,
+        model: *const mod.model.Model,
         no_alloc: bool,
-        type_k: c.enum_ggml_type,
-        type_v: c.enum_ggml_type,
+        type_k: mod.impl.c.enum_ggml_type,
+        type_v: mod.impl.c.enum_ggml_type,
         v_trans: bool,
         kv_size: u32,
         n_swa: u32,
-        swa_type: hparams_mod.SwaType,
-        type_r: c.enum_ggml_type,
-        type_s: c.enum_ggml_type,
+        swa_type: mod.hparams.SwaType,
+        type_r: mod.impl.c.enum_ggml_type,
+        type_s: mod.impl.c.enum_ggml_type,
         rs_size: u32,
         n_seq_max: u32,
         n_rs_seq: u32,
         offload: bool,
         unified: bool,
-        filter_attn: memory.LayerFilter,
-        filter_recr: memory.LayerFilter,
-        filter_idx: memory.LayerFilter,
-        exc: *Exception,
-    ) Thrown!*MemoryHybridIdx {
-        const base = try MemoryHybrid.create(model, no_alloc, type_k, type_v, v_trans, kv_size, n_swa, swa_type, type_r, type_s, rs_size, n_seq_max, n_rs_seq, offload, unified, filter_attn, filter_recr, exc);
+        filter_attn: mod.memory.LayerFilter,
+        filter_recr: mod.memory.LayerFilter,
+        filter_idx: mod.memory.LayerFilter,
+        exc: *mod.impl.Exception,
+    ) mod.impl.Thrown!*MemoryHybridIdx {
+        const base = try mod.memory_hybrid.MemoryHybrid.create(model, no_alloc, type_k, type_v, v_trans, kv_size, n_swa, swa_type, type_r, type_s, rs_size, n_seq_max, n_rs_seq, offload, unified, filter_attn, filter_recr, exc);
         errdefer base.destroy();
 
-        const self = allocator.create(MemoryHybridIdx) catch oom();
-        errdefer allocator.destroy(self);
+        const self = std.heap.c_allocator.create(MemoryHybridIdx) catch oom();
+        errdefer std.heap.c_allocator.destroy(self);
         self.* = .{ .base = base, .hparams_idx = model.hparams };
 
         if (filter_idx.func != null) {
             const hp = &model.hparams;
             @memset(&self.hparams_idx.n_head_kv_arr, 1);
             self.hparams_idx.n_embd_head_k_full = hp.indexer_head_size *% (if (hp.indexer_kpool > 0) hp.indexer_kpool_row else 1);
-            self.hparams_idx.rope_type = c.LLAMA_ROPE_TYPE_NONE;
+            self.hparams_idx.rope_type = mod.impl.c.LLAMA_ROPE_TYPE_NONE;
             // MLA-shaped, so the cache stores no V tensors.
             self.hparams_idx.n_embd_head_k_mla_impl = hp.indexer_head_size;
             self.hparams_idx.n_embd_head_v_mla_impl = hp.indexer_head_size;
 
-            impl.logInfo("%s: creating indexer KV cache, size = %u cells\n", .{ "operator()", kv_size });
+            mod.impl.logInfo("%s: creating indexer KV cache, size = %u cells\n", .{ "operator()", kv_size });
 
-            self.mem_idx = try KvCache.createTagged(model, no_alloc, &self.hparams_idx, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_idx, .{}, .{}, "idx_", false, exc);
+            self.mem_idx = try mod.kv_cache.KvCache.createTagged(model, no_alloc, &self.hparams_idx, type_k, type_v, v_trans, offload, unified, kv_size, n_seq_max, n_swa, swa_type, null, filter_idx, .{}, .{}, "idx_", false, exc);
         }
         return self;
     }
@@ -283,24 +258,24 @@ pub const MemoryHybridIdx = struct {
     pub fn destroy(self: *MemoryHybridIdx) void {
         if (self.kpool_lay) |l| {
             l.deinit();
-            allocator.destroy(l);
+            std.heap.c_allocator.destroy(l);
         }
         if (self.mem_idx) |m| m.destroy();
         self.base.destroy();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `init_batch`
     /// (llama-memory-hybrid-idx.cpp:73 @b1b770d90): `llama_memory_hybrid`'s,
     /// repeated because the indexer needs the attention slot infos the base
     /// context hides.
-    pub fn initBatch(self: *MemoryHybridIdx, balloc: *batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridIdxContext {
+    pub fn initBatch(self: *MemoryHybridIdx, balloc: *mod.batch.BatchAllocr, n_ubatch: u32, embd_all: bool) *HybridIdxContext {
         const func = "init_batch";
         blk: {
             balloc.splitReset();
-            var ubatches: std.ArrayList(Ubatch) = .empty;
+            var ubatches: std.ArrayList(mod.batch.Ubatch) = .empty;
             while (true) {
-                var ub: Ubatch = undefined;
+                var ub: mod.batch.Ubatch = undefined;
                 if (embd_all) {
                     // All outputs: split by sequence.
                     ub = balloc.splitSeq(n_ubatch);
@@ -313,38 +288,38 @@ pub const MemoryHybridIdx = struct {
                     ub = balloc.splitEqual(n_ubatch, !unified, if (n_rs_seq > 0) n_rs_seq + 1 else 0);
                 }
                 if (ub.n_tokens == 0) break;
-                ubatches.append(allocator, ub) catch oom();
+                ubatches.append(std.heap.c_allocator, ub) catch oom();
             }
 
             if (balloc.getNUsed() < balloc.getNTokens()) {
                 // No suitable split.
-                memory_hybrid.releaseAll(&ubatches);
+                mod.memory_hybrid.releaseAll(&ubatches);
                 break :blk;
             }
 
             // The recurrent batches first.
             if (!self.getMemRecr().prepare(ubatches.items)) {
-                impl.logError("%s: failed to prepare recurrent ubatches\n", .{func});
-                memory_hybrid.releaseAll(&ubatches);
+                mod.impl.logError("%s: failed to prepare recurrent ubatches\n", .{func});
+                mod.memory_hybrid.releaseAll(&ubatches);
                 return HybridIdxContext.createStatus(.failed_prepare);
             }
 
             // Then the attention cache.
             var heads_attn = self.getMemAttn().prepare(ubatches.items) orelse {
-                impl.logError("%s: failed to prepare attention ubatches\n", .{func});
-                memory_hybrid.releaseAll(&ubatches);
+                mod.impl.logError("%s: failed to prepare attention ubatches\n", .{func});
+                mod.memory_hybrid.releaseAll(&ubatches);
                 return HybridIdxContext.createStatus(.failed_prepare);
             };
             if (heads_attn.items.len == 0) {
-                heads_attn.deinit(allocator);
-                impl.logError("%s: failed to prepare attention ubatches\n", .{func});
-                memory_hybrid.releaseAll(&ubatches);
+                heads_attn.deinit(std.heap.c_allocator);
+                mod.impl.logError("%s: failed to prepare attention ubatches\n", .{func});
+                mod.memory_hybrid.releaseAll(&ubatches);
                 return HybridIdxContext.createStatus(.failed_prepare);
             }
 
             // The indexer takes the attention cache's slot layout: one of
             // its own could drift from it.
-            const heads_idx: std.ArrayList(SlotInfo) = if (self.mem_idx != null) cloneSinfos(heads_attn.items) else .empty;
+            const heads_idx: std.ArrayList(mod.kv_cache.SlotInfo) = if (self.mem_idx != null) cloneSinfos(heads_attn.items) else .empty;
 
             return HybridIdxContext.createBatch(self, heads_attn, heads_idx, ubatches);
         }
@@ -388,7 +363,7 @@ pub const MemoryHybridIdx = struct {
             return;
         }
 
-        impl.assert(seq_id < max_seq, "llama-memory-hybrid-idx.cpp", 168, "seq_id < (llama_seq_id) LLAMA_MAX_SEQ");
+        mod.impl.assert(seq_id < mod.kv_cells.max_seq, "llama-memory-hybrid-idx.cpp", 168, "seq_id < (llama_seq_id) LLAMA_MAX_SEQ");
 
         const s: usize = @intCast(seq_id);
         self.mem_idx_stale[s] = @min(self.mem_idx_stale[s], p0);
@@ -425,7 +400,7 @@ pub const MemoryHybridIdx = struct {
     /// keeps its pooled keys, the destination rebuilds its layout and
     /// re-pools into the same rows.
     pub fn seqCp(self: *MemoryHybridIdx, a: i32, b: i32, p0: i32, p1: i32) void {
-        impl.assert(p0 <= 0 and p1 < 0, "llama-memory-hybrid-idx.cpp", 199, "p0 <= 0 && p1 < 0 && \"partial seq_cp is not supported\"");
+        mod.impl.assert(p0 <= 0 and p1 < 0, "llama-memory-hybrid-idx.cpp", 199, "p0 <= 0 && p1 < 0 && \"partial seq_cp is not supported\"");
 
         self.base.seqCp(a, b, p0, p1);
         if (self.mem_idx) |m| {
@@ -479,7 +454,7 @@ pub const MemoryHybridIdx = struct {
     /// Ports `llama_memory_hybrid_idx`'s `memory_breakdown`
     /// (llama-memory-hybrid-idx.cpp:241 @b1b770d90): the indexer's bytes
     /// added to the hybrid memory's, per buffer type.
-    pub fn memoryBreakdown(self: *const MemoryHybridIdx, out: *std.ArrayList(memory.BuftSize)) void {
+    pub fn memoryBreakdown(self: *const MemoryHybridIdx, out: *std.ArrayList(mod.memory.BuftSize)) void {
         self.base.memoryBreakdown(out);
         if (self.mem_idx) |m| m.memoryBreakdown(out);
     }
@@ -489,7 +464,7 @@ pub const MemoryHybridIdx = struct {
     /// goes last, a pure suffix ([TAG_HYBRID_IDX_STATE]); the indexer cache
     /// has the attention cache's SWA type, so both skip a partial state
     /// alike.
-    pub fn stateWrite(self: *const MemoryHybridIdx, w: io.Writer, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
+    pub fn stateWrite(self: *const MemoryHybridIdx, w: mod.io.Writer, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
         try self.base.stateWrite(w, seq_id, flags, exc);
         if (self.mem_idx) |m| try m.stateWrite(w, seq_id, flags, exc);
     }
@@ -499,8 +474,8 @@ pub const MemoryHybridIdx = struct {
     /// with the indexer restored into the cells the attention restore chose
     /// ([TAG_HYBRID_IDX_SINFO]). A failure drops what was being restored
     /// from all three caches, a state they agree on, and rethrows.
-    pub fn stateRead(self: *MemoryHybridIdx, r: io.Reader, seq_id: i32, flags: u32, exc: *Exception) Thrown!void {
-        var sinfos_attn: std.ArrayList(SlotInfo) = .empty;
+    pub fn stateRead(self: *MemoryHybridIdx, r: mod.io.Reader, seq_id: i32, flags: u32, exc: *mod.impl.Exception) mod.impl.Thrown!void {
+        var sinfos_attn: std.ArrayList(mod.kv_cache.SlotInfo) = .empty;
         defer deinitSinfos(&sinfos_attn);
 
         self.stateReadInner(r, seq_id, flags, &sinfos_attn, exc) catch |err| {
@@ -509,7 +484,7 @@ pub const MemoryHybridIdx = struct {
         };
     }
 
-    fn stateReadInner(self: *MemoryHybridIdx, r: io.Reader, seq_id: i32, flags: u32, sinfos_attn: *std.ArrayList(SlotInfo), exc: *Exception) Thrown!void {
+    fn stateReadInner(self: *MemoryHybridIdx, r: mod.io.Reader, seq_id: i32, flags: u32, sinfos_attn: *std.ArrayList(mod.kv_cache.SlotInfo), exc: *mod.impl.Exception) mod.impl.Thrown!void {
         // the indexer cache has the SWA type of the attention cache, so both
         // read the same partial state
         try self.getMemAttn().stateReadSinfo(r, seq_id, flags, if (self.mem_idx != null) sinfos_attn else null, null, exc);
@@ -546,18 +521,18 @@ pub const MemoryHybridIdx = struct {
     }
 
     /// `llama_memory_hybrid`'s `get_mem_attn`.
-    pub fn getMemAttn(self: *const MemoryHybridIdx) *KvCache {
+    pub fn getMemAttn(self: *const MemoryHybridIdx) *mod.kv_cache.KvCache {
         return self.base.getMemAttn();
     }
 
     /// `llama_memory_hybrid`'s `get_mem_recr`.
-    pub fn getMemRecr(self: *const MemoryHybridIdx) *memory_recurrent.MemoryRecurrent {
+    pub fn getMemRecr(self: *const MemoryHybridIdx) *mod.memory_recurrent.MemoryRecurrent {
         return self.base.getMemRecr();
     }
 
     /// Ports `llama_memory_hybrid_idx`'s `get_mem_idx` (llama-memory-hybrid-idx.cpp:312
     /// @b1b770d90): null when the model carries no indexer.
-    pub fn getMemIdx(self: *const MemoryHybridIdx) ?*KvCache {
+    pub fn getMemIdx(self: *const MemoryHybridIdx) ?*mod.kv_cache.KvCache {
         return self.mem_idx;
     }
 
@@ -588,7 +563,7 @@ pub const MemoryHybridIdx = struct {
     /// Ports `llama_memory_hybrid_idx`'s `kpool_layout_get`
     /// (llama-memory-hybrid-idx.cpp:378 @b1b770d90).
     pub fn kpoolLayoutGet(self: *const MemoryHybridIdx) *const KpoolLayout {
-        impl.assert(self.kpool_lay != null, "llama-memory-hybrid-idx.cpp", 379, "kpool_lay != nullptr");
+        mod.impl.assert(self.kpool_lay != null, "llama-memory-hybrid-idx.cpp", 379, "kpool_lay != nullptr");
         return self.kpool_lay.?;
     }
 
@@ -599,11 +574,11 @@ pub const MemoryHybridIdx = struct {
     ///
     /// Return: the layout, borrowed from the memory.
     pub fn kpoolLayoutUpdate(self: *MemoryHybridIdx) *const KpoolLayout {
-        impl.assert(self.mem_idx != null, "llama-memory-hybrid-idx.cpp", 387, "mem_idx != nullptr");
+        mod.impl.assert(self.mem_idx != null, "llama-memory-hybrid-idx.cpp", 387, "mem_idx != nullptr");
         const m = self.mem_idx.?;
 
         if (self.kpool_lay == null) {
-            const l = allocator.create(KpoolLayout) catch oom();
+            const l = std.heap.c_allocator.create(KpoolLayout) catch oom();
             l.* = .{};
             self.kpool_lay = l;
         }
@@ -615,7 +590,7 @@ pub const MemoryHybridIdx = struct {
 
         lay.n_pool_real = 0;
 
-        for (0..max_seq) |su| {
+        for (0..mod.kv_cells.max_seq) |su| {
             const s: i32 = @intCast(su);
             const sq = &lay.seqs[su];
 
@@ -633,7 +608,7 @@ pub const MemoryHybridIdx = struct {
 
             if (self.mem_idx_stale[su] == pos_clean and sq.cells.items.len != 0 and sp.len != 0 and sq.pos_min == sp[0].pos) {
                 const back = sq.cells.items[sq.cells.items.len - 1];
-                sq.cells.appendSlice(allocator, sp[upperBoundPosCell(sp, back)..]) catch oom();
+                sq.cells.appendSlice(std.heap.c_allocator, sp[upperBoundPosCell(sp, back)..]) catch oom();
             }
 
             // The appended tail accounts for every cell only when nothing
@@ -642,7 +617,7 @@ pub const MemoryHybridIdx = struct {
             // regardless.
             if (sq.cells.items.len != sp.len or self.mem_idx_stale[su] != pos_clean) {
                 sq.cells.clearRetainingCapacity();
-                sq.cells.appendSlice(allocator, sp) catch oom();
+                sq.cells.appendSlice(std.heap.c_allocator, sp) catch oom();
                 sq.pools.clearRetainingCapacity();
                 sq.j_next = 0;
                 sq.pos_min = if (sp.len == 0) 0 else sp[0].pos;
@@ -654,7 +629,7 @@ pub const MemoryHybridIdx = struct {
             if (self.hparams_idx.indexer_kpool_by_order) {
                 // Consecutive cells in sequence order, whatever their positions.
                 while (j + kpool <= n) : (j += kpool) {
-                    sq.pools.append(allocator, @intCast(j)) catch oom();
+                    sq.pools.append(std.heap.c_allocator, @intCast(j)) catch oom();
                 }
             } else {
                 while (j + kpool <= n) {
@@ -672,7 +647,7 @@ pub const MemoryHybridIdx = struct {
                         }
                     }
                     if (ok) {
-                        sq.pools.append(allocator, @intCast(j)) catch oom();
+                        sq.pools.append(std.heap.c_allocator, @intCast(j)) catch oom();
                         j += kpool;
                     } else {
                         j += 1;
@@ -690,23 +665,23 @@ pub const MemoryHybridIdx = struct {
     // -------------------------------------------------------------------------
     // The memory interface
 
-    pub fn memoryOf(self: *MemoryHybridIdx) memory.Memory {
+    pub fn memoryOf(self: *MemoryHybridIdx) mod.memory.Memory {
         return .{ .ptr = self, .vtable = &vtable };
     }
 
-    const vtable: memory.Memory.VTable = .{
+    const vtable: mod.memory.Memory.VTable = .{
         .initBatch = struct {
-            fn f(p: *anyopaque, b: *batch.BatchAllocr, n: u32, e: bool) memory.Context {
+            fn f(p: *anyopaque, b: *mod.batch.BatchAllocr, n: u32, e: bool) mod.memory.Context {
                 return from(p).initBatch(b, n, e).contextOf();
             }
         }.f,
         .initFull = struct {
-            fn f(p: *anyopaque) memory.Context {
+            fn f(p: *anyopaque) mod.memory.Context {
                 return from(p).initFull().contextOf();
             }
         }.f,
         .initUpdate = struct {
-            fn f(p: *anyopaque, l: *anyopaque, o: bool) memory.Context {
+            fn f(p: *anyopaque, l: *anyopaque, o: bool) mod.memory.Context {
                 return from(p).initUpdate(l, o).contextOf();
             }
         }.f,
@@ -756,17 +731,17 @@ pub const MemoryHybridIdx = struct {
             }
         }.f,
         .memoryBreakdown = struct {
-            fn f(p: *anyopaque, out: *std.ArrayList(memory.BuftSize)) void {
+            fn f(p: *anyopaque, out: *std.ArrayList(mod.memory.BuftSize)) void {
                 from(p).memoryBreakdown(out);
             }
         }.f,
         .stateWrite = struct {
-            fn f(p: *anyopaque, w: io.Writer, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, w: mod.io.Writer, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateWrite(w, s, fl, e);
             }
         }.f,
         .stateRead = struct {
-            fn f(p: *anyopaque, r: io.Reader, s: i32, fl: u32, e: *Exception) Thrown!void {
+            fn f(p: *anyopaque, r: mod.io.Reader, s: i32, fl: u32, e: *mod.impl.Exception) mod.impl.Thrown!void {
                 return from(p).stateRead(r, s, fl, e);
             }
         }.f,
@@ -785,9 +760,9 @@ pub const MemoryHybridIdx = struct {
 /// Ports `llama_memory_hybrid_idx_ns` (llama-memory-hybrid-idx.cpp:321
 /// @b1b770d90): the streams in each ubatch's slot info, `get_k`/`get_v`'s
 /// `ns`.
-fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
+fn streamsPerUbatch(sinfos: []const mod.kv_cache.SlotInfo) std.ArrayList(u32) {
     var res: std.ArrayList(u32) = .empty;
-    res.ensureTotalCapacity(allocator, sinfos.len) catch oom();
+    res.ensureTotalCapacity(std.heap.c_allocator, sinfos.len) catch oom();
     for (sinfos) |*si| res.appendAssumeCapacity(si.s1 - si.s0 + 1);
     return res;
 }
@@ -797,15 +772,15 @@ fn streamsPerUbatch(sinfos: []const SlotInfo) std.ArrayList(u32) {
 /// layer seen two ways -- the per-token part of each row (glm5-next: key |
 /// gate, qwen4exp: key) and the pooled key after it.
 pub const KpoolAccess = struct {
-    ctx: *c.ggml_context,
-    key_gate: *Tensor,
-    pooled: *Tensor,
+    ctx: *mod.impl.c.ggml_context,
+    key_gate: *mod.impl.c.ggml_tensor,
+    pooled: *mod.impl.c.ggml_tensor,
 
     /// Ports the constructor of `kpool_access`
     /// (llama-memory-hybrid-idx.cpp:572 @b1b770d90).
-    fn init(ctx: *c.ggml_context, k: *Tensor, n_embd: i64) KpoolAccess {
+    fn init(ctx: *mod.impl.c.ggml_context, k: *mod.impl.c.ggml_tensor, n_embd: i64) KpoolAccess {
         const n_tok = k.ne[0] - n_embd;
-        impl.assert(n_tok > 0 and @rem(n_tok, n_embd) == 0, "llama-memory-hybrid-idx.cpp", 575, "n_tok > 0 && n_tok % n_embd == 0");
+        mod.impl.assert(n_tok > 0 and @rem(n_tok, n_embd) == 0, "llama-memory-hybrid-idx.cpp", 575, "n_tok > 0 && n_tok % n_embd == 0");
 
         const n_cells = k.ne[1] * k.ne[2];
 
@@ -813,24 +788,24 @@ pub const KpoolAccess = struct {
         // the whole storage.
         return .{
             .ctx = ctx,
-            .key_gate = c.ggml_view_2d(ctx, k, n_tok, n_cells, k.nb[1], 0),
-            .pooled = c.ggml_view_2d(ctx, k, n_embd, n_cells, k.nb[1], c.ggml_row_size(k.type, n_tok)),
+            .key_gate = mod.impl.c.ggml_view_2d(ctx, k, n_tok, n_cells, k.nb[1], 0),
+            .pooled = mod.impl.c.ggml_view_2d(ctx, k, n_embd, n_cells, k.nb[1], mod.impl.c.ggml_row_size(k.type, n_tok)),
         };
     }
 
     /// Ports `kpool_access`'s `gather_key_gate` (llama-memory-hybrid-idx.cpp:585 @b1b770d90).
-    pub fn gatherKeyGate(self: KpoolAccess, idxs: *Tensor) *Tensor {
-        return c.ggml_get_rows(self.ctx, self.key_gate, idxs);
+    pub fn gatherKeyGate(self: KpoolAccess, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+        return mod.impl.c.ggml_get_rows(self.ctx, self.key_gate, idxs);
     }
 
     /// Ports `kpool_access`'s `scatter_pooled` (llama-memory-hybrid-idx.cpp:589 @b1b770d90).
-    pub fn scatterPooled(self: KpoolAccess, values: *Tensor, idxs: *Tensor) *Tensor {
-        return c.ggml_set_rows(self.ctx, self.pooled, values, idxs);
+    pub fn scatterPooled(self: KpoolAccess, values: *mod.impl.c.ggml_tensor, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+        return mod.impl.c.ggml_set_rows(self.ctx, self.pooled, values, idxs);
     }
 
     /// Ports `kpool_access`'s `gather_pooled` (llama-memory-hybrid-idx.cpp:593 @b1b770d90).
-    pub fn gatherPooled(self: KpoolAccess, idxs: *Tensor) *Tensor {
-        return c.ggml_get_rows(self.ctx, self.pooled, idxs);
+    pub fn gatherPooled(self: KpoolAccess, idxs: *mod.impl.c.ggml_tensor) *mod.impl.c.ggml_tensor {
+        return mod.impl.c.ggml_get_rows(self.ctx, self.pooled, idxs);
     }
 };
 
@@ -839,7 +814,7 @@ pub const KpoolAccess = struct {
 pub const HybridIdxContext = struct {
     /// The `llama_memory_hybrid_idx_context`'s base. The `memory.Context`
     /// points here.
-    base: HybridContext,
+    base: mod.memory_hybrid.HybridContext,
     mem: ?*MemoryHybridIdx = null,
     /// Streams per ubatch, read from the slot infos before `ctx_idx` takes
     /// them.
@@ -848,9 +823,9 @@ pub const HybridIdxContext = struct {
     /// (qwen4exp): token `s*n + i` of ubatch `u` sits in cell `idxs[s][i]`
     /// of stream `strm[s]` of `sinfos_kpool[u]`, and several cells can
     /// share a position.
-    sinfos_kpool: std.ArrayList(SlotInfo) = .empty,
+    sinfos_kpool: std.ArrayList(mod.kv_cache.SlotInfo) = .empty,
     /// Null unless the model has an indexer.
-    ctx_idx: ?*kv_cache.KvCacheContext = null,
+    ctx_idx: ?*mod.kv_cache.KvCacheContext = null,
     /// The base's ubatch cursor, private there.
     i_cur: usize = 0,
 
@@ -865,9 +840,9 @@ pub const HybridIdxContext = struct {
 
     /// Ports the status constructor of `llama_memory_hybrid_idx_context`
     /// (llama-memory-hybrid-idx.cpp:468 @b1b770d90).
-    pub fn createStatus(status: memory.Status) *HybridIdxContext {
-        const self = allocator.create(HybridIdxContext) catch oom();
-        self.* = .{ .base = HybridContext.initStatus(status) };
+    pub fn createStatus(status: mod.memory.Status) *HybridIdxContext {
+        const self = std.heap.c_allocator.create(HybridIdxContext) catch oom();
+        self.* = .{ .base = mod.memory_hybrid.HybridContext.initStatus(status) };
         return self;
     }
 
@@ -878,22 +853,22 @@ pub const HybridIdxContext = struct {
     /// be the dense graph. The pool counts are sized for every pool the
     /// cache can hold.
     pub fn createFull(mem: *MemoryHybridIdx) *HybridIdxContext {
-        const self = allocator.create(HybridIdxContext) catch oom();
-        self.* = .{ .base = HybridContext.initFull(mem.base), .mem = mem };
+        const self = std.heap.c_allocator.create(HybridIdxContext) catch oom();
+        self.* = .{ .base = mod.memory_hybrid.HybridContext.initFull(mem.base), .mem = mem };
         if (mem.getMemIdx()) |m| {
-            self.ns_ubatch.append(allocator, m.getNStream()) catch oom();
-            self.ctx_idx = kv_cache.KvCacheContext.createFull(m);
+            self.ns_ubatch.append(std.heap.c_allocator, m.getNStream()) catch oom();
+            self.ctx_idx = mod.kv_cache.KvCacheContext.createFull(m);
         }
         if (self.kpoolTrack()) {
             _ = mem.kpoolLayoutUpdate();
             var st = self.kpoolBuildSizes();
             const idx = mem.getMemIdx().?;
             const n_pool_max: u64 = @as(u64, idx.getSize() / mem.getKpool()) * idx.getNSeqMax();
-            impl.assert(n_pool_max <= std.math.maxInt(u32) - 64, "llama-memory-hybrid-idx.cpp", 485, "n_pool_max <= UINT32_MAX - 64");
+            mod.impl.assert(n_pool_max <= std.math.maxInt(u32) - 64, "llama-memory-hybrid-idx.cpp", 485, "n_pool_max <= UINT32_MAX - 64");
             st.n_pool_real = @max(st.n_pool_real, @as(u32, @intCast(n_pool_max)));
             st.n_new = st.n_pool_real;
             st.n_new_g = @max(st.n_new, 1);
-            const p = allocator.create(KpoolState) catch oom();
+            const p = std.heap.c_allocator.create(KpoolState) catch oom();
             p.* = st;
             self.kpool_st = p;
             self.i_kpool = 0;
@@ -906,8 +881,8 @@ pub const HybridIdxContext = struct {
     /// pending cross-stream `seq_cp`, without which the copy keeps stale
     /// indexer keys.
     pub fn createUpdate(mem: *MemoryHybridIdx, lctx: *anyopaque, optimize: bool) *HybridIdxContext {
-        const self = allocator.create(HybridIdxContext) catch oom();
-        self.* = .{ .base = HybridContext.initUpdate(mem.base, lctx, optimize), .mem = mem };
+        const self = std.heap.c_allocator.create(HybridIdxContext) catch oom();
+        self.* = .{ .base = mod.memory_hybrid.HybridContext.initUpdate(mem.base, lctx, optimize), .mem = mem };
         if (mem.getMemIdx()) |m| self.ctx_idx = m.initUpdate(lctx, optimize);
         return self;
     }
@@ -917,19 +892,19 @@ pub const HybridIdxContext = struct {
     /// the base and the indexer each get their own copy of the ubatches,
     /// and a sequence edit since the last batch forces its touched
     /// positions to re-pool.
-    pub fn createBatch(mem: *MemoryHybridIdx, sinfos_attn: std.ArrayList(SlotInfo), sinfos_idx: std.ArrayList(SlotInfo), ubatches: std.ArrayList(Ubatch)) *HybridIdxContext {
-        const self = allocator.create(HybridIdxContext) catch oom();
+    pub fn createBatch(mem: *MemoryHybridIdx, sinfos_attn: std.ArrayList(mod.kv_cache.SlotInfo), sinfos_idx: std.ArrayList(mod.kv_cache.SlotInfo), ubatches: std.ArrayList(mod.batch.Ubatch)) *HybridIdxContext {
+        const self = std.heap.c_allocator.create(HybridIdxContext) catch oom();
         const ns = streamsPerUbatch(sinfos_idx.items);
-        const sinfos_kpool: std.ArrayList(SlotInfo) = if (mem.getMemIdx() != null and mem.getKpool() > 0 and mem.getKpoolByOrder()) cloneSinfos(sinfos_idx.items) else .empty;
-        var ctx_idx: ?*kv_cache.KvCacheContext = null;
+        const sinfos_kpool: std.ArrayList(mod.kv_cache.SlotInfo) = if (mem.getMemIdx() != null and mem.getKpool() > 0 and mem.getKpoolByOrder()) cloneSinfos(sinfos_idx.items) else .empty;
+        var ctx_idx: ?*mod.kv_cache.KvCacheContext = null;
         if (mem.getMemIdx()) |m| {
-            ctx_idx = kv_cache.KvCacheContext.createBatch(m, sinfos_idx, memory_hybrid.retainedCopy(ubatches.items));
+            ctx_idx = mod.kv_cache.KvCacheContext.createBatch(m, sinfos_idx, mod.memory_hybrid.retainedCopy(ubatches.items));
         } else {
             var unused = sinfos_idx;
             deinitSinfos(&unused);
         }
         self.* = .{
-            .base = HybridContext.initBatch(mem.base, sinfos_attn, ubatches),
+            .base = mod.memory_hybrid.HybridContext.initBatch(mem.base, sinfos_attn, ubatches),
             .mem = mem,
             .ns_ubatch = ns,
             .sinfos_kpool = sinfos_kpool,
@@ -944,19 +919,19 @@ pub const HybridIdxContext = struct {
         if (self.ctx_idx) |x| x.destroy();
         if (self.kpool_st) |st| {
             st.deinit();
-            allocator.destroy(st);
+            std.heap.c_allocator.destroy(st);
         }
         deinitSinfos(&self.sinfos_kpool);
-        self.ns_ubatch.deinit(allocator);
+        self.ns_ubatch.deinit(std.heap.c_allocator);
         self.base.deinit();
-        allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     /// The extension behind a hybrid context, the C++'s
     /// `static_cast<const llama_memory_hybrid_idx_context *>`: valid only
     /// for a context `MemoryHybridIdx` made, as qwen4exp's and glm5-next's
     /// always are.
-    pub fn fromBase(base: *const HybridContext) *const HybridIdxContext {
+    pub fn fromBase(base: *const mod.memory_hybrid.HybridContext) *const HybridIdxContext {
         return @alignCast(@fieldParentPtr("base", base));
     }
 
@@ -983,7 +958,7 @@ pub const HybridIdxContext = struct {
         if (res and self.kpoolTrack()) {
             _ = self.mem.?.kpoolLayoutUpdate();
             if (self.kpool_st == null) {
-                const p = allocator.create(KpoolState) catch oom();
+                const p = std.heap.c_allocator.create(KpoolState) catch oom();
                 p.* = .{};
                 self.kpool_st = p;
             }
@@ -1003,28 +978,28 @@ pub const HybridIdxContext = struct {
     }
 
     /// `llama_memory_hybrid_context`'s `get_status`.
-    pub fn getStatus(self: *const HybridIdxContext) memory.Status {
+    pub fn getStatus(self: *const HybridIdxContext) mod.memory.Status {
         return self.base.getStatus();
     }
 
     /// `llama_memory_hybrid_context`'s `get_ubatch`.
-    pub fn getUbatch(self: *const HybridIdxContext) *const Ubatch {
+    pub fn getUbatch(self: *const HybridIdxContext) *const mod.batch.Ubatch {
         return self.base.getUbatch();
     }
 
     /// `llama_memory_hybrid_context`'s `get_attn`.
-    pub fn getAttn(self: *const HybridIdxContext) *const kv_cache.KvCacheContext {
+    pub fn getAttn(self: *const HybridIdxContext) *const mod.kv_cache.KvCacheContext {
         return self.base.getAttn();
     }
 
     /// `llama_memory_hybrid_context`'s `get_recr`.
-    pub fn getRecr(self: *const HybridIdxContext) *const memory_recurrent.RecurrentContext {
+    pub fn getRecr(self: *const HybridIdxContext) *const mod.memory_recurrent.RecurrentContext {
         return self.base.getRecr();
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_idx`
     /// (llama-memory-hybrid-idx.cpp:562 @b1b770d90): null with no indexer.
-    pub fn getIdx(self: *const HybridIdxContext) ?*const kv_cache.KvCacheContext {
+    pub fn getIdx(self: *const HybridIdxContext) ?*const mod.kv_cache.KvCacheContext {
         return self.ctx_idx;
     }
 
@@ -1032,14 +1007,14 @@ pub const HybridIdxContext = struct {
     /// (llama-memory-hybrid-idx.cpp:566 @b1b770d90): the streams in the
     /// current slot info, `get_k`/`get_v`'s `ns`; 1 when unified.
     pub fn getNStream(self: *const HybridIdxContext) u32 {
-        impl.assert(self.i_cur < self.ns_ubatch.items.len, "llama-memory-hybrid-idx.cpp", 567, "i_cur < ns_ubatch.size()");
+        mod.impl.assert(self.i_cur < self.ns_ubatch.items.len, "llama-memory-hybrid-idx.cpp", 567, "i_cur < ns_ubatch.size()");
         return self.ns_ubatch.items[self.i_cur];
     }
 
     /// Ports `llama_memory_hybrid_idx_context`'s `get_kpool_access`
     /// (llama-memory-hybrid-idx.cpp:597 @b1b770d90).
-    pub fn getKpoolAccess(self: *const HybridIdxContext, ctx: *c.ggml_context, il: i32, n_embd: i64) KpoolAccess {
-        impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, "llama-memory-hybrid-idx.cpp", 599, "mem != nullptr && mem->get_mem_idx() != nullptr");
+    pub fn getKpoolAccess(self: *const HybridIdxContext, ctx: *mod.impl.c.ggml_context, il: i32, n_embd: i64) KpoolAccess {
+        mod.impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, "llama-memory-hybrid-idx.cpp", 599, "mem != nullptr && mem->get_mem_idx() != nullptr");
         return KpoolAccess.init(ctx, self.mem.?.getMemIdx().?.getKStorage(il), n_embd);
     }
 
@@ -1066,7 +1041,7 @@ pub const HybridIdxContext = struct {
     /// or tokens decoded for several sequences) share their pools, whose
     /// one pooled row they all read through `pool_cells`, so the scatter's
     /// rows stay unique.
-    fn kpoolBuildState(self: *HybridIdxContext, ubatch: *const Ubatch) void {
+    fn kpoolBuildState(self: *HybridIdxContext, ubatch: *const mod.batch.Ubatch) void {
         const mem = self.mem.?;
         const lay = mem.kpoolLayoutGet();
         const st = self.kpool_st.?;
@@ -1086,12 +1061,12 @@ pub const HybridIdxContext = struct {
         resizeU32(&st.is_new, lay.n_pool_real);
         resizeU32(&st.rep_gen, @as(usize, kv_size) * idx.getNStream());
 
-        var pool_start: [max_seq]u32 = undefined;
+        var pool_start: [mod.kv_cells.max_seq]u32 = undefined;
 
         const Mark = struct {
             st: *KpoolState,
             lay: *const KpoolLayout,
-            pool_start: *const [max_seq]u32,
+            pool_start: *const [mod.kv_cells.max_seq]u32,
             kv_size: u32,
             kpool: u32,
 
@@ -1108,7 +1083,7 @@ pub const HybridIdxContext = struct {
         const marker: Mark = .{ .st = st, .lay = lay, .pool_start = &pool_start, .kv_size = kv_size, .kpool = kpool };
 
         var ip: u32 = 0;
-        for (0..max_seq) |su| {
+        for (0..mod.kv_cells.max_seq) |su| {
             const sq = &lay.seqs[su];
             pool_start[su] = ip;
             ip += @intCast(sq.pools.items.len);
@@ -1126,12 +1101,12 @@ pub const HybridIdxContext = struct {
             }
             for (lo..sq.pools.items.len) |pi| marker.mark(su, pi);
         }
-        impl.assert(ip == st.is_new.items.len, "llama-memory-hybrid-idx.cpp", 676, "ip == st.is_new.size()");
+        mod.impl.assert(ip == st.is_new.items.len, "llama-memory-hybrid-idx.cpp", 676, "ip == st.is_new.size()");
 
         // In order mode a token's cell gives its rank, and the rank its
         // pool: positions cannot, as an image shares one.
         const by_order = mem.getKpoolByOrder();
-        const sinfo: ?*const SlotInfo = if (by_order) &self.sinfos_kpool.items[self.i_cur] else null;
+        const sinfo: ?*const mod.kv_cache.SlotInfo = if (by_order) &self.sinfos_kpool.items[self.i_cur] else null;
         const n_tps: u32 = if (sinfo) |si| @intCast(si.size()) else 0;
 
         for (0..ubatch.n_tokens) |i| {
@@ -1142,7 +1117,7 @@ pub const HybridIdxContext = struct {
                 const sq = &lay.seqs[s];
                 if (by_order) {
                     const r = kpoolRank(sq.cells.items, p, sinfo.?.idxs.items[i / n_tps].items[i % n_tps]);
-                    impl.assert(r >= 0, "llama-memory-hybrid-idx.cpp", 690, "r >= 0");
+                    mod.impl.assert(r >= 0, "llama-memory-hybrid-idx.cpp", 690, "r >= 0");
                     const pool: usize = @as(usize, @intCast(r)) / kpool;
                     if (pool < sq.pools.items.len) marker.mark(s, pool);
                     continue;
@@ -1173,7 +1148,7 @@ pub const HybridIdxContext = struct {
     /// Ports `llama_memory_hybrid_idx_context`'s `kpool_cur`
     /// (llama-memory-hybrid-idx.cpp:715 @b1b770d90).
     fn kpoolCur(self: *const HybridIdxContext) *const KpoolState {
-        impl.assert(self.kpool_st != null and self.i_kpool == self.i_cur, "llama-memory-hybrid-idx.cpp", 716, "kpool_st != nullptr && i_kpool == i_cur && \"k-pool state read before apply()\"");
+        mod.impl.assert(self.kpool_st != null and self.i_kpool == self.i_cur, "llama-memory-hybrid-idx.cpp", 716, "kpool_st != nullptr && i_kpool == i_cur && \"k-pool state read before apply()\"");
         return self.kpool_st.?;
     }
 
@@ -1211,22 +1186,22 @@ pub const HybridIdxContext = struct {
     ///   member's M-RoPE position, for keys rotated at pooling time
     pub fn setInputKpool(
         self: *const HybridIdxContext,
-        pool_cells: *Tensor,
-        pool_idxs: *Tensor,
-        pool_mask: *Tensor,
-        tail_idxs: *Tensor,
-        sel_mask: ?*Tensor,
-        new_pool_idxs: *Tensor,
-        new_pool_rep: ?*Tensor,
-        ubatch: *const Ubatch,
-        new_pool_pos: ?*Tensor,
+        pool_cells: *mod.impl.c.ggml_tensor,
+        pool_idxs: *mod.impl.c.ggml_tensor,
+        pool_mask: *mod.impl.c.ggml_tensor,
+        tail_idxs: *mod.impl.c.ggml_tensor,
+        sel_mask: ?*mod.impl.c.ggml_tensor,
+        new_pool_idxs: *mod.impl.c.ggml_tensor,
+        new_pool_rep: ?*mod.impl.c.ggml_tensor,
+        ubatch: *const mod.batch.Ubatch,
+        new_pool_pos: ?*mod.impl.c.ggml_tensor,
     ) void {
         const f = "llama-memory-hybrid-idx.cpp";
-        impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, f, 732, "mem != nullptr && mem->get_mem_idx() != nullptr");
-        impl.assert(c.ggml_backend_buffer_is_host(pool_cells.buffer), f, 733, "ggml_backend_buffer_is_host(pool_cells->buffer)");
-        impl.assert(c.ggml_backend_buffer_is_host(pool_idxs.buffer), f, 734, "ggml_backend_buffer_is_host(pool_idxs->buffer)");
-        impl.assert(c.ggml_backend_buffer_is_host(pool_mask.buffer), f, 735, "ggml_backend_buffer_is_host(pool_mask->buffer)");
-        impl.assert(c.ggml_backend_buffer_is_host(tail_idxs.buffer), f, 736, "ggml_backend_buffer_is_host(tail_idxs->buffer)");
+        mod.impl.assert(self.mem != null and self.mem.?.getMemIdx() != null, f, 732, "mem != nullptr && mem->get_mem_idx() != nullptr");
+        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_cells.buffer), f, 733, "ggml_backend_buffer_is_host(pool_cells->buffer)");
+        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_idxs.buffer), f, 734, "ggml_backend_buffer_is_host(pool_idxs->buffer)");
+        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(pool_mask.buffer), f, 735, "ggml_backend_buffer_is_host(pool_mask->buffer)");
+        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(tail_idxs.buffer), f, 736, "ggml_backend_buffer_is_host(tail_idxs->buffer)");
 
         const mem = self.mem.?;
         const m_idx = mem.getMemIdx().?;
@@ -1245,19 +1220,19 @@ pub const HybridIdxContext = struct {
 
         const by_order = mem.getKpoolByOrder();
 
-        impl.assert(n_pool == kpoolPad(st.n_pool_real), f, 752, "n_pool == kpool_pad(st.n_pool_real)");
-        impl.assert(st.is_new.items.len == st.n_pool_real, f, 753, "st.is_new.size() == st.n_pool_real");
-        impl.assert(pool_mask.ne[0] == n_pool and pool_mask.ne[1] == n_tokens, f, 754, "pool_mask->ne[0] == (int64_t) n_pool && pool_mask->ne[1] == (int64_t) n_tokens");
-        impl.assert(tail_idxs.ne[0] == @as(i64, kpool) - 1 and tail_idxs.ne[1] == n_tokens, f, 755, "tail_idxs->ne[0] == (int64_t) kpool - 1 && tail_idxs->ne[1] == (int64_t) n_tokens");
-        impl.assert(pool_idxs.ne[0] == kpool and pool_idxs.ne[1] == n_pool, f, 756, "pool_idxs->ne[0] == (int64_t) kpool && pool_idxs->ne[1] == (int64_t) n_pool");
-        impl.assert(c.ggml_backend_buffer_is_host(new_pool_idxs.buffer), f, 757, "ggml_backend_buffer_is_host(new_pool_idxs->buffer)");
-        impl.assert(c.ggml_nelements(new_pool_idxs) == kpool * n_new_g, f, 758, "ggml_nelements(new_pool_idxs) == (int64_t) kpool*n_new_g");
+        mod.impl.assert(n_pool == kpoolPad(st.n_pool_real), f, 752, "n_pool == kpool_pad(st.n_pool_real)");
+        mod.impl.assert(st.is_new.items.len == st.n_pool_real, f, 753, "st.is_new.size() == st.n_pool_real");
+        mod.impl.assert(pool_mask.ne[0] == n_pool and pool_mask.ne[1] == n_tokens, f, 754, "pool_mask->ne[0] == (int64_t) n_pool && pool_mask->ne[1] == (int64_t) n_tokens");
+        mod.impl.assert(tail_idxs.ne[0] == @as(i64, kpool) - 1 and tail_idxs.ne[1] == n_tokens, f, 755, "tail_idxs->ne[0] == (int64_t) kpool - 1 && tail_idxs->ne[1] == (int64_t) n_tokens");
+        mod.impl.assert(pool_idxs.ne[0] == kpool and pool_idxs.ne[1] == n_pool, f, 756, "pool_idxs->ne[0] == (int64_t) kpool && pool_idxs->ne[1] == (int64_t) n_pool");
+        mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(new_pool_idxs.buffer), f, 757, "ggml_backend_buffer_is_host(new_pool_idxs->buffer)");
+        mod.impl.assert(mod.impl.c.ggml_nelements(new_pool_idxs) == kpool * n_new_g, f, 758, "ggml_nelements(new_pool_idxs) == (int64_t) kpool*n_new_g");
         // the graph always scatters the fresh pooled keys back into the cache
-        impl.assert(new_pool_rep != null and c.ggml_backend_buffer_is_host(new_pool_rep.?.buffer), f, 760, "new_pool_rep != nullptr && ggml_backend_buffer_is_host(new_pool_rep->buffer)");
-        impl.assert(new_pool_rep.?.ne[0] == n_new_g, f, 761, "new_pool_rep->ne[0] == (int64_t) n_new_g");
+        mod.impl.assert(new_pool_rep != null and mod.impl.c.ggml_backend_buffer_is_host(new_pool_rep.?.buffer), f, 760, "new_pool_rep != nullptr && ggml_backend_buffer_is_host(new_pool_rep->buffer)");
+        mod.impl.assert(new_pool_rep.?.ne[0] == n_new_g, f, 761, "new_pool_rep->ne[0] == (int64_t) n_new_g");
         if (new_pool_pos) |npp| {
-            impl.assert(c.ggml_backend_buffer_is_host(npp.buffer), f, 763, "ggml_backend_buffer_is_host(new_pool_pos->buffer)");
-            impl.assert(npp.ne[0] == 4 * @as(i64, n_new_g), f, 764, "new_pool_pos->ne[0] == 4*(int64_t) n_new_g");
+            mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(npp.buffer), f, 763, "ggml_backend_buffer_is_host(new_pool_pos->buffer)");
+            mod.impl.assert(npp.ne[0] == 4 * @as(i64, n_new_g), f, 764, "new_pool_pos->ne[0] == 4*(int64_t) n_new_g");
         }
 
         const kv_size: u32 = m_idx.getSize();
@@ -1271,7 +1246,7 @@ pub const HybridIdxContext = struct {
 
         // The sequences of this ubatch: an absent one's pools must fall on
         // the scatter's sentinel row.
-        var seq_in_ub: [max_seq]bool = @splat(false);
+        var seq_in_ub: [mod.kv_cells.max_seq]bool = @splat(false);
         for (0..n_tokens) |i| {
             var k: usize = 0;
             while (k < ubatch.n_seq_id[i]) : (k += 1) seq_in_ub[@intCast(ubatch.seq_id[i][k])] = true;
@@ -1284,22 +1259,22 @@ pub const HybridIdxContext = struct {
             const s: usize = @intCast(ubatch.seq_id[0][0]);
             const sq = &lay.seqs[s];
             const it = lowerBoundPosCell(sq.cells.items, .{ .pos = ubatch.pos[0], .cell = 0 });
-            impl.assert(it != sq.cells.items.len and sq.cells.items[it].pos == ubatch.pos[0], f, 788, "it != sq.cells.end() && it->first == ubatch->pos[0]");
+            mod.impl.assert(it != sq.cells.items.len and sq.cells.items[it].pos == ubatch.pos[0], f, 788, "it != sq.cells.end() && it->first == ubatch->pos[0]");
             dummy_cell = Gcell.of(sq, kv_size, sq.cells.items[it].cell);
         }
 
         // In order mode a token sees the pools and the tail up to its own
         // rank in the sequence, which its cell pins down.
         var rank: std.ArrayList(i64) = .empty;
-        defer rank.deinit(allocator);
+        defer rank.deinit(std.heap.c_allocator);
         if (by_order) {
             const sinfo = &self.sinfos_kpool.items[self.i_cur];
             const n_tps: u32 = @intCast(sinfo.size());
 
-            rank.resize(allocator, n_tokens) catch oom();
+            rank.resize(std.heap.c_allocator, n_tokens) catch oom();
             for (0..n_tokens) |i| {
                 rank.items[i] = kpoolRank(lay.seqs[@intCast(ubatch.seq_id[i][0])].cells.items, ubatch.pos[i], sinfo.idxs.items[i / n_tps].items[i % n_tps]);
-                impl.assert(rank.items[i] >= 0, f, 801, "rank[i] >= 0");
+                mod.impl.assert(rank.items[i] >= 0, f, 801, "rank[i] >= 0");
             }
         }
 
@@ -1312,21 +1287,21 @@ pub const HybridIdxContext = struct {
         // Pools per token in the selection.
         var n_top: u32 = 0;
         if (sel_mask) |g| {
-            impl.assert(c.ggml_backend_buffer_is_host(g.buffer), f, 812, "ggml_backend_buffer_is_host(sel_mask->buffer)");
-            impl.assert(g.type == c.GGML_TYPE_F32, f, 813, "sel_mask->type == GGML_TYPE_F32");
-            impl.assert(g.ne[3] == n_tokens and g.ne[1] == 1 and g.ne[2] == 1, f, 814, "sel_mask->ne[3] == (int64_t) n_tokens && sel_mask->ne[1] == 1 && sel_mask->ne[2] == 1");
+            mod.impl.assert(mod.impl.c.ggml_backend_buffer_is_host(g.buffer), f, 812, "ggml_backend_buffer_is_host(sel_mask->buffer)");
+            mod.impl.assert(g.type == mod.impl.c.GGML_TYPE_F32, f, 813, "sel_mask->type == GGML_TYPE_F32");
+            mod.impl.assert(g.ne[3] == n_tokens and g.ne[1] == 1 and g.ne[2] == 1, f, 814, "sel_mask->ne[3] == (int64_t) n_tokens && sel_mask->ne[1] == 1 && sel_mask->ne[2] == 1");
             n_sel = @intCast(g.ne[0]);
             // the tail slots, when selected, are the n_sel % kpool != 0 remainder
             n_top = n_sel / kpool;
-            impl.assert(n_sel % kpool == 0 or n_sel % kpool == kpool - 1, f, 818, "n_sel % kpool == 0 || n_sel % kpool == kpool - 1");
+            mod.impl.assert(n_sel % kpool == 0 or n_sel % kpool == kpool - 1, f, 818, "n_sel % kpool == 0 || n_sel % kpool == kpool - 1");
             gm = @ptrCast(@alignCast(g.data));
         }
 
         // pools are laid out per sequence
-        var seq_pool_start: [max_seq]u32 = @splat(0);
+        var seq_pool_start: [mod.kv_cells.max_seq]u32 = @splat(0);
         var pool_end: std.ArrayList(i32) = .empty;
-        defer pool_end.deinit(allocator);
-        pool_end.ensureTotalCapacity(allocator, n_pool) catch oom();
+        defer pool_end.deinit(std.heap.c_allocator);
+        pool_end.ensureTotalCapacity(std.heap.c_allocator, n_pool) catch oom();
 
         const pcell: [*]i32 = @ptrCast(@alignCast(pool_cells.data));
         const pidx: [*]i32 = @ptrCast(@alignCast(pool_idxs.data));
@@ -1337,7 +1312,7 @@ pub const HybridIdxContext = struct {
         if (npos) |np| @memset(np[0 .. 4 * @as(usize, n_new_g)], 0);
 
         var i_new: u32 = 0;
-        for (0..max_seq) |su| {
+        for (0..mod.kv_cells.max_seq) |su| {
             const sq = &lay.seqs[su];
             seq_pool_start[su] = @intCast(pool_end.items.len);
 
@@ -1345,7 +1320,7 @@ pub const HybridIdxContext = struct {
 
             for (sq.pools.items) |j| {
                 const ipu: u32 = @intCast(pool_end.items.len);
-                impl.assert(ipu + 1 < n_pool, f, 847, "ip + 1 < n_pool");
+                mod.impl.assert(ipu + 1 < n_pool, f, 847, "ip + 1 < n_pool");
 
                 // The pooled key lives in the last member's row.
                 const rep = sq.cells.items[j + kpool - 1].cell;
@@ -1357,7 +1332,7 @@ pub const HybridIdxContext = struct {
                 }
 
                 if (st.is_new.items[ipu] == st.generation) {
-                    impl.assert(i_new < n_new, f, 858, "i_new < n_new");
+                    mod.impl.assert(i_new < n_new, f, 858, "i_new < n_new");
                     for (0..kpool) |k| {
                         nidx[@as(usize, i_new) * kpool + k] = @intCast(Gcell.of(sq, kv_size, sq.cells.items[j + k].cell));
                     }
@@ -1377,14 +1352,14 @@ pub const HybridIdxContext = struct {
                 pool_end.appendAssumeCapacity(sq.cells.items[j + kpool - 1].pos);
             }
         }
-        impl.assert(i_new == n_new, f, 878, "i_new == n_new");
+        mod.impl.assert(i_new == n_new, f, 878, "i_new == n_new");
 
         // Padded entries re-pool cells whose pooled slot is never read (only
         // complete pools' reps are), each its own cell: entries sharing one
         // would write it from several threads in the scatter.
         if (n_new_g > n_new) {
-            const reps = allocator.alloc(i64, pool_end.items.len) catch oom();
-            defer allocator.free(reps);
+            const reps = std.heap.c_allocator.alloc(i64, pool_end.items.len) catch oom();
+            defer std.heap.c_allocator.free(reps);
             for (reps, 0..) |*r, k| r.* = pcell[k];
             std.sort.pdq(i64, reps, {}, std.sort.asc(i64));
 
@@ -1395,7 +1370,7 @@ pub const HybridIdxContext = struct {
                 pad_cell += 1;
             }) {
                 while (std.sort.binarySearch(i64, reps, pad_cell, orderI64) != null) pad_cell += 1;
-                impl.assert(pad_cell < @as(i64, kv_size) * n_stream_kv, f, 891, "pad_cell < (int64_t) kv_size*n_stream_kv");
+                mod.impl.assert(pad_cell < @as(i64, kv_size) * n_stream_kv, f, 891, "pad_cell < (int64_t) kv_size*n_stream_kv");
                 for (0..kpool) |k| nidx[@as(usize, i) * kpool + k] = @intCast(pad_cell);
                 nrep[i] = pad_cell;
             }
@@ -1415,8 +1390,8 @@ pub const HybridIdxContext = struct {
         // ends at or before it.
         const Fill = struct {
             fn run(comptime T: type, data: [*]T, ctx: anytype) void {
-                const keep: T = if (T == u16) c.ggml_fp32_to_fp16(0.0) else 0.0;
-                const drop: T = if (T == u16) c.ggml_fp32_to_fp16(-std.math.inf(f32)) else -std.math.inf(f32);
+                const keep: T = if (T == u16) mod.impl.c.ggml_fp32_to_fp16(0.0) else 0.0;
+                const drop: T = if (T == u16) mod.impl.c.ggml_fp32_to_fp16(-std.math.inf(f32)) else -std.math.inf(f32);
 
                 for (0..ctx.n_tokens) |i| {
                     const s: usize = @intCast(ctx.ubatch.seq_id[i][0]);
@@ -1468,7 +1443,7 @@ pub const HybridIdxContext = struct {
             .n_top = n_top,
             .n_sel = @as(usize, n_sel),
         };
-        if (pool_mask.type == c.GGML_TYPE_F16) {
+        if (pool_mask.type == mod.impl.c.GGML_TYPE_F16) {
             Fill.run(u16, @ptrCast(@alignCast(pool_mask.data)), fill_ctx);
         } else {
             Fill.run(f32, @ptrCast(@alignCast(pool_mask.data)), fill_ctx);
@@ -1514,11 +1489,11 @@ pub const HybridIdxContext = struct {
 
     /// The `memory.Context`, pointing at `base` so the graph's
     /// `cast(HybridContext)` sees the base.
-    pub fn contextOf(self: *HybridIdxContext) memory.Context {
+    pub fn contextOf(self: *HybridIdxContext) mod.memory.Context {
         return .{ .ptr = &self.base, .vtable = &ctx_vtable };
     }
 
-    const ctx_vtable: memory.Context.VTable = .{
+    const ctx_vtable: mod.memory.Context.VTable = .{
         .next = struct {
             fn f(p: *anyopaque) bool {
                 return cast(p).next();
@@ -1530,12 +1505,12 @@ pub const HybridIdxContext = struct {
             }
         }.f,
         .getUbatch = struct {
-            fn f(p: *anyopaque) *const Ubatch {
+            fn f(p: *anyopaque) *const mod.batch.Ubatch {
                 return cast(p).getUbatch();
             }
         }.f,
         .getStatus = struct {
-            fn f(p: *anyopaque) memory.Status {
+            fn f(p: *anyopaque) mod.memory.Status {
                 return cast(p).getStatus();
             }
         }.f,
@@ -1547,7 +1522,7 @@ pub const HybridIdxContext = struct {
     };
 
     fn cast(p: *anyopaque) *HybridIdxContext {
-        const base: *HybridContext = @ptrCast(@alignCast(p));
+        const base: *mod.memory_hybrid.HybridContext = @ptrCast(@alignCast(p));
         return @alignCast(@fieldParentPtr("base", base));
     }
 };
@@ -1569,9 +1544,9 @@ test {
 test "a context's base pointer recovers the extension" {
     const ctx = HybridIdxContext.createStatus(.failed_prepare);
     const mc = ctx.contextOf();
-    try std.testing.expect(mc.cast(HybridContext) == &ctx.base);
-    try std.testing.expect(HybridIdxContext.fromBase(mc.cast(HybridContext)) == ctx);
-    try std.testing.expectEqual(memory.Status.failed_prepare, mc.getStatus());
+    try std.testing.expect(mc.cast(mod.memory_hybrid.HybridContext) == &ctx.base);
+    try std.testing.expect(HybridIdxContext.fromBase(mc.cast(mod.memory_hybrid.HybridContext)) == ctx);
+    try std.testing.expectEqual(mod.memory.Status.failed_prepare, mc.getStatus());
     mc.destroy();
 }
 
@@ -1582,7 +1557,7 @@ test "a pool count pads to 64 past one spare pool" {
 }
 
 test "a rank is the index of the exact pair, or -1" {
-    const cells = [_]PosCell{ .{ .pos = 0, .cell = 3 }, .{ .pos = 1, .cell = 1 }, .{ .pos = 1, .cell = 4 } };
+    const cells = [_]mod.kv_cells.PosCell{ .{ .pos = 0, .cell = 3 }, .{ .pos = 1, .cell = 1 }, .{ .pos = 1, .cell = 4 } };
     try std.testing.expectEqual(@as(i64, 2), kpoolRank(&cells, 1, 4));
     try std.testing.expectEqual(@as(i64, -1), kpoolRank(&cells, 1, 2));
 }

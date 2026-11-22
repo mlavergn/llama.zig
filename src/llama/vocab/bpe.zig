@@ -18,19 +18,11 @@
 //! libc++'s.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const libcxx = @import("stdlib").libcxx;
-const unicode = @import("../unicode.zig");
-const vm = @import("module.zig");
-
-const allocator = impl.allocator;
-const Vocab = vm.Vocab;
-const Token = vm.Token;
-const token_null = vm.vocab.token_null;
-const PreType = vm.vocab.PreType;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 /// Ports `dna_kmer_marker` (llama-vocab.cpp:1827 @b1b770d90): U+E000.
@@ -49,7 +41,7 @@ const Patterns = struct {
 
 /// Ports `llm_tokenizer_bpe`'s constructor's `switch` (llama-vocab.cpp:284
 /// @b1b770d90), generated.
-fn patterns(pre: PreType) Patterns {
+fn patterns(pre: llama.vocab.vocab.PreType) Patterns {
     return switch (pre) {
         .flint => .{ .exprs = &.{
             "\\p{N}{1,3}",
@@ -218,8 +210,8 @@ pub const Tokenizer = struct {
     byte_encode: bool,
 
     /// Return: the tokenizer for `vocab`'s pre-tokenizer.
-    pub fn init(vocab: *const Vocab) Tokenizer {
-        impl.assert(vocab.type == vm.vocab.type_bpe, "llama-vocab.cpp", 283, "vocab.get_type() == LLAMA_VOCAB_TYPE_BPE");
+    pub fn init(vocab: *const llama.vocab.Vocab) Tokenizer {
+        llama.impl.assert(vocab.type == llama.vocab.vocab.type_bpe, "llama-vocab.cpp", 283, "vocab.get_type() == LLAMA_VOCAB_TYPE_BPE");
         const p = patterns(vocab.pre_type);
         return .{ .regex_exprs = p.exprs, .byte_encode = p.byte_encode };
     }
@@ -256,24 +248,24 @@ const Mode = enum { plain, hybriddna, whitespace };
 /// Ports `llm_tokenizer_bpe_session` (llama-vocab.cpp:610 @b1b770d90),
 /// and through `mode` the two sessions derived from it.
 pub const Session = struct {
-    vocab: *const Vocab,
+    vocab: *const llama.vocab.Vocab,
     tokenizer: *const Tokenizer,
     mode: Mode,
     symbols: std.ArrayList(Symbol) = .empty,
     symbols_final: std.ArrayList(Symbol) = .empty,
-    work_queue: libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
+    work_queue: stdlib.libcxx.PriorityQueue(Bigram, void, bigramLess) = .{ .ctx = {} },
 
     // `llm_tokenizer_hybriddna_session`'s members.
-    dna_begin_id: Token = token_null,
-    dna_end_id: Token = token_null,
-    dna_oov_id: Token = token_null,
+    dna_begin_id: llama.vocab.Token = llama.vocab.vocab.token_null,
+    dna_end_id: llama.vocab.Token = llama.vocab.vocab.token_null,
+    dna_oov_id: llama.vocab.Token = llama.vocab.vocab.token_null,
     pad_char: u8 = 'A',
 
     /// The session `llama_vocab::impl`'s `tokenize` makes for `vocab`'s
     /// tokenizer model (llama-vocab.cpp:3883 @b1b770d90).
     ///
     /// Return: the session; free it with `deinit`.
-    pub fn init(vocab: *const Vocab, tokenizer: *const Tokenizer) Session {
+    pub fn init(vocab: *const llama.vocab.Vocab, tokenizer: *const Tokenizer) Session {
         const model = vocab.tokenizer_model.items;
         const mode: Mode = if (std.mem.eql(u8, model, "hybriddna")) .hybriddna else if (std.mem.eql(u8, model, "whitespace")) .whitespace else .plain;
         return .{ .vocab = vocab, .tokenizer = tokenizer, .mode = mode };
@@ -281,41 +273,41 @@ pub const Session = struct {
 
     /// Return: nothing.
     pub fn deinit(self: *Session) void {
-        self.symbols.deinit(allocator);
-        self.symbols_final.deinit(allocator);
-        self.work_queue.deinit(allocator);
+        self.symbols.deinit(std.heap.c_allocator);
+        self.symbols_final.deinit(std.heap.c_allocator);
+        self.work_queue.deinit(std.heap.c_allocator);
     }
 
     /// Ports `llm_tokenizer_bpe_session`'s `append_bos`.
-    pub fn appendBos(self: *const Session, output: *std.ArrayList(Token)) void {
+    pub fn appendBos(self: *const Session, output: *std.ArrayList(llama.vocab.Token)) void {
         if (self.vocab.add_bos) {
-            impl.assert(self.vocab.special_bos_id != token_null, "llama-vocab.cpp", 621, "vocab.token_bos() != LLAMA_TOKEN_NULL");
-            output.append(allocator, self.vocab.special_bos_id) catch oom();
+            llama.impl.assert(self.vocab.special_bos_id != llama.vocab.vocab.token_null, "llama-vocab.cpp", 621, "vocab.token_bos() != LLAMA_TOKEN_NULL");
+            output.append(std.heap.c_allocator, self.vocab.special_bos_id) catch oom();
         }
     }
 
     /// Ports `llm_tokenizer_bpe_session`'s `append_eos`.
-    pub fn appendEos(self: *const Session, output: *std.ArrayList(Token)) void {
+    pub fn appendEos(self: *const Session, output: *std.ArrayList(llama.vocab.Token)) void {
         if (self.vocab.add_eos) {
-            impl.assert(self.vocab.special_eos_id != token_null, "llama-vocab.cpp", 630, "vocab.token_eos() != LLAMA_TOKEN_NULL");
-            output.append(allocator, self.vocab.special_eos_id) catch oom();
+            llama.impl.assert(self.vocab.special_eos_id != llama.vocab.vocab.token_null, "llama-vocab.cpp", 630, "vocab.token_eos() != LLAMA_TOKEN_NULL");
+            output.append(std.heap.c_allocator, self.vocab.special_eos_id) catch oom();
         }
     }
 
     /// Ports `llm_tokenizer_bpe_session`'s `check_double_bos_eos`.
-    pub fn checkDoubleBosEos(self: *const Session, output: []const Token) void {
+    pub fn checkDoubleBosEos(self: *const Session, output: []const llama.vocab.Token) void {
         if (self.vocab.add_bos and output.len >= 2 and output[1] == self.vocab.special_bos_id) {
-            impl.logWarn("%s: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?\n", .{"check_double_bos_eos"});
+            llama.impl.logWarn("%s: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?\n", .{"check_double_bos_eos"});
         }
         if (self.vocab.add_eos and output.len >= 2 and output[output.len - 2] == self.vocab.special_eos_id) {
-            impl.logWarn("%s: Added a EOS token to the prompt as specified by the model but the prompt also ends with a EOS token. So now the final prompt ends with 2 EOS tokens. Are you sure this is what you want?\n", .{"check_double_bos_eos"});
+            llama.impl.logWarn("%s: Added a EOS token to the prompt as specified by the model but the prompt also ends with a EOS token. So now the final prompt ends with 2 EOS tokens. Are you sure this is what you want?\n", .{"check_double_bos_eos"});
         }
     }
 
     /// The session's `tokenize`, dispatched as the C++'s virtual is.
     ///
     /// Return: nothing, or `error.Thrown` from the pre-tokenizer.
-    pub fn tokenize(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    pub fn tokenize(self: *Session, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         return switch (self.mode) {
             .plain => self.tokenizeBpe(text, output, exc),
             .hybriddna => self.tokenizeHybridDna(text, output, exc),
@@ -333,7 +325,7 @@ pub const Session = struct {
         // The symbols are adjacent in the word, so `left_token +
         // right_token` is one span of it.
         const t = lt.ptr[0 .. lt.len + rt.len];
-        self.work_queue.push(allocator, .{ .left = left, .right = right, .text = t, .rank = rank_found, .size = lt.len + rt.len }) catch oom();
+        self.work_queue.push(std.heap.c_allocator, .{ .left = left, .right = right, .text = t, .rank = rank_found, .size = lt.len + rt.len }) catch oom();
     }
 
     /// Ports `llm_tokenizer_bpe_session`'s `tokenize` (llama-vocab.cpp:652
@@ -341,34 +333,34 @@ pub const Session = struct {
     /// `[` and `<`; Soprano folds whitespace runs to one space and lowercases.
     /// mmBERT's Metaspace pre-tokenizer: a text starts with an escaped space,
     /// and each escaped space starts a new word.
-    fn tokenizeBpe(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    fn tokenizeBpe(self: *Session, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         const vocab = self.vocab;
         const tok_pre = vocab.pre_type;
 
         var normalized_text: std.ArrayList(u8) = .empty;
-        defer normalized_text.deinit(allocator);
+        defer normalized_text.deinit(std.heap.c_allocator);
         var split_text = text;
         if (tok_pre == .nemotron_3_5_embd) {
             const zwnj = "\xe2\x80\x8c";
-            normalized_text.appendSlice(allocator, text) catch oom();
-            impl.replaceAll(&normalized_text, "[" ++ zwnj, "[");
-            impl.replaceAll(&normalized_text, "<" ++ zwnj, "<");
+            normalized_text.appendSlice(std.heap.c_allocator, text) catch oom();
+            llama.impl.replaceAll(&normalized_text, "[" ++ zwnj, "[");
+            llama.impl.replaceAll(&normalized_text, "<" ++ zwnj, "<");
             split_text = normalized_text.items;
         } else if (tok_pre == .soprano) {
             var space = false;
-            const cpts = unicode.cptsFromUtf8(text);
-            defer allocator.free(cpts);
+            const cpts = llama.unicode.cptsFromUtf8(text);
+            defer std.heap.c_allocator.free(cpts);
             for (cpts) |cpt| {
-                if (unicode.cptFlagsFromCpt(cpt).is_whitespace) {
-                    if (!space) normalized_text.append(allocator, ' ') catch oom();
+                if (llama.unicode.cptFlagsFromCpt(cpt).is_whitespace) {
+                    if (!space) normalized_text.append(std.heap.c_allocator, ' ') catch oom();
                     space = true;
                 } else {
                     // Unicode full lowercase expands LATIN CAPITAL LETTER I
                     // WITH DOT ABOVE.
                     if (cpt == 0x0130) {
-                        normalized_text.appendSlice(allocator, "i\xcc\x87") catch oom();
+                        normalized_text.appendSlice(std.heap.c_allocator, "i\xcc\x87") catch oom();
                     } else {
-                        unicode.appendCptUtf8(&normalized_text, unicode.tolower(cpt)) catch
+                        llama.unicode.appendCptUtf8(&normalized_text, llama.unicode.tolower(cpt)) catch
                             return exc.throw(.invalid_argument, "invalid codepoint", .{});
                     }
                     space = false;
@@ -377,7 +369,7 @@ pub const Session = struct {
             split_text = normalized_text.items;
         }
 
-        var word_collection = unicode.regexSplit(split_text, self.tokenizer.regex_exprs, self.tokenizer.byte_encode) catch |err| return switch (err) {
+        var word_collection = llama.unicode.regexSplit(split_text, self.tokenizer.regex_exprs, self.tokenizer.byte_encode) catch |err| return switch (err) {
             error.RegexFailed => exc.throw(.runtime_error, "Failed to process regex", .{}),
             error.CategoryWithNonAscii => exc.throw(.runtime_error, "Regex includes both unicode categories and non-ASCII characters - not supported", .{}),
             error.InvalidCodepoint => exc.throw(.invalid_argument, "invalid codepoint", .{}),
@@ -390,25 +382,25 @@ pub const Session = struct {
 
         if (tok_pre == .mmbert) {
             const space = "\xe2\x96\x81";
-            var words: unicode.Words = .{};
+            var words: llama.unicode.Words = .{};
             var tmp: std.ArrayList(u8) = .empty;
-            defer tmp.deinit(allocator);
+            defer tmp.deinit(std.heap.c_allocator);
             for (0..word_collection.len()) |w| {
                 const word0 = word_collection.get(w);
                 if (std.mem.findNone(u8, word0, "\n") == null) {
-                    words.buf.appendSlice(allocator, word0) catch oom();
-                    words.ends.append(allocator, words.buf.items.len) catch oom();
+                    words.buf.appendSlice(std.heap.c_allocator, word0) catch oom();
+                    words.ends.append(std.heap.c_allocator, words.buf.items.len) catch oom();
                     continue;
                 }
                 tmp.clearRetainingCapacity();
-                if (!std.mem.startsWith(u8, word0, space)) tmp.appendSlice(allocator, space) catch oom();
-                tmp.appendSlice(allocator, word0) catch oom();
+                if (!std.mem.startsWith(u8, word0, space)) tmp.appendSlice(std.heap.c_allocator, space) catch oom();
+                tmp.appendSlice(std.heap.c_allocator, word0) catch oom();
                 const word = tmp.items;
                 var start: usize = 0;
                 while (start < word.len) {
                     const end = std.mem.findPos(u8, word, start + space.len, space) orelse word.len;
-                    words.buf.appendSlice(allocator, word[start..end]) catch oom();
-                    words.ends.append(allocator, words.buf.items.len) catch oom();
+                    words.buf.appendSlice(std.heap.c_allocator, word[start..end]) catch oom();
+                    words.ends.append(std.heap.c_allocator, words.buf.items.len) catch oom();
                     start = end;
                 }
             }
@@ -424,19 +416,19 @@ pub const Session = struct {
             var index: i32 = 0;
             var offset: usize = 0;
 
-            if (vocab.ignore_merges and vocab.textToToken(word) != token_null) {
-                self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
+            if (vocab.ignore_merges and vocab.textToToken(word) != llama.vocab.vocab.token_null) {
+                self.symbols.append(std.heap.c_allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
                 offset = word.len;
             } else if ((tok_pre == .gemma4 or tok_pre == .mmbert) and std.mem.findNone(u8, word, "\n") == null) {
                 // fix for gemma 4, ref: https://github.com/ggml-org/llama.cpp/pull/21343
-                if (vocab.textToToken(word) != token_null) {
-                    self.symbols.append(allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
+                if (vocab.textToToken(word) != llama.vocab.vocab.token_null) {
+                    self.symbols.append(std.heap.c_allocator, .{ .prev = -1, .next = -1, .text = word }) catch oom();
                     offset = word.len;
                 }
             }
 
             while (offset < word.len) {
-                const char_len = @min(word.len - offset, unicode.lenUtf8(word[offset]));
+                const char_len = @min(word.len - offset, llama.unicode.lenUtf8(word[offset]));
                 const sym: Symbol = .{
                     .text = word[offset..][0..char_len],
                     .prev = index - 1,
@@ -444,7 +436,7 @@ pub const Session = struct {
                 };
                 offset += char_len;
                 index += 1;
-                self.symbols.append(allocator, sym) catch oom();
+                self.symbols.append(std.heap.c_allocator, sym) catch oom();
             }
             var i: i32 = 1;
             while (i < @as(i32, @intCast(self.symbols.items.len))) : (i += 1) self.addNewBigram(i - 1, i);
@@ -485,7 +477,7 @@ pub const Session = struct {
                     sym.prev = final_prev_index;
                     sym.next = -1;
                     if (final_prev_index != -1) self.symbols_final.items[@intCast(final_prev_index)].next = @intCast(self.symbols_final.items.len);
-                    self.symbols_final.append(allocator, sym.*) catch oom();
+                    self.symbols_final.append(std.heap.c_allocator, sym.*) catch oom();
                     final_prev_index = @intCast(self.symbols_final.items.len - 1);
                 }
             }
@@ -493,7 +485,7 @@ pub const Session = struct {
 
         std.mem.swap(std.ArrayList(Symbol), &self.symbols, &self.symbols_final);
         self.symbols_final.clearRetainingCapacity();
-        self.symbols_final.appendSlice(allocator, self.symbols.items) catch oom();
+        self.symbols_final.appendSlice(std.heap.c_allocator, self.symbols.items) catch oom();
 
         if (self.symbols.items.len != 0) {
             var i: i32 = 0;
@@ -504,11 +496,11 @@ pub const Session = struct {
                 const str = symbol.text;
                 const token = vocab.textToToken(str);
 
-                if (token == token_null and tok_pre == .soprano) {
-                    output.append(allocator, vocab.special_unk_id) catch oom();
-                } else if (token == token_null) {
+                if (token == llama.vocab.vocab.token_null and tok_pre == .soprano) {
+                    output.append(std.heap.c_allocator, vocab.special_unk_id) catch oom();
+                } else if (token == llama.vocab.vocab.token_null) {
                     for (str) |ch| {
-                        var token_multibyte: Token = token_null;
+                        var token_multibyte: llama.vocab.Token = llama.vocab.vocab.token_null;
                         if (self.tokenizer.byte_encode) {
                             token_multibyte = vocab.textToToken(&[_]u8{ch});
                         } else {
@@ -516,10 +508,10 @@ pub const Session = struct {
                             const hex = "0123456789ABCDEF";
                             token_multibyte = vocab.textToToken(&[_]u8{ '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>' });
                         }
-                        if (token_multibyte != token_null) output.append(allocator, token_multibyte) catch oom();
+                        if (token_multibyte != llama.vocab.vocab.token_null) output.append(std.heap.c_allocator, token_multibyte) catch oom();
                     }
                 } else {
-                    output.append(allocator, token) catch oom();
+                    output.append(std.heap.c_allocator, token) catch oom();
                 }
             }
         }
@@ -531,7 +523,7 @@ pub const Session = struct {
     /// through the base BPE, with optional tagging of untagged DNA
     /// (`auto_dna_tags`, Carbon-14B) and tail="pad_n" vocabularies, whose
     /// dedicated tokens pad a trailing partial k-mer with N instead of A.
-    fn tokenizeHybridDna(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    fn tokenizeHybridDna(self: *Session, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         const vocab = self.vocab;
 
         self.dna_begin_id = vocab.textToToken(dna_open_tag);
@@ -539,11 +531,11 @@ pub const Session = struct {
         self.dna_oov_id = vocab.textToToken("<oov>");
 
         // Fall back to plain BPE if the DNA pieces aren't in the vocab.
-        if (self.dna_begin_id == token_null or self.dna_end_id == token_null or self.dna_oov_id == token_null) {
+        if (self.dna_begin_id == llama.vocab.vocab.token_null or self.dna_end_id == llama.vocab.vocab.token_null or self.dna_oov_id == llama.vocab.vocab.token_null) {
             return self.tokenizeBpe(text, output, exc);
         }
 
-        self.pad_char = if (vocab.textToToken("ANNNNN" ++ dna_kmer_marker) != token_null) 'N' else 'A';
+        self.pad_char = if (vocab.textToToken("ANNNNN" ++ dna_kmer_marker) != llama.vocab.vocab.token_null) 'N' else 'A';
 
         // split on explicit tags as HybridDNATokenizer._split_by_dna_tags
         // does; only the text outside them is auto-tagged
@@ -612,7 +604,7 @@ pub const Session = struct {
             }
         }.f;
         var seq: std.ArrayList(u8) = .empty;
-        defer seq.deinit(allocator);
+        defer seq.deinit(std.heap.c_allocator);
         var p: usize = 0;
         while (p < text.len) {
             if (isAcgt(text[p]) and (p == 0 or !isLetter(text[p - 1]))) {
@@ -634,14 +626,14 @@ pub const Session = struct {
                 if (match_end) |me| {
                     seq.clearRetainingCapacity();
                     for (text[p..me]) |ch| {
-                        if (!isBlank(ch)) seq.append(allocator, ch) catch oom();
+                        if (!isBlank(ch)) seq.append(std.heap.c_allocator, ch) catch oom();
                     }
-                    out.appendSlice(allocator, if (seq.items.len >= 12) seq.items else text[p..me]) catch oom();
+                    out.appendSlice(std.heap.c_allocator, if (seq.items.len >= 12) seq.items else text[p..me]) catch oom();
                     p = me;
                     continue;
                 }
             }
-            out.append(allocator, text[p]) catch oom();
+            out.append(std.heap.c_allocator, text[p]) catch oom();
             p += 1;
         }
     }
@@ -651,14 +643,14 @@ pub const Session = struct {
     /// HybridDNATokenizer._auto_tag_text_segment does (pure ACGT runs of at
     /// least 6 bases, or runs of at least 12 with at most 20% IUPAC ambiguity
     /// codes).
-    fn tokenizeDnaText(self: *Session, raw: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    fn tokenizeDnaText(self: *Session, raw: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         if (!self.vocab.dna_auto_tags) {
             if (raw.len != 0) try self.tokenizeBpe(raw, output, exc);
             return;
         }
 
         var normalized: std.ArrayList(u8) = .empty;
-        defer normalized.deinit(allocator);
+        defer normalized.deinit(std.heap.c_allocator);
         normalizeSpacedDna(raw, &normalized);
         const text = normalized.items;
 
@@ -689,28 +681,28 @@ pub const Session = struct {
     /// HybridDNATokenizer._process_dna_sequence: strip, uppercase, then one
     /// token per k bases. A k-mer with anything but ACGT is `<oov>`, and a
     /// trailing partial k-mer is right-padded with `pad_char`.
-    fn tokenizeDna(self: *Session, content: []const u8, has_start: bool, has_end: bool, output: *std.ArrayList(Token)) void {
-        if (has_start) output.append(allocator, self.dna_begin_id) catch oom();
+    fn tokenizeDna(self: *Session, content: []const u8, has_start: bool, has_end: bool, output: *std.ArrayList(llama.vocab.Token)) void {
+        if (has_start) output.append(std.heap.c_allocator, self.dna_begin_id) catch oom();
 
-        const cpts = unicode.cptsFromUtf8(content);
-        defer allocator.free(cpts);
+        const cpts = llama.unicode.cptsFromUtf8(content);
+        defer std.heap.c_allocator.free(cpts);
         var first: usize = 0;
         var last: usize = cpts.len;
-        while (first < last and unicode.cptFlagsFromCpt(cpts[first]).is_whitespace) first += 1;
-        while (last > first and unicode.cptFlagsFromCpt(cpts[last - 1]).is_whitespace) last -= 1;
+        while (first < last and llama.unicode.cptFlagsFromCpt(cpts[first]).is_whitespace) first += 1;
+        while (last > first and llama.unicode.cptFlagsFromCpt(cpts[last - 1]).is_whitespace) last -= 1;
 
         var i = first;
         while (i + dna_k <= last) : (i += dna_k) {
-            output.append(allocator, self.kmerToken(cpts[i .. i + dna_k])) catch oom();
+            output.append(std.heap.c_allocator, self.kmerToken(cpts[i .. i + dna_k])) catch oom();
         }
-        if (i < last) output.append(allocator, self.kmerToken(cpts[i..last])) catch oom();
+        if (i < last) output.append(std.heap.c_allocator, self.kmerToken(cpts[i..last])) catch oom();
 
-        if (has_end) output.append(allocator, self.dna_end_id) catch oom();
+        if (has_end) output.append(std.heap.c_allocator, self.dna_end_id) catch oom();
     }
 
     /// `kmer_token`: the k-mer's token, carrying the reserved marker suffix so
     /// it never resolves to a base-vocab token.
-    fn kmerToken(self: *const Session, kmer_cpts: []const u32) Token {
+    fn kmerToken(self: *const Session, kmer_cpts: []const u32) llama.vocab.Token {
         var kmer: [dna_k + dna_kmer_marker.len]u8 = undefined;
         for (kmer_cpts, 0..) |cpt, i| {
             const ch: u32 = if (cpt < 128) toUpper(@intCast(cpt)) else cpt;
@@ -720,27 +712,27 @@ pub const Session = struct {
         @memset(kmer[kmer_cpts.len..dna_k], self.pad_char);
         kmer[dna_k..].* = dna_kmer_marker.*;
         const tok = self.vocab.textToToken(&kmer);
-        return if (tok != token_null) tok else self.dna_oov_id;
+        return if (tok != llama.vocab.vocab.token_null) tok else self.dna_oov_id;
     }
 
     /// Ports `llm_tokenizer_whitespace_session`'s `tokenize` (llama-vocab.cpp:2032
     /// @b1b770d90): whitespace dropped, each run between lowercased if the
     /// normalizer says so, and BPE'd alone.
-    fn tokenizeWhitespace(self: *Session, text: []const u8, output: *std.ArrayList(Token), exc: *impl.Exception) impl.Thrown!void {
+    fn tokenizeWhitespace(self: *Session, text: []const u8, output: *std.ArrayList(llama.vocab.Token), exc: *llama.impl.Exception) llama.impl.Thrown!void {
         const lowercase = self.vocab.normalizer_opts.lowercase;
         var segment: std.ArrayList(u8) = .empty;
-        defer segment.deinit(allocator);
+        defer segment.deinit(std.heap.c_allocator);
 
-        const cpts = unicode.cptsFromUtf8(text);
-        defer allocator.free(cpts);
+        const cpts = llama.unicode.cptsFromUtf8(text);
+        defer std.heap.c_allocator.free(cpts);
         for (cpts) |cpt| {
-            if (unicode.cptFlagsFromCpt(cpt).is_whitespace) {
+            if (llama.unicode.cptFlagsFromCpt(cpt).is_whitespace) {
                 if (segment.items.len != 0) {
                     try self.tokenizeBpe(segment.items, output, exc);
                     segment.clearRetainingCapacity();
                 }
             } else {
-                unicode.appendCptUtf8(&segment, if (lowercase) unicode.tolower(cpt) else cpt) catch
+                llama.unicode.appendCptUtf8(&segment, if (lowercase) llama.unicode.tolower(cpt) else cpt) catch
                     return exc.throw(.invalid_argument, "invalid codepoint", .{});
             }
         }

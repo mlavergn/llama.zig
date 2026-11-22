@@ -22,35 +22,28 @@
 //! reaches.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const core = @import("core.zig");
-
-const c = impl.c;
-const Sampler = core.Sampler;
-const SamplerI = core.SamplerI;
-const TokenDataArray = core.TokenDataArray;
-const src = core.src;
+const llama = @import("../module.zig");
 
 /// Ports `llama_sampler_infill` (llama-sampler.cpp:4066 @b1b770d90).
 const Infill = struct {
-    vocab: ?*const c.struct_llama_vocab,
+    vocab: ?*const llama.impl.c.struct_llama_vocab,
 
     buf0: [512]u8,
     buf1: [512]u8,
 };
 
 /// Ports `llama_sampler_infill_name` (llama-sampler.cpp:4073 @b1b770d90).
-fn infillName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
+fn infillName(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]const u8 {
     _ = smpl;
     return "infill";
 }
 
 /// `vocab->token_to_piece(id, buf, size, 0, false)`, terminating as the C++
 /// does when the piece does not fit -- see the file header.
-fn pieceInto(vocab: ?*const c.struct_llama_vocab, id: c.llama_token, buf: []u8) usize {
-    const len = c.llama_token_to_piece(vocab, id, buf.ptr, @intCast(buf.len), 0, false);
+fn pieceInto(vocab: ?*const llama.impl.c.struct_llama_vocab, id: llama.impl.c.llama_token, buf: []u8) usize {
+    const len = llama.api.vocab.llama_token_to_piece(vocab, id, buf.ptr, @intCast(buf.len), 0, false);
     if (len < 0) {
-        c.ggml_abort(src, 4152, "terminating due to uncaught exception of type std::length_error: %s", "vector");
+        llama.impl.c.ggml_abort(llama.sampler.core.src, 4152, "terminating due to uncaught exception of type std::length_error: %s", "vector");
     }
     return @intCast(len);
 }
@@ -60,16 +53,16 @@ fn pieceInto(vocab: ?*const c.struct_llama_vocab, id: c.llama_token, buf: []u8) 
 /// Picks end-of-generation when its mass is high enough; otherwise merges
 /// each candidate into any it is a text prefix of, then drops the weak ones
 /// in two rounds, falling back to EOT (or EOS) when nothing non-EOG is left.
-fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
-    const ctx = core.ctxOf(Infill, smpl);
+fn infillApply(smpl: [*c]llama.impl.c.struct_llama_sampler, cur_p: [*c]llama.impl.c.llama_token_data_array) callconv(.c) void {
+    const ctx = llama.sampler.core.ctxOf(Infill, smpl);
 
-    core.softmaxImpl(cur_p, true);
+    llama.sampler.core.softmaxImpl(cur_p, true);
 
     var p_txt_sum: f32 = 0.0;
     var p_eog_sum: f32 = 0.0;
 
-    for (core.items(cur_p)) |d| {
-        if (c.llama_vocab_is_eog(ctx.vocab, d.id)) {
+    for (llama.sampler.core.items(cur_p)) |d| {
+        if (llama.api.vocab.llama_vocab_is_eog(ctx.vocab, d.id)) {
             p_eog_sum += d.p;
         } else {
             p_txt_sum += d.p;
@@ -85,7 +78,7 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
         var p_sum: f32 = 0.0;
 
         for (0..size_org) |i| {
-            if (c.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id)) {
+            if (llama.api.vocab.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id)) {
                 p_sum += cur_p.*.data[i].p;
 
                 cur_p.*.data[cur_p.*.size] = cur_p.*.data[i];
@@ -93,7 +86,7 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
             }
         }
 
-        for (core.items(cur_p)) |*d| d.p /= p_sum;
+        for (llama.sampler.core.items(cur_p)) |*d| d.p /= p_sum;
 
         return;
     }
@@ -135,7 +128,7 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     cur_p.*.size = 0;
 
     for (0..size_org) |i| {
-        const is_eog = c.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id);
+        const is_eog = llama.api.vocab.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id);
 
         if (cur_p.*.data[i].p < thold and !is_eog) continue;
 
@@ -149,18 +142,18 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 
     if (n_non_eog == 0) {
         cur_p.*.size = 1;
-        cur_p.*.data[0].id = c.llama_vocab_eot(ctx.vocab);
-        if (cur_p.*.data[0].id == c.LLAMA_TOKEN_NULL) {
-            cur_p.*.data[0].id = c.llama_vocab_eos(ctx.vocab);
+        cur_p.*.data[0].id = llama.api.vocab.llama_vocab_eot(ctx.vocab);
+        if (cur_p.*.data[0].id == llama.impl.c.LLAMA_TOKEN_NULL) {
+            cur_p.*.data[0].id = llama.api.vocab.llama_vocab_eos(ctx.vocab);
         }
         cur_p.*.data[0].logit = 1.0;
 
-        impl.assert(cur_p.*.data[0].id != c.LLAMA_TOKEN_NULL, src, 4252, "cur_p->data[0].id != LLAMA_TOKEN_NULL");
+        llama.impl.assert(cur_p.*.data[0].id != llama.impl.c.LLAMA_TOKEN_NULL, llama.sampler.core.src, 4252, "cur_p->data[0].id != LLAMA_TOKEN_NULL");
 
         return;
     }
 
-    for (core.items(cur_p)) |*d| d.p /= p_sum;
+    for (llama.sampler.core.items(cur_p)) |*d| d.p /= p_sum;
 
     size_org = cur_p.*.size;
     p_sum = 0.0;
@@ -169,7 +162,7 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     cur_p.*.size = 0;
 
     for (0..size_org) |i| {
-        const is_eog = c.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id);
+        const is_eog = llama.api.vocab.llama_vocab_is_eog(ctx.vocab, cur_p.*.data[i].id);
 
         if (cur_p.*.data[i].p < thold and !is_eog) continue;
 
@@ -179,21 +172,21 @@ fn infillApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
         cur_p.*.size += 1;
     }
 
-    for (core.items(cur_p)) |*d| d.p /= p_sum;
+    for (llama.sampler.core.items(cur_p)) |*d| d.p /= p_sum;
 }
 
 /// Ports `llama_sampler_infill_clone` (llama-sampler.cpp:4260 @b1b770d90).
-fn infillClone(smpl: [*c]const Sampler) callconv(.c) [*c]Sampler {
-    return llama_sampler_init_infill(core.ctxOf(Infill, smpl).vocab);
+fn infillClone(smpl: [*c]const llama.impl.c.struct_llama_sampler) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama_sampler_init_infill(llama.sampler.core.ctxOf(Infill, smpl).vocab);
 }
 
 /// Ports `llama_sampler_infill_free` (llama-sampler.cpp:4265 @b1b770d90).
-fn infillFree(smpl: [*c]Sampler) callconv(.c) void {
-    core.destroy(Infill, core.ctxOf(Infill, smpl));
+fn infillFree(smpl: [*c]llama.impl.c.struct_llama_sampler) callconv(.c) void {
+    llama.sampler.core.destroy(Infill, llama.sampler.core.ctxOf(Infill, smpl));
 }
 
 /// Ports `llama_sampler_infill_i` (llama-sampler.cpp:4269 @b1b770d90).
-var infill_iface: SamplerI = .{
+var infill_iface: llama.impl.c.struct_llama_sampler_i = .{
     .name = infillName,
     .accept = null,
     .apply = infillApply,
@@ -208,8 +201,8 @@ var infill_iface: SamplerI = .{
 /// - `vocab`: the vocabulary; borrowed for the sampler's lifetime.
 ///
 /// Return: the sampler.
-pub export fn llama_sampler_init_infill(vocab: ?*const c.struct_llama_vocab) callconv(.c) [*c]Sampler {
-    return core.llama_sampler_init(&infill_iface, core.create(Infill, .{
+pub export fn llama_sampler_init_infill(vocab: ?*const llama.impl.c.struct_llama_vocab) callconv(.c) [*c]llama.impl.c.struct_llama_sampler {
+    return llama.sampler.core.llama_sampler_init(&infill_iface, llama.sampler.core.create(Infill, .{
         .vocab = vocab,
         .buf0 = std.mem.zeroes([512]u8),
         .buf1 = std.mem.zeroes([512]u8),

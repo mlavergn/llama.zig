@@ -29,10 +29,8 @@
 //! which one escaped.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const json = @import("module.zig");
-
-const Value = json.Value;
 
 /// Every fallible call here and in `schema_to_grammar.zig`. See the file
 /// comment for which C++ exception each is.
@@ -75,10 +73,10 @@ pub fn raise(err: Error, parts: []const []const u8) Error {
 /// `json.what()` over.
 ///
 /// Return: the mapped error.
-pub fn fromJson(e: json.Error) Error {
+pub fn fromJson(e: mod.Error) Error {
     return switch (e) {
         error.OutOfMemory => error.OutOfMemory,
-        error.JsonError => raise(error.JsonError, &.{json.what()}),
+        error.JsonError => raise(error.JsonError, &.{mod.what()}),
     };
 }
 
@@ -225,9 +223,9 @@ pub const Node = union(Kind) {
     /// `common_chat_schema_all_of` (json-schema.h:125 @b1b770d90)
     all_of: []*Node,
     /// `common_chat_schema_const` (json-schema.h:133 @b1b770d90)
-    @"const": Value,
+    @"const": mod.Value,
     /// `common_chat_schema_enum` (json-schema.h:143 @b1b770d90)
-    @"enum": []Value,
+    @"enum": []mod.Value,
     null,
     boolean,
     number,
@@ -301,7 +299,7 @@ pub const Document = struct {
 ///
 /// Return: the document, freed with `deinit`; `error.RuntimeError` with
 /// `what()` set when the schema is outside the subset.
-pub fn fromJsonSchema(gpa: std.mem.Allocator, schema: *const Value) Error!Document {
+pub fn fromJsonSchema(gpa: std.mem.Allocator, schema: *const mod.Value) Error!Document {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     var b: Builder = .{ .a = arena.allocator(), .root = schema };
@@ -348,7 +346,7 @@ pub fn depthEnter(depth: *c_int) Error!void {
 /// Ports `common_chat_schema_builder` (json-schema.cpp:24 @b1b770d90).
 const Builder = struct {
     a: std.mem.Allocator,
-    root: *const Value,
+    root: *const mod.Value,
     /// `depth_`, how deep `build_node` is
     depth: c_int = 0,
     /// the targets built here; a key maps to null while its target is being
@@ -387,7 +385,7 @@ const Builder = struct {
     /// Ports `get_count` (json-schema.cpp:38 @b1b770d90): a non-negative
     /// `int`, read as `get<int>()` reads it -- an integer out of range
     /// truncates first.
-    fn getCount(schema: *const Value, key: []const u8, path: []const u8, def: c_int) Error!c_int {
+    fn getCount(schema: *const mod.Value, key: []const u8, path: []const u8, def: c_int) Error!c_int {
         if (!schema.contains(key)) return def;
         const v = schema.at(key) catch |e| return fromJson(e);
         if (!v.isNumberInteger() or (v.get(c_int) catch |e| return fromJson(e)) < 0) {
@@ -399,17 +397,17 @@ const Builder = struct {
     /// Ports `get_bound` (json-schema.cpp:50 @b1b770d90): a fractional
     /// bound rounds inwards. `(int64_t)` of a double out of range is
     /// undefined in C++; this saturates, as AArch64's `fcvtzs` does.
-    fn getBound(schema: *const Value, key: []const u8, path: []const u8, round_up: bool) Error!i64 {
+    fn getBound(schema: *const mod.Value, key: []const u8, path: []const u8, round_up: bool) Error!i64 {
         const v = schema.at(key) catch |e| return fromJson(e);
         if (v.isNumberInteger()) return v.get(i64) catch |e| return fromJson(e);
         if (!v.isNumber()) return fail(path, &.{ key, " must be a number" });
         const d = v.get(f64) catch |e| return fromJson(e);
-        const r: Value = .{ .number_float = if (round_up) @ceil(d) else @floor(d) };
+        const r: mod.Value = .{ .number_float = if (round_up) @ceil(d) else @floor(d) };
         return r.get(i64) catch |e| return fromJson(e);
     }
 
     /// Ports `get_format` (json-schema.cpp:62 @b1b770d90).
-    fn getFormat(schema: *const Value, path: []const u8) Error!StringFormat {
+    fn getFormat(schema: *const mod.Value, path: []const u8) Error!StringFormat {
         if (!schema.contains("format")) return .none;
         const v = schema.at("format") catch |e| return fromJson(e);
         if (!v.isString()) return fail(path, &.{"format must be a string"});
@@ -428,8 +426,8 @@ const Builder = struct {
     /// Ports `resolve_ref` (json-schema.cpp:86 @b1b770d90): walks the
     /// pointer's segments as written -- no `~0`/`~1` unescaping -- an array
     /// index read by `std::stoull`.
-    fn resolveRef(self: *Builder, ref: []const u8, path: []const u8) Error!*const Value {
-        var target: *const Value = self.root;
+    fn resolveRef(self: *Builder, ref: []const u8, path: []const u8) Error!*const mod.Value {
+        var target: *const mod.Value = self.root;
         // `string_split(ref.substr(1), "/")`; the first token is always
         // the empty one before the leading '/'
         var tokens = std.mem.splitSequence(u8, ref[1..], "/");
@@ -454,7 +452,7 @@ const Builder = struct {
     }
 
     /// Ports `build_ref` (json-schema.cpp:111 @b1b770d90).
-    fn buildRef(self: *Builder, value: *const Value, path: []const u8) Error!*Node {
+    fn buildRef(self: *Builder, value: *const mod.Value, path: []const u8) Error!*Node {
         if (!value.isString()) return fail(path, &.{"$ref must be a string"});
         const ref = try self.a.dupe(u8, value.string);
         if (!std.mem.startsWith(u8, ref, "#/")) {
@@ -474,7 +472,7 @@ const Builder = struct {
 
     /// Ports `build_alternatives` (json-schema.cpp:130 @b1b770d90), for
     /// both `any_of` and `all_of`.
-    fn buildAlternatives(self: *Builder, comptime k: Kind, alts: *const Value, path: []const u8) Error!*Node {
+    fn buildAlternatives(self: *Builder, comptime k: Kind, alts: *const mod.Value, path: []const u8) Error!*Node {
         if (!alts.isArray()) return fail(path, &.{"must be an array of schemas"});
         if (alts.empty()) return fail(path, &.{"must not be empty"});
         const children = try self.a.alloc(*Node, alts.array.items.len);
@@ -485,7 +483,7 @@ const Builder = struct {
     }
 
     /// Ports `build_object` (json-schema.cpp:145 @b1b770d90).
-    fn buildObject(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildObject(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         var obj: Object = .{};
 
         var required: std.ArrayList([]const u8) = .empty;
@@ -533,7 +531,7 @@ const Builder = struct {
     }
 
     /// Ports `build_array` (json-schema.cpp:186 @b1b770d90).
-    fn buildArray(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildArray(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         var arr: Array = undefined;
         if (schema.contains("items") or schema.contains("prefixItems")) {
             // "items" wins when both are present; a schema instead of an
@@ -557,7 +555,7 @@ const Builder = struct {
     }
 
     /// Ports `build_string` (json-schema.cpp:209 @b1b770d90).
-    fn buildString(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildString(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         var s: String = .{};
         if (schema.contains("pattern")) {
             const pattern = schema.at("pattern") catch |e| return fromJson(e);
@@ -572,7 +570,7 @@ const Builder = struct {
 
     /// Ports `build_integer` (json-schema.cpp:224 @b1b770d90). The `+ 1`
     /// and `- 1` on a saturated bound overflow in the C++, which wraps.
-    fn buildInteger(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildInteger(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         var n: Integer = .{};
         if (schema.contains("minimum")) {
             n.minimum = try getBound(schema, "minimum", path, true);
@@ -588,14 +586,14 @@ const Builder = struct {
     }
 
     /// Ports `build_node` (json-schema.cpp:241 @b1b770d90).
-    fn buildNode(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildNode(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         try depthEnter(&self.depth);
         defer self.depth -= 1;
         return self.buildNodeImpl(schema, path);
     }
 
     /// Ports `build_node_impl` (json-schema.cpp:246 @b1b770d90).
-    fn buildNodeImpl(self: *Builder, schema: *const Value, path: []const u8) Error!*Node {
+    fn buildNodeImpl(self: *Builder, schema: *const mod.Value, path: []const u8) Error!*Node {
         if (!schema.isObject()) return fail(path, &.{"schema must be an object"});
         if (schema.contains("$ref")) {
             return self.buildRef(schema.at("$ref") catch |e| return fromJson(e), path);
@@ -605,8 +603,8 @@ const Builder = struct {
             return self.buildAlternatives(.any_of, schema.at(key) catch |e| return fromJson(e), try self.cat(&.{ path, "/", key }));
         }
 
-        const null_value: Value = .null;
-        const type_v: *const Value = if (schema.contains("type"))
+        const null_value: mod.Value = .null;
+        const type_v: *const mod.Value = if (schema.contains("type"))
             schema.at("type") catch |e| return fromJson(e)
         else
             &null_value;
@@ -628,7 +626,7 @@ const Builder = struct {
         if (schema.contains("enum")) {
             const values = schema.at("enum") catch |e| return fromJson(e);
             if (!values.isArray() or values.empty()) return fail(path, &.{"enum must be a non-empty array"});
-            const vs = try self.a.alloc(Value, values.array.items.len);
+            const vs = try self.a.alloc(mod.Value, values.array.items.len);
             for (values.array.items, 0..) |*v, i| vs[i] = v.clone(self.a) catch |e| return fromJson(e);
             return self.newNode(.{ .@"enum" = vs });
         }
@@ -637,7 +635,7 @@ const Builder = struct {
         }
 
         const type_name: []const u8 = if (type_v.isString()) type_v.string else "";
-        const true_value: Value = .{ .boolean = true };
+        const true_value: mod.Value = .{ .boolean = true };
         const has_properties = schema.contains("properties") or
             (schema.contains("additionalProperties") and
                 !(schema.at("additionalProperties") catch |e| return fromJson(e)).eql(&true_value));
@@ -679,7 +677,7 @@ const Builder = struct {
 };
 
 /// Ports `json_type` (json-schema.cpp:365 @b1b770d90).
-fn jsonType(v: *const Value) ValueType {
+fn jsonType(v: *const mod.Value) ValueType {
     if (v.isNull()) return .null;
     if (v.isBoolean()) return .boolean;
     if (v.isNumberInteger()) return .integer;
@@ -828,7 +826,7 @@ test {
 
 test "a recursive $ref resolves to its own target" {
     const a = std.testing.allocator;
-    var v = try json.parse(a,
+    var v = try mod.parse(a,
         \\{"$ref": "#/$defs/n", "$defs": {"n": {"type": "object",
         \\ "properties": {"next": {"$ref": "#/$defs/n"}, "s": {"type": ["string", "null"]}}}}}
     );
@@ -846,7 +844,7 @@ test "a recursive $ref resolves to its own target" {
 
 test "an unsupported schema names its path" {
     const a = std.testing.allocator;
-    var v = try json.parse(a, "{\"properties\": {\"x\": {\"type\": \"date\"}}}");
+    var v = try mod.parse(a, "{\"properties\": {\"x\": {\"type\": \"date\"}}}");
     defer v.deinit(a);
     try std.testing.expectError(error.RuntimeError, fromJsonSchema(a, &v));
     try std.testing.expectEqualStrings("JSON schema error at #/properties/x: unrecognized type date", what());

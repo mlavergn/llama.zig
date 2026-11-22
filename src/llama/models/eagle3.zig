@@ -16,26 +16,15 @@
 //! `build_arch_graph`, and its `graph<is_enc>` with `build_inp_embd_enc`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const context_mod = @import("../context.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 fn oom() noreturn {
-    impl.abort("models/eagle3.cpp", 0, "out of memory");
+    llama.impl.abort("models/eagle3.cpp", 0, "out of memory");
 }
 
 /// Ports `llama_model_eagle3`'s `load_arch_hparams` (models/eagle3.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
     const func = "load_arch_hparams";
@@ -45,17 +34,17 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     const ids = (try meta.getArrList(i32, .target_layers, false, exc)) orelse {
         return exc.throw(.runtime_error, "EAGLE3 model requires 'extract_layers' in GGUF metadata", .{});
     };
-    defer allocator.free(ids);
+    defer std.heap.c_allocator.free(ids);
     self.target_layer_ids.clearRetainingCapacity();
-    self.target_layer_ids.appendSlice(allocator, ids) catch oom();
+    self.target_layer_ids.appendSlice(std.heap.c_allocator, ids) catch oom();
     if (self.target_layer_ids.items.len != 3) {
         return exc.throw(.runtime_error, "EAGLE3 requires exactly 3 entries in 'extract_layers'", .{});
     }
     const t = self.target_layer_ids.items;
-    impl.logInfo("%s: EAGLE3 extract_layers = [%d, %d, %d]\n", .{ func, t[0], t[1], t[2] });
+    llama.impl.logInfo("%s: EAGLE3 extract_layers = [%d, %d, %d]\n", .{ func, t[0], t[1], t[2] });
 
     const n_embd_tgt = (try meta.getKey(u32, .target_hidden_size, true, exc)).?;
-    impl.logInfo("%s: EAGLE3 n_embd_tgt = %u (draft n_embd = %u)\n", .{ func, n_embd_tgt, hp.n_embd });
+    llama.impl.logInfo("%s: EAGLE3 n_embd_tgt = %u (draft n_embd = %u)\n", .{ func, n_embd_tgt, hp.n_embd });
 
     hp.n_embd_inp_enc_impl = @as(u32, @truncate(self.target_layer_ids.items.len)) *% n_embd_tgt;
 
@@ -64,7 +53,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(bool, .norm_before_residual, false, exc)) |v| hp.norm_before_residual = v;
     if (hp.norm_before_residual) {
         // Upstream's message, typo included.
-        impl.logInfo("%s: EAGLE3gnorm_before_residual = true\n", .{func});
+        llama.impl.logInfo("%s: EAGLE3gnorm_before_residual = true\n", .{func});
     }
 
     // norm_before_fc is optional and false by default; EAGLE-3.1 sets it
@@ -75,10 +64,10 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_eagle3`'s `load_arch_tensors` (models/eagle3.cpp:38 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
     const func = "load_arch_tensors";
 
     const n_embd_inp: i64 = hp.nEmbdInpEnc();
@@ -91,10 +80,10 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     if (ml.getTensorMeta("d2t")) |d2t_meta| {
         n_draft_vocab = d2t_meta.ne[0];
         self.d2t = try self.createTensor(.{ .tensor = .d2t }, &.{n_draft_vocab}, 0, exc);
-        impl.logInfo("%s: EAGLE3 using d2t mapping (draft_vocab_size = %lld)\n", .{ func, @as(c_longlong, n_draft_vocab) });
+        llama.impl.logInfo("%s: EAGLE3 using d2t mapping (draft_vocab_size = %lld)\n", .{ func, @as(c_longlong, n_draft_vocab) });
     } else {
         self.d2t = null;
-        impl.logInfo("%s: EAGLE3 without d2t - sharing same vocab_size with target (vocab_size = %lld)\n", .{ func, @as(c_longlong, n_draft_vocab) });
+        llama.impl.logInfo("%s: EAGLE3 without d2t - sharing same vocab_size with target (vocab_size = %lld)\n", .{ func, @as(c_longlong, n_draft_vocab) });
     }
 
     // The feature fusion layer: the three target layers projected to the
@@ -112,12 +101,12 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
     self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, n_draft_vocab }, nr, exc);
 
     // The token embeddings are optional: Llama 3.3 70B's EAGLE-3 has its own.
-    const tn_embd: loader.Tn = .{ .tensor = .token_embd, .suffix = "weight" };
+    const tn_embd: llama.loader.Tn = .{ .tensor = .token_embd, .suffix = "weight" };
     const tn_embd_name = tn_embd.str();
     if (ml.getTensorMeta(tn_embd_name.slice())) |tok_embd_meta| {
         const n_target_vocab = tok_embd_meta.ne[1];
         self.tok_embd = try self.createTensor(tn_embd, &.{ l.n_embd, n_target_vocab }, 0, exc);
-        impl.logInfo("%s: EAGLE3 using its own token_embd (vocab = %lld)\n", .{ func, @as(c_longlong, n_target_vocab) });
+        llama.impl.logInfo("%s: EAGLE3 using its own token_embd (vocab = %lld)\n", .{ func, @as(c_longlong, n_target_vocab) });
     }
 
     // The single decoder layer.
@@ -150,36 +139,36 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_eagle3`'s `build_arch_graph` (models/eagle3.cpp:315 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, params: *const llama.graph.Params) void {
     switch (params.gtype) {
         .encoder => buildGraphEnc(model, b),
         .default, .decoder => buildGraphDec(model, b),
-        else => impl.abort("models/eagle3.cpp", 323, "invalid graph type"),
+        else => llama.impl.abort("models/eagle3.cpp", 323, "invalid graph type"),
     }
 }
 
 /// `llama_get_model(cparams.ctx_other)`: the target model a draft shares
 /// weights with.
-fn otherModel(b: *const graph.Builder) *const Model {
-    const other: *const context_mod.Context = @ptrCast(@alignCast(b.cparams.ctx_other.?));
+fn otherModel(b: *const llama.graph.Builder) *const llama.model.Model {
+    const other: *const llama.context.Context = @ptrCast(@alignCast(b.cparams.ctx_other.?));
     return other.getModel();
 }
 
 /// Ports `llama_model_eagle3`'s `graph<true>`'s `build_inp_embd_enc`
 /// (models/eagle3.cpp:104 @b1b770d90): the target model's features, three
 /// layers concatenated, given as the batch's embeddings.
-fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
+fn buildInpEmbdEnc(b: *const llama.graph.Builder) *llama.impl.c.ggml_tensor {
     const hp = b.hparams;
 
-    const inp_target = allocator.create(graph.InpEmbd) catch oom();
+    const inp_target = std.heap.c_allocator.create(llama.graph.InpEmbd) catch oom();
     inp_target.* = .{ .n_embd = hp.nEmbdInpEnc() };
-    inp_target.embd = c.ggml_new_tensor_2d(b.ctx0, c.GGML_TYPE_F32, hp.nEmbdInpEnc(), b.n_tokens);
-    c.ggml_set_input(inp_target.embd);
+    inp_target.embd = llama.impl.c.ggml_new_tensor_2d(b.ctx0, llama.impl.c.GGML_TYPE_F32, hp.nEmbdInpEnc(), b.n_tokens);
+    llama.impl.c.ggml_set_input(inp_target.embd);
 
     const cur = inp_target.embd.?;
     b.cb(cur, "inp_embd", -1);
 
-    _ = b.res.addInput(graph.InpEmbd, inp_target);
+    _ = b.res.addInput(llama.graph.InpEmbd, inp_target);
 
     return cur;
 }
@@ -188,7 +177,7 @@ fn buildInpEmbdEnc(b: *const graph.Builder) *Tensor {
 /// (models/eagle3.cpp:125 @b1b770d90): the encoder, which fuses the target
 /// model's features -- e.g. `[12288, n_tokens]` from its low, middle and
 /// high layers -- into `g_embeddings`, e.g. `[4096, n_tokens]`.
-fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphEnc(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     var cur = buildInpEmbdEnc(b);
 
     // An RMS norm on the fused target features before fc.
@@ -203,52 +192,52 @@ fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
 
     // The g_embeddings go to t_h_nextn, as MTP's do, so they can be read
     // through llama_get_embeddings_nextn(ctx_dft).
-    c.ggml_set_output(cur);
+    llama.impl.c.ggml_set_output(cur);
     b.res.t_h_nextn = cur;
 
-    c.ggml_build_forward_expand(b.gf, cur);
+    llama.impl.c.ggml_build_forward_expand(b.gf, cur);
 }
 
 /// Ports the constructor of `llama_model_eagle3`'s `graph<false>`
 /// (models/eagle3.cpp:152 @b1b770d90): the decoder, over draft tokens and
 /// the encoder's g_embeddings, to draft logits.
-fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
+fn buildGraphDec(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
 
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/eagle3.cpp", 155, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/eagle3.cpp", 155, "n_embd_head == hparams.n_embd_head_k()");
     // EAGLE-3 has a single decoder layer.
-    impl.assert(b.n_layer == 1, "models/eagle3.cpp", 156, "n_layer == 1");
+    llama.impl.assert(b.n_layer == 1, "models/eagle3.cpp", 156, "n_layer == 1");
 
     // The decoder's two inputs: the token embeddings -- EAGLE-3's own, as
     // Llama 3.3 70B's has, or the target model's, as Llama 3.1 8B's uses --
     // and the encoder's g_embeddings.
     var tok_embd = model.tok_embd;
     if (model.tok_embd == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 166, "cparams.ctx_other != nullptr");
+        llama.impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 166, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.tok_embd != null, "models/eagle3.cpp", 169, "model_other->tok_embd != nullptr && \"EAGLE3 decoder requires token embeddings (own or from target model)\"");
+        llama.impl.assert(model_other.tok_embd != null, "models/eagle3.cpp", 169, "model_other->tok_embd != nullptr && \"EAGLE3 decoder requires token embeddings (own or from target model)\"");
         tok_embd = model_other.tok_embd;
     }
 
-    const inp = allocator.create(graph.InpEmbd) catch oom();
+    const inp = std.heap.c_allocator.create(llama.graph.InpEmbd) catch oom();
     inp.* = .{ .n_embd = b.n_embd };
 
-    inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.n_tokens);
-    c.ggml_set_input(inp.tokens);
+    inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.tokens);
 
-    inp.embd = c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, b.n_embd, b.n_tokens);
-    c.ggml_set_input(inp.embd);
+    inp.embd = llama.impl.c.ggml_new_tensor_2d(ctx, llama.impl.c.GGML_TYPE_F32, b.n_embd, b.n_tokens);
+    llama.impl.c.ggml_set_input(inp.embd);
 
-    const inp_embd: *Tensor = c.ggml_get_rows(ctx, tok_embd, inp.tokens);
+    const inp_embd: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_get_rows(ctx, tok_embd, inp.tokens);
     b.cb(inp_embd, "inp_embd", -1);
 
     const inp_g = inp.embd.?;
     b.cb(inp_g, "inp_g_embeddings", -1);
 
-    _ = b.res.addInput(graph.InpEmbd, inp);
+    _ = b.res.addInput(llama.graph.InpEmbd, inp);
 
     var inpL = inp_g;
 
@@ -257,7 +246,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
 
     const inp_attn = b.buildAttnInpKv();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     // The single decoder layer.
     const il: c_int = 0;
@@ -280,7 +269,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
 
         // The normed inp_embd and inp_g, concatenated. Upstream passes the
         // layer index as the dimension, which is 0 here.
-        var cur: *Tensor = c.ggml_concat(ctx, embd_norm, g_norm, il);
+        var cur: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_concat(ctx, embd_norm, g_norm, il);
         b.cb(cur, "concat_embd", il);
 
         // Self-attention over the concatenated input.
@@ -293,9 +282,9 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
         var Vcur = b.buildLoraMm(layer.wv.?, cur, null);
         b.cb(Vcur, "Vcur", il);
 
-        Qcur = c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
-        Kcur = c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
-        Vcur = c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
+        Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, n_embd_head, b.n_head, b.n_tokens);
+        Kcur = llama.impl.c.ggml_reshape_3d(ctx, Kcur, n_embd_head, b.n_head_kv, b.n_tokens);
+        Vcur = llama.impl.c.ggml_reshape_3d(ctx, Vcur, n_embd_head, b.n_head_kv, b.n_tokens);
 
         Qcur = b.buildRope(Qcur, inp_pos, il);
         Kcur = b.buildRope(Kcur, inp_pos, il);
@@ -306,7 +295,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildAttn(inp_attn, layer.wo, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
 
         // The residual, updated.
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The FFN norm on the sum.
@@ -317,7 +306,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "ffn_out", il);
 
         // The output, with the residual.
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         b.cb(cur, "eagle3_prenorm", il);
 
         inpL = cur;
@@ -327,7 +316,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
 
     // The pre-norm state, the next token's g_embeddings in autoregressive
     // generation.
-    c.ggml_set_output(cur);
+    llama.impl.c.ggml_set_output(cur);
     b.res.t_h_nextn = cur;
 
     cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
@@ -337,10 +326,10 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
     // model's when it has none.
     var output = model.output;
     if (output == null) {
-        impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 288, "cparams.ctx_other != nullptr");
+        llama.impl.assert(b.cparams.ctx_other != null, "models/eagle3.cpp", 288, "cparams.ctx_other != nullptr");
         const model_other = otherModel(b);
 
-        impl.assert(model_other.output != null, "models/eagle3.cpp", 291, "model_other->output != nullptr && \"EAGLE3 decoder requires an output projection (own or from target model)\"");
+        llama.impl.assert(model_other.output != null, "models/eagle3.cpp", 291, "model_other->output != nullptr && \"EAGLE3 decoder requires an output projection (own or from target model)\"");
         output = model_other.output;
     }
     cur = b.buildLoraMm(output.?, cur, null);
@@ -350,12 +339,12 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
         const n_outputs = cur.ne[1];
         const n_vocab: i64 = model.vocab.nTokens();
 
-        impl.assert(d2t.type == c.GGML_TYPE_I64, "models/eagle3.cpp", 301, "model.d2t->type == GGML_TYPE_I64");
-        impl.assert(d2t.ne[0] == n_draft_vocab, "models/eagle3.cpp", 302, "model.d2t->ne[0] == n_draft_vocab");
+        llama.impl.assert(d2t.type == llama.impl.c.GGML_TYPE_I64, "models/eagle3.cpp", 301, "model.d2t->type == GGML_TYPE_I64");
+        llama.impl.assert(d2t.ne[0] == n_draft_vocab, "models/eagle3.cpp", 302, "model.d2t->ne[0] == n_draft_vocab");
 
-        const logits: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_3d(ctx, c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
-        cur = c.ggml_set_rows(ctx, logits, c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
-        cur = c.ggml_reshape_2d(ctx, cur, n_vocab, n_outputs);
+        const logits: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_fill(ctx, llama.impl.c.ggml_new_tensor_3d(ctx, llama.impl.c.GGML_TYPE_F32, 1, n_vocab, n_outputs), -std.math.inf(f32));
+        cur = llama.impl.c.ggml_set_rows(ctx, logits, llama.impl.c.ggml_reshape_3d(ctx, cur, 1, n_draft_vocab, n_outputs), llama.impl.c.ggml_reshape_3d(ctx, d2t, n_draft_vocab, 1, 1));
+        cur = llama.impl.c.ggml_reshape_2d(ctx, cur, n_vocab, n_outputs);
     }
 
     b.cb(cur, "result_output", -1);

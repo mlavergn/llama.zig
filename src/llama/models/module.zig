@@ -15,7 +15,7 @@ const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
-const arch_mod = @import("../arch.zig");
+const arch_table = @import("../arch_table.zig");
 const cparams_mod = @import("../cparams.zig");
 
 const Model = model_mod.Model;
@@ -231,7 +231,7 @@ fn entryOf(comptime M: type) Entry {
 /// - `arch`: the architecture the file names.
 ///
 /// Return: its overrides, or null when the port has none.
-pub fn forArch(arch: arch_mod.Arch) ?Entry {
+pub fn forArch(arch: arch_table.Arch) ?Entry {
     return switch (arch) {
         .afmoe => entryOf(afmoe),
         .apertus => entryOf(apertus),

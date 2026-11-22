@@ -20,12 +20,8 @@
 //! index would bucket differently, and no real model has one.
 
 const std = @import("std");
-const impl = @import("impl.zig");
-const clip = @import("clip.zig");
-const names = @import("names.zig");
-const model_mod = @import("model.zig");
-const libcxx = @import("stdlib").libcxx;
-const gpa = impl.gpa;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 
 /// `load_hparams`'s locals the switch reads and writes.
 pub const Info = struct {
@@ -39,14 +35,14 @@ pub const Info = struct {
 /// The insertion sequence of the last `wa_layer_indexes` `load` filled, and
 /// the hparams it belongs to.
 var wa_insertions: std.ArrayList(i32) = .empty;
-var wa_owner: ?*const model_mod.Hparams = null;
+var wa_owner: ?*const mod.model.Hparams = null;
 var wa_ordered: std.ArrayList(i32) = .empty;
 
 const func = "load_hparams";
 
 /// Ports the model-specific switch of `load_hparams` (mtmd-model.cpp:117
 /// @b1b770d90), a member of `mtmd_model_loader`.
-pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!void {
+pub fn load(ld: *mod.clip.Loader, model: *mod.model.Model, info: Info) mod.clip.Error!void {
     const hparams = &model.hparams;
     var kb: [256]u8 = undefined;
 
@@ -82,8 +78,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // MiniCPM-V 4.6/4.7 unified merger projector
             // ViT merger 2x2 + final merger 2x2 = 4x spatial merge per dimension
             hparams.n_merge = 4;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "mtmd-model.cpp", 334, "hparams.n_merge == 2 || hparams.n_merge == 4");
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            mod.impl.ggmlAssert(hparams.n_merge == 2 or hparams.n_merge == 4, "mtmd-model.cpp", 334, "hparams.n_merge == 2 || hparams.n_merge == 4");
 
             // no padding: the reference stretches the refined image to the target size
             hparams.image_pad_ov = .none;
@@ -91,12 +87,12 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
 
             // borrow wa_layer_indexes for vit_merger insertion point
             var wa_layer_indexes_vec: std.ArrayList(i32) = .empty;
-            defer wa_layer_indexes_vec.deinit(gpa);
-            try ld.getArrInt(names.KEY_WIN_ATTN_LAYER_INDEXES, &wa_layer_indexes_vec, false);
+            defer wa_layer_indexes_vec.deinit(std.heap.c_allocator);
+            try ld.getArrInt(mod.names.KEY_WIN_ATTN_LAYER_INDEXES, &wa_layer_indexes_vec, false);
             if (wa_layer_indexes_vec.items.len != 0) {
                 const insert_lid = wa_layer_indexes_vec.items[0];
                 if (insert_lid < 0 or insert_lid >= hparams.n_layer) {
-                    return clip.throwErr("%s: layer index %d is out of range (n_layer: %d)", .{ func, @as(c_int, insert_lid), @as(c_int, hparams.n_layer) });
+                    return mod.clip.throwErr("%s: layer index %d is out of range (n_layer: %d)", .{ func, @as(c_int, insert_lid), @as(c_int, hparams.n_layer) });
                 }
                 hparams.insert_layer_id = insert_lid;
             }
@@ -106,32 +102,32 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // older version of internvl doesn't have min/max tiles, we need to provide default values for them to avoid issues
             hparams.preproc_min_tiles = 1;
             hparams.preproc_max_tiles = 12;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
-            try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "mtmd-model.cpp", 361, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
-            try clip.Loader.setInternvlDhrResCandidates(model);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
+            try ld.getU32(mod.names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
+            mod.impl.ggmlAssert(hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles < std.math.maxInt(i32), "mtmd-model.cpp", 361, "hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles < INT32_MAX");
+            try mod.clip.Loader.setInternvlDhrResCandidates(model);
         },
         // PROJECTOR_TYPE_NEMOTRON_V2_VL
         .nemotron_v2_vl => {
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
         },
         // PROJECTOR_TYPE_NEMOTRON_OMNI
         .nemotron_omni => {
             hparams.ffn_op = .gelu_erf;
             info.log_ffn_op.* = "gelu_erf";
             hparams.image_resize_pad = .none;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.warmup_image_size = hparams.image_size;
         },
         // PROJECTOR_TYPE_PARAKEET
         .parakeet => {
-            try ld.getU32(names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
-            impl.ggmlAssert(hparams.subsampling_factor == 8, "mtmd-model.cpp", 382, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in mtmd_graph_parakeet::build()\"");
-            try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
-            impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "mtmd-model.cpp", 385, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
+            try ld.getU32(mod.names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
+            mod.impl.ggmlAssert(hparams.subsampling_factor == 8, "mtmd-model.cpp", 382, "hparams.subsampling_factor == 8 && \"subsampling_factor must match the conv strides in mtmd_graph_parakeet::build()\"");
+            try ld.getU32(mod.names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
+            mod.impl.ggmlAssert(hparams.audio_conv_kernel_size > 0 and @rem(hparams.audio_conv_kernel_size, 2) == 1, "mtmd-model.cpp", 385, "hparams.audio_conv_kernel_size > 0 && hparams.audio_conv_kernel_size % 2 == 1 && \"audio_conv_kernel_size must be a positive odd integer\"");
             hparams.audio_chunk_len = 0;
             hparams.audio_sample_rate = 16000;
             hparams.audio_n_fft = 512;
@@ -140,15 +136,15 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_NEMOTRON_TRANSCRIBE
         .nemotron_transcribe => {
-            try ld.getU32(names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
-            try ld.getU32(names.KEY_A_ROPE_DIMS, &hparams.audio_rope_dims, true);
-            try ld.getU32(names.KEY_A_SPK_N_BLOCK, &hparams.spk_n_layer, true);
-            try ld.getU32(names.KEY_A_SPK_N_HEAD, &hparams.spk_n_head, true);
+            try ld.getU32(mod.names.KEY_AUDIO_SUBSMPL_FACTOR, &hparams.subsampling_factor, true);
+            try ld.getU32(mod.names.KEY_A_ROPE_DIMS, &hparams.audio_rope_dims, true);
+            try ld.getU32(mod.names.KEY_A_SPK_N_BLOCK, &hparams.spk_n_layer, true);
+            try ld.getU32(mod.names.KEY_A_SPK_N_HEAD, &hparams.spk_n_head, true);
             if (hparams.subsampling_factor != 8) {
-                return clip.throwErr("%s: unsupported subsampling factor %d\n", .{ func, hparams.subsampling_factor });
+                return mod.clip.throwErr("%s: unsupported subsampling factor %d\n", .{ func, hparams.subsampling_factor });
             }
-            if (hparams.spk_n_layer <= 0 or hparams.spk_n_layer > @as(c_int, @truncate(impl.c.gguf_get_n_tensors(ld.ctx_gguf)))) {
-                return clip.throwErr("%s: invalid speaker block count %d\n", .{ func, hparams.spk_n_layer });
+            if (hparams.spk_n_layer <= 0 or hparams.spk_n_layer > @as(c_int, @truncate(mod.impl.c.gguf_get_n_tensors(ld.ctx_gguf)))) {
+                return mod.clip.throwErr("%s: invalid speaker block count %d\n", .{ func, hparams.spk_n_layer });
             }
             hparams.audio_chunk_len = 0;
             hparams.audio_sample_rate = 16000;
@@ -163,24 +159,24 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         .idefics3 => {
             // use default llava-uhd preprocessing params
             hparams.image_resize_algo = .lanczos;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
             hparams.setLimitImageTokensCustom();
         },
         // PROJECTOR_TYPE_COHERE2V
         .cohere2v => {
             hparams.image_pad_rf = .none;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, true);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, true);
             if (hparams.preproc_max_tiles <= 0 or hparams.preproc_max_tiles > 256) {
-                return clip.throwErr("%s: preproc_max_tiles (%d) must be in range [1, 256]\n", .{ func, hparams.preproc_max_tiles });
+                return mod.clip.throwErr("%s: preproc_max_tiles (%d) must be in range [1, 256]\n", .{ func, hparams.preproc_max_tiles });
             }
         },
         // PROJECTOR_TYPE_LFM2, D1OMNI_V
         .lfm2, .d1omni_v => {
             // default for older GGUFs
             var resize_algo: ?[*:0]const u8 = "bilinear";
-            try ld.getStringPtr(names.KEY_IMAGE_RESIZE_ALGO, &resize_algo, false);
+            try ld.getStringPtr(mod.names.KEY_IMAGE_RESIZE_ALGO, &resize_algo, false);
             const algo = std.mem.span(resize_algo.?);
             // Lfm2VlImageProcessor and d1-omni vision.py resize bilinear and bicubic with torchvision
             if (std.mem.eql(u8, algo, "bilinear")) {
@@ -190,32 +186,32 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             } else if (std.mem.eql(u8, algo, "lanczos")) {
                 hparams.setImageResizeAlgo(.lanczos, false);
             } else {
-                return clip.throwErr("%s: unsupported image resize algo: %s\n", .{ func, resize_algo.? });
+                return mod.clip.throwErr("%s: unsupported image resize algo: %s\n", .{ func, resize_algo.? });
             }
             hparams.image_resize_algo_rf = hparams.image_resize_algo;
             hparams.image_resize_algo_ov = hparams.image_resize_algo;
             // the tiles stretch the image to the grid (Lfm2VlImageProcessor, d1-omni vision.py)
             hparams.image_pad_rf = .none;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             // defaults for GGUFs converted before tiling params were written
             // ref: https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B/blob/main/processor_config.json
             hparams.preproc_min_tiles = 2;
             hparams.preproc_max_tiles = 10;
             hparams.preproc_tile_size = 512;
             hparams.preproc_max_pixels_tolerance = 2.0;
-            try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
-            try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            try ld.getU32(names.KEY_PREPROC_TILE_SIZE, &hparams.preproc_tile_size, false);
-            try ld.getF32(names.KEY_PREPROC_MAX_PIXELS_TOLERANCE, &hparams.preproc_max_pixels_tolerance, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "mtmd-model.cpp", 461, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
+            try ld.getU32(mod.names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
+            try ld.getU32(mod.names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
+            try ld.getU32(mod.names.KEY_PREPROC_TILE_SIZE, &hparams.preproc_tile_size, false);
+            try ld.getF32(mod.names.KEY_PREPROC_MAX_PIXELS_TOLERANCE, &hparams.preproc_max_pixels_tolerance, false);
+            mod.impl.ggmlAssert(hparams.preproc_min_tiles >= 1 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles, "mtmd-model.cpp", 461, "hparams.preproc_min_tiles >= 1 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles");
             hparams.setLimitImageTokens(64, 256);
         },
         // PROJECTOR_TYPE_PHI4
         .phi4 => {
             hparams.n_merge = 1;
             hparams.image_resize_algo = .bilinear;
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(16 * 16);
         },
         // PROJECTOR_TYPE_PIXTRAL
@@ -224,14 +220,14 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 1; // the original pixtral does not use patch merging
             hparams.image_resize_algo = .bicubic;
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
             if (hparams.image_longest_edge > 0) {
                 const patch_size: i64 = @as(i64, hparams.patch_size) * hparams.n_merge;
-                if (patch_size <= 0) return clip.throwErr("Pixtral merged patch size must be positive", .{});
+                if (patch_size <= 0) return mod.clip.throwErr("Pixtral merged patch size must be positive", .{});
                 const n_tokens_per_side: i64 = @divTrunc(hparams.image_longest_edge + patch_size - 1, patch_size);
                 if (@as(f64, @floatFromInt(n_tokens_per_side * patch_size)) > @sqrt(@as(f64, @floatFromInt(std.math.maxInt(c_int))))) {
-                    return clip.throwErr("Pixtral preprocessing image size is too large", .{});
+                    return mod.clip.throwErr("Pixtral preprocessing image size is too large", .{});
                 }
                 hparams.image_resize_pad = .none;
                 hparams.image_floor_before_align = true;
@@ -246,9 +242,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 1;
             hparams.image_resize_algo = .bicubic;
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             hparams.image_longest_edge = hparams.image_size;
-            try ld.getU32(names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
+            try ld.getU32(mod.names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
             hparams.setLimitImageTokensCustom();
             hparams.setWarmupNTokens(256); // avoid OOM on warmup
         },
@@ -257,19 +253,19 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.rope_theta = 10000.0;
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_DOTS3NOTE_V
         .dots3note_v => {
             hparams.rope_theta = 10000.0;
             hparams.image_resize_algo = .bicubic;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
-            try ld.getU32(names.KEY_VISION_N_EXPERT_USED, &hparams.n_expert_used, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_VISION_N_EXPERT_USED, &hparams.n_expert_used, true);
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_DOTS3NOTE_A
@@ -285,7 +281,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         .kimivl => {
             hparams.image_resize_algo = .bicubic;
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             // TODO: check kimivl preprocessor for exact values
             hparams.setLimitImageTokens(8, 1024);
             hparams.setWarmupNTokens(256); // avoid OOM on warmup
@@ -294,12 +290,12 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         .kimik25, .kimik31 => {
             hparams.image_resize_algo = .bicubic;
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
 
             var min_pixels: i32 = 0;
             var max_pixels: i32 = 0;
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &min_pixels, false);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &max_pixels, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &min_pixels, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &max_pixels, false);
             if (min_pixels > 0 and max_pixels > 0) {
                 hparams.image_min_pixels = min_pixels;
                 hparams.image_max_pixels = max_pixels;
@@ -316,8 +312,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_pad_color = .{ 127, 127, 127 };
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
             hparams.dsv4_max_n_token = 384;
             hparams.dsv4_max_wh_ratio = 8;
             const patch_area = hparams.patch_size * hparams.patch_size * hparams.n_merge * hparams.n_merge;
@@ -342,8 +338,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_pad_color = .{ 127, 127, 127 };
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
             // vision_max_n_token = 1024, vision_max_wh_ratio = null (converter asserts both)
             hparams.dsv4_max_n_token = 1024;
             hparams.dsv4_max_wh_ratio = 0;
@@ -367,7 +363,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 4;
             hparams.image_resize_algo = .bilinear;
             // test model (tinygemma3) has a different value, we optionally read it
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
         },
         // PROJECTOR_TYPE_GEMMA4V, GEMMA4UV
         .gemma4v, .gemma4uv => {
@@ -377,7 +373,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 3; // pooling_kernel_size
             hparams.image_resize_algo = .bicubic;
             hparams.image_resize_pad = .none;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             if (model.proj_type == .gemma4uv) {
                 // for "unified" variant, we directly use a bigger patch size, because the "token merging" is done directly on conv layer
                 hparams.patch_size = hparams.patch_size * hparams.n_merge;
@@ -391,7 +387,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             // Gemma3n uses MobileNetV5 which produces 256 tokens (16x16)
             hparams.n_merge = 1; // MobileNetV5 handles resizing internally
             hparams.image_resize_algo = .bilinear;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
         },
         // PROJECTOR_TYPE_QWEN2VL, QWEN25VL, QWEN3VL, LING3VL
         .qwen2vl, .qwen25vl, .qwen3vl, .ling3vl => {
@@ -399,27 +395,27 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             if (hparams.n_merge != 2) {
                 // the temporal merge input and the merger use a 2x2 patch grid
-                return clip.throwErr("%s: spatial_merge_size (%d) must be 2\n", .{ func, hparams.n_merge });
+                return mod.clip.throwErr("%s: spatial_merge_size (%d) must be 2\n", .{ func, hparams.n_merge });
             }
-            try ld.getU32(names.KEY_WIN_ATTN_PATTERN, &hparams.n_wa_pattern, model.proj_type == .qwen25vl); // only 2.5 requires it
+            try ld.getU32(mod.names.KEY_WIN_ATTN_PATTERN, &hparams.n_wa_pattern, model.proj_type == .qwen25vl); // only 2.5 requires it
             // ref: https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/preprocessor_config.json
             hparams.setLimitImageTokens(8, 4096);
             // optional limits of the model, the custom values take precedence
             if (hparams.custom_image_min_tokens <= 0) {
-                try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, false);
+                try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, false);
             }
             if (hparams.custom_image_max_tokens <= 0) {
-                try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, false);
+                try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, false);
             }
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
             const warn_min_pixels = 1024 * hparams.n_merge * hparams.n_merge * hparams.patch_size * hparams.patch_size;
             if (hparams.image_min_pixels < warn_min_pixels) {
-                impl.logWrn("%s: Qwen-VL models require at minimum 1024 image tokens to function correctly on grounding tasks\n", .{func});
-                impl.logWrn("%s: if you encounter problems with accuracy, try adding --image-min-tokens 1024\n", .{func});
-                impl.logWrn("%s: more info: https://github.com/ggml-org/llama.cpp/issues/16842\n\n", .{func});
+                mod.impl.logWrn("%s: Qwen-VL models require at minimum 1024 image tokens to function correctly on grounding tasks\n", .{func});
+                mod.impl.logWrn("%s: if you encounter problems with accuracy, try adding --image-min-tokens 1024\n", .{func});
+                mod.impl.logWrn("%s: more info: https://github.com/ggml-org/llama.cpp/issues/16842\n\n", .{func});
             }
         },
         // PROJECTOR_TYPE_MAGEVL
@@ -429,29 +425,29 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_SENSENOVA_U1
         .sensenova_u1 => {
             hparams.n_merge = 2;
             hparams.image_resize_algo = .bicubic;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.rope_theta = 10000.0;
             hparams.setLimitImageTokens(16, 4096);
             if (hparams.n_merge != 2) {
-                return clip.throwErr("%s: SenseNova U1 requires spatial_merge_size=2, got %u", .{ func, @as(c_uint, @bitCast(hparams.n_merge)) });
+                return mod.clip.throwErr("%s: SenseNova U1 requires spatial_merge_size=2, got %u", .{ func, @as(c_uint, @bitCast(hparams.n_merge)) });
             }
             hparams.setWarmupNTokens(16 * 16);
         },
         // PROJECTOR_TYPE_LFM3VL
         .lfm3vl => {
             var resize_algo: ?[*:0]const u8 = "";
-            try ld.getStringPtr(names.KEY_IMAGE_RESIZE_ALGO, &resize_algo, true);
+            try ld.getStringPtr(mod.names.KEY_IMAGE_RESIZE_ALGO, &resize_algo, true);
             const algo = std.mem.span(resize_algo.?);
             // Lfm3VlImageProcessor resizes with torchvision
             if (std.mem.eql(u8, algo, "bilinear")) {
@@ -459,24 +455,24 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             } else if (std.mem.eql(u8, algo, "bicubic")) {
                 hparams.setImageResizeAlgo(.bicubic, true);
             } else {
-                return clip.throwErr("%s: unsupported image resize algo: %s\n", .{ func, resize_algo.? });
+                return mod.clip.throwErr("%s: unsupported image resize algo: %s\n", .{ func, resize_algo.? });
             }
             // smart_resize stretches to the aligned size, no letterbox
             hparams.image_resize_pad = .none;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, true);
             // token counts and the projector graph assume a 2x2 merge
             if (hparams.n_merge != 2) {
-                return clip.throwErr("%s: unsupported spatial_merge_size %d for lfm3vl, only 2 is supported\n", .{ func, hparams.n_merge });
+                return mod.clip.throwErr("%s: unsupported spatial_merge_size %d for lfm3vl, only 2 is supported\n", .{ func, hparams.n_merge });
             }
-            try ld.getU32(clip.fmtKey(&kb, names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
+            try ld.getU32(mod.clip.fmtKey(&kb, mod.names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
             hparams.rope_theta = 1000000.0; // vision_rope_theta
             // HF processor size; the max is also capped at 4096 tokens as an OOM guard
             var min_pixels: i32 = 0;
             var max_pixels: i32 = 0;
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &max_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &max_pixels, true);
             if (min_pixels <= 0 or max_pixels < min_pixels) {
-                return clip.throwErr("%s: invalid image min/max pixels %d/%d\n", .{ func, min_pixels, max_pixels });
+                return mod.clip.throwErr("%s: invalid image min/max pixels %d/%d\n", .{ func, min_pixels, max_pixels });
             }
             const patch_area = hparams.patch_size * hparams.patch_size * hparams.n_merge * hparams.n_merge;
             hparams.setLimitImageTokens(@divTrunc(min_pixels, patch_area), @min(@as(i32, 4096), @divTrunc(max_pixels, patch_area)));
@@ -487,9 +483,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 2; // spatial_merge_size
             hparams.image_resize_algo = .bicubic;
             hparams.image_resize_pad = .none;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             // n_merge is used as a divisor; reject 0 to avoid int div-by-zero
-            impl.ggmlAssert(hparams.n_merge > 0, "mtmd-model.cpp", 754, "hparams.n_merge > 0");
+            mod.impl.ggmlAssert(hparams.n_merge > 0, "mtmd-model.cpp", 754, "hparams.n_merge > 0");
             hparams.rope_theta = 10000.0; // vision_config.rope_theta
             // MiniMax-M3: max_pixels 451584 (=672^2) -> 576 merged tokens (image_seq_length)
             hparams.setLimitImageTokens(8, 576);
@@ -498,27 +494,27 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         // PROJECTOR_TYPE_MUSE_SPARK_AUDIO
         .muse_spark_audio => {
             hparams.audio_sample_rate = 24000; // mono waveform, no frontend
-            try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
-            try ld.getArrInt(names.KEY_A_HIDDEN_SIZES, &hparams.audio_hidden_sizes, true);
-            try ld.getArrInt(names.KEY_A_PATCH_SIZES, &hparams.audio_patch_sizes, true);
-            try ld.getArrInt(names.KEY_A_DEPTHS, &hparams.audio_depths, true);
+            try ld.getU32(mod.names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
+            try ld.getArrInt(mod.names.KEY_A_HIDDEN_SIZES, &hparams.audio_hidden_sizes, true);
+            try ld.getArrInt(mod.names.KEY_A_PATCH_SIZES, &hparams.audio_patch_sizes, true);
+            try ld.getArrInt(mod.names.KEY_A_DEPTHS, &hparams.audio_depths, true);
 
             // the graph indexes the three arrays by stage and model.layers by the running depth sum
             const n_stage = hparams.audio_patch_sizes.items.len;
-            impl.ggmlAssert(n_stage > 0, "mtmd-model.cpp", 770, "n_stage > 0");
-            impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "mtmd-model.cpp", 771, "hparams.audio_hidden_sizes.size() == n_stage");
-            impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "mtmd-model.cpp", 772, "hparams.audio_depths.size() == n_stage");
-            impl.ggmlAssert(hparams.n_mel_bins == 1, "mtmd-model.cpp", 773, "hparams.n_mel_bins == 1");
-            impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "mtmd-model.cpp", 774, "hparams.audio_conv_kernel_size >= 1");
+            mod.impl.ggmlAssert(n_stage > 0, "mtmd-model.cpp", 770, "n_stage > 0");
+            mod.impl.ggmlAssert(hparams.audio_hidden_sizes.items.len == n_stage, "mtmd-model.cpp", 771, "hparams.audio_hidden_sizes.size() == n_stage");
+            mod.impl.ggmlAssert(hparams.audio_depths.items.len == n_stage, "mtmd-model.cpp", 772, "hparams.audio_depths.size() == n_stage");
+            mod.impl.ggmlAssert(hparams.n_mel_bins == 1, "mtmd-model.cpp", 773, "hparams.n_mel_bins == 1");
+            mod.impl.ggmlAssert(hparams.audio_conv_kernel_size >= 1, "mtmd-model.cpp", 774, "hparams.audio_conv_kernel_size >= 1");
 
             var n_blocks: i64 = 0;
             for (0..n_stage) |i| {
-                impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "mtmd-model.cpp", 778, "hparams.audio_hidden_sizes[i] >= 1");
-                impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "mtmd-model.cpp", 779, "hparams.audio_depths[i] >= 0");
+                mod.impl.ggmlAssert(hparams.audio_hidden_sizes.items[i] >= 1, "mtmd-model.cpp", 778, "hparams.audio_hidden_sizes[i] >= 1");
+                mod.impl.ggmlAssert(hparams.audio_depths.items[i] >= 0, "mtmd-model.cpp", 779, "hparams.audio_depths[i] >= 0");
                 n_blocks += hparams.audio_depths.items[i];
             }
             if (n_blocks != hparams.n_layer) {
-                return clip.throwErr("%s: sum of audio depths (%lld) does not match n_layer (%d)\n", .{ func, @as(c_longlong, n_blocks), hparams.n_layer });
+                return mod.clip.throwErr("%s: sum of audio depths (%lld) does not match n_layer (%d)\n", .{ func, @as(c_longlong, n_blocks), hparams.n_layer });
             }
             hparams.warmup_audio_size = hparams.audioSamplesPerToken();
         },
@@ -529,7 +525,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.rope_theta = 10000.0;
             hparams.muse_glimmer_patch_temporal = 2;
             hparams.muse_glimmer_sparse_factor = 4; // 3 sparse layers + 1 global, repeating
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             hparams.setLimitImageTokens(1, 4096);
             hparams.setWarmupNTokens(32 * 32);
         },
@@ -539,26 +535,26 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(clip.fmtKey(&kb, names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.clip.fmtKey(&kb, mod.names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
             // 1D banded sliding-window radius (visual_token_window_size); required
-            try ld.getU32(names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             var pat: std.ArrayList(i32) = .empty;
-            defer pat.deinit(gpa);
-            try ld.getArrInt(names.KEY_WA_PATTERN_MODE, &pat, true);
-            impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "mtmd-model.cpp", 810, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
+            defer pat.deinit(std.heap.c_allocator);
+            try ld.getArrInt(mod.names.KEY_WA_PATTERN_MODE, &pat, true);
+            mod.impl.ggmlAssert(@as(i32, @intCast(pat.items.len)) == hparams.n_layer, "mtmd-model.cpp", 810, "(int) pat.size() == hparams.n_layer && \"mimovl wa_pattern_mode length must equal n_layer\"");
             hparams.wa_pattern_mode.clearRetainingCapacity();
-            try hparams.wa_pattern_mode.appendSlice(gpa, pat.items);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try hparams.wa_pattern_mode.appendSlice(std.heap.c_allocator, pat.items);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_STEP3VL
         .step3vl => {
             hparams.n_merge = 4; // two stride-2 downsamplers after patching
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
             hparams.rope_theta = 10000.0;
-            try ld.getU32(names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
+            try ld.getU32(mod.names.KEY_PREPROC_IMAGE_SIZE, &hparams.image_longest_edge, false);
             if (hparams.image_longest_edge == 0) hparams.image_longest_edge = 3024;
             // note: the step3vl preprocessor slices based on a fixed window grid, so it does not support custom min/max image tokens
             hparams.warmup_image_size = hparams.image_size;
@@ -568,11 +564,11 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 2;
             hparams.image_resize_algo = .bilinear;
             hparams.image_resize_pad = .none;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             var wa_layer_indexes_vec: std.ArrayList(i32) = .empty;
-            defer wa_layer_indexes_vec.deinit(gpa);
-            try ld.getArrInt(names.KEY_WIN_ATTN_LAYER_INDEXES, &wa_layer_indexes_vec, true);
+            defer wa_layer_indexes_vec.deinit(std.heap.c_allocator);
+            try ld.getArrInt(mod.names.KEY_WIN_ATTN_LAYER_INDEXES, &wa_layer_indexes_vec, true);
             for (wa_layer_indexes_vec.items) |layer| try insertWaLayer(hparams, layer);
             // support max_height * max_width = 8000 * 8000. 8000/16/2 = 250 image tokens
             hparams.setLimitImageTokens(1, 62500);
@@ -592,7 +588,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.rope_theta = 10000.0;
             hparams.n_merge = 2; // default value for GLM4-V
             hparams.image_resize_algo = .bicubic;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
             hparams.setLimitImageTokens(8, 4096);
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
@@ -602,10 +598,10 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.rope_theta = 10000.0;
             hparams.n_merge = 2;
             hparams.image_resize_algo = .bicubic;
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getF32(names.KEY_SWIGLU_CLAMP, &hparams.swiglu_clamp, true);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getF32(mod.names.KEY_SWIGLU_CLAMP, &hparams.swiglu_clamp, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setLimitImageTokensCustom();
             hparams.setWarmupNTokens(46 * 46); // avoid OOM on warmup
         },
@@ -613,14 +609,14 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         .llama4 => {
             hparams.rope_theta = 10000.0;
             hparams.image_resize_algo = .bilinear;
-            try ld.getU32(names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
-            try clip.Loader.setLlavaUhdResCandidates(model, 3);
+            try ld.getU32(mod.names.KEY_PROJ_SCALE_FACTOR, &hparams.n_merge, false);
+            try mod.clip.Loader.setLlavaUhdResCandidates(model, 3);
         },
         // PROJECTOR_TYPE_ULTRAVOX, QWEN2A, QWEN3A, GLMA, VOXTRAL, MERALION, MUSIC_FLAMINGO
         .ultravox, .qwen2a, .qwen3a, .glma, .voxtral, .meralion, .music_flamingo => {
             const require_stack = model.proj_type == .ultravox or model.proj_type == .voxtral or
                 model.proj_type == .meralion or model.proj_type == .glma;
-            try ld.getU32(names.KEY_A_PROJ_STACK_FACTOR, &hparams.proj_stack_factor, require_stack);
+            try ld.getU32(mod.names.KEY_A_PROJ_STACK_FACTOR, &hparams.proj_stack_factor, require_stack);
             hparams.ffn_op = .gelu_erf;
             info.log_ffn_op.* = "gelu_erf"; // temporary solution for logging
 
@@ -633,8 +629,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_VOXTRAL_RT
         .voxtral_rt => {
-            try ld.getU32(names.KEY_A_PROJ_STACK_FACTOR, &hparams.proj_stack_factor, true);
-            try ld.getU32(names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_A_PROJ_STACK_FACTOR, &hparams.proj_stack_factor, true);
+            try ld.getU32(mod.names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             hparams.rope_theta = 1000000.0; // params.json
             hparams.ffn_op = .silu;
             info.log_ffn_op.* = "silu";
@@ -649,15 +645,15 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_MIMO_AUDIO
         .mimo_audio => {
-            try ld.getU32(names.KEY_A_RVQ_NUM_QUANTIZERS, &hparams.rvq_num_quantizers, false);
-            try ld.getArrInt(names.KEY_A_RVQ_CODEBOOK_SIZE, &hparams.rvq_codebook_size, false);
+            try ld.getU32(mod.names.KEY_A_RVQ_NUM_QUANTIZERS, &hparams.rvq_num_quantizers, false);
+            try ld.getArrInt(mod.names.KEY_A_RVQ_CODEBOOK_SIZE, &hparams.rvq_codebook_size, false);
             if (hparams.rvq_num_quantizers <= 0) {
-                return clip.throwErr("%s: mimo_audio: missing %s\n", .{ func, @as([*:0]const u8, names.KEY_A_RVQ_NUM_QUANTIZERS) });
+                return mod.clip.throwErr("%s: mimo_audio: missing %s\n", .{ func, @as([*:0]const u8, mod.names.KEY_A_RVQ_NUM_QUANTIZERS) });
             }
             if (@as(i32, @intCast(hparams.rvq_codebook_size.items.len)) != hparams.rvq_num_quantizers) {
-                return clip.throwErr("%s: mimo_audio: %s length (%zu) must equal %s (%d)\n", .{
-                    func,                                               @as([*:0]const u8, names.KEY_A_RVQ_CODEBOOK_SIZE), hparams.rvq_codebook_size.items.len,
-                    @as([*:0]const u8, names.KEY_A_RVQ_NUM_QUANTIZERS), hparams.rvq_num_quantizers,
+                return mod.clip.throwErr("%s: mimo_audio: %s length (%zu) must equal %s (%d)\n", .{
+                    func,                                                   @as([*:0]const u8, mod.names.KEY_A_RVQ_CODEBOOK_SIZE), hparams.rvq_codebook_size.items.len,
+                    @as([*:0]const u8, mod.names.KEY_A_RVQ_NUM_QUANTIZERS), hparams.rvq_num_quantizers,
                 });
             }
             hparams.ffn_op = .gelu_erf; // PyTorch F.gelu default (approximate="none")
@@ -669,20 +665,20 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_window_len = 960;
             hparams.audio_hop_len = 240;
 
-            try ld.getU32(names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             var wa_pattern: std.ArrayList(i32) = .empty;
-            defer wa_pattern.deinit(gpa);
-            try ld.getArrInt(names.KEY_A_WA_PATTERN_MODE, &wa_pattern, true);
+            defer wa_pattern.deinit(std.heap.c_allocator);
+            try ld.getArrInt(mod.names.KEY_A_WA_PATTERN_MODE, &wa_pattern, true);
             if (@as(i32, @intCast(wa_pattern.items.len)) != hparams.n_layer) {
-                return clip.throwErr("%s: mimo_audio: %s length (%zu) must equal n_layer (%d)\n", .{ func, @as([*:0]const u8, names.KEY_A_WA_PATTERN_MODE), wa_pattern.items.len, hparams.n_layer });
+                return mod.clip.throwErr("%s: mimo_audio: %s length (%zu) must equal n_layer (%d)\n", .{ func, @as([*:0]const u8, mod.names.KEY_A_WA_PATTERN_MODE), wa_pattern.items.len, hparams.n_layer });
             }
             hparams.wa_pattern_mode.clearRetainingCapacity();
-            try hparams.wa_pattern_mode.appendSlice(gpa, wa_pattern.items);
+            try hparams.wa_pattern_mode.appendSlice(std.heap.c_allocator, wa_pattern.items);
 
-            try ld.getU32(names.KEY_A_LOCAL_BLOCK_COUNT, &hparams.audio_local_n_layer, true);
-            try ld.getU32(names.KEY_A_LOCAL_GROUP_SIZE, &hparams.audio_local_group_size, true);
+            try ld.getU32(mod.names.KEY_A_LOCAL_BLOCK_COUNT, &hparams.audio_local_n_layer, true);
+            try ld.getU32(mod.names.KEY_A_LOCAL_GROUP_SIZE, &hparams.audio_local_group_size, true);
             if (hparams.audio_local_group_size <= 0) {
-                return clip.throwErr("%s: mimo_audio: %s must be > 0\n", .{ func, @as([*:0]const u8, names.KEY_A_LOCAL_GROUP_SIZE) });
+                return mod.clip.throwErr("%s: mimo_audio: %s must be > 0\n", .{ func, @as([*:0]const u8, mod.names.KEY_A_LOCAL_GROUP_SIZE) });
             }
         },
         // PROJECTOR_TYPE_QWEN3TTS_SPKENC
@@ -726,10 +722,10 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.gen_top_k = 0;
             hparams.gen_penalty_repeat = 1.2;
             hparams.gen_penalty_last_n = 64;
-            try ld.getF32(names.KEY_GEN_AUDIO_TEMP, &hparams.gen_temp, false);
-            try ld.getI32(names.KEY_GEN_AUDIO_TOP_K, &hparams.gen_top_k, false);
-            try ld.getF32(names.KEY_GEN_AUDIO_PENALTY_REPEAT, &hparams.gen_penalty_repeat, false);
-            try ld.getI32(names.KEY_GEN_AUDIO_PENALTY_LAST_N, &hparams.gen_penalty_last_n, false);
+            try ld.getF32(mod.names.KEY_GEN_AUDIO_TEMP, &hparams.gen_temp, false);
+            try ld.getI32(mod.names.KEY_GEN_AUDIO_TOP_K, &hparams.gen_top_k, false);
+            try ld.getF32(mod.names.KEY_GEN_AUDIO_PENALTY_REPEAT, &hparams.gen_penalty_repeat, false);
+            try ld.getI32(mod.names.KEY_GEN_AUDIO_PENALTY_LAST_N, &hparams.gen_penalty_last_n, false);
         },
         // PROJECTOR_TYPE_QWEN3TTS_GEN
         .qwen3tts_gen => {
@@ -772,7 +768,7 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_sample_rate = 24000;
             // seanet ratios are [6,5,4] in the config, the encoder reverses them
             hparams.seanet_ratios.clearRetainingCapacity();
-            try hparams.seanet_ratios.appendSlice(gpa, &.{ 4, 5, 6 });
+            try hparams.seanet_ratios.appendSlice(std.heap.c_allocator, &.{ 4, 5, 6 });
             hparams.seanet_n_stage = @intCast(hparams.seanet_ratios.items.len);
             hparams.mimi_downsample = 16;
             // matches the reference transformer's "context"
@@ -800,8 +796,8 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         .paddleocr => {
             hparams.n_merge = 2;
             hparams.image_resize_algo = .bicubic;
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(28 * 28); // avoid OOM on warmup
         },
         // PROJECTOR_TYPE_DEEPSEEKOCR, DEEPSEEKOCR2
@@ -812,10 +808,10 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_algo = .bicubic;
             hparams.image_pad_color = .{ 127, 127, 127 };
 
-            try ld.getU32(names.KEY_SAM_N_BLOCK, &hparams.sam_n_layer, true);
-            try ld.getU32(names.KEY_SAM_N_HEAD, &hparams.sam_n_head, true);
-            try ld.getU32(names.KEY_SAM_N_EMBD, &hparams.sam_n_embd, true);
-            try ld.getU32(names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_SAM_N_BLOCK, &hparams.sam_n_layer, true);
+            try ld.getU32(mod.names.KEY_SAM_N_HEAD, &hparams.sam_n_head, true);
+            try ld.getU32(mod.names.KEY_SAM_N_EMBD, &hparams.sam_n_embd, true);
+            try ld.getU32(mod.names.KEY_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             hparams.preproc_min_tiles = 2;
             if (model.proj_type == .deepseekocr) {
                 hparams.preproc_max_tiles = 9;
@@ -827,12 +823,12 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
                 hparams.preproc_max_tiles = 6;
                 hparams.preproc_tile_size = 768;
                 // qwen2 encoder is GQA, requires KEY_N_HEAD_KV
-                try ld.getU32(clip.fmtKey(&kb, names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
+                try ld.getU32(mod.clip.fmtKey(&kb, mod.names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
             }
             // unlimited-ocr shares the v1 projector but tiles up to 32
-            try ld.getU32(names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
-            try ld.getU32(names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
-            impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "mtmd-model.cpp", 1112, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
+            try ld.getU32(mod.names.KEY_PREPROC_MIN_TILES, &hparams.preproc_min_tiles, false);
+            try ld.getU32(mod.names.KEY_PREPROC_MAX_TILES, &hparams.preproc_max_tiles, false);
+            mod.impl.ggmlAssert(hparams.preproc_min_tiles >= 0 and hparams.preproc_min_tiles <= hparams.preproc_max_tiles and hparams.preproc_max_tiles <= 256, "mtmd-model.cpp", 1112, "hparams.preproc_min_tiles >= 0 && hparams.preproc_min_tiles <= hparams.preproc_max_tiles && hparams.preproc_max_tiles <= 256");
         },
         // PROJECTOR_TYPE_HUNYUANVL
         .hunyuanvl => {
@@ -841,9 +837,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_pad = .none;
             hparams.ffn_op = .gelu;
             hparams.setLimitImageTokens(256, 16384);
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, false);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, false);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, false);
             hparams.setWarmupNTokens(32 * 32);
         },
         // PROJECTOR_TYPE_LFM2A, D1OMNI_A
@@ -857,9 +853,9 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
         },
         // PROJECTOR_TYPE_LFM3A
         .lfm3a => {
-            try ld.getU32(names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
+            try ld.getU32(mod.names.KEY_A_ATTN_WINDOW_SIZE, &hparams.attn_window_size, true);
             if (hparams.attn_window_size <= 0) {
-                return clip.throwErr("%s: invalid audio attention window %d\n", .{ func, hparams.attn_window_size });
+                return mod.clip.throwErr("%s: invalid audio attention window %d\n", .{ func, hparams.attn_window_size });
             }
             hparams.rope_theta = 1000000.0; // checked by the converter
             // audio preprocessing params, see mtmd_audio_preprocessor_lfm3a
@@ -874,13 +870,13 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.n_merge = 2;
             hparams.image_resize_pad = .none; // the HF processor resizes to the smart_resize size, no padding
             hparams.image_round_half_even = true; // smart_resize uses Python round()
-            try ld.getU32(names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
-            try ld.getU32(names.KEY_WIN_ATTN_PATTERN, &hparams.n_wa_pattern, false);
-            try ld.getU32(names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
-            try ld.getU32(names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
+            try ld.getU32(mod.names.KEY_SPATIAL_MERGE_SIZE, &hparams.n_merge, false);
+            try ld.getU32(mod.names.KEY_WIN_ATTN_PATTERN, &hparams.n_wa_pattern, false);
+            try ld.getU32(mod.names.KEY_IMAGE_MIN_PIXELS, &hparams.image_min_pixels, true);
+            try ld.getU32(mod.names.KEY_IMAGE_MAX_PIXELS, &hparams.image_max_pixels, true);
             hparams.setWarmupNTokens(46 * 46);
             if (hparams.rope_theta <= 0.0) hparams.rope_theta = 10000.0;
-            try ld.getU32(clip.fmtKey(&kb, names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
+            try ld.getU32(mod.clip.fmtKey(&kb, mod.names.KEY_N_HEAD_KV, "vision"), &hparams.n_head_kv, true);
         },
         // PROJECTOR_TYPE_GEMMA4A
         .gemma4a => {
@@ -909,14 +905,14 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.audio_n_fft = 512;
             hparams.audio_window_len = 400;
             hparams.audio_hop_len = 160;
-            try ld.getU32(names.KEY_A_CHUNK_SIZE, &hparams.audio_chunk_size, true);
+            try ld.getU32(mod.names.KEY_A_CHUNK_SIZE, &hparams.audio_chunk_size, true);
             // context_size is squared for the attn_dists/mask buffers; cap to prevent int32 overflow
-            impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "mtmd-model.cpp", 1196, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
-            try ld.getU32(names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
-            try ld.getU32(names.KEY_A_MAX_POS_EMB, &hparams.audio_max_pos_emb, true);
-            try ld.getU32(names.KEY_A_PROJ_WINDOW_SIZE, &hparams.audio_proj_window_size, true);
-            try ld.getU32(names.KEY_A_PROJ_DOWNSAMPLE_RATE, &hparams.audio_proj_downsample_rate, true);
-            try ld.getU32(names.KEY_A_PROJ_HEAD_COUNT, &hparams.audio_proj_head_count, true);
+            mod.impl.ggmlAssert(hparams.audio_chunk_size > 0 and hparams.audio_chunk_size <= 8192, "mtmd-model.cpp", 1196, "hparams.audio_chunk_size > 0 && hparams.audio_chunk_size <= 8192");
+            try ld.getU32(mod.names.KEY_A_CONV_KERNEL_SIZE, &hparams.audio_conv_kernel_size, true);
+            try ld.getU32(mod.names.KEY_A_MAX_POS_EMB, &hparams.audio_max_pos_emb, true);
+            try ld.getU32(mod.names.KEY_A_PROJ_WINDOW_SIZE, &hparams.audio_proj_window_size, true);
+            try ld.getU32(mod.names.KEY_A_PROJ_DOWNSAMPLE_RATE, &hparams.audio_proj_downsample_rate, true);
+            try ld.getU32(mod.names.KEY_A_PROJ_HEAD_COUNT, &hparams.audio_proj_head_count, true);
             // NOTE: feature layers loaded above in common path
         },
         // PROJECTOR_TYPE_JANUS_PRO
@@ -931,16 +927,16 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
             hparams.image_resize_pad = .ceil;
 
             // NOTE: feature_layers loaded in common path as optional
-            try ld.getArrInt(names.KEY_PROJ_SPATIAL_OFFSETS, &hparams.proj_spatial_offsets, true);
+            try ld.getArrInt(mod.names.KEY_PROJ_SPATIAL_OFFSETS, &hparams.proj_spatial_offsets, true);
             if (hparams.feature_layers.items.len != hparams.proj_spatial_offsets.items.len) {
                 return granite4FeatureLayerMismatch(hparams.feature_layers.items.len, hparams.proj_spatial_offsets.items.len);
             }
 
-            try ld.getU32(names.KEY_PROJ_SAMPLE_QUERY_SIDE, &hparams.downsample_query_side, true);
-            try ld.getU32(names.KEY_PROJ_SAMPLE_WINDOW_SIDE, &hparams.downsample_window_side, true);
+            try ld.getU32(mod.names.KEY_PROJ_SAMPLE_QUERY_SIDE, &hparams.downsample_query_side, true);
+            try ld.getU32(mod.names.KEY_PROJ_SAMPLE_WINDOW_SIDE, &hparams.downsample_window_side, true);
             hparams.warmup_image_size = hparams.image_size;
         },
-        else => return clip.throwErr("%s: unknown vision projector type %s\n", .{ func, info.proj_type }),
+        else => return mod.clip.throwErr("%s: unknown vision projector type %s\n", .{ func, info.proj_type }),
     }
 }
 
@@ -954,36 +950,36 @@ pub fn load(ld: *clip.Loader, model: *model_mod.Model, info: Info) clip.Error!vo
 /// followed by the second size, and the missing argument is taken as 0;
 /// any other size is a wild pointer, on which upstream's `snprintf` faults,
 /// so the port raises SIGSEGV there.
-fn granite4FeatureLayerMismatch(n_feature_layers: usize, n_offsets: usize) clip.Error {
+fn granite4FeatureLayerMismatch(n_feature_layers: usize, n_offsets: usize) mod.clip.Error {
     if (n_feature_layers != 0) {
         _ = std.c.raise(.SEGV);
         std.process.abort();
     }
-    return clip.throwErr("%s: feature_layers.size() %d != proj_spatial_offsets.size() %d", .{
+    return mod.clip.throwErr("%s: feature_layers.size() %d != proj_spatial_offsets.size() %d", .{
         @as(?[*:0]const u8, null), @as(c_int, @truncate(@as(i64, @bitCast(n_offsets)))), @as(c_int, 0),
     });
 }
 
 /// `hparams.wa_layer_indexes.insert(layer)`, recording the insertion order.
-fn insertWaLayer(hparams: *model_mod.Hparams, layer: i32) clip.Error!void {
+fn insertWaLayer(hparams: *mod.model.Hparams, layer: i32) mod.clip.Error!void {
     if (wa_owner != hparams) {
         wa_insertions.clearRetainingCapacity();
         wa_owner = hparams;
     }
-    try wa_insertions.append(gpa, layer);
-    try hparams.wa_layer_indexes.put(gpa, layer, {});
+    try wa_insertions.append(std.heap.c_allocator, layer);
+    try hparams.wa_layer_indexes.put(std.heap.c_allocator, layer, {});
 }
 
 /// `hparams.wa_layer_indexes` in the order a `std::unordered_set<int32_t>`
 /// iterates it, for `load_hparams`'s log line. Borrowed until the next call.
-pub fn waLayerIndexesInSetOrder(hparams: *const model_mod.Hparams) clip.Error![]const i32 {
+pub fn waLayerIndexesInSetOrder(hparams: *const mod.model.Hparams) mod.clip.Error![]const i32 {
     wa_ordered.clearRetainingCapacity();
     if (wa_owner != hparams) return wa_ordered.items;
-    var set = try libcxx.U32Set.init(gpa);
+    var set = try stdlib.libcxx.U32Set.init(std.heap.c_allocator);
     defer set.deinit();
     for (wa_insertions.items) |v| _ = try set.insert(@bitCast(v));
     var it = set.iterator();
-    while (it.next()) |v| try wa_ordered.append(gpa, @bitCast(v));
+    while (it.next()) |v| try wa_ordered.append(std.heap.c_allocator, @bitCast(v));
     return wa_ordered.items;
 }
 
@@ -995,7 +991,7 @@ test {
 }
 
 test "the set order of wa_layer_indexes is libc++'s, not insertion order" {
-    var hp: model_mod.Hparams = .{};
+    var hp: mod.model.Hparams = .{};
     defer hp.deinit();
     for ([_]i32{ 31, 7, 15, 23 }) |v| try insertWaLayer(&hp, v);
     const got = try waLayerIndexesInSetOrder(&hp);

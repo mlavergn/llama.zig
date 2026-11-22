@@ -10,25 +10,15 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_gemma_embedding`'s `load_arch_hparams` (models/gemma-embedding.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.symmetric);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.symmetric);
     try self.loadSwaPattern(ml, 6, false, exc);
 
     hp.causal_attn = false; // Embeddings do not use causal attention.
@@ -44,21 +34,21 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     if (try meta.getKey(u32, .dense_3_feat_in, false, exc)) |v| hp.dense_3_feat_in = v;
     if (try meta.getKey(u32, .dense_3_feat_out, false, exc)) |v| hp.dense_3_feat_out = v;
 
-    impl.assert(hp.dense_2_feat_in == 0 or hp.dense_2_feat_in == hp.n_embd, "models/gemma-embedding.cpp", 19, "(hparams.dense_2_feat_in == 0 || hparams.dense_2_feat_in == hparams.n_embd) && \"dense_2_feat_in must be equal to n_embd\"");
-    impl.assert(hp.dense_3_feat_out == 0 or hp.dense_3_feat_out == hp.n_embd, "models/gemma-embedding.cpp", 20, "(hparams.dense_3_feat_out == 0 || hparams.dense_3_feat_out == hparams.n_embd) && \"dense_3_feat_out must be equal to n_embd\"");
+    llama.impl.assert(hp.dense_2_feat_in == 0 or hp.dense_2_feat_in == hp.n_embd, "models/gemma-embedding.cpp", 19, "(hparams.dense_2_feat_in == 0 || hparams.dense_2_feat_in == hparams.n_embd) && \"dense_2_feat_in must be equal to n_embd\"");
+    llama.impl.assert(hp.dense_3_feat_out == 0 or hp.dense_3_feat_out == hp.n_embd, "models/gemma-embedding.cpp", 20, "(hparams.dense_3_feat_out == 0 || hparams.dense_3_feat_out == hparams.n_embd) && \"dense_3_feat_out must be equal to n_embd\"");
 
     self.type = switch (hp.nLayer()) {
         24 => .@"0_3b",
         else => .unknown,
     };
-    hp.f_attention_scale = 1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
+    hp.f_attention_scale = 1.0 / stdlib.libm.sqrtfInt(hp.nEmbdHeadK(0));
 }
 
 /// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -68,7 +58,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     // The dense linear weights.
@@ -97,20 +87,20 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma_embedding`'s `build_arch_graph` (models/gemma-embedding.cpp:69 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_gemma_embedding`'s `graph`
 /// (models/gemma-embedding.cpp:73 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadK(0);
 
     // Raw embeddings given as input (e.g. encoded images) are not scaled:
     // the scale applies to the token rows only.
-    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -151,20 +141,20 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Vcur, "Vcur", il);
 
             // ref: https://github.com/google/gemma_pytorch/blob/014acb7ac4563a5f77c76d7ff98f31b568c16508/gemma/model.py#L315
-            Qcur = c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
+            Qcur = llama.impl.c.ggml_scale(ctx, Qcur, hp.f_attention_scale);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpL = c.ggml_get_rows(ctx, inpL, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpL = llama.impl.c.ggml_get_rows(ctx, inpL, inp_out_ids);
         }
 
         cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
         b.cb(cur, "attn_post_norm", il);
 
-        const sa_out: *Tensor = c.ggml_add(ctx, cur, inpL);
+        const sa_out: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpL);
         b.cb(sa_out, "sa_out", il);
 
         cur = b.buildNorm(sa_out, layer.ffn_norm, null, .rms, il);
@@ -179,7 +169,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
         b.cb(cur, "ffn_post_norm", -1);
 
-        cur = c.ggml_add(ctx, cur, sa_out);
+        cur = llama.impl.c.ggml_add(ctx, cur, sa_out);
 
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);

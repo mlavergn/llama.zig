@@ -9,21 +9,11 @@
 //! expressions, left to right, since a parser's id is its position.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
 const peg = @import("peg");
-const exception = @import("../exception.zig");
-const chat_peg = @import("../chat_peg.zig");
-const params_mod = @import("../params.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const parsers = @import("module.zig");
 
 const Allocator = std.mem.Allocator;
-const Error = exception.Error;
-const ChatParams = params_mod.ChatParams;
-const ChatBuilder = chat_peg.ChatBuilder;
-const ParserId = peg.ParserId;
-const GenerationParams = template.GenerationParams;
 
 const TURN_START = "<|START_OF_TURN_TOKEN|>";
 const TURN_END = "<|END_OF_TURN_TOKEN|>";
@@ -43,12 +33,12 @@ const RESULT_END = "<|END_TOOL_RESULT|>";
 const GEN_PREFIX = TURN_START ++ CHATBOT;
 
 const Build = struct {
-    inputs: *const GenerationParams,
+    inputs: *const common_chat.template.GenerationParams,
     has_tools: bool,
     has_response_format: bool,
     extract_reasoning: bool,
 
-    fn parser(self: *Build, p: *ChatBuilder) chat_peg.Error!ParserId {
+    fn parser(self: *Build, p: *common_chat.chat_peg.ChatBuilder) peg.Error!peg.ParserId {
         const b = &p.b;
         const generation_prompt = try b.literal(GEN_PREFIX);
         const end = try b.end();
@@ -102,11 +92,11 @@ const Build = struct {
 /// Ports `common_chat_params_init_cohere2moe` (parsers/cohere2moe.cpp:19 @b1b770d90).
 ///
 /// Return: owned by the arena `a`.
-pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const GenerationParams) Error!ChatParams {
-    var data: ChatParams = .{};
+pub fn init(a: Allocator, tmpl: *const common_chat.template.Template, inputs: *const common_chat.template.GenerationParams) common_chat.exception.Error!common_chat.params.ChatParams {
+    var data: common_chat.params.ChatParams = .{};
 
-    data.prompt = try template.directApplyImpl(a, tmpl, inputs, null, null, null);
-    data.generation_prompt = try template.generationPromptImpl(a, tmpl, inputs, null, null, null);
+    data.prompt = try common_chat.template.directApplyImpl(a, tmpl, inputs, null, null, null);
+    data.generation_prompt = try common_chat.template.generationPromptImpl(a, tmpl, inputs, null, null, null);
     data.format = .peg_native;
     data.supports_thinking = true;
     data.thinking_start_tag = THINK_START;
@@ -125,8 +115,8 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
     try data.message_delimiters.add(a, .tool, TURN_START ++ SYSTEM ++ RESULT_START);
     try data.message_delimiters.add(a, .system, TURN_START ++ SYSTEM);
 
-    const has_tools = parsers.hasTools(&inputs.tools);
-    const has_response_format = parsers.hasResponseFormat(&inputs.json_schema);
+    const has_tools = common_chat.parsers.hasTools(&inputs.tools);
+    const has_response_format = common_chat.parsers.hasResponseFormat(&inputs.json_schema);
     const extract_reasoning = inputs.reasoning_format != .none;
     const include_grammar = has_response_format or (has_tools and inputs.tool_choice != .none);
 
@@ -147,12 +137,12 @@ pub fn init(a: Allocator, tmpl: *const template.Template, inputs: *const Generat
         .has_response_format = has_response_format,
         .extract_reasoning = extract_reasoning,
     };
-    data.parser = chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return util.fromPeg(e);
+    data.parser = common_chat.chat_peg.buildChatPegParser(a, &build, Build.parser) catch |e| return common_chat.util.fromPeg(e);
     const arena = &data.parser.?;
 
     if (include_grammar) {
         data.grammar_lazy = !has_response_format and inputs.tool_choice == .auto;
-        data.grammar = try parsers.grammar(a, arena, data.grammar_lazy);
+        data.grammar = try common_chat.parsers.grammar(a, arena, data.grammar_lazy);
 
         data.grammar_triggers = .empty;
         try data.addWordTrigger(a, ACTION_START);
@@ -173,9 +163,9 @@ test "Cohere2MoE.jinja applies with a tool and builds a parser and a grammar" {
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "llama.cpp/models/templates/Cohere2MoE.jinja", a, .limited(1 << 20));
-    var t = try template.Template.init(std.testing.allocator, src, "<s>", "</s>");
+    var t = try common_chat.template.Template.init(std.testing.allocator, src, "<s>", "</s>");
     defer t.deinit();
-    var p: GenerationParams = .{ .add_generation_prompt = true };
+    var p: common_chat.template.GenerationParams = .{ .add_generation_prompt = true };
     p.messages = try json.parse(a, "[{\"role\":\"user\",\"content\":\"hi\"}]");
     p.tools = try json.parse(a, "[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}]");
     const data = try init(a, &t, &p);

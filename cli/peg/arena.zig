@@ -25,15 +25,11 @@
 //! in the variant's order.
 
 const std = @import("std");
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const json = @import("json");
-const libcxx = @import("stdlib").libcxx;
-const errors = @import("errors.zig");
-const trie = json.trie;
-const schema = json.schema;
 
 const Allocator = std.mem.Allocator;
-pub const Error = errors.Error;
-const raise = errors.raise;
 
 /// Ports `common_peg_parser_id` (peg-parser.h:21 @b1b770d90).
 pub const ParserId = usize;
@@ -152,7 +148,7 @@ pub const AstArena = struct {
         children: []const AstId,
         is_partial: bool,
         invalid_utf8: []const InvalidUtf8,
-    ) Error!AstId {
+    ) mod.errors.Error!AstId {
         const a = self.mem.allocator();
         const id = self.nodes.items.len;
         try self.nodes.append(self.gpa, .{
@@ -174,8 +170,8 @@ pub const AstArena = struct {
     ///
     /// Return: borrowed until the next `addNode` or `clear`; `OutOfRange`
     /// past the end.
-    pub fn get(self: *const AstArena, id: AstId) Error!*const AstNode {
-        if (id >= self.nodes.items.len) return errors.outOfRange();
+    pub fn get(self: *const AstArena, id: AstId) mod.errors.Error!*const AstNode {
+        if (id >= self.nodes.items.len) return mod.errors.outOfRange();
         return &self.nodes.items[id];
     }
 
@@ -183,7 +179,7 @@ pub const AstArena = struct {
     /// descendant with `tag`, depth first, `max_depth` levels down.
     ///
     /// Return: its id, or `invalid_ast_id`.
-    pub fn findByTag(self: *const AstArena, parent: *const AstNode, tag: []const u8, max_depth: c_int) Error!AstId {
+    pub fn findByTag(self: *const AstArena, parent: *const AstNode, tag: []const u8, max_depth: c_int) mod.errors.Error!AstId {
         for (parent.children) |child_id| {
             const child = try self.get(child_id);
             if (std.mem.eql(u8, child.tag, tag)) return child_id;
@@ -199,7 +195,7 @@ pub const AstArena = struct {
     /// matching the rule name.
     ///
     /// Return: its id, or `invalid_ast_id`.
-    pub fn findByRule(self: *const AstArena, parent: *const AstNode, rule: []const u8, max_depth: c_int) Error!AstId {
+    pub fn findByRule(self: *const AstArena, parent: *const AstNode, rule: []const u8, max_depth: c_int) mod.errors.Error!AstId {
         for (parent.children) |child_id| {
             const child = try self.get(child_id);
             if (std.mem.eql(u8, child.rule, rule)) return child_id;
@@ -218,7 +214,7 @@ pub const AstArena = struct {
     /// Parameters:
     /// - `id`: where to start; `invalid_ast_id` visits nothing.
     /// - `ctx`, `f`: the visitor, called with each node.
-    pub fn visit(self: *const AstArena, id: AstId, ctx: anytype, comptime f: fn (@TypeOf(ctx), *const AstNode) Error!void) Error!void {
+    pub fn visit(self: *const AstArena, id: AstId, ctx: anytype, comptime f: fn (@TypeOf(ctx), *const AstNode) mod.errors.Error!void) mod.errors.Error!void {
         const a = std.heap.smp_allocator;
         var stack: std.ArrayList(AstId) = .empty;
         defer stack.deinit(a);
@@ -237,7 +233,7 @@ pub const AstArena = struct {
 
     /// Ports `visit` (peg-parser.cpp:205 @b1b770d90), the overload taking a
     /// result: every node it carries.
-    pub fn visitResult(self: *const AstArena, result: *const ParseResult, ctx: anytype, comptime f: fn (@TypeOf(ctx), *const AstNode) Error!void) Error!void {
+    pub fn visitResult(self: *const AstArena, result: *const ParseResult, ctx: anytype, comptime f: fn (@TypeOf(ctx), *const AstNode) mod.errors.Error!void) mod.errors.Error!void {
         for (result.nodes) |node| try self.visit(node, ctx, f);
     }
 
@@ -257,7 +253,7 @@ pub const AstArena = struct {
     /// once more under each ancestor.
     ///
     /// Return: owned by the caller.
-    pub fn dump(self: *const AstArena, gpa: Allocator) Error![]u8 {
+    pub fn dump(self: *const AstArena, gpa: Allocator) mod.errors.Error![]u8 {
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(gpa);
         for (self.nodes.items) |*node| try self.bfsNode(gpa, &out, node, 0);
@@ -265,7 +261,7 @@ pub const AstArena = struct {
     }
 
     /// Ports `bfs_node` (peg-parser.cpp:858 @b1b770d90).
-    fn bfsNode(self: *const AstArena, gpa: Allocator, out: *std.ArrayList(u8), node: *const AstNode, indent: c_int) Error!void {
+    fn bfsNode(self: *const AstArena, gpa: Allocator, out: *std.ArrayList(u8), node: *const AstNode, indent: c_int) mod.errors.Error!void {
         var i: c_int = 0;
         while (i < indent) : (i += 1) try out.appendSlice(gpa, "  ");
         try out.print(gpa, "NODE {d}", .{node.id});
@@ -328,7 +324,7 @@ pub const ParseContext = struct {
     /// constructor taking input, which it copies.
     ///
     /// Return: the context; `deinit` frees it.
-    pub fn init(gpa: Allocator, input: []const u8, flags: u32) Error!ParseContext {
+    pub fn init(gpa: Allocator, input: []const u8, flags: u32) mod.errors.Error!ParseContext {
         return .{
             .gpa = gpa,
             .input = try gpa.dupe(u8, input),
@@ -344,7 +340,7 @@ pub const ParseContext = struct {
     /// mode.
     ///
     /// Return: the context; `deinit` frees it.
-    pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) Error!ParseContext {
+    pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) mod.errors.Error!ParseContext {
         @import("llama").impl.assert(tokens.len == 0 or tokens.len == input.len, "common/peg-parser.h", 208, "this->tokens.empty() || this->tokens.size() == this->input.size()");
         var self = try init(gpa, input, flags);
         errdefer self.deinit();
@@ -389,14 +385,14 @@ pub const CharRange = struct {
 /// C++ shares a `common_chat_schema_document_ptr`.
 pub const SharedDoc = struct {
     gpa: Allocator,
-    doc: schema.Document,
+    doc: json.schema.Document,
     refs: usize = 1,
 
     /// Parses `value` into a document of its own, held once.
     ///
     /// Return: the document, released with `release`.
-    pub fn fromJson(gpa: Allocator, value: *const json.Value) Error!*SharedDoc {
-        const doc = schema.fromJsonSchema(gpa, value) catch |e| return errors.fromSchema(e);
+    pub fn fromJson(gpa: Allocator, value: *const json.Value) mod.errors.Error!*SharedDoc {
+        const doc = json.schema.fromJsonSchema(gpa, value) catch |e| return mod.errors.fromSchema(e);
         const self = try gpa.create(SharedDoc);
         self.* = .{ .gpa = gpa, .doc = doc };
         return self;
@@ -476,7 +472,7 @@ pub const Parser = union(enum) {
         child: ParserId,
         name: []const u8,
         doc: ?*SharedDoc = null,
-        node: ?*const schema.Node = null,
+        node: ?*const json.schema.Node = null,
         raw: bool,
     };
 
@@ -500,13 +496,13 @@ pub const Parser = union(enum) {
 pub const Arena = struct {
     gpa: Allocator,
     parsers: std.ArrayList(Parser) = .empty,
-    rules: libcxx.StringMap(ParserId),
+    rules: stdlib.libcxx.StringMap(ParserId),
     root: ParserId = invalid_parser_id,
     /// every string and list the parsers hold
     mem: std.heap.ArenaAllocator,
 
     /// Return: an empty arena; `deinit` frees it.
-    pub fn init(gpa: Allocator) Error!Arena {
+    pub fn init(gpa: Allocator) mod.errors.Error!Arena {
         return .{ .gpa = gpa, .rules = try .init(gpa), .mem = .init(gpa) };
     }
 
@@ -529,7 +525,7 @@ pub const Arena = struct {
     /// builds one from a copy.
     ///
     /// Return: owned by `gpa`; `deinit` frees it.
-    pub fn clone(self: *const Arena, gpa: Allocator) Error!Arena {
+    pub fn clone(self: *const Arena, gpa: Allocator) mod.errors.Error!Arena {
         var out = try Arena.init(gpa);
         errdefer out.deinit();
         const a = out.alloc();
@@ -569,7 +565,7 @@ pub const Arena = struct {
         return out;
     }
 
-    fn dupeStrings(a: Allocator, list: []const []const u8) Error![]const []const u8 {
+    fn dupeStrings(a: Allocator, list: []const []const u8) mod.errors.Error![]const []const u8 {
         const out = try a.alloc([]const u8, list.len);
         for (list, out) |s, *o| o.* = try a.dupe(u8, s);
         return out;
@@ -586,8 +582,8 @@ pub const Arena = struct {
     ///
     /// Return: borrowed until the next `addParser`; `OutOfRange` past the
     /// end.
-    pub fn get(self: *const Arena, id: ParserId) Error!*Parser {
-        if (id >= self.parsers.items.len) return errors.outOfRange();
+    pub fn get(self: *const Arena, id: ParserId) mod.errors.Error!*Parser {
+        if (id >= self.parsers.items.len) return mod.errors.outOfRange();
         return &self.parsers.items[id];
     }
 
@@ -604,14 +600,14 @@ pub const Arena = struct {
     /// Ports `add_parser` (peg-parser.cpp:213 @b1b770d90).
     ///
     /// Return: the new parser's id.
-    pub fn addParser(self: *Arena, parser: Parser) Error!ParserId {
+    pub fn addParser(self: *Arena, parser: Parser) mod.errors.Error!ParserId {
         const id = self.parsers.items.len;
         try self.parsers.append(self.gpa, parser);
         return id;
     }
 
     /// Ports `add_rule` (peg-parser.cpp:219 @b1b770d90): `rules_[name] = id`.
-    pub fn addRule(self: *Arena, name: []const u8, id: ParserId) Error!void {
+    pub fn addRule(self: *Arena, name: []const u8, id: ParserId) mod.errors.Error!void {
         const slot = try self.rules.getOrPut(name, id);
         slot.value.* = id;
     }
@@ -619,9 +615,9 @@ pub const Arena = struct {
     /// Ports `get_rule` (peg-parser.cpp:223 @b1b770d90).
     ///
     /// Return: the rule's parser id; `RuntimeError` when there is none.
-    pub fn getRule(self: *const Arena, name: []const u8) Error!ParserId {
+    pub fn getRule(self: *const Arena, name: []const u8) mod.errors.Error!ParserId {
         if (self.rules.get(name)) |id| return id.*;
-        return raise(error.RuntimeError, &.{ "Rule not found: ", name });
+        return mod.errors.raise(error.RuntimeError, &.{ "Rule not found: ", name });
     }
 
     /// Ports `has_rule` (peg-parser.h:354 @b1b770d90).
@@ -633,8 +629,8 @@ pub const Arena = struct {
     /// the root.
     ///
     /// Return: the result; its node list is borrowed from `ctx`.
-    pub fn parse(self: *const Arena, ctx: *ParseContext, start: usize) Error!ParseResult {
-        if (self.root == invalid_parser_id) return raise(error.RuntimeError, &.{"No root parser set"});
+    pub fn parse(self: *const Arena, ctx: *ParseContext, start: usize) mod.errors.Error!ParseResult {
+        if (self.root == invalid_parser_id) return mod.errors.raise(error.RuntimeError, &.{"No root parser set"});
 
         // Initialize rule depth for all parsers
         ctx.gpa.free(ctx.rule_depth);
@@ -647,14 +643,14 @@ pub const Arena = struct {
 
     /// Ports `parse` (peg-parser.cpp:843 @b1b770d90), the overload taking
     /// an id.
-    pub fn parseAt(self: *const Arena, id: ParserId, ctx: *ParseContext, start: usize) Error!ParseResult {
+    pub fn parseAt(self: *const Arena, id: ParserId, ctx: *ParseContext, start: usize) mod.errors.Error!ParseResult {
         const parser = try self.get(id);
         var exec: Executor = .{ .arena = self, .ctx = ctx, .start_pos = start };
         return exec.run(parser.*);
     }
 
     /// Ports `resolve_ref` (peg-parser.cpp:850 @b1b770d90).
-    fn resolveRef(self: *Arena, id: ParserId) Error!ParserId {
+    fn resolveRef(self: *Arena, id: ParserId) mod.errors.Error!ParserId {
         const parser = try self.get(id);
         return switch (parser.*) {
             .ref => |name| self.getRule(name),
@@ -664,7 +660,7 @@ pub const Arena = struct {
 
     /// Ports `resolve_refs` (peg-parser.cpp:883 @b1b770d90): every child
     /// that is a reference becomes the rule it names, and so does the root.
-    pub fn resolveRefs(self: *Arena) Error!void {
+    pub fn resolveRefs(self: *Arena) mod.errors.Error!void {
         for (0..self.parsers.items.len) |i| {
             switch (self.parsers.items[i]) {
                 .sequence, .choice => |children| for (children) |*c| {
@@ -682,7 +678,7 @@ pub const Arena = struct {
     /// parser met twice on the way down printed as `[cycle]`.
     ///
     /// Return: owned by the caller.
-    pub fn dump(self: *const Arena, gpa: Allocator, id: ParserId) Error![]u8 {
+    pub fn dump(self: *const Arena, gpa: Allocator, id: ParserId) mod.errors.Error![]u8 {
         var visited: std.AutoHashMapUnmanaged(ParserId, void) = .empty;
         defer visited.deinit(gpa);
         var out: std.ArrayList(u8) = .empty;
@@ -692,7 +688,7 @@ pub const Arena = struct {
     }
 
     /// Ports `dump_impl` (peg-parser.cpp:937 @b1b770d90).
-    fn dumpImpl(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), id: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) Error!void {
+    fn dumpImpl(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), id: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
         if (visited.contains(id)) return out.appendSlice(gpa, "[cycle]");
         try visited.put(gpa, id, {});
         const parser = try self.get(id);
@@ -751,7 +747,7 @@ pub const Arena = struct {
             .schema => |p| {
                 try out.appendSlice(gpa, "Schema(");
                 try self.dumpImpl(gpa, out, p.child, visited);
-                try out.print(gpa, ", {s})", .{if (p.node) |n| schema.kindName(n.kind()) else "null"});
+                try out.print(gpa, ", {s})", .{if (p.node) |n| json.schema.kindName(n.kind()) else "null"});
             },
             .rule => |p| {
                 try out.print(gpa, "Rule({s}, ", .{p.name});
@@ -768,7 +764,7 @@ pub const Arena = struct {
         }
     }
 
-    fn dumpWrapped(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), open: []const u8, child: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) Error!void {
+    fn dumpWrapped(self: *const Arena, gpa: Allocator, out: *std.ArrayList(u8), open: []const u8, child: ParserId, visited: *std.AutoHashMapUnmanaged(ParserId, void)) mod.errors.Error!void {
         try out.appendSlice(gpa, open);
         try self.dumpImpl(gpa, out, child, visited);
         try out.appendSlice(gpa, ")");
@@ -776,7 +772,7 @@ pub const Arena = struct {
 };
 
 /// `string_join` (common.cpp), appended.
-pub fn joinTo(gpa: Allocator, out: *std.ArrayList(u8), parts: []const []const u8, sep: []const u8) Error!void {
+pub fn joinTo(gpa: Allocator, out: *std.ArrayList(u8), parts: []const []const u8, sep: []const u8) mod.errors.Error!void {
     for (parts, 0..) |p, i| {
         if (i > 0) try out.appendSlice(gpa, sep);
         try out.appendSlice(gpa, p);
@@ -811,7 +807,7 @@ const Executor = struct {
         return ParseResult.span(t, start, end);
     }
 
-    fn withNodes(self: *Executor, t: ResultType, start: usize, end: usize, nodes: []const AstId, invalid_utf8: []const InvalidUtf8) Error!ParseResult {
+    fn withNodes(self: *Executor, t: ResultType, start: usize, end: usize, nodes: []const AstId, invalid_utf8: []const InvalidUtf8) mod.errors.Error!ParseResult {
         _ = self;
         return .{ .type = t, .start = start, .end = end, .nodes = nodes, .invalid_utf8 = invalid_utf8 };
     }
@@ -820,7 +816,7 @@ const Executor = struct {
         return self.ctx.scratch.allocator();
     }
 
-    fn run(self: *Executor, parser: Parser) Error!ParseResult {
+    fn run(self: *Executor, parser: Parser) mod.errors.Error!ParseResult {
         return switch (parser) {
             .epsilon => res(.success, self.start_pos),
             .start => res(if (self.start_pos == 0) .success else .fail, self.start_pos),
@@ -853,7 +849,7 @@ const Executor = struct {
     }
 
     /// Ports `debug_input_snippet` (peg-parser.cpp:241 @b1b770d90).
-    fn snippet(self: *const Executor, gpa: Allocator, pos: usize) Error![]u8 {
+    fn snippet(self: *const Executor, gpa: Allocator, pos: usize) mod.errors.Error![]u8 {
         const len = 60;
         const input = self.ctx.input;
         if (pos >= input.len) return gpa.dupe(u8, "<EOF>");
@@ -869,7 +865,7 @@ const Executor = struct {
         return out.toOwnedSlice(gpa);
     }
 
-    fn dumpOf(self: *const Executor, id: ParserId) Error![]u8 {
+    fn dumpOf(self: *const Executor, id: ParserId) mod.errors.Error![]u8 {
         return self.arena.dump(std.heap.smp_allocator, id);
     }
 
@@ -889,13 +885,13 @@ const Executor = struct {
     }
 
     /// Ports the executor's arm for `common_peg_sequence_parser` (peg-parser.cpp:301 @b1b770d90).
-    fn sequence(self: *Executor, children: []const ParserId) Error!ParseResult {
+    fn sequence(self: *Executor, children: []const ParserId) mod.errors.Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.logDbg("{s}SEQ start at {d} '{s}' ({d} children)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
+            try mod.errors.logDbg("{s}SEQ start at {d} '{s}' ({d} children)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
         }
         ctx.parse_depth += 1;
 
@@ -906,39 +902,39 @@ const Executor = struct {
             if (ctx.isDebug()) {
                 const d = try self.dumpOf(child_id);
                 defer a.free(d);
-                try errors.eprint("{s}SEQ child {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
+                try mod.errors.eprint("{s}SEQ child {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
             }
             const result = try self.arena.parseAt(child_id, ctx, pos);
             if (ctx.isDebug()) {
-                try errors.eprint("{s}SEQ child {d}: {s} at {d}->{d}\n", .{ self.indent(), i, result.type.name(), result.start, result.end });
+                try mod.errors.eprint("{s}SEQ child {d}: {s} at {d}->{d}\n", .{ self.indent(), i, result.type.name(), result.start, result.end });
             }
             if (result.fail()) {
                 ctx.parse_depth -= 1;
-                if (ctx.isDebug()) try errors.eprint("{s}SEQ -> FAIL\n", .{self.indent()});
+                if (ctx.isDebug()) try mod.errors.eprint("{s}SEQ -> FAIL\n", .{self.indent()});
                 return span(.fail, self.start_pos, result.end);
             }
             if (result.nodes.len > 0) try nodes.appendSlice(self.scratch(), result.nodes);
             try invalid_utf8.appendSlice(self.scratch(), result.invalid_utf8);
             if (result.needMoreInput()) {
                 ctx.parse_depth -= 1;
-                if (ctx.isDebug()) try errors.eprint("{s}SEQ -> NEED_MORE\n", .{self.indent()});
+                if (ctx.isDebug()) try mod.errors.eprint("{s}SEQ -> NEED_MORE\n", .{self.indent()});
                 return self.withNodes(.need_more_input, self.start_pos, result.end, nodes.items, invalid_utf8.items);
             }
             pos = result.end;
         }
         ctx.parse_depth -= 1;
-        if (ctx.isDebug()) try errors.eprint("{s}SEQ -> SUCCESS at {d}->{d}\n", .{ self.indent(), self.start_pos, pos });
+        if (ctx.isDebug()) try mod.errors.eprint("{s}SEQ -> SUCCESS at {d}->{d}\n", .{ self.indent(), self.start_pos, pos });
         return self.withNodes(.success, self.start_pos, pos, nodes.items, invalid_utf8.items);
     }
 
     /// Ports the executor's arm for `common_peg_choice_parser` (peg-parser.cpp:355 @b1b770d90).
-    fn choice(self: *Executor, children: []const ParserId) Error!ParseResult {
+    fn choice(self: *Executor, children: []const ParserId) mod.errors.Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.eprint("{s}CHOICE start at {d} '{s}' ({d} options)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
+            try mod.errors.eprint("{s}CHOICE start at {d} '{s}' ({d} options)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
         }
         ctx.parse_depth += 1;
         const pos = self.start_pos;
@@ -946,29 +942,29 @@ const Executor = struct {
             if (ctx.isDebug()) {
                 const d = try self.dumpOf(child_id);
                 defer a.free(d);
-                try errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
+                try mod.errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
             }
             const result = try self.arena.parseAt(child_id, ctx, pos);
-            if (ctx.isDebug()) try errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, result.type.name() });
+            if (ctx.isDebug()) try mod.errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, result.type.name() });
             if (!result.fail()) {
                 ctx.parse_depth -= 1;
-                if (ctx.isDebug()) try errors.eprint("{s}CHOICE -> {s} (option {d})\n", .{ self.indent(), result.type.name(), i });
+                if (ctx.isDebug()) try mod.errors.eprint("{s}CHOICE -> {s} (option {d})\n", .{ self.indent(), result.type.name(), i });
                 return result;
             }
         }
         ctx.parse_depth -= 1;
-        if (ctx.isDebug()) try errors.eprint("{s}CHOICE -> FAIL (no options matched)\n", .{self.indent()});
+        if (ctx.isDebug()) try mod.errors.eprint("{s}CHOICE -> FAIL (no options matched)\n", .{self.indent()});
         return res(.fail, self.start_pos);
     }
 
     /// Ports the executor's arm for `common_peg_repetition_parser` (peg-parser.cpp:390 @b1b770d90).
-    fn repetition(self: *Executor, child: ParserId, min_count: c_int, max_count: c_int) Error!ParseResult {
+    fn repetition(self: *Executor, child: ParserId, min_count: c_int, max_count: c_int) mod.errors.Error!ParseResult {
         const ctx = self.ctx;
         const a = std.heap.smp_allocator;
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.eprint("{s}REPEAT start at {d} '{s}' (min={d}, max={d})\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), min_count, max_count });
+            try mod.errors.eprint("{s}REPEAT start at {d} '{s}' (min={d}, max={d})\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), min_count, max_count });
         }
         ctx.parse_depth += 1;
 
@@ -978,19 +974,19 @@ const Executor = struct {
         var invalid_utf8: std.ArrayList(InvalidUtf8) = .empty;
         while (max_count == -1 or match_count < max_count) {
             if (pos >= ctx.input.len) {
-                if (ctx.isDebug()) try errors.eprint("{s}REPEAT: at end of input, count={d}\n", .{ self.indent(), match_count });
+                if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT: at end of input, count={d}\n", .{ self.indent(), match_count });
                 break;
             }
             const result = try self.arena.parseAt(child, ctx, pos);
             if (ctx.isDebug()) {
-                try errors.eprint("{s}REPEAT iter {d}: {s} at {d}->{d}, nodes={d}\n", .{ self.indent(), match_count, result.type.name(), result.start, result.end, result.nodes.len });
+                try mod.errors.eprint("{s}REPEAT iter {d}: {s} at {d}->{d}, nodes={d}\n", .{ self.indent(), match_count, result.type.name(), result.start, result.end, result.nodes.len });
                 const d = try self.dumpOf(child);
                 defer a.free(d);
-                try errors.eprint("{s}REPEAT CHILD: {s}\n", .{ self.indent(), std.mem.sliceTo(d, 0) });
+                try mod.errors.eprint("{s}REPEAT CHILD: {s}\n", .{ self.indent(), std.mem.sliceTo(d, 0) });
             }
             if (result.success()) {
                 if (result.end == pos) {
-                    if (ctx.isDebug()) try errors.eprint("{s}  REPEAT: empty match, stopping\n", .{self.indent()});
+                    if (ctx.isDebug()) try mod.errors.eprint("{s}  REPEAT: empty match, stopping\n", .{self.indent()});
                     break;
                 }
                 if (result.nodes.len > 0) try nodes.appendSlice(self.scratch(), result.nodes);
@@ -1003,36 +999,36 @@ const Executor = struct {
                 if (result.nodes.len > 0) try nodes.appendSlice(self.scratch(), result.nodes);
                 try invalid_utf8.appendSlice(self.scratch(), result.invalid_utf8);
                 ctx.parse_depth -= 1;
-                if (ctx.isDebug()) try errors.eprint("{s}REPEAT -> NEED_MORE (count={d}, nodes={d})\n", .{ self.indent(), match_count, nodes.items.len });
+                if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT -> NEED_MORE (count={d}, nodes={d})\n", .{ self.indent(), match_count, nodes.items.len });
                 return self.withNodes(.need_more_input, self.start_pos, result.end, nodes.items, invalid_utf8.items);
             }
-            if (ctx.isDebug()) try errors.eprint("{s}REPEAT: child failed, stopping\n", .{self.indent()});
+            if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT: child failed, stopping\n", .{self.indent()});
             break;
         }
 
         if (min_count > 0 and match_count < min_count) {
             ctx.parse_depth -= 1;
             if (pos >= ctx.input.len and ctx.isLenient()) {
-                if (ctx.isDebug()) try errors.eprint("{s}REPEAT -> NEED_MORE (not enough matches: {d} < {d})\n", .{ self.indent(), match_count, min_count });
+                if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT -> NEED_MORE (not enough matches: {d} < {d})\n", .{ self.indent(), match_count, min_count });
                 return self.withNodes(.need_more_input, self.start_pos, pos, nodes.items, invalid_utf8.items);
             }
-            if (ctx.isDebug()) try errors.eprint("{s}REPEAT -> FAIL (not enough matches: {d} < {d})\n", .{ self.indent(), match_count, min_count });
+            if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT -> FAIL (not enough matches: {d} < {d})\n", .{ self.indent(), match_count, min_count });
             return span(.fail, self.start_pos, pos);
         }
 
         ctx.parse_depth -= 1;
-        if (ctx.isDebug()) try errors.eprint("{s}REPEAT -> SUCCESS (count={d}, nodes={d})\n", .{ self.indent(), match_count, nodes.items.len });
+        if (ctx.isDebug()) try mod.errors.eprint("{s}REPEAT -> SUCCESS (count={d}, nodes={d})\n", .{ self.indent(), match_count, nodes.items.len });
         return self.withNodes(.success, self.start_pos, pos, nodes.items, invalid_utf8.items);
     }
 
     /// Ports the executor's arm for `common_peg_and_parser` (peg-parser.cpp:484 @b1b770d90).
-    fn andParser(self: *Executor, child: ParserId) Error!ParseResult {
+    fn andParser(self: *Executor, child: ParserId) mod.errors.Error!ParseResult {
         const result = try self.arena.parseAt(child, self.ctx, self.start_pos);
         return res(result.type, self.start_pos);
     }
 
     /// Ports the executor's arm for `common_peg_not_parser` (peg-parser.cpp:490 @b1b770d90).
-    fn notParser(self: *Executor, child: ParserId) Error!ParseResult {
+    fn notParser(self: *Executor, child: ParserId) mod.errors.Error!ParseResult {
         const result = try self.arena.parseAt(child, self.ctx, self.start_pos);
         if (result.success()) return res(.fail, self.start_pos);
         if (result.needMoreInput()) return res(.need_more_input, self.start_pos);
@@ -1042,7 +1038,7 @@ const Executor = struct {
     /// Ports the executor's arm for `common_peg_any_parser` (peg-parser.cpp:507 @b1b770d90):
     /// one UTF-8 code point.
     fn any(self: *Executor) ParseResult {
-        const r = trie.parseUtf8Codepoint(self.ctx.input, self.start_pos);
+        const r = json.trie.parseUtf8Codepoint(self.ctx.input, self.start_pos);
         switch (r.status) {
             .incomplete => return res(if (self.ctx.isLenient()) .need_more_input else .fail, self.start_pos),
             .invalid => return res(.fail, self.start_pos),
@@ -1063,7 +1059,7 @@ const Executor = struct {
         var pos = self.start_pos;
         var match_count: c_int = 0;
         while (p.max_count == -1 or match_count < p.max_count) {
-            const r = trie.parseUtf8Codepoint(ctx.input, pos);
+            const r = json.trie.parseUtf8Codepoint(ctx.input, pos);
             if (r.status == .incomplete) {
                 if (match_count >= p.min_count) return span(.success, self.start_pos, pos);
                 if (!ctx.isLenient()) return res(.fail, self.start_pos);
@@ -1143,7 +1139,7 @@ const Executor = struct {
                 const result = handleEscapeSequence(ctx, self.start_pos, &pos, delimiter);
                 if (!result.success()) return result;
             } else {
-                const r = trie.parseUtf8Codepoint(ctx.input, pos);
+                const r = json.trie.parseUtf8Codepoint(ctx.input, pos);
                 if (r.status == .incomplete) {
                     if (!ctx.isLenient()) return res(.fail, self.start_pos);
                     return span(.need_more_input, self.start_pos, pos);
@@ -1162,15 +1158,15 @@ const Executor = struct {
     /// recorded -- a delimiter cannot start inside them -- except a sequence
     /// cut short by the end of a lenient parse's input, which may still
     /// arrive.
-    fn until(self: *Executor, delimiters: []const []const u8) Error!ParseResult {
+    fn until(self: *Executor, delimiters: []const []const u8) mod.errors.Error!ParseResult {
         const ctx = self.ctx;
-        var matcher = try trie.Trie.init(std.heap.smp_allocator, delimiters);
+        var matcher = try json.trie.Trie.init(std.heap.smp_allocator, delimiters);
         defer matcher.deinit();
         var pos = self.start_pos;
         var last_valid_pos = self.start_pos;
         var invalid_utf8: std.ArrayList(InvalidUtf8) = .empty;
         while (pos < ctx.input.len) {
-            const r = trie.parseUtf8Codepoint(ctx.input, pos);
+            const r = json.trie.parseUtf8Codepoint(ctx.input, pos);
             if (r.status == .incomplete and ctx.isLenient()) {
                 return self.withNodes(.need_more_input, self.start_pos, last_valid_pos, &.{}, invalid_utf8.items);
             }
@@ -1198,7 +1194,7 @@ const Executor = struct {
     /// and `common_peg_tag_parser` (peg-parser.cpp:779 @b1b770d90): the
     /// child, and a node for it unless it failed; the node and the result
     /// both carry the child's invalid UTF-8.
-    fn named(self: *Executor, child: ParserId, rule_name: []const u8, tag: []const u8) Error!ParseResult {
+    fn named(self: *Executor, child: ParserId, rule_name: []const u8, tag: []const u8) mod.errors.Error!ParseResult {
         const ctx = self.ctx;
         const result = try self.arena.parseAt(child, ctx, self.start_pos);
         if (result.fail()) return result;
@@ -1217,30 +1213,30 @@ const Executor = struct {
     /// (peg-parser.cpp:745 @b1b770d90): only rules recurse, a recursive rule
     /// is entered once per input level. The C leaves the count raised on a
     /// throw, and `parse` zeroes it again.
-    fn rule(self: *Executor, child: ParserId, name: []const u8) Error!ParseResult {
+    fn rule(self: *Executor, child: ParserId, name: []const u8) mod.errors.Error!ParseResult {
         const depth = &self.ctx.rule_depth[child];
         if (depth.* >= rule_recursive_limit) {
-            return raise(error.InvalidArgument, &.{"input is nested more than 64 levels deep"});
+            return mod.errors.raise(error.InvalidArgument, &.{"input is nested more than 64 levels deep"});
         }
         depth.* += 1;
         defer depth.* -= 1;
         return self.named(child, name, "");
     }
 
-    fn tagged(self: *Executor, child: ParserId, tag: []const u8) Error!ParseResult {
-        if (self.ctx.isDebug()) try errors.eprint("{s}TAG: {s}\n", .{ self.indent(), std.mem.sliceTo(tag, 0) });
+    fn tagged(self: *Executor, child: ParserId, tag: []const u8) mod.errors.Error!ParseResult {
+        if (self.ctx.isDebug()) try mod.errors.eprint("{s}TAG: {s}\n", .{ self.indent(), std.mem.sliceTo(tag, 0) });
         return self.named(child, "", tag);
     }
 
     /// Ports the executor's arm for `common_peg_ref_parser` (peg-parser.cpp:809 @b1b770d90).
-    fn ref(self: *Executor, name: []const u8) Error!ParseResult {
+    fn ref(self: *Executor, name: []const u8) mod.errors.Error!ParseResult {
         const rule_id = try self.arena.getRule(name);
         return self.arena.parseAt(rule_id, self.ctx, self.start_pos);
     }
 
     /// Ports the executor's arm for `common_peg_atomic_parser` (peg-parser.cpp:814 @b1b770d90):
     /// a partial match carries no nodes.
-    fn atomic(self: *Executor, child: ParserId) Error!ParseResult {
+    fn atomic(self: *Executor, child: ParserId) mod.errors.Error!ParseResult {
         var result = try self.arena.parseAt(child, self.ctx, self.start_pos);
         if (result.needMoreInput()) result.nodes = &.{};
         return result;

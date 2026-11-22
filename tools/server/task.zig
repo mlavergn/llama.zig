@@ -32,22 +32,13 @@
 //! took.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
+const mod = @import("module.zig");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const common = @import("common.zig");
-const tokens_mod = @import("tokens.zig");
-const queue = @import("queue.zig");
 
-const c = tools.c;
-const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Error = common.Error;
-const Obj = common.Obj;
-const Token = common.Token;
-const GrammarTrigger = common.GrammarTrigger;
-const ServerTokens = tokens_mod.ServerTokens;
 
 pub const SamplerType = tools.params.SamplerType;
 pub const SpeculativeType = tools.params.SpeculativeType;
@@ -67,7 +58,7 @@ pub fn grammarValue(s: *const Sampling) []const u8 {
 }
 
 /// `preserved_tokens.insert(tok)` on the `std::set` `Sampling` keeps sorted.
-pub fn preserveToken(a: Allocator, s: *Sampling, tok: Token) Error!void {
+pub fn preserveToken(a: Allocator, s: *Sampling, tok: mod.common.Token) mod.common.Error!void {
     var i: usize = 0;
     while (i < s.preserved_tokens.items.len) : (i += 1) {
         const t = s.preserved_tokens.items[i];
@@ -82,7 +73,7 @@ pub fn preserveToken(a: Allocator, s: *Sampling, tok: Token) Error!void {
 /// enums and pointers to C objects copied. Used for the sampling and
 /// speculative parameters, whose members `tools/common/` owns -- a member
 /// added there is copied without a change here.
-pub fn deepClone(a: Allocator, v: anytype) Error!@TypeOf(v) {
+pub fn deepClone(a: Allocator, v: anytype) mod.common.Error!@TypeOf(v) {
     const T = @TypeOf(v);
     switch (@typeInfo(T)) {
         .pointer => |p| {
@@ -113,14 +104,14 @@ pub fn deepClone(a: Allocator, v: anytype) Error!@TypeOf(v) {
 }
 
 /// `params.speculative = params_base.speculative`: a deep copy into `a`.
-fn cloneSpeculative(a: Allocator, s: *const tools.params.Speculative) Error!tools.params.Speculative {
+fn cloneSpeculative(a: Allocator, s: *const tools.params.Speculative) mod.common.Error!tools.params.Speculative {
     return deepClone(a, s.*);
 }
 
 /// Ports `common_speculative_type_name_str` (speculative.cpp:2512 @b1b770d90).
 ///
 /// Return: owned by `a`.
-pub fn speculativeTypeNameStr(a: Allocator, types: []const SpeculativeType) Error![]u8 {
+pub fn speculativeTypeNameStr(a: Allocator, types: []const SpeculativeType) mod.common.Error![]u8 {
     var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(a);
 
@@ -194,7 +185,7 @@ pub const ControlAction = enum(c_int) {
 /// Ports `server_control_response` (server-task.h:69 @b1b770d90): a response
 /// of a realtime conversation. Strings are the owner's arena's.
 pub const ControlResponse = struct {
-    out_mode: c.enum_mtmd_helper_gen_audio_out_mode = c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO,
+    out_mode: tools.c.enum_mtmd_helper_gen_audio_out_mode = tools.c.MTMD_HELPER_GEN_AUDIO_OUT_AUTO,
     sampling: Sampling = .{}, // of the text tokens: tool call grammar and preserved tokens
     n_predict: i32 = -1, // text tokens and audio frames, -1: until the context is full
     lang: []const u8 = "", // empty: model default
@@ -236,7 +227,7 @@ pub const TaskParams = struct {
     t_max_prompt_ms: i64 = -1, // TODO: implement
     t_max_predict_ms: i64 = -1, // if positive, limit the generation phase to this time limit
 
-    lora: common.LoraMap = .{}, // mapping adapter ID -> scale
+    lora: mod.common.LoraMap = .{}, // mapping adapter ID -> scale
 
     antiprompt: []const []const u8 = &.{},
     response_fields: []const []const u8 = &.{},
@@ -275,13 +266,13 @@ pub const TaskParams = struct {
     /// chain and the `{ none }` speculative type -- allocated in `a`. A
     /// `TaskParams` written `.{}` has those lists empty; only a cancel or
     /// control task, whose parameters nothing reads, should be one.
-    pub fn init(a: Allocator) Error!TaskParams {
+    pub fn init(a: Allocator) mod.common.Error!TaskParams {
         const defaults = try tools.params.Params.init(a);
         return .{ .sampling = defaults.sampling, .speculative = defaults.speculative };
     }
 
     /// `task_params(const task_params &)`: a deep copy into `a`.
-    pub fn clone(self: *const TaskParams, a: Allocator) Error!TaskParams {
+    pub fn clone(self: *const TaskParams, a: Allocator) mod.common.Error!TaskParams {
         var p = self.*;
         p.lora = try self.lora.clone(a);
         p.antiprompt = try deepClone(a, self.antiprompt);
@@ -301,12 +292,12 @@ pub const TaskParams = struct {
     /// Ports `format_logit_bias` (server-task.cpp:19 @b1b770d90), a member of `task_params`.
     ///
     /// Return: owned by `a`.
-    pub fn formatLogitBias(self: *const TaskParams, a: Allocator, logit_bias: []const c.llama_logit_bias) Error!Value {
+    pub fn formatLogitBias(self: *const TaskParams, a: Allocator, logit_bias: []const tools.c.llama_logit_bias) mod.common.Error!json.Value {
         _ = self;
-        var data = Value.emptyArray();
+        var data = json.Value.emptyArray();
         errdefer data.deinit(a);
         for (logit_bias) |lb| {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("bias", lb.bias);
             try o.put("token", lb.token);
@@ -320,16 +311,16 @@ pub const TaskParams = struct {
     /// back; `only_metrics` leaves out the lists and the grammar.
     ///
     /// Return: owned by `a`.
-    pub fn toJson(self: *const TaskParams, a: Allocator, only_metrics: bool) Error!Value {
+    pub fn toJson(self: *const TaskParams, a: Allocator, only_metrics: bool) mod.common.Error!json.Value {
         const sampling = &self.sampling;
         var samplers = try a.alloc([]const u8, sampling.samplers.items.len);
         defer a.free(samplers);
         for (sampling.samplers.items, 0..) |s, i| samplers[i] = s.toStr();
 
-        var lora = Value.emptyArray();
+        var lora = json.Value.emptyArray();
         defer lora.deinit(a);
         for (self.lora.entries.items) |it| {
-            var o = Obj.init(a);
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("id", it.id);
             try o.put("scale", it.scale);
@@ -339,7 +330,7 @@ pub const TaskParams = struct {
         const spec_types = try speculativeTypeNameStr(a, self.speculative.types.items);
         defer a.free(spec_types);
 
-        var o = Obj.init(a);
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
 
         if (only_metrics) {
@@ -388,10 +379,10 @@ pub const TaskParams = struct {
             return o.done();
         }
 
-        var grammar_triggers = Value.emptyArray();
+        var grammar_triggers = json.Value.emptyArray();
         defer grammar_triggers.deinit(a);
         for (sampling.grammar_triggers.items) |trigger| {
-            const ct: GrammarTrigger = .{ .type = @backingInt(trigger.type), .value = trigger.value, .token = trigger.token };
+            const ct: mod.common.GrammarTrigger = .{ .type = @backingInt(trigger.type), .value = trigger.value, .token = trigger.token };
             try grammar_triggers.pushBack(a, try ct.toJson(a));
         }
 
@@ -485,7 +476,7 @@ pub const TaskResultState = struct {
     /// a copy of the request's chat session (null: the default one, which
     /// parses everything as content), its message so far, and fresh
     /// Responses ids.
-    pub fn init(gpa: Allocator, session: ?*const Session) Error!TaskResultState {
+    pub fn init(gpa: Allocator, session: ?*const Session) mod.common.Error!TaskResultState {
         var self: TaskResultState = .{
             .gpa = gpa,
             .chat_session = if (session) |ss| try ss.clone(gpa) else try Session.initEmpty(gpa),
@@ -499,8 +490,8 @@ pub const TaskResultState = struct {
         return self;
     }
 
-    fn prefixed(gpa: Allocator, prefix: []const u8) Error![]u8 {
-        const r = try common.randomString(gpa);
+    fn prefixed(gpa: Allocator, prefix: []const u8) mod.common.Error![]u8 {
+        const r = try mod.common.randomString(gpa);
         defer gpa.free(r);
         return std.mem.concat(gpa, u8, &.{ prefix, r });
     }
@@ -522,12 +513,12 @@ pub const TaskResultState = struct {
     }
 
     /// `oai_resp_fc_id = id`.
-    pub fn setFcId(self: *TaskResultState, id: []const u8) Error!void {
+    pub fn setFcId(self: *TaskResultState, id: []const u8) mod.common.Error!void {
         try chat.Msg.setField(self.gpa, &self.oai_resp_fc_id, id);
     }
 
     fn genId(_: void, a: Allocator) anyerror![]const u8 {
-        return common.genToolCallId(a);
+        return mod.common.genToolCallId(a);
     }
 
     /// Ports `update_chat_msg` (server-task.cpp:159 @b1b770d90), a member of
@@ -548,7 +539,7 @@ pub const TaskResultState = struct {
         is_partial: bool,
         diffs: *std.ArrayList(chat.MsgDiff),
         filter_tool_calls: bool,
-    ) Error!*const chat.Msg {
+    ) mod.common.Error!*const chat.Msg {
         const gpa = self.gpa;
         var msg_prv_copy = try self.chat_msg.clone(gpa);
         defer msg_prv_copy.deinit(gpa);
@@ -630,7 +621,7 @@ pub const TaskResultState = struct {
 };
 
 /// A diff whose strings `a` owns.
-pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) Error!chat.MsgDiff {
+pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) mod.common.Error!chat.MsgDiff {
     return .{
         .reasoning_content_delta = try a.dupe(u8, d.reasoning_content_delta),
         .content_delta = try a.dupe(u8, d.content_delta),
@@ -651,24 +642,24 @@ pub fn cloneDiff(a: Allocator, d: chat.MsgDiff) Error!chat.MsgDiff {
 /// copy; `get` hands out pointers valid as long as this is alive. Since
 /// A voice is a speaker reference (a voice bitmap), not a string.
 pub const TtsInp = struct {
-    data: c.mtmd_helper_gen_audio_inp = undefined,
+    data: tools.c.mtmd_helper_gen_audio_inp = undefined,
     prompt_str: [:0]const u8 = "",
     lang_str: [:0]const u8 = "",
-    speaker_ref_ptr: ?*c.mtmd_bitmap = null,
+    speaker_ref_ptr: ?*tools.c.mtmd_bitmap = null,
 
     /// The C++'s default member initializer.
     pub fn init() TtsInp {
-        return .{ .data = c.mtmd_helper_gen_audio_inp_default() };
+        return .{ .data = tools.c.mtmd_helper_gen_audio_inp_default() };
     }
 
     /// `set_speaker_ref`: takes the bitmap, the one it held is freed.
-    pub fn setSpeakerRef(self: *TtsInp, bmp: ?*c.mtmd_bitmap) void {
-        if (self.speaker_ref_ptr) |old| c.mtmd_bitmap_free(old);
+    pub fn setSpeakerRef(self: *TtsInp, bmp: ?*tools.c.mtmd_bitmap) void {
+        if (self.speaker_ref_ptr) |old| tools.c.mtmd_bitmap_free(old);
         self.speaker_ref_ptr = bmp;
     }
 
     /// `get`.
-    pub fn get(self: *TtsInp) *const c.mtmd_helper_gen_audio_inp {
+    pub fn get(self: *TtsInp) *const tools.c.mtmd_helper_gen_audio_inp {
         self.data.prompt = self.prompt_str.ptr;
         self.data.prompt_len = self.prompt_str.len;
         self.data.lang = if (self.lang_str.len == 0) null else self.lang_str.ptr;
@@ -690,7 +681,7 @@ pub const Task = struct {
     /// each option, exactly one of the two lists is used. The lists are the
     /// task's own (`gpa`), freed by `Task.deinit`.
     pub const Decision = struct {
-        labels: std.ArrayList(c.llama_token) = .empty, // logits of these tokens, at the last prompt token
+        labels: std.ArrayList(tools.c.llama_token) = .empty, // logits of these tokens, at the last prompt token
         label_groups: std.ArrayList(i32) = .empty, // if set, number of labels per output, the output is their max
         markers: std.ArrayList(i32) = .empty, // embeddings[column] at these prompt positions
         column: i32 = 0,
@@ -757,7 +748,7 @@ pub const Task = struct {
 
     // used by SERVER_TASK_TYPE_INFERENCE
     params: TaskParams = .{},
-    tokens: ServerTokens = .{},
+    tokens: mod.tokens.ServerTokens = .{},
 
     // only used by CLI, this allow tokenizing CLI inputs on server side
     // we need this because mtmd_context and vocab are not accessible outside of server_context
@@ -777,7 +768,7 @@ pub const Task = struct {
     decision: Decision = .{},
 
     // used by SERVER_TASK_TYPE_SET_LORA
-    set_lora: common.LoraMap = .{}, // mapping adapter ID -> scale
+    set_lora: mod.common.LoraMap = .{}, // mapping adapter ID -> scale
 
     // used by SERVER_TASK_TYPE_TTS
     tts_inp: TtsInp = .{},
@@ -792,7 +783,7 @@ pub const Task = struct {
     }
 
     /// The task's arena, made on first use with `gpa`.
-    pub fn arenaAlloc(self: *Task, gpa: Allocator) Error!Allocator {
+    pub fn arenaAlloc(self: *Task, gpa: Allocator) mod.common.Error!Allocator {
         if (self.arena == null) {
             const ar = try gpa.create(std.heap.ArenaAllocator);
             ar.* = .init(gpa);
@@ -848,8 +839,8 @@ pub const Task = struct {
 
     /// Ports `get_list_id` (server-task.h:295 @b1b770d90): every task's id and
     /// its children's, in a libc++ `unordered_set` reserved for `tasks.size()`.
-    pub fn getListId(gpa: Allocator, tasks: []const Task) Error!queue.IdSet {
-        var ids = try queue.IdSet.initCapacity(gpa, tasks.len);
+    pub fn getListId(gpa: Allocator, tasks: []const Task) mod.common.Error!mod.queue.IdSet {
+        var ids = try mod.queue.IdSet.initCapacity(gpa, tasks.len);
         errdefer ids.deinit();
         for (tasks) |t| {
             try ids.insert(t.id);
@@ -864,7 +855,7 @@ pub const Task = struct {
     /// session's sampling (grammar, triggers, preserved tokens, generation
     /// prompt), format, stop strings and message spans, for a templated
     /// session; an untemplated one changes nothing.
-    pub fn applyChatSession(self: *Task, gpa: Allocator, session: *const chat.session.Session) Error!void {
+    pub fn applyChatSession(self: *Task, gpa: Allocator, session: *const chat.session.Session) mod.common.Error!void {
         if (!session.hasTemplate()) {
             return;
         }
@@ -882,7 +873,7 @@ pub const Task = struct {
 
     /// Ports `add_child` (server-task.h:317 @b1b770d90): a copy of this task
     /// as a child, with its own sampling seed.
-    pub fn addChild(self: *Task, gpa: Allocator, id_parent: c_int, id_child: c_int) Error!void {
+    pub fn addChild(self: *Task, gpa: Allocator, id_parent: c_int, id_child: c_int) mod.common.Error!void {
         var copy: Task = .{};
         errdefer copy.deinit(gpa);
 
@@ -895,7 +886,7 @@ pub const Task = struct {
 
         // use different sampling seed for each child
         // note: https://github.com/ggml-org/llama.cpp/pull/18700#discussion_r2675115723
-        if (copy.params.sampling.seed != c.LLAMA_DEFAULT_SEED) {
+        if (copy.params.sampling.seed != tools.c.LLAMA_DEFAULT_SEED) {
             copy.params.sampling.seed +%= @as(u32, @truncate(self.child_tasks.items.len)) +% 1;
         }
 
@@ -931,8 +922,8 @@ pub const ResultPromptProgress = struct {
     time_ms: i64 = 0,
 
     /// Ports `result_prompt_progress`'s `to_json` (server-task.cpp:234 @b1b770d90).
-    pub fn toJson(self: ResultPromptProgress, a: Allocator) Error!Value {
-        var o = Obj.init(a);
+    pub fn toJson(self: ResultPromptProgress, a: Allocator) mod.common.Error!json.Value {
+        var o = mod.common.Obj.init(a);
         errdefer o.deinit();
         try o.put("total", self.total);
         try o.put("cache", self.cache);
@@ -947,19 +938,19 @@ pub const ResultPromptProgress = struct {
 pub const CompletionTokenOutput = struct {
     /// Ports `completion_token_output`'s `prob_info` (server-task.h:391 @b1b770d90).
     pub const ProbInfo = struct {
-        tok: Token = 0,
+        tok: mod.common.Token = 0,
         txt: []const u8 = "",
         prob: f32 = 0,
     };
 
-    tok: Token = 0,
+    tok: mod.common.Token = 0,
     prob: f32 = 0,
     text_to_send: []const u8 = "",
 
     probs: []const ProbInfo = &.{},
 
     /// A deep copy into `a`.
-    pub fn clone(self: *const CompletionTokenOutput, a: Allocator) Error!CompletionTokenOutput {
+    pub fn clone(self: *const CompletionTokenOutput, a: Allocator) mod.common.Error!CompletionTokenOutput {
         var o = self.*;
         o.text_to_send = try a.dupe(u8, self.text_to_send);
         const ps = try a.alloc(ProbInfo, self.probs.len);
@@ -972,12 +963,12 @@ pub const CompletionTokenOutput = struct {
     /// the candidates, each with its text cut to whole characters.
     ///
     /// Return: owned by `a`.
-    pub fn toJson(self: *const CompletionTokenOutput, a: Allocator, post_sampling_probs: bool) Error!Value {
-        var probs_for_token = Value.emptyArray();
+    pub fn toJson(self: *const CompletionTokenOutput, a: Allocator, post_sampling_probs: bool) mod.common.Error!json.Value {
+        var probs_for_token = json.Value.emptyArray();
         errdefer probs_for_token.deinit(a);
         for (self.probs) |p| {
-            const txt = p.txt[0..common.validateUtf8(p.txt)];
-            var o = Obj.init(a);
+            const txt = p.txt[0..mod.common.validateUtf8(p.txt)];
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("id", p.tok);
             try o.put("token", txt);
@@ -991,12 +982,12 @@ pub const CompletionTokenOutput = struct {
     /// Ports `probs_vector_to_json` (server-task.cpp:274 @b1b770d90), a member of `completion_token_output`.
     ///
     /// Return: owned by `a`.
-    pub fn probsVectorToJson(a: Allocator, probs: []const CompletionTokenOutput, post_sampling_probs: bool) Error!Value {
-        var out = Value.emptyArray();
+    pub fn probsVectorToJson(a: Allocator, probs: []const CompletionTokenOutput, post_sampling_probs: bool) mod.common.Error!json.Value {
+        var out = json.Value.emptyArray();
         errdefer out.deinit(a);
         for (probs) |*p| {
-            const txt = p.text_to_send[0..common.validateUtf8(p.text_to_send)];
-            var o = Obj.init(a);
+            const txt = p.text_to_send[0..mod.common.validateUtf8(p.text_to_send)];
+            var o = mod.common.Obj.init(a);
             errdefer o.deinit();
             try o.put("id", p.tok);
             try o.put("token", txt);
@@ -1013,11 +1004,11 @@ pub const CompletionTokenOutput = struct {
     /// log(0) is the lowest float instead.
     pub fn logarithm(x: f32) f32 {
         // the JSON library converts -inf to null, so we need to prevent that
-        return if (x == 0.0) -std.math.floatMax(f32) else libm.logf(x);
+        return if (x == 0.0) -std.math.floatMax(f32) else stdlib.libm.logf(x);
     }
 
     /// Ports `str_to_bytes` (server-task.cpp:301 @b1b770d90), a member of `completion_token_output`.
-    pub fn strToBytes(str: []const u8) common.Bytes {
+    pub fn strToBytes(str: []const u8) mod.common.Bytes {
         return .{ .s = str };
     }
 };
@@ -1034,8 +1025,8 @@ pub const PromptCheckpoint = struct {
     // (optional) id of the task that created the checkpoint
     id_task: c_int = -1,
 
-    pos_min: c.llama_pos = 0,
-    pos_max: c.llama_pos = 0,
+    pos_min: tools.c.llama_pos = 0,
+    pos_max: tools.c.llama_pos = 0,
 
     data_tgt: []u8 = &.{},
     data_dft: []u8 = &.{},
@@ -1054,7 +1045,7 @@ pub const PromptCheckpoint = struct {
     }
 
     /// Ports `common_prompt_checkpoint`'s `update_pos` (common/common.cpp:2435 @b1b770d90).
-    pub fn updatePos(self: *PromptCheckpoint, n_tokens: i64, pos_min: c.llama_pos, pos_max: c.llama_pos) void {
+    pub fn updatePos(self: *PromptCheckpoint, n_tokens: i64, pos_min: tools.c.llama_pos, pos_max: tools.c.llama_pos) void {
         self.n_tokens = n_tokens;
         self.pos_min = pos_min;
         self.pos_max = pos_max;
@@ -1075,44 +1066,44 @@ pub const PromptCheckpoint = struct {
 
     /// `common_prompt_checkpoint::update_tgt` and `update_dft`: the
     /// sequence's state into `buf`, resized to fit.
-    fn updateBuf(buf: *[]u8, a: Allocator, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags, comptime line: c_int) Error!void {
+    fn updateBuf(buf: *[]u8, a: Allocator, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags, comptime line: c_int) mod.common.Error!void {
         if (ctx == null) return;
 
-        const ckpt_size = c.llama_state_seq_get_size_ext(ctx, seq_id, flags);
+        const ckpt_size = tools.c.llama_state_seq_get_size_ext(ctx, seq_id, flags);
 
         buf.* = try a.realloc(buf.*, ckpt_size);
 
-        const n = c.llama_state_seq_get_data_ext(ctx, buf.ptr, ckpt_size, seq_id, flags);
+        const n = tools.c.llama_state_seq_get_data_ext(ctx, buf.ptr, ckpt_size, seq_id, flags);
         if (n != ckpt_size) {
-            _ = c.ggml_abort("common.cpp", line, "checkpoint size mismatch: expected %zu, got %zu\n", ckpt_size, n);
+            _ = tools.c.ggml_abort("common.cpp", line, "checkpoint size mismatch: expected %zu, got %zu\n", ckpt_size, n);
         }
     }
 
     /// Ports `common_prompt_checkpoint`'s `update_tgt` (common/common.cpp:2444 @b1b770d90).
-    pub fn updateTgt(self: *PromptCheckpoint, a: Allocator, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) Error!void {
+    pub fn updateTgt(self: *PromptCheckpoint, a: Allocator, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags) mod.common.Error!void {
         try updateBuf(&self.data_tgt, a, ctx, seq_id, flags, 2458);
     }
 
     /// Ports `common_prompt_checkpoint`'s `update_dft` (common/common.cpp:2462 @b1b770d90).
-    pub fn updateDft(self: *PromptCheckpoint, a: Allocator, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) Error!void {
+    pub fn updateDft(self: *PromptCheckpoint, a: Allocator, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags) mod.common.Error!void {
         try updateBuf(&self.data_dft, a, ctx, seq_id, flags, 2476);
     }
 
-    fn loadBuf(buf: []const u8, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) bool {
+    fn loadBuf(buf: []const u8, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags) bool {
         if (ctx == null) return true;
         if (buf.len == 0) return true;
-        const n = c.llama_state_seq_set_data_ext(ctx, buf.ptr, buf.len, seq_id, flags);
+        const n = tools.c.llama_state_seq_set_data_ext(ctx, buf.ptr, buf.len, seq_id, flags);
         return n == buf.len;
     }
 
     /// Ports `common_prompt_checkpoint`'s `load_tgt` (common/common.cpp:2480 @b1b770d90):
     /// false if the state could not be restored.
-    pub fn loadTgt(self: *const PromptCheckpoint, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) bool {
+    pub fn loadTgt(self: *const PromptCheckpoint, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags) bool {
         return loadBuf(self.data_tgt, ctx, seq_id, flags);
     }
 
     /// Ports `common_prompt_checkpoint`'s `load_dft` (common/common.cpp:2496 @b1b770d90).
-    pub fn loadDft(self: *const PromptCheckpoint, ctx: ?*c.llama_context, seq_id: c.llama_seq_id, flags: c.llama_state_seq_flags) bool {
+    pub fn loadDft(self: *const PromptCheckpoint, ctx: ?*tools.c.llama_context, seq_id: tools.c.llama_seq_id, flags: tools.c.llama_state_seq_flags) bool {
         return loadBuf(self.data_dft, ctx, seq_id, flags);
     }
 
@@ -1147,7 +1138,7 @@ pub const CheckpointRef = struct {
     gpa: Allocator,
 
     /// `std::make_shared<common_prompt_checkpoint>()`: one reference.
-    pub fn create(gpa_: Allocator) Error!*CheckpointRef {
+    pub fn create(gpa_: Allocator) mod.common.Error!*CheckpointRef {
         const r = try gpa_.create(CheckpointRef);
         r.* = .{ .gpa = gpa_ };
         return r;
@@ -1171,7 +1162,7 @@ pub const CheckpointRef = struct {
 /// Ports `server_prompt` (server-task.h:688 @b1b770d90): a prompt's tokens and
 /// its checkpoints (`std::list`, kept in order), shared with the prompt cache.
 pub const ServerPrompt = struct {
-    tokens: ServerTokens,
+    tokens: mod.tokens.ServerTokens,
     checkpoints: std.ArrayList(*CheckpointRef) = .empty,
 
     /// Ports `clear` (server-task.h:694 @b1b770d90).
@@ -1187,7 +1178,7 @@ pub const ServerPrompt = struct {
     }
 
     /// Ports `clone` (server-task.h:703 @b1b770d90).
-    pub fn clone(self: *const ServerPrompt) Error!ServerPrompt {
+    pub fn clone(self: *const ServerPrompt) mod.common.Error!ServerPrompt {
         var out: ServerPrompt = .{ .tokens = try self.tokens.clone() };
         errdefer out.deinit();
         try out.checkpoints.ensureTotalCapacity(out.tokens.gpa, self.checkpoints.items.len);
@@ -1312,13 +1303,13 @@ pub const PromptCache = struct {
     ///
     /// Return: the new state, owned by the cache; null when the prompt is
     /// already cached, or too big, or memory ran out.
-    pub fn alloc(self: *PromptCache, prompt: *const ServerPrompt, state_size_tgt: usize, state_size_dft: usize) Error!?*PromptCacheState {
+    pub fn alloc(self: *PromptCache, prompt: *const ServerPrompt, state_size_tgt: usize, state_size_dft: usize) mod.common.Error!?*PromptCacheState {
         // first check if the current state is contained fully in the cache
         for (self.states.items) |s| {
             const cur_lcp_len: c_int = @truncate(@as(i64, @intCast(try s.prompt.tokens.getCommonPrefix(&prompt.tokens))));
 
             if (cur_lcp_len == @as(c_int, @truncate(@as(i64, @intCast(prompt.tokens.size()))))) {
-                common.srv(.trc, "alloc", "%s", .{@as([*:0]const u8, " - prompt is already in the cache, skipping\n")});
+                mod.common.srv(.trc, "alloc", "%s", .{@as([*:0]const u8, " - prompt is already in the cache, skipping\n")});
                 return null;
             }
         }
@@ -1333,7 +1324,7 @@ pub const PromptCache = struct {
 
         // skip over-limit entries to avoid disturbing the cache
         if (self.limit_size > 0 and state_size_new > self.limit_size) {
-            common.srv(.wrn, "alloc", " - prompt state size %.3f MiB exceeds cache size limit %.3f MiB, skipping\n", .{ @as(f64, @floatFromInt(state_size_new)) / mib, @as(f64, @floatFromInt(self.limit_size)) / mib });
+            mod.common.srv(.wrn, "alloc", " - prompt state size %.3f MiB exceeds cache size limit %.3f MiB, skipping\n", .{ @as(f64, @floatFromInt(state_size_new)) / mib, @as(f64, @floatFromInt(self.limit_size)) / mib });
             return null;
         }
 
@@ -1344,7 +1335,7 @@ pub const PromptCache = struct {
             const len: c_int = @truncate(@as(i64, @intCast(try s.prompt.tokens.getCommonPrefix(&prompt.tokens))));
 
             if (len == @as(c_int, @truncate(@as(i64, @intCast(s.prompt.tokens.size()))))) {
-                common.srv(.trc, "alloc", " - removing obsolete cached prompt with length %d\n", .{len});
+                mod.common.srv(.trc, "alloc", " - removing obsolete cached prompt with length %d\n", .{len});
 
                 _ = self.states.orderedRemove(i);
                 self.destroyState(s);
@@ -1356,7 +1347,7 @@ pub const PromptCache = struct {
         if (self.limit_size > 0) {
             // make room before allocating the new vectors to avoid breaching the limit
             while (self.states.items.len != 0 and self.size() + state_size_new > self.limit_size) {
-                common.srv(.wrn, "alloc", " - making room for prompt cache entry, removing oldest entry (size = %.3f MiB)\n", .{@as(f64, @floatFromInt(self.states.items[0].size())) / mib});
+                mod.common.srv(.wrn, "alloc", " - making room for prompt cache entry, removing oldest entry (size = %.3f MiB)\n", .{@as(f64, @floatFromInt(self.states.items[0].size())) / mib});
 
                 self.popFront();
             }
@@ -1394,11 +1385,11 @@ pub const PromptCache = struct {
     /// The `std::bad_alloc` arm of `alloc`: shrink the limit to 40% of what
     /// is cached and trim.
     fn allocFailed(self: *PromptCache) ?*PromptCacheState {
-        common.srv(.err, "alloc", "failed to allocate memory for prompt cache state: %s\n", .{@as([*:0]const u8, "std::bad_alloc")});
+        mod.common.srv(.err, "alloc", "failed to allocate memory for prompt cache state: %s\n", .{@as([*:0]const u8, "std::bad_alloc")});
 
         self.limit_size = @max(1, @as(usize, @intFromFloat(0.4 * @as(f64, @floatFromInt(self.size())))));
 
-        common.srv(.wrn, "alloc", " - cache size limit reduced to %.3f MiB\n", .{@as(f64, @floatFromInt(self.limit_size)) / mib});
+        mod.common.srv(.wrn, "alloc", " - cache size limit reduced to %.3f MiB\n", .{@as(f64, @floatFromInt(self.limit_size)) / mib});
 
         self.update();
 
@@ -1410,13 +1401,13 @@ pub const PromptCache = struct {
     /// restored into `id_slot` and moved into `prompt`.
     ///
     /// Return: false when a state failed to restore.
-    pub fn load(self: *PromptCache, prompt: *ServerPrompt, tokens_new: *const ServerTokens, ctx_tgt: ?*c.llama_context, ctx_dft: ?*c.llama_context, id_slot: i32) Error!bool {
+    pub fn load(self: *PromptCache, prompt: *ServerPrompt, tokens_new: *const mod.tokens.ServerTokens, ctx_tgt: ?*tools.c.llama_context, ctx_dft: ?*tools.c.llama_context, id_slot: i32) mod.common.Error!bool {
         var lcp_best: c_int = @truncate(@as(i64, @intCast(try prompt.tokens.getCommonPrefix(tokens_new))));
 
         var f_keep_best: f32 = if (prompt.tokens.size() > 0) @as(f32, @floatFromInt(lcp_best)) / @as(f32, @floatFromInt(prompt.tokens.size())) else -1.0; // empty slot: any cache entry wins
         var f_sim_best: f32 = @as(f32, @floatFromInt(lcp_best)) / @as(f32, @floatFromInt(tokens_new.size()));
 
-        common.srv(.trc, "load", " - looking for better prompt, base f_keep = %.3f, f_sim = %.3f\n", .{ @as(f64, f_keep_best), @as(f64, f_sim_best) });
+        mod.common.srv(.trc, "load", " - looking for better prompt, base f_keep = %.3f, f_sim = %.3f\n", .{ @as(f64, f_keep_best), @as(f64, f_sim_best) });
 
         var it_best: ?usize = null;
 
@@ -1427,7 +1418,7 @@ pub const PromptCache = struct {
             const f_keep_cur = @as(f32, @floatFromInt(lcp_cur)) / @as(f32, @floatFromInt(s.prompt.tokens.size()));
             const f_sim_cur = @as(f32, @floatFromInt(lcp_cur)) / @as(f32, @floatFromInt(tokens_new.size()));
 
-            common.srv(.trc, "load", "   - prompt with length %7zu, lcp = %7d, f_keep = %.3f, f_sim = %.3f\n", .{ s.prompt.tokens.size(), lcp_cur, @as(f64, f_keep_cur), @as(f64, f_sim_cur) });
+            mod.common.srv(.trc, "load", "   - prompt with length %7zu, lcp = %7d, f_keep = %.3f, f_sim = %.3f\n", .{ s.prompt.tokens.size(), lcp_cur, @as(f64, f_keep_cur), @as(f64, f_sim_cur) });
 
             // don't trash large prompts
             if (f_keep_cur < 0.25) {
@@ -1445,15 +1436,15 @@ pub const PromptCache = struct {
 
         if (it_best) |bi| {
             const best = self.states.items[bi];
-            common.srv(.trc, "load", " - found better prompt with f_keep = %.3f, f_sim = %.3f\n", .{ @as(f64, f_keep_best), @as(f64, f_sim_best) });
+            mod.common.srv(.trc, "load", " - found better prompt with f_keep = %.3f, f_sim = %.3f\n", .{ @as(f64, f_keep_best), @as(f64, f_sim_best) });
 
             {
                 const data = best.data.main;
 
                 const sz = data.len;
-                const n = c.llama_state_seq_set_data_ext(ctx_tgt, data.ptr, sz, id_slot, 0);
+                const n = tools.c.llama_state_seq_set_data_ext(ctx_tgt, data.ptr, sz, id_slot, 0);
                 if (n != sz) {
-                    common.srv(.err, "load", "failed to restore state with size %zu\n", .{sz});
+                    mod.common.srv(.err, "load", "failed to restore state with size %zu\n", .{sz});
 
                     return false;
                 }
@@ -1469,9 +1460,9 @@ pub const PromptCache = struct {
                     tools.ggml.ggmlAssert(ctx_dft != null, "server-task.cpp", 1893, "ctx_dft");
 
                     const sz = data.len;
-                    const n = c.llama_state_seq_set_data_ext(ctx_dft, data.ptr, sz, id_slot, 0);
+                    const n = tools.c.llama_state_seq_set_data_ext(ctx_dft, data.ptr, sz, id_slot, 0);
                     if (n != sz) {
-                        common.srv(.wrn, "load", "failed to restore state with size %zu\n", .{sz});
+                        mod.common.srv(.wrn, "load", "failed to restore state with size %zu\n", .{sz});
 
                         return false;
                     }
@@ -1481,11 +1472,11 @@ pub const PromptCache = struct {
                 }
             }
 
-            common.srv(.dbg, "load", "%s", .{@as([*:0]const u8, "__TEST_TAG_PROMPT_CACHE_RESTORE__\n")});
+            mod.common.srv(.dbg, "load", "%s", .{@as([*:0]const u8, "__TEST_TAG_PROMPT_CACHE_RESTORE__\n")});
 
             // the whole cached prompt is a prefix of the new one
             if (lcp_best == @as(c_int, @truncate(@as(i64, @intCast(best.prompt.tokens.size()))))) {
-                common.srv(.dbg, "load", "%s", .{@as([*:0]const u8, "__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__\n")});
+                mod.common.srv(.dbg, "load", "%s", .{@as([*:0]const u8, "__TEST_TAG_PROMPT_CACHE_FULL_RESTORE__\n")});
             }
 
             prompt.deinit();
@@ -1506,7 +1497,7 @@ pub const PromptCache = struct {
     pub fn update(self: *PromptCache) void {
         if (self.limit_size > 0) {
             while (self.states.items.len != 0 and self.size() > self.limit_size) {
-                common.srv(.wrn, "update", " - cache size limit reached, removing oldest entry (size = %.3f MiB)\n", .{@as(f64, @floatFromInt(self.states.items[0].size())) / mib});
+                mod.common.srv(.wrn, "update", " - cache size limit reached, removing oldest entry (size = %.3f MiB)\n", .{@as(f64, @floatFromInt(self.states.items[0].size())) / mib});
 
                 self.popFront();
             }
@@ -1520,16 +1511,16 @@ pub const PromptCache = struct {
 
         if (self.limit_tokens > 0) {
             while (self.states.items.len != 0 and self.nTokens() > limit_tokens_cur) {
-                common.srv(.wrn, "update", " - cache token limit (%zu, est: %zu) reached, removing oldest entry (size = %.3f MiB)\n", .{ self.limit_tokens, limit_tokens_cur, @as(f64, @floatFromInt(self.states.items[0].size())) / mib });
+                mod.common.srv(.wrn, "update", " - cache token limit (%zu, est: %zu) reached, removing oldest entry (size = %.3f MiB)\n", .{ self.limit_tokens, limit_tokens_cur, @as(f64, @floatFromInt(self.states.items[0].size())) / mib });
 
                 self.popFront();
             }
         }
 
-        common.srv(.trc, "update", " - cache state: %zu prompts, %.3f MiB (limits: %.3f MiB, %zu tokens, %zu est)\n", .{ self.states.items.len, @as(f64, @floatFromInt(self.size())) / mib, @as(f64, @floatFromInt(self.limit_size)) / mib, self.limit_tokens, limit_tokens_cur });
+        mod.common.srv(.trc, "update", " - cache state: %zu prompts, %.3f MiB (limits: %.3f MiB, %zu tokens, %zu est)\n", .{ self.states.items.len, @as(f64, @floatFromInt(self.size())) / mib, @as(f64, @floatFromInt(self.limit_size)) / mib, self.limit_tokens, limit_tokens_cur });
 
         for (self.states.items) |state| {
-            common.srv(.trc, "update", "   - prompt %p: %7d tokens, checkpoints: %2zu, %9.3f MiB\n", .{ @as(*const anyopaque, state), state.prompt.nTokens(), state.prompt.checkpoints.items.len, @as(f64, @floatFromInt(state.size())) / mib });
+            mod.common.srv(.trc, "update", "   - prompt %p: %7d tokens, checkpoints: %2zu, %9.3f MiB\n", .{ @as(*const anyopaque, state), state.prompt.nTokens(), state.prompt.checkpoints.items.len, @as(f64, @floatFromInt(state.size())) / mib });
         }
     }
 };

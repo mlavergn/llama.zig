@@ -15,18 +15,10 @@
 //! from its arguments.
 
 const std = @import("std");
+const common_chat = @import("../module.zig");
 const json = @import("json");
-const exception = @import("../exception.zig");
-const template = @import("../template.zig");
-const util = @import("../util.zig");
-const log = @import("../log.zig");
-const types = @import("types.zig");
 
 const Allocator = std.mem.Allocator;
-const Value = json.Value;
-const Error = exception.Error;
-const Segment = types.Segment;
-const DiffSplit = types.DiffSplit;
 
 /// Ports `trim_whitespace` (chat-auto-parser-helpers.cpp:12 @b1b770d90).
 pub fn trimWhitespace(str: []const u8) []const u8 {
@@ -78,15 +70,15 @@ fn commonSuffixLen(left: []const u8, right: []const u8) usize {
     return n;
 }
 
-fn cat(a: Allocator, x: []const u8, y: []const u8) Error![]const u8 {
+fn cat(a: Allocator, x: []const u8, y: []const u8) common_chat.exception.Error![]const u8 {
     return std.mem.concat(a, u8, &.{ x, y });
 }
 
 /// Ports `calculate_diff_split` (chat-auto-parser-helpers.cpp:84 @b1b770d90):
 /// the longest common prefix and suffix of two renders, each ending on a
 /// marker where one is in reach, and what is left of each between them.
-pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) Error!DiffSplit {
-    var result: DiffSplit = .{};
+pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) common_chat.exception.Error!common_chat.autoparser.types.DiffSplit {
+    var result: common_chat.autoparser.types.DiffSplit = .{};
 
     const left_seg = try segmentizeMarkers(a, left);
     const right_seg = try segmentizeMarkers(a, right);
@@ -200,7 +192,7 @@ pub fn calculateDiffSplit(a: Allocator, left: []const u8, right: []const u8) Err
 }
 
 /// `std`'s `accumulate` of the segments' values.
-fn joinSegments(a: Allocator, segs: []const Segment) Error![]const u8 {
+fn joinSegments(a: Allocator, segs: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     for (segs) |s| try out.appendSlice(a, s.value);
     return out.items;
@@ -228,8 +220,8 @@ pub fn afterCommonSuffix(full: []const u8, left: []const u8, right: []const u8) 
 /// `<...>` and `[...]` runs as markers, everything between as text.
 ///
 /// Return: owned by `a`; each value borrowed from `text`.
-pub fn segmentizeMarkers(a: Allocator, text: []const u8) Error![]Segment {
-    var retval: std.ArrayList(Segment) = .empty;
+pub fn segmentizeMarkers(a: Allocator, text: []const u8) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
+    var retval: std.ArrayList(common_chat.autoparser.types.Segment) = .empty;
     var in_marker = false;
     var marker_opener: u8 = 0;
     var last_border: usize = 0;
@@ -256,8 +248,8 @@ pub fn segmentizeMarkers(a: Allocator, text: []const u8) Error![]Segment {
 }
 
 /// Ports `prune_whitespace_segments` (chat-auto-parser-helpers.cpp:298 @b1b770d90).
-pub fn pruneWhitespaceSegments(a: Allocator, segments: []const Segment) Error![]Segment {
-    var result: std.ArrayList(Segment) = .empty;
+pub fn pruneWhitespaceSegments(a: Allocator, segments: []const common_chat.autoparser.types.Segment) common_chat.exception.Error![]common_chat.autoparser.types.Segment {
+    var result: std.ArrayList(common_chat.autoparser.types.Segment) = .empty;
     for (segments) |seg| {
         if (trimWhitespace(seg.value).len != 0) try result.append(a, seg);
     }
@@ -271,20 +263,20 @@ pub const err_tmpl = "#**ERROR**#";
 /// Ports `apply_template` (chat-auto-parser-helpers.cpp:312 @b1b770d90): a
 /// probe rendered, `enable_thinking` bound in the extra context too, and
 /// `err_tmpl` when the template fails.
-pub fn applyTemplate(a: Allocator, tmpl: *const template.Template, params: *const types.TemplateParams) Error![]const u8 {
-    var tmpl_params: template.GenerationParams = .{};
+pub fn applyTemplate(a: Allocator, tmpl: *const common_chat.template.Template, params: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error![]const u8 {
+    var tmpl_params: common_chat.template.GenerationParams = .{};
     tmpl_params.messages = params.messages;
     tmpl_params.tools = params.tools;
     tmpl_params.add_generation_prompt = params.add_generation_prompt;
     tmpl_params.enable_thinking = params.enable_thinking;
 
     tmpl_params.extra_context = if (params.extra_context) |e| try e.clone(a) else .null;
-    const slot = tmpl_params.extra_context.index(a, "enable_thinking") catch |e| return util.fromJson(e);
-    slot.* = try Value.from(a, params.enable_thinking);
+    const slot = tmpl_params.extra_context.index(a, "enable_thinking") catch |e| return common_chat.util.fromJson(e);
+    slot.* = try json.Value.from(a, params.enable_thinking);
 
-    const prompt = template.directApply(a, tmpl, &tmpl_params) catch |e| {
+    const prompt = common_chat.template.directApply(a, tmpl, &tmpl_params) catch |e| {
         if (e == error.OutOfMemory) return error.OutOfMemory;
-        log.dbg("Template application failed: {s}\n", .{exception.what(e)});
+        common_chat.log.dbg("Template application failed: {s}\n", .{common_chat.exception.what(e)});
         return err_tmpl;
     };
     return prompt.str(a);
@@ -295,7 +287,7 @@ pub fn applyTemplate(a: Allocator, tmpl: *const template.Template, params: *cons
 /// the C++'s lambda modifies its copy.
 ///
 /// Return: null when either render fails.
-pub fn compareVariants(a: Allocator, tmpl: *const template.Template, params_a: *const types.TemplateParams, params_b: *const types.TemplateParams) Error!?types.CompareVariantsResult {
+pub fn compareVariants(a: Allocator, tmpl: *const common_chat.template.Template, params_a: *const common_chat.autoparser.types.TemplateParams, params_b: *const common_chat.autoparser.types.TemplateParams) common_chat.exception.Error!?common_chat.autoparser.types.CompareVariantsResult {
     const output_a = try applyTemplate(a, tmpl, params_a);
     const output_b = try applyTemplate(a, tmpl, params_b);
     if (std.mem.eql(u8, output_a, err_tmpl) or std.mem.eql(u8, output_b, err_tmpl)) return null;

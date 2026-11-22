@@ -24,13 +24,7 @@
 //! `sumf` directly — the one structural difference from its K-quant
 //! siblings.
 
-const std = @import("std");
-const impl = @import("../../impl.zig");
-const blocks = @import("blocks.zig");
-const epilogue = @import("epilogue.zig");
-const convert = @import("../convert.zig");
-
-const c = impl.c;
+const ggml = @import("../../module.zig");
 
 const QK_K = 256;
 
@@ -38,7 +32,7 @@ const QK_K = 256;
 inline fn sixBit(
     comptime blocklen: i32,
     comptime ncols_interleaved: i32,
-    bl: *const blocks.block_q6_Kx8,
+    bl: *const ggml.cpu.repack.blocks.block_q6_Kx8,
     ql_pos: i32,
     comptime upper: bool,
     qh_half: i32,
@@ -75,16 +69,16 @@ fn gemv(
     const nb: i32 = @divTrunc(n, qk);
     const blocks_per_half: i32 = @divTrunc(64, blocklen);
 
-    impl.assert(@rem(n, qk) == 0, "n % qk == 0");
-    impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
+    ggml.impl.assert(@rem(n, qk) == 0, "n % qk == 0");
+    ggml.impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
 
     var sumf: [ncols_interleaved]f32 = undefined;
 
-    const a_ptr: [*]const c.block_q8_K = @ptrCast(@alignCast(vy));
+    const a_ptr: [*]const ggml.impl.c.block_q8_K = @ptrCast(@alignCast(vy));
     var x: i32 = 0;
     while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
-        const b_ptr: [*]const blocks.block_q6_Kx8 =
-            @as([*]const blocks.block_q6_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
+        const b_ptr: [*]const ggml.cpu.repack.blocks.block_q6_Kx8 =
+            @as([*]const ggml.cpu.repack.blocks.block_q6_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
 
         for (0..ncols_interleaved) |j| sumf[j] = 0.0;
 
@@ -127,7 +121,7 @@ fn gemv(
                         sumi_h += q_h * a_h;
                     }
 
-                    sumf[ju] = epilogue.accumulate(sumf[ju], sumi_l * scale_l + sumi_h * scale_h, convert.cpuFp16ToFp32(bl.d[ju]), al.d);
+                    sumf[ju] = ggml.cpu.repack.epilogue.accumulate(sumf[ju], sumi_l * scale_l + sumi_h * scale_h, ggml.cpu.convert.cpuFp16ToFp32(bl.d[ju]), al.d);
                 }
             }
         }
@@ -155,20 +149,20 @@ fn gemm(
     const q8_half_stride: i32 = 512;
     const q8_low_high_step: i32 = 256;
 
-    impl.assert(@rem(n, qk) == 0, "n % qk == 0");
-    impl.assert(@rem(nr, 4) == 0, "nr % 4 == 0");
-    impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
+    ggml.impl.assert(@rem(n, qk) == 0, "n % qk == 0");
+    ggml.impl.assert(@rem(nr, 4) == 0, "nr % 4 == 0");
+    ggml.impl.assert(@rem(nc, ncols_interleaved) == 0, "nc % ncols_interleaved == 0");
 
     var sumf: [4][ncols_interleaved]f32 = undefined;
 
     var y: i32 = 0;
     while (y < @divTrunc(nr, 4)) : (y += 1) {
-        const a_ptr: [*]const blocks.block_q8_Kx4 =
-            @as([*]const blocks.block_q8_Kx4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
+        const a_ptr: [*]const ggml.cpu.repack.blocks.block_q8_Kx4 =
+            @as([*]const ggml.cpu.repack.blocks.block_q8_Kx4, @ptrCast(@alignCast(vy))) + @as(usize, @intCast(y * nb));
         var x: i32 = 0;
         while (x < @divTrunc(nc, ncols_interleaved)) : (x += 1) {
-            const b_ptr: [*]const blocks.block_q6_Kx8 =
-                @as([*]const blocks.block_q6_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
+            const b_ptr: [*]const ggml.cpu.repack.blocks.block_q6_Kx8 =
+                @as([*]const ggml.cpu.repack.blocks.block_q6_Kx8, @ptrCast(@alignCast(vx))) + @as(usize, @intCast(x * nb));
             for (0..4) |m| {
                 for (0..ncols_interleaved) |j| sumf[m][j] = 0.0;
             }
@@ -216,7 +210,7 @@ fn gemm(
                                 sumi_h += q_h * q8_h;
                             }
 
-                            sumf[mu][ju] = epilogue.accumulate(sumf[mu][ju], sumi_l * scale_l + sumi_h * scale_h, convert.cpuFp16ToFp32(bl.d[ju]), al.d[mu]);
+                            sumf[mu][ju] = ggml.cpu.repack.epilogue.accumulate(sumf[mu][ju], sumi_l * scale_l + sumi_h * scale_h, ggml.cpu.convert.cpuFp16ToFp32(bl.d[ju]), al.d[mu]);
                         }
                     }
                 }

@@ -10,18 +10,10 @@
 //! `llama_model_bert`'s, in `bert.zig`.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const bert = @import("bert.zig");
-
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
+const llama = @import("../module.zig");
 
 /// Ports `llama_model_jina_bert_v2`'s `load_arch_hparams` (models/jina-bert-v2.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const hp = &self.hparams;
     hp.f_norm_eps = (try ml.meta.getKey(f32, .attention_layernorm_eps, true, exc)).?;
     hp.f_max_alibi_bias = 8.0;
@@ -34,9 +26,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_jina_bert_v2`'s `load_arch_tensors` (models/jina-bert-v2.cpp:14 @b1b770d90).
-pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, ml: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
-    const nr = loader.tensor_not_required;
+    const nr = llama.loader.tensor_not_required;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc); // word_embeddings
     self.type_embd = try self.createTensor(.{ .tensor = .token_types, .suffix = "weight" }, &.{ l.n_embd, l.n_token_types }, 0, exc); // token_type_embeddings
@@ -69,12 +61,12 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 
         layer.ffn_gate = try self.createTensor(.{ .tensor = .ffn_gate, .suffix = "weight", .bid = i }, &.{ l.n_embd, l.n_ff }, nr, exc);
 
-        const tn_ffn_up_weight: loader.Tn = .{ .tensor = .ffn_up, .suffix = "weight", .bid = i };
+        const tn_ffn_up_weight: llama.loader.Tn = .{ .tensor = .ffn_up, .suffix = "weight", .bid = i };
         const tn_name = tn_ffn_up_weight.str();
         const t_ffn_up = ml.getTensorMeta(tn_name.slice());
         const n_ffn_up: i64 = if (t_ffn_up) |t| t.ne[1] else l.n_ff;
 
-        impl.assert(n_ffn_up == l.n_ff or n_ffn_up == l.n_ff * 2, "models/jina-bert-v2.cpp", 51, "n_ffn_up == n_ff || n_ffn_up == n_ff * 2");
+        llama.impl.assert(n_ffn_up == l.n_ff or n_ffn_up == l.n_ff * 2, "models/jina-bert-v2.cpp", 51, "n_ffn_up == n_ff || n_ffn_up == n_ff * 2");
         layer.ffn_up = try self.createTensor(tn_ffn_up_weight, &.{ l.n_embd, n_ffn_up }, 0, exc);
         layer.ffn_up_b = try self.createTensor(.{ .tensor = .ffn_up, .suffix = "bias", .bid = i }, &.{n_ffn_up}, nr, exc);
 
@@ -87,8 +79,8 @@ pub fn loadArchTensors(self: *Model, ml: *loader.Loader, exc: *Exception) Thrown
 }
 
 /// Ports `llama_model_jina_bert_v2`'s `build_arch_graph` (models/jina-bert-v2.cpp:63 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
-    bert.buildGraph(model, b);
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
+    llama.models.bert.buildGraph(model, b);
 }
 
 // -----------------------------------------------------------------------------

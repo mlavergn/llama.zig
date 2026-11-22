@@ -18,16 +18,7 @@
 //! kernel.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const convert = @import("convert.zig");
-const fattn_common = @import("fattn_common.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-const half = kernels.half;
+const ggml = @import("../module.zig");
 
 /// Ports `CUDA_CONV2D_BLOCK_SIZE` (conv2d.cuh:4 @b1b770d90).
 const block_size = 256;
@@ -55,9 +46,9 @@ const ConvParams = extern struct {
 
 /// Ports `conv2d_cuda` (conv2d.cu:110 @b1b770d90), reached through
 /// `conv2d_cuda_f16` and `conv2d_cuda_f32` (conv2d.cu:326, 330 @b1b770d90).
-fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, Y_D: ?*anyopaque, P: ConvParams, st: cu.cudaStream_t) void {
+fn conv2dCuda(comptime T: type, X_D: ?*const anyopaque, K_D: ?*const anyopaque, Y_D: ?*anyopaque, P: ConvParams, st: ggml.cuda.common.cu.cudaStream_t) void {
     const blocks: c_int = @truncate(@divTrunc(P.TOTAL + block_size - 1, block_size));
-    kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_kernel", &.{ kernels.typeName(T), "whcn_layout" })), .{
+    ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", ggml.cuda.kernels.tmpl("conv2d_kernel", &.{ ggml.cuda.kernels.typeName(T), "whcn_layout" })), .{
         .grid = .{ .x = @bitCast(blocks) },
         .block = .{ .x = block_size },
         .shmem = 0,
@@ -75,49 +66,49 @@ fn conv2dLaunchImplicitGemm(
     output: ?*anyopaque,
     params: ConvParams,
     split_k: c_int,
-    grid: kernels.Dim3,
-    block: kernels.Dim3,
-    stream: cu.cudaStream_t,
+    grid: ggml.cuda.kernels.Dim3,
+    block: ggml.cuda.kernels.Dim3,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
-    const lp: kernels.LaunchParams = .{ .grid = grid, .block = block, .shmem = 0, .stream = stream };
+    const lp: ggml.cuda.kernels.LaunchParams = .{ .grid = grid, .block = block, .shmem = 0, .stream = stream };
     const args = .{ input, weight, output, params, split_k };
-    const mma = comptime kernels.boolean(use_mma);
+    const mma = comptime ggml.cuda.kernels.boolean(use_mma);
     if (params.KW == 3 and params.KH == 3) {
-        kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_implicit_gemm_f16", &.{ kernels.int(3), kernels.int(3), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", ggml.cuda.kernels.tmpl("conv2d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(3), ggml.cuda.kernels.int(3), mma })), lp, args);
     } else if (params.KW == 1 and params.KH == 1) {
-        kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_implicit_gemm_f16", &.{ kernels.int(1), kernels.int(1), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", ggml.cuda.kernels.tmpl("conv2d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(1), ggml.cuda.kernels.int(1), mma })), lp, args);
     } else {
-        kernels.launch(kernels.get("conv2d", kernels.tmpl("conv2d_implicit_gemm_f16", &.{ kernels.int(0), kernels.int(0), mma })), lp, args);
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", ggml.cuda.kernels.tmpl("conv2d_implicit_gemm_f16", &.{ ggml.cuda.kernels.int(0), ggml.cuda.kernels.int(0), mma })), lp, args);
     }
 }
 
 /// Ports `ggml_cuda_op_conv2d` (conv2d.cu:334 @b1b770d90).
-pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
-    const kernel = impl.one(Tensor, dst.src[0]);
-    const input = impl.one(Tensor, dst.src[1]);
+pub fn opConv2d(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const kernel = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
+    const input = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[1]);
     const K_D: ?*const anyopaque = kernel.data;
     const X_D: ?*const anyopaque = input.data;
     const Y_D: ?*anyopaque = dst.data;
 
-    impl.assert(input.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
-    impl.assert(c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
-    impl.assert(c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
-    impl.assert(kernel.type == c.GGML_TYPE_F16 or kernel.type == c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
+    ggml.impl.assert(input.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32, "input->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(input), "ggml_is_contiguous(input)");
+    ggml.impl.assert(ggml.impl.c.ggml_is_contiguous(kernel), "ggml_is_contiguous(kernel)");
+    ggml.impl.assert(kernel.type == ggml.impl.c.GGML_TYPE_F16 or kernel.type == ggml.impl.c.GGML_TYPE_F32, "kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32");
 
     // same number of input channels
-    impl.assert(input.ne[2] == kernel.ne[2], "input->ne[2] == kernel->ne[2]");
+    ggml.impl.assert(input.ne[2] == kernel.ne[2], "input->ne[2] == kernel->ne[2]");
 
     const st = ctx.stream();
 
-    const ST_X = impl.getOpParamsI32(dst, 0); // stride_x
-    const ST_Y = impl.getOpParamsI32(dst, 1); // stride_y
-    const PD_X = impl.getOpParamsI32(dst, 2); // padding_x
-    const PD_Y = impl.getOpParamsI32(dst, 3); // padding_y
-    const DL_X = impl.getOpParamsI32(dst, 4); // dilation_x
-    const DL_Y = impl.getOpParamsI32(dst, 5); // dilation_y
+    const ST_X = ggml.impl.getOpParamsI32(dst, 0); // stride_x
+    const ST_Y = ggml.impl.getOpParamsI32(dst, 1); // stride_y
+    const PD_X = ggml.impl.getOpParamsI32(dst, 2); // padding_x
+    const PD_Y = ggml.impl.getOpParamsI32(dst, 3); // padding_y
+    const DL_X = ggml.impl.getOpParamsI32(dst, 4); // dilation_x
+    const DL_Y = ggml.impl.getOpParamsI32(dst, 5); // dilation_y
 
     // No cwhn
-    impl.assert(impl.getOpParamsI32(dst, 6) == 0, "p[6] == false");
+    ggml.impl.assert(ggml.impl.getOpParamsI32(dst, 6) == 0, "p[6] == false");
 
     const IW: i64 = input.ne[0]; // input_w
     const IH: i64 = input.ne[1]; // input_h
@@ -149,12 +140,12 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
         .TOTAL = total,
     };
 
-    const device = &common.info().devices[@intCast(ctx.device)];
-    const use_mma = common.turingMmaAvailable(device.cc) or fattn_common.amdWmmaAvailable(device.cc) or fattn_common.amdMfmaAvailable(device.cc);
+    const device = &ggml.cuda.common.info().devices[@intCast(ctx.device)];
+    const use_mma = ggml.cuda.common.turingMmaAvailable(device.cc) or ggml.cuda.fattn_common.amdWmmaAvailable(device.cc) or ggml.cuda.fattn_common.amdMfmaAvailable(device.cc);
     // Devices without a native fragment implementation in mma.cuh can share the tiling.
-    const use_simt = common.cc.isMthreads(device.cc) or (common.cc.isAmd(device.cc) and !use_mma and IC * KW * KH >= 64);
+    const use_simt = ggml.cuda.common.cc.isMthreads(device.cc) or (ggml.cuda.common.cc.isAmd(device.cc) and !use_mma and IC * KW * KH >= 64);
     const pointwise = KW == 1 and KH == 1 and ST_X == 1 and ST_Y == 1 and PD_X == 0 and PD_Y == 0;
-    const use_blas = pointwise and common.fastFp16HardwareAvailable(device.cc);
+    const use_blas = pointwise and ggml.cuda.common.fastFp16HardwareAvailable(device.cc);
     // Short reductions on small maps do not amortize conversion and launch costs.
     const small_conv = IC * KW * KH < 64 and OW * OH < 512;
 
@@ -163,8 +154,8 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
     const padded_h: i64 = IH + 2 * @as(i64, PD_Y);
     const padded_fits = padded_w > 0 and padded_w <= limit and padded_h > 0 and padded_h <= limit and
         padded_w * padded_h <= limit and IC * B <= @divTrunc(limit, padded_w * padded_h);
-    if (kernel.type == c.GGML_TYPE_F16 and (use_mma or use_blas or use_simt) and (use_blas or !small_conv) and
-        c.ggml_nelements(input) <= limit and c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and
+    if (kernel.type == ggml.impl.c.GGML_TYPE_F16 and (use_mma or use_blas or use_simt) and (use_blas or !small_conv) and
+        ggml.impl.c.ggml_nelements(input) <= limit and ggml.impl.c.ggml_nelements(kernel) <= limit and total <= limit and padded_fits and
         PD_X >= 0 and PD_Y >= 0 and ST_X > 0 and ST_Y > 0 and DL_X > 0 and DL_Y > 0 and
         (OW - 1) * ST_X + (KW - 1) * DL_X < padded_w and (OH - 1) * ST_Y + (KH - 1) * DL_Y < padded_h and
         @divTrunc(OC + 63, 64) <= 65535 and B <= 65535)
@@ -173,13 +164,13 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
         const ph: c_int = @intCast(padded_h);
         const padded_total: c_int = @truncate(padded_w * padded_h * IC * B);
 
-        var x_half = common.PoolAlloc(half).initAlloc(ctx.pool(), @intCast(padded_total));
+        var x_half = ggml.cuda.common.PoolAlloc(ggml.cuda.kernels.half).initAlloc(ctx.pool(), @intCast(padded_total));
         defer x_half.deinit();
         // Match im2col's F16 input precision, but expand patches only in shared memory and accumulate in F32.
         if (PD_X == 0 and PD_Y == 0) {
-            convert.getToFp16(input.type).?(X_D, x_half.get(), padded_total, st);
+            ggml.cuda.convert.getToFp16(input.type).?(X_D, x_half.get(), padded_total, st);
         } else {
-            kernels.launch(kernels.get("conv2d", "conv2d_pad_f16"), .{
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", "conv2d_pad_f16"), .{
                 .grid = .{ .x = @intCast(@divTrunc(padded_total + 255, 256)) },
                 .block = .{ .x = 256 },
                 .shmem = 0,
@@ -209,47 +200,47 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
             const beta: f32 = 0.0;
             const positions: c_int = @truncate(OW * OH);
             const cublas_h = ctx.cublasHandle();
-            const xh: [*]const half = x_half.get().?;
+            const xh: [*]const ggml.cuda.kernels.half = x_half.get().?;
             const yd: [*]f32 = @ptrCast(@alignCast(Y_D.?));
             var n: c_int = 0;
             while (n < B) : (n += 1) {
-                common.cublasCheck(cu.cublasGemmEx(
+                ggml.cuda.common.cublasCheck(ggml.cuda.common.cu.cublasGemmEx(
                     cublas_h,
-                    cu.CUBLAS_OP_N,
-                    cu.CUBLAS_OP_N,
+                    ggml.cuda.common.cu.CUBLAS_OP_N,
+                    ggml.cuda.common.cu.CUBLAS_OP_N,
                     positions,
                     @as(c_int, @truncate(OC)),
                     @as(c_int, @truncate(IC)),
                     &alpha,
                     xh + @as(usize, @intCast(@as(i64, n) * IC * positions)),
-                    cu.CUDA_R_16F,
+                    ggml.cuda.common.cu.CUDA_R_16F,
                     positions,
                     K_D,
-                    cu.CUDA_R_16F,
+                    ggml.cuda.common.cu.CUDA_R_16F,
                     @as(c_int, @truncate(IC)),
                     &beta,
                     yd + @as(usize, @intCast(@as(i64, n) * OC * positions)),
-                    cu.CUDA_R_32F,
+                    ggml.cuda.common.cu.CUDA_R_32F,
                     positions,
-                    cu.CUBLAS_COMPUTE_32F,
-                    cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
+                    ggml.cuda.common.cu.CUBLAS_COMPUTE_32F,
+                    ggml.cuda.common.cu.CUBLAS_GEMM_DEFAULT_TENSOR_OP,
                 ), "cublasGemmEx(cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, positions, int(OC), int(IC), &alpha, x_half.get() + int64_t(n) * IC * positions, CUDA_R_16F, positions, K_D, CUDA_R_16F, int(IC), &beta, Y_D + int64_t(n) * OC * positions, CUDA_R_32F, positions, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)", @src());
             }
             return;
         }
         const blocks: i64 = @divTrunc(OW * OH + 63, 64) * @divTrunc(OC + 63, 64) * B;
-        const target: c_int = 8 * common.info().devices[@intCast(ctx.device)].nsm;
+        const target: c_int = 8 * ggml.cuda.common.info().devices[@intCast(ctx.device)].nsm;
         // Split long reductions so small spatial maps still occupy the GPU.
         const split_k: c_int = @intCast(@min(
             @min(@as(i64, 32), @divTrunc(@as(i64, 65535), B)),
             @min(@divTrunc(IC * KW * KH + 63, 64), @max(@as(i64, 1), @divTrunc(target + blocks - 1, blocks))),
         ));
 
-        var partial = common.PoolAlloc(f32).init(ctx.pool());
+        var partial = ggml.cuda.common.PoolAlloc(f32).init(ctx.pool());
         defer partial.deinit();
         const result: ?*anyopaque = if (split_k == 1) Y_D else @ptrCast(partial.alloc(@intCast(total * split_k)));
-        const block: kernels.Dim3 = .{ .x = @bitCast(device.warp_size), .y = 4 };
-        const grid: kernels.Dim3 = .{
+        const block: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(device.warp_size), .y = 4 };
+        const grid: ggml.cuda.kernels.Dim3 = .{
             .x = @truncate(@as(u64, @bitCast(@divTrunc(OW * OH + 63, 64)))),
             .y = @truncate(@as(u64, @bitCast(@divTrunc(OC + 63, 64)))),
             .z = @truncate(@as(u64, @bitCast(B * split_k))),
@@ -260,7 +251,7 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
             conv2dLaunchImplicitGemm(false, x_half.get(), K_D, result, padded_params, split_k, grid, block, st);
         }
         if (split_k > 1) {
-            kernels.launch(kernels.get("conv2d", "conv2d_reduce_split_k"), .{
+            ggml.cuda.kernels.launch(ggml.cuda.kernels.get("conv2d", "conv2d_reduce_split_k"), .{
                 .grid = .{ .x = @truncate(@as(u64, @bitCast(@divTrunc(total + 255, 256)))) },
                 .block = .{ .x = 256 },
                 .shmem = 0,
@@ -270,8 +261,8 @@ pub fn opConv2d(ctx: *common.Context, dst: *Tensor) void {
         return;
     }
 
-    if (kernel.type == c.GGML_TYPE_F16) {
-        conv2dCuda(half, X_D, K_D, Y_D, params, st);
+    if (kernel.type == ggml.impl.c.GGML_TYPE_F16) {
+        conv2dCuda(ggml.cuda.kernels.half, X_D, K_D, Y_D, params, st);
     } else {
         conv2dCuda(f32, X_D, K_D, Y_D, params, st);
     }

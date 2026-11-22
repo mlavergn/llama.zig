@@ -14,20 +14,12 @@
 //! behind a C ABI. Only `float` is instantiated:
 //! upstream comments out the `F16` and `BF16` cases.
 
-const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-
-const c = impl.c;
-const cu = common.cu;
-const Tensor = c.ggml_tensor;
-
+const ggml = @import("../module.zig");
 /// Ports `CUDA_CUMSUM_BLOCK_SIZE` (cumsum.cuh:3 @b1b770d90).
 const block_size = 256;
 
 /// `cub_shim.cu`'s wrapper of `cumsum_cub<float>`'s `InclusiveSum`.
-extern fn ggml_cuda_cub_inclusive_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, src: [*]const f32, dst: [*]f32, ne: i64, stream: cu.cudaStream_t) cu.cudaError_t;
+extern fn ggml_cuda_cub_inclusive_sum_f32(d_temp_storage: ?*anyopaque, tmp_size: *usize, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) ggml.cuda.common.cu.cudaError_t;
 
 /// A `dim3` member from an `int64_t`: C++ converts modulo 2^32.
 fn dimOf(v: i64) u32 {
@@ -42,13 +34,13 @@ fn strideOf(nb: i64, ts: usize) i64 {
 
 /// Ports `cumsum_cub` (cumsum.cu:190 @b1b770d90) for `T = float`. Upstream
 /// checks neither call's result, and neither does this.
-fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: cu.cudaStream_t) void {
+fn cumsumCub(pool: *ggml.cuda.common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream: ggml.cuda.common.cu.cudaStream_t) void {
     var tmp_size: usize = 0;
 
     // Query how much temp storage CUDA UnBound (CUB) needs
     _ = ggml_cuda_cub_inclusive_sum_f32(null, &tmp_size, src, dst, ne, stream);
 
-    var tmp_alloc = common.PoolAlloc(u8).initAlloc(pool, tmp_size);
+    var tmp_alloc = ggml.cuda.common.PoolAlloc(u8).initAlloc(pool, tmp_size);
     defer tmp_alloc.deinit();
 
     // Perform the inclusive scan
@@ -57,7 +49,7 @@ fn cumsumCub(pool: *common.Pool, src: [*]const f32, dst: [*]f32, ne: i64, stream
 
 /// Ports `cumsum_cuda` (cumsum.cu:214 @b1b770d90) for `T = float`.
 fn cumsumCuda(
-    ctx: *common.Context,
+    ctx: *ggml.cuda.common.Context,
     src: [*]const f32,
     dst: [*]f32,
     ne00: i64,
@@ -72,7 +64,7 @@ fn cumsumCuda(
     nb1: i64,
     nb2: i64,
     nb3: i64,
-    stream: cu.cudaStream_t,
+    stream: ggml.cuda.common.cu.cudaStream_t,
 ) void {
     const type_size: usize = @sizeOf(f32);
     var use_cub = false;
@@ -96,18 +88,18 @@ fn cumsumCuda(
         }
     }
 
-    const grid_dims: kernels.Dim3 = .{ .x = dimOf(ne01), .y = dimOf(ne02), .z = dimOf(ne03) };
-    const info = &common.info().devices[@intCast(common.getDevice())];
+    const grid_dims: ggml.cuda.kernels.Dim3 = .{ .x = dimOf(ne01), .y = dimOf(ne02), .z = dimOf(ne03) };
+    const info = &ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())];
     const warp_size: c_int = info.warp_size;
     const num_warps: c_int = @truncate(@divTrunc(ne00 + warp_size - 1, warp_size));
     var bs: c_int = num_warps * warp_size;
     bs = @min(bs, block_size);
-    const block_dims: kernels.Dim3 = .{ .x = @bitCast(bs) };
+    const block_dims: ggml.cuda.kernels.Dim3 = .{ .x = @bitCast(bs) };
     const warps_per_block: c_int = @divTrunc(bs, warp_size);
     const shmem_size: usize = @as(usize, @bitCast(@as(isize, bs + warps_per_block + 2))) *% @sizeOf(f32);
 
     if (use_cub and ne00 >= 1024) {
-        kernels.launch(kernels.get("cumsum", "cumsum_cub_kernel<float, (int)256>"), .{
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("cumsum", "cumsum_cub_kernel<float, (int)256>"), .{
             .grid = grid_dims,
             .block = .{ .x = block_size },
             .stream = stream,
@@ -120,7 +112,7 @@ fn cumsumCuda(
             strideOf(nb2, type_size),    strideOf(nb3, type_size),
         });
     } else {
-        kernels.launch(kernels.get("cumsum", "cumsum_kernel<float>"), .{
+        ggml.cuda.kernels.launch(ggml.cuda.kernels.get("cumsum", "cumsum_kernel<float>"), .{
             .grid = grid_dims,
             .block = block_dims,
             .shmem = shmem_size,
@@ -138,15 +130,15 @@ fn cumsumCuda(
 }
 
 /// Ports `ggml_cuda_op_cumsum` (cumsum.cu:267 @b1b770d90).
-pub fn opCumsum(ctx: *common.Context, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+pub fn opCumsum(ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
     const stream = ctx.stream();
 
-    impl.assert(src0.type == dst.type, "src0->type == dst->type");
+    ggml.impl.assert(src0.type == dst.type, "src0->type == dst->type");
     switch (src0.type) {
-        c.GGML_TYPE_F32 => {
+        ggml.impl.c.GGML_TYPE_F32 => {
             const nb = struct {
-                fn f(t: *const Tensor, i: usize) i64 {
+                fn f(t: *const ggml.impl.c.ggml_tensor, i: usize) i64 {
                     return @bitCast(@as(u64, t.nb[i]));
                 }
             }.f;
@@ -171,6 +163,6 @@ pub fn opCumsum(ctx: *common.Context, dst: *Tensor) void {
         },
         // F16 and BF16 are commented out upstream ("We do not support those
         // on CPU for now anyway").
-        else => impl.abort("fatal error"),
+        else => ggml.impl.abort("fatal error"),
     }
 }

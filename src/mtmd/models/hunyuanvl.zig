@@ -6,14 +6,10 @@
 //! Ports `llama.cpp/tools/mtmd/models/hunyuanvl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const clip = @import("../clip.zig");
-const graph = @import("../graph.zig");
-const c = impl.c;
-const ne = graph.ne;
+const mtmd = @import("../module.zig");
 
 /// Ports `build` (hunyuanvl.cpp:3 @b1b770d90), a member of `mtmd_graph_hunyuanvl`.
-pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
+pub fn build(g: *mtmd.graph.Graph, params: ?*const mtmd.clip.EncodeParams) mtmd.clip.Error!?*mtmd.impl.c.ggml_cgraph {
     _ = params;
     const ctx0 = g.ctx0;
     const model = g.model;
@@ -23,9 +19,9 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     // position embedding: declared as a graph input, filled on CPU
     // by mtmd_subcontext::encode() (see PROJECTOR_TYPE_HUNYUANVL branch there).
-    const pos_embd = c.ggml_new_tensor_2d(ctx0, c.GGML_TYPE_F32, g.n_embd, ph * pw);
-    _ = c.ggml_set_name(pos_embd, "hunyuanvl_pos_embd");
-    c.ggml_set_input(pos_embd);
+    const pos_embd = mtmd.impl.c.ggml_new_tensor_2d(ctx0, mtmd.impl.c.GGML_TYPE_F32, g.n_embd, ph * pw);
+    _ = mtmd.impl.c.ggml_set_name(pos_embd, "hunyuanvl_pos_embd");
+    mtmd.impl.c.ggml_set_input(pos_embd);
 
     const inp = g.buildInp();
     var cur = g.buildVit(inp, g.n_patches, .normal, g.hparams.ffn_op, pos_embd, null, .{});
@@ -34,45 +30,45 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     cur = g.buildNorm(cur, model.mm_pre_norm_w, null, .rms, g.eps, -1);
 
     // [C, W*H] -> [W, H, C] for conv2d
-    cur = c.ggml_reshape_3d(ctx0, cur, g.n_embd, pw, ph);
-    cur = c.ggml_permute(ctx0, cur, 2, 0, 1, 3);
-    cur = c.ggml_cont(ctx0, cur);
+    cur = mtmd.impl.c.ggml_reshape_3d(ctx0, cur, g.n_embd, pw, ph);
+    cur = mtmd.impl.c.ggml_permute(ctx0, cur, 2, 0, 1, 3);
+    cur = mtmd.impl.c.ggml_cont(ctx0, cur);
 
     // Conv2d(1152->2304, k=2, s=2) + GELU + Conv2d(2304->4608, k=1, s=1)
-    cur = c.ggml_conv_2d(ctx0, model.mm_0_w, cur, merge, merge, 0, 0, 1, 1);
+    cur = mtmd.impl.c.ggml_conv_2d(ctx0, model.mm_0_w, cur, merge, merge, 0, 0, 1, 1);
     if (model.mm_0_b != null) {
-        cur = c.ggml_add(ctx0, cur, c.ggml_reshape_3d(ctx0, model.mm_0_b, 1, 1, ne(model.mm_0_b, 0)));
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_reshape_3d(ctx0, model.mm_0_b, 1, 1, mtmd.graph.ne(model.mm_0_b, 0)));
     }
-    cur = c.ggml_gelu(ctx0, cur);
-    cur = c.ggml_conv_2d(ctx0, model.mm_1_w, cur, 1, 1, 0, 0, 1, 1);
+    cur = mtmd.impl.c.ggml_gelu(ctx0, cur);
+    cur = mtmd.impl.c.ggml_conv_2d(ctx0, model.mm_1_w, cur, 1, 1, 0, 0, 1, 1);
     if (model.mm_1_b != null) {
-        cur = c.ggml_add(ctx0, cur, c.ggml_reshape_3d(ctx0, model.mm_1_b, 1, 1, ne(model.mm_1_b, 0)));
+        cur = mtmd.impl.c.ggml_add(ctx0, cur, mtmd.impl.c.ggml_reshape_3d(ctx0, model.mm_1_b, 1, 1, mtmd.graph.ne(model.mm_1_b, 0)));
     }
 
     const ow = @divTrunc(pw, merge);
     const oh = @divTrunc(ph, merge);
-    const idim: c_int = @intCast(ne(cur, 2)); // OC = 4608
+    const idim: c_int = @intCast(mtmd.graph.ne(cur, 2)); // OC = 4608
 
     // append newline along W (dim 0)
-    var nl = c.ggml_reshape_4d(ctx0, model.image_newline, 1, 1, idim, 1);
-    nl = c.ggml_repeat_4d(ctx0, nl, 1, oh, idim, 1);
-    cur = c.ggml_concat(ctx0, cur, nl, 0);
+    var nl = mtmd.impl.c.ggml_reshape_4d(ctx0, model.image_newline, 1, 1, idim, 1);
+    nl = mtmd.impl.c.ggml_repeat_4d(ctx0, nl, 1, oh, idim, 1);
+    cur = mtmd.impl.c.ggml_concat(ctx0, cur, nl, 0);
 
     // [OW+1, OH, OC] -> [OC, (OW+1)*OH]
-    cur = c.ggml_permute(ctx0, cur, 1, 2, 0, 3);
-    cur = c.ggml_cont_2d(ctx0, cur, idim, (ow + 1) * oh);
+    cur = mtmd.impl.c.ggml_permute(ctx0, cur, 1, 2, 0, 3);
+    cur = mtmd.impl.c.ggml_cont_2d(ctx0, cur, idim, (ow + 1) * oh);
 
     // project to LLM hidden size
     cur = g.buildMm(model.mm_model_proj, cur);
-    if (model.mm_model_proj_b != null) cur = c.ggml_add(ctx0, cur, model.mm_model_proj_b);
+    if (model.mm_model_proj_b != null) cur = mtmd.impl.c.ggml_add(ctx0, cur, model.mm_model_proj_b);
 
     // wrap with begin/end tokens
-    cur = c.ggml_concat(ctx0, c.ggml_reshape_2d(ctx0, model.mm_img_begin, ne(model.mm_img_begin, 0), 1), cur, 1);
-    cur = c.ggml_concat(ctx0, cur, c.ggml_reshape_2d(ctx0, model.mm_img_end, ne(model.mm_img_end, 0), 1), 1);
+    cur = mtmd.impl.c.ggml_concat(ctx0, mtmd.impl.c.ggml_reshape_2d(ctx0, model.mm_img_begin, mtmd.graph.ne(model.mm_img_begin, 0), 1), cur, 1);
+    cur = mtmd.impl.c.ggml_concat(ctx0, cur, mtmd.impl.c.ggml_reshape_2d(ctx0, model.mm_img_end, mtmd.graph.ne(model.mm_img_end, 0), 1), 1);
 
     cur = g.buildNorm(cur, model.mm_post_norm_w, null, .rms, g.eps, -1);
 
-    c.ggml_build_forward_expand(g.gf, cur);
+    mtmd.impl.c.ggml_build_forward_expand(g.gf, cur);
     return g.gf;
 }
 

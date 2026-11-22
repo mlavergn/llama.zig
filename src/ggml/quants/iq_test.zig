@@ -18,16 +18,7 @@
 //! `test-backend-ops` before anything caught it.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const blocks = @import("blocks.zig");
-const quantize = @import("../quantize.zig");
-const dq = @import("iq_dequant.zig");
-const iq1 = @import("iq1.zig");
-const iq2 = @import("iq2.zig");
-const iq3 = @import("iq3.zig");
-const iq4 = @import("iq4.zig");
-const t = @import("testing.zig");
-const c = impl.c;
+const ggml = @import("../module.zig");
 
 const ChunkFn = *const fn ([*c]const f32, ?*anyopaque, i64, i64, [*c]const f32) callconv(.c) usize;
 const DeqFn = *const fn (?*const anyopaque, [*c]f32, i64) callconv(.c) void;
@@ -36,7 +27,7 @@ const DeqFn = *const fn (?*const anyopaque, [*c]f32, i64) callconv(.c) void;
 const Case = struct {
     name: []const u8,
     /// The ggml type, so the codebook can be initialised.
-    type: c.enum_ggml_type,
+    type: ggml.impl.c.enum_ggml_type,
     /// `quantize_row_*_ref`, wrapped to a common signature. Null when the C
     /// has none -- the imatrix-only formats.
     ref: ?*const fn ([*c]const f32, ?*anyopaque, i64) void = null,
@@ -59,48 +50,48 @@ fn wrapDeq(comptime f: anytype) DeqFn {
 const cases = [_]Case{
     .{
         .name = "IQ2_XXS",
-        .type = c.GGML_TYPE_IQ2_XXS,
-        .chunk = iq2.quantize_iq2_xxs,
-        .dequant = wrapDeq(dq.dequantize_row_iq2_xxs),
+        .type = ggml.impl.c.GGML_TYPE_IQ2_XXS,
+        .chunk = ggml.quants.iq2.quantize_iq2_xxs,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_xxs),
     },
     .{
         .name = "IQ2_XS",
-        .type = c.GGML_TYPE_IQ2_XS,
-        .chunk = iq2.quantize_iq2_xs,
-        .dequant = wrapDeq(dq.dequantize_row_iq2_xs),
+        .type = ggml.impl.c.GGML_TYPE_IQ2_XS,
+        .chunk = ggml.quants.iq2.quantize_iq2_xs,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_xs),
     },
     .{
         .name = "IQ2_S",
-        .type = c.GGML_TYPE_IQ2_S,
-        .ref = wrapRef(iq2.quantize_row_iq2_s_ref),
-        .chunk = iq2.quantize_iq2_s,
-        .dequant = wrapDeq(dq.dequantize_row_iq2_s),
+        .type = ggml.impl.c.GGML_TYPE_IQ2_S,
+        .ref = wrapRef(ggml.quants.iq2.quantize_row_iq2_s_ref),
+        .chunk = ggml.quants.iq2.quantize_iq2_s,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq2_s),
     },
     .{
         .name = "IQ3_XXS",
-        .type = c.GGML_TYPE_IQ3_XXS,
-        .ref = wrapRef(iq3.quantize_row_iq3_xxs_ref),
-        .chunk = iq3.quantize_iq3_xxs,
-        .dequant = wrapDeq(dq.dequantize_row_iq3_xxs),
+        .type = ggml.impl.c.GGML_TYPE_IQ3_XXS,
+        .ref = wrapRef(ggml.quants.iq3.quantize_row_iq3_xxs_ref),
+        .chunk = ggml.quants.iq3.quantize_iq3_xxs,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq3_xxs),
     },
     .{
         .name = "IQ3_S",
-        .type = c.GGML_TYPE_IQ3_S,
-        .ref = wrapRef(iq3.quantize_row_iq3_s_ref),
-        .chunk = iq3.quantize_iq3_s,
-        .dequant = wrapDeq(dq.dequantize_row_iq3_s),
+        .type = ggml.impl.c.GGML_TYPE_IQ3_S,
+        .ref = wrapRef(ggml.quants.iq3.quantize_row_iq3_s_ref),
+        .chunk = ggml.quants.iq3.quantize_iq3_s,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq3_s),
     },
     .{
         .name = "IQ1_S",
-        .type = c.GGML_TYPE_IQ1_S,
-        .chunk = iq1.quantize_iq1_s,
-        .dequant = wrapDeq(dq.dequantize_row_iq1_s),
+        .type = ggml.impl.c.GGML_TYPE_IQ1_S,
+        .chunk = ggml.quants.iq1.quantize_iq1_s,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq1_s),
     },
     .{
         .name = "IQ1_M",
-        .type = c.GGML_TYPE_IQ1_M,
-        .chunk = iq1.quantize_iq1_m,
-        .dequant = wrapDeq(dq.dequantize_row_iq1_m),
+        .type = ggml.impl.c.GGML_TYPE_IQ1_M,
+        .chunk = ggml.quants.iq1.quantize_iq1_m,
+        .dequant = wrapDeq(ggml.quants.iq_dequant.dequantize_row_iq1_m),
     },
 };
 
@@ -110,8 +101,8 @@ test "every i-quant matches the C on every pattern" {
         // rather than the per-family initialiser is the point: it dispatches
         // on type, where calling `iq2xs_init_impl` directly aborts for the
         // 3-bit formats.
-        quantize.ggml_quantize_init(case.type);
-        for (t.all_patterns) |pattern| {
+        ggml.quantize.ggml_quantize_init(case.type);
+        for (ggml.quants.testing.all_patterns) |pattern| {
             // **Skipped where the C's own answer is unspecified.**
             //
             // The 1-bit formats solve their split exactly: sort the block,
@@ -138,24 +129,24 @@ test "every i-quant matches the C on every pattern" {
                 (pattern == .constant or pattern == .outlier);
             if (ties_unspecified) continue;
 
-            const g = t.find(case.name, pattern);
+            const g = ggml.quants.testing.find(case.name, pattern);
 
-            var src: [t.n_elem]f32 = undefined;
-            var imatrix: [t.n_per_row]f32 = undefined;
-            t.fillSrc(pattern, &src);
-            t.fillImatrix(&imatrix);
+            var src: [ggml.quants.testing.n_elem]f32 = undefined;
+            var imatrix: [ggml.quants.golden.n_per_row]f32 = undefined;
+            ggml.quants.testing.fillSrc(pattern, &src);
+            ggml.quants.testing.fillImatrix(&imatrix);
 
-            var buf: [t.n_elem * 4]u8 align(16) = undefined;
+            var buf: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
             // A *separate* buffer for the dequantizer's input. Slicing `buf`
             // would have worked right up until the chunk checks below
             // overwrite it, which is exactly what happened the first time.
-            var deq_src: [t.n_elem * 4]u8 align(16) = undefined;
+            var deq_src: [ggml.quants.testing.n_elem * 4]u8 align(16) = undefined;
             var deq_len: usize = 0;
 
             if (case.ref) |ref| {
                 @memset(&buf, 0);
-                ref(&src, &buf, @intCast(t.n_elem));
-                const used = g.row_size * t.n_rows;
+                ref(&src, &buf, @intCast(ggml.quants.testing.n_elem));
+                const used = g.row_size * ggml.quants.golden.n_rows;
                 std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
                     std.debug.print("{s}: ref differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
@@ -166,7 +157,7 @@ test "every i-quant matches the C on every pattern" {
 
             if (g.chunk) |want| {
                 @memset(&buf, 0);
-                const n = case.chunk(&src, &buf, t.n_rows, t.n_per_row, null);
+                const n = case.chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, null);
                 std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                     std.debug.print("{s}: chunk differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
@@ -175,7 +166,7 @@ test "every i-quant matches the C on every pattern" {
 
             if (g.chunk_imatrix) |want| {
                 @memset(&buf, 0);
-                const n = case.chunk(&src, &buf, t.n_rows, t.n_per_row, &imatrix);
+                const n = case.chunk(&src, &buf, ggml.quants.golden.n_rows, ggml.quants.golden.n_per_row, &imatrix);
                 std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                     std.debug.print("{s}: chunk+imatrix differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
@@ -187,10 +178,10 @@ test "every i-quant matches the C on every pattern" {
             }
 
             if (g.deq) |want| {
-                var out: [t.n_elem]f32 = undefined;
+                var out: [ggml.quants.testing.n_elem]f32 = undefined;
                 @memset(&out, 0);
                 std.debug.assert(deq_len > 0);
-                case.dequant(@ptrCast(&deq_src), &out, @intCast(t.n_elem));
+                case.dequant(@ptrCast(&deq_src), &out, @intCast(ggml.quants.testing.n_elem));
                 std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
                     std.debug.print("{s}: dequantize differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;

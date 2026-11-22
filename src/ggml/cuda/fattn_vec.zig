@@ -10,13 +10,7 @@
 //! `ggml_cuda_flash_attn_ext_vec_case` is declared `extern` against.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-const common = @import("common.zig");
-const kernels = @import("kernels.zig");
-const fattn_common = @import("fattn_common.zig");
-
-const c = impl.c;
-const Tensor = c.ggml_tensor;
+const ggml = @import("../module.zig");
 
 /// Ports `ggml_cuda_fattn_vec_get_nthreads_host` (fattn-vec.cuh:4 @b1b770d90).
 fn getNthreadsHost(cc: c_int) c_int {
@@ -25,38 +19,38 @@ fn getNthreadsHost(cc: c_int) c_int {
 }
 
 /// The instance file's spelling of a K or V type.
-fn typeStem(comptime t: c.enum_ggml_type) []const u8 {
+fn typeStem(comptime t: ggml.impl.c.enum_ggml_type) []const u8 {
     return switch (t) {
-        c.GGML_TYPE_F16 => "f16",
-        c.GGML_TYPE_Q4_0 => "q4_0",
-        c.GGML_TYPE_Q4_1 => "q4_1",
-        c.GGML_TYPE_Q5_0 => "q5_0",
-        c.GGML_TYPE_Q5_1 => "q5_1",
-        c.GGML_TYPE_Q8_0 => "q8_0",
-        c.GGML_TYPE_BF16 => "bf16",
-        c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
+        ggml.impl.c.GGML_TYPE_F16 => "f16",
+        ggml.impl.c.GGML_TYPE_Q4_0 => "q4_0",
+        ggml.impl.c.GGML_TYPE_Q4_1 => "q4_1",
+        ggml.impl.c.GGML_TYPE_Q5_0 => "q5_0",
+        ggml.impl.c.GGML_TYPE_Q5_1 => "q5_1",
+        ggml.impl.c.GGML_TYPE_Q8_0 => "q8_0",
+        ggml.impl.c.GGML_TYPE_BF16 => "bf16",
+        ggml.impl.c.GGML_TYPE_F8_E4M3 => "f8_e4m3",
         else => @compileError("no fattn-vec instance for this type"),
     };
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_vec_case_impl` (fattn-vec.cuh:557 @b1b770d90).
-fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, comptime use_logit_softcap: bool, ctx: *common.Context, dst: *Tensor) void {
+fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type, comptime use_logit_softcap: bool, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const library = comptime std.fmt.comptimePrint("fattn-vec-instance-{s}-{s}", .{ typeStem(type_K), typeStem(type_V) });
-    const cc = common.info().devices[@intCast(common.getDevice())].cc;
+    const cc = ggml.cuda.common.info().devices[@intCast(ggml.cuda.common.getDevice())].cc;
 
     const nthreads = getNthreadsHost(cc);
-    const nwarps = @divTrunc(nthreads, common.warp_size);
-    const fattn_kernel = comptime kernels.get(library, kernels.tmpl("flash_attn_ext_vec", &.{
-        kernels.int(D),
-        kernels.int(cols_per_block),
-        kernels.ggmlType(type_K),
-        kernels.ggmlType(type_V),
-        kernels.boolean(use_logit_softcap),
+    const nwarps = @divTrunc(nthreads, ggml.cuda.common.warp_size);
+    const fattn_kernel = comptime ggml.cuda.kernels.get(library, ggml.cuda.kernels.tmpl("flash_attn_ext_vec", &.{
+        ggml.cuda.kernels.int(D),
+        ggml.cuda.kernels.int(cols_per_block),
+        ggml.cuda.kernels.ggmlType(type_K),
+        ggml.cuda.kernels.ggmlType(type_V),
+        ggml.cuda.kernels.boolean(use_logit_softcap),
     }));
-    const need_f16_K = type_K == c.GGML_TYPE_F16;
-    const need_f16_V = type_V == c.GGML_TYPE_F16;
+    const need_f16_K = type_K == ggml.impl.c.GGML_TYPE_F16;
+    const need_f16_V = type_V == ggml.impl.c.GGML_TYPE_F16;
     const nbytes_shared: usize = 0;
-    fattn_common.launchFattn(library, D, cols_per_block, 1, ctx, dst, .{
+    ggml.cuda.fattn_common.launchFattn(library, D, cols_per_block, 1, ctx, dst, .{
         .kernel = fattn_kernel,
         .nwarps = nwarps,
         .nbytes_shared = nbytes_shared,
@@ -69,11 +63,11 @@ fn vecCaseImpl(comptime D: comptime_int, comptime cols_per_block: comptime_int, 
 }
 
 /// Ports `ggml_cuda_flash_attn_ext_vec_case` (fattn-vec.cuh:570 @b1b770d90).
-pub fn vecCase(comptime D: comptime_int, comptime type_K: c.enum_ggml_type, comptime type_V: c.enum_ggml_type, ctx: *common.Context, dst: *Tensor) void {
+pub fn vecCase(comptime D: comptime_int, comptime type_K: ggml.impl.c.enum_ggml_type, comptime type_V: ggml.impl.c.enum_ggml_type, ctx: *ggml.cuda.common.Context, dst: *ggml.impl.c.ggml_tensor) void {
     const KQV = dst;
-    const Q = impl.one(Tensor, dst.src[0]);
+    const Q = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    const logit_softcap = impl.getOpParamsF32(KQV, 2);
+    const logit_softcap = ggml.impl.getOpParamsF32(KQV, 2);
 
     if (Q.ne[1] == 1) {
         const cols_per_block = 1;

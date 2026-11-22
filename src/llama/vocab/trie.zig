@@ -10,12 +10,10 @@
 //! lookups.
 
 const std = @import("std");
-const impl = @import("../impl.zig");
-
-const allocator = impl.allocator;
+const llama = @import("../module.zig");
 
 fn oom() noreturn {
-    impl.abort("llama-vocab.cpp", 0, "out of memory");
+    llama.impl.abort("llama-vocab.cpp", 0, "out of memory");
 }
 
 /// Ports `naive_trie` (llama-vocab.cpp:29 @b1b770d90). Walking iteratively is
@@ -36,14 +34,14 @@ pub const Trie = struct {
     /// Return: a trie holding only its root.
     pub fn init() Trie {
         var t: Trie = .{};
-        t.nodes.append(allocator, .{}) catch oom();
+        t.nodes.append(std.heap.c_allocator, .{}) catch oom();
         return t;
     }
 
     /// Return: nothing.
     pub fn deinit(self: *Trie) void {
-        self.nodes.deinit(allocator);
-        self.edges.deinit(allocator);
+        self.nodes.deinit(std.heap.c_allocator);
+        self.edges.deinit(std.heap.c_allocator);
     }
 
     fn edgeKey(node: Index, c: u8) u64 {
@@ -61,9 +59,9 @@ pub const Trie = struct {
     pub fn insert(self: *Trie, key: []const u8, value: i32) void {
         var node: Index = root;
         for (key) |c| {
-            const r = self.edges.getOrPut(allocator, edgeKey(node, c)) catch oom();
+            const r = self.edges.getOrPut(std.heap.c_allocator, edgeKey(node, c)) catch oom();
             if (!r.found_existing) {
-                self.nodes.append(allocator, .{}) catch oom();
+                self.nodes.append(std.heap.c_allocator, .{}) catch oom();
                 r.value_ptr.* = @intCast(self.nodes.items.len - 1);
             }
             node = r.value_ptr.*;

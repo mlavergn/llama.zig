@@ -12,25 +12,15 @@
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_gemma3n`'s `load_arch_hparams` (models/gemma3n.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
-    hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+    hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
     try self.loadSwaPattern(ml, 5, false, exc);
 
     hp.n_layer_kv_from_start = 20;
@@ -57,7 +47,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_gemma3n`'s `load_arch_tensors` (models/gemma3n.cpp:26 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
 
@@ -67,10 +57,10 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
-    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_not_required, exc);
+    self.output = try self.createTensor(.{ .tensor = .output, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_not_required, exc);
     // Without an output, the input token embedding is used.
     if (self.output == null) {
-        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, loader.tensor_duplicated, exc);
+        self.output = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, llama.loader.tensor_duplicated, exc);
     }
 
     self.altup_proj = try self.createTensor(.{ .tensor = .altup_proj, .suffix = "weight" }, &.{ l.n_embd, l.n_embd, n_altup - 1 }, 0, exc);
@@ -117,7 +107,7 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_gemma3n`'s `build_arch_graph` (models/gemma3n.cpp:83 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     const g: Graph = .{
         .model = model,
         .b = b,
@@ -131,16 +121,16 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
 /// Ports `gemma3n_view_2d_slice` (models/gemma3n.cpp:88 @b1b770d90): the 2D
 /// slice of a 3D tensor at `idx` along its third dimension.
-fn view2dSlice(ctx: *c.ggml_context, x: *Tensor, idx: c_int) *Tensor {
-    impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma3n.cpp", 89, "idx < (int) x->ne[2]");
-    return c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(c.ggml_element_size(x)))));
+fn view2dSlice(ctx: *llama.impl.c.ggml_context, x: *llama.impl.c.ggml_tensor, idx: c_int) *llama.impl.c.ggml_tensor {
+    llama.impl.assert(idx < @as(c_int, @intCast(x.ne[2])), "models/gemma3n.cpp", 89, "idx < (int) x->ne[2]");
+    return llama.impl.c.ggml_view_2d(ctx, x, x.ne[0], x.ne[1], llama.impl.c.ggml_row_size(x.type, x.ne[0]), @intCast(idx * x.ne[0] * x.ne[1] * @as(i64, @intCast(llama.impl.c.ggml_element_size(x)))));
 }
 
 /// Ports `llama_model_gemma3n`'s `graph` (src/models/models.h:862 @b1b770d90): the
 /// builder and the constants its helpers share.
 const Graph = struct {
-    model: *const Model,
-    b: *const graph.Builder,
+    model: *const llama.model.Model,
+    b: *const llama.graph.Builder,
 
     n_embd_head: i64,
     n_embd_altup: i64,
@@ -164,7 +154,7 @@ const Graph = struct {
 
         // Important: do not normalize weights for raw embeddings input (i.e.
         // encoded image embeddings): `build_inp_embd` scales the token rows only.
-        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(n_embd));
+        var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbdScaled(model.tok_embd.?, stdlib.libm.sqrtfInt(n_embd));
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
@@ -172,8 +162,8 @@ const Graph = struct {
 
         const inp_attn = b.buildAttnInpKvIswa();
 
-        var inp_per_layer: *Tensor = self.buildInpPerLayer();
-        c.ggml_build_forward_expand(b.gf, inp_per_layer);
+        var inp_per_layer: *llama.impl.c.ggml_tensor = self.buildInpPerLayer();
+        llama.impl.c.ggml_build_forward_expand(b.gf, inp_per_layer);
 
         // inp_per_layer now has shape [n_embd_altup, n_tokens, n_layer].
         inp_per_layer = self.projectPerLayerInputs(inpL, inp_per_layer);
@@ -182,11 +172,11 @@ const Graph = struct {
         // concatenated along its last dimension.
         {
             const target_magnitude = self.calcMagnitude(inpL);
-            const inp_repeated: *Tensor = c.ggml_repeat_4d(ctx, inpL, n_embd, n_tokens, n_altup - 1, 1);
-            var altup_added: *Tensor = c.ggml_mul_mat(ctx, model.altup_proj, inp_repeated); // [n_embd, n_tokens, n_altup - 1]
+            const inp_repeated: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_repeat_4d(ctx, inpL, n_embd, n_tokens, n_altup - 1, 1);
+            var altup_added: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, model.altup_proj, inp_repeated); // [n_embd, n_tokens, n_altup - 1]
             const new_magnitude = self.calcMagnitude(altup_added);
-            altup_added = c.ggml_div(ctx, c.ggml_mul(ctx, altup_added, target_magnitude), new_magnitude);
-            inpL = c.ggml_concat(ctx, inpL, altup_added, 2); // [n_embd, n_tokens, n_altup]
+            altup_added = llama.impl.c.ggml_div(ctx, llama.impl.c.ggml_mul(ctx, altup_added, target_magnitude), new_magnitude);
+            inpL = llama.impl.c.ggml_concat(ctx, inpL, altup_added, 2); // [n_embd, n_tokens, n_altup]
             b.cb(inpL, "inp_stacked", -1);
         }
         // inpL now has shape [n_embd, n_tokens, n_altup].
@@ -197,7 +187,7 @@ const Graph = struct {
             // This block closely resembles Gemma3p5DecoderLayer in the
             // Python code.
 
-            var cur: *Tensor = inpL; // [n_embd, n_tokens, n_altup]
+            var cur: *llama.impl.c.ggml_tensor = inpL; // [n_embd, n_tokens, n_altup]
             const predictions = self.altupPredict(cur, il); // [n_embd, n_tokens, n_altup]
 
             // The predicted value goes through self-attention and LAuReL.
@@ -221,7 +211,7 @@ const Graph = struct {
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
                 Kcur = b.buildNorm(Kcur, layer.attn_k_norm, null, .rms, il);
-                Vcur = c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
+                Vcur = llama.impl.c.ggml_rms_norm(ctx, Vcur, hp.f_norm_rms_eps);
 
                 b.cb(Qcur, "Qcur_normed", il);
                 b.cb(Kcur, "Kcur_normed", il);
@@ -237,16 +227,16 @@ const Graph = struct {
                 cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, hp.f_attention_scale, il);
             } else {
                 // Reuse the KV cache of earlier layers.
-                var Qcur: *Tensor = undefined;
+                var Qcur: *llama.impl.c.ggml_tensor = undefined;
                 if (layer.wqkv) |wqkv| {
                     const qkv = b.buildLoraMm(wqkv, cur, null);
                     const q_dim = self.n_embd_head * b.n_head;
-                    Qcur = c.ggml_cont(ctx, c.ggml_view_2d(ctx, qkv, q_dim, n_tokens, qkv.nb[1], 0));
+                    Qcur = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_view_2d(ctx, qkv, q_dim, n_tokens, qkv.nb[1], 0));
                 } else {
                     Qcur = b.buildLoraMm(layer.wq.?, cur, null);
                 }
                 b.cb(Qcur, "Qcur", il);
-                Qcur = c.ggml_reshape_3d(ctx, Qcur, self.n_embd_head, b.n_head, n_tokens);
+                Qcur = llama.impl.c.ggml_reshape_3d(ctx, Qcur, self.n_embd_head, b.n_head, n_tokens);
 
                 Qcur = b.buildNorm(Qcur, layer.attn_q_norm, null, .rms, il);
                 b.cb(Qcur, "Qcur_normed", il);
@@ -259,10 +249,10 @@ const Graph = struct {
             cur = b.buildNorm(cur, layer.attn_post_norm, null, .rms, il);
             b.cb(cur, "attn_post_norm", il);
 
-            cur = c.ggml_add(ctx, cur, active_prediction); // [n_embd, n_tokens]
+            cur = llama.impl.c.ggml_add(ctx, cur, active_prediction); // [n_embd, n_tokens]
             b.cb(cur, "attn_gated", il);
 
-            const attn_laurel: *Tensor = c.ggml_scale(ctx, c.ggml_add(ctx, cur, laurel_out), 1.0 / libm.sqrtf(2.0)); // [n_embd, n_tokens]
+            const attn_laurel: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_add(ctx, cur, laurel_out), 1.0 / @sqrt(@as(f32, 2.0))); // [n_embd, n_tokens]
             b.cb(attn_laurel, "attn_laurel", il);
 
             cur = b.buildNorm(attn_laurel, layer.ffn_norm, null, .rms, il);
@@ -277,30 +267,30 @@ const Graph = struct {
                     // Apply activation sparsity.
                     gate_proj = self.gaussianTopk(gate_proj);
                 }
-                gate_proj = c.ggml_gelu(ctx, gate_proj);
+                gate_proj = llama.impl.c.ggml_gelu(ctx, gate_proj);
 
-                cur = c.ggml_mul(ctx, up_proj, gate_proj);
+                cur = llama.impl.c.ggml_mul(ctx, up_proj, gate_proj);
                 cur = b.buildLoraMm(layer.ffn_down.?, cur, null);
                 b.cb(cur, "ffn_out", il);
             }
             cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, -1);
             b.cb(cur, "ffn_post_norm", il);
 
-            const attn_ffw_laurel_gated: *Tensor = c.ggml_add(ctx, cur, attn_laurel); // [n_embd, n_tokens]
+            const attn_ffw_laurel_gated: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, attn_laurel); // [n_embd, n_tokens]
             b.cb(attn_ffw_laurel_gated, "attn_ffw_laurel_gated", il);
 
             var corrected = self.altupCorrect(predictions, attn_ffw_laurel_gated, il); // [n_embd, n_tokens, n_altup]
 
-            var first_prediction: *Tensor = undefined; // [n_embd, n_tokens]
+            var first_prediction: *llama.impl.c.ggml_tensor = undefined; // [n_embd, n_tokens]
             {
                 first_prediction = view2dSlice(ctx, corrected, self.i_altup_act); // [n_embd, n_tokens]
-                first_prediction = c.ggml_mul(ctx, first_prediction, layer.altup_correct_scale);
+                first_prediction = llama.impl.c.ggml_mul(ctx, first_prediction, layer.altup_correct_scale);
                 first_prediction = b.buildLoraMm(layer.per_layer_inp_gate.?, first_prediction, null);
-                first_prediction = c.ggml_gelu(ctx, first_prediction); // [n_embd_altup, n_tokens]
+                first_prediction = llama.impl.c.ggml_gelu(ctx, first_prediction); // [n_embd_altup, n_tokens]
                 b.cb(first_prediction, "first_prediction_gated", il);
 
                 const inp_this_layer = view2dSlice(ctx, inp_per_layer, il); // [n_embd_altup, n_tokens]
-                first_prediction = c.ggml_mul(ctx, first_prediction, inp_this_layer); // [n_embd_altup, n_tokens]
+                first_prediction = llama.impl.c.ggml_mul(ctx, first_prediction, inp_this_layer); // [n_embd_altup, n_tokens]
                 b.cb(first_prediction, "first_prediction_scaled", il);
 
                 first_prediction = b.buildLoraMm(layer.per_layer_proj.?, first_prediction, null); // [n_embd, n_tokens]
@@ -311,9 +301,9 @@ const Graph = struct {
             // `corrected_predictions[1:] += first_prediction`.
             {
                 const slice_first = view2dSlice(ctx, corrected, 0);
-                const slice_rest: *Tensor = c.ggml_view_3d(ctx, corrected, n_embd, n_tokens, n_altup - 1, c.ggml_row_size(corrected.type, n_embd), c.ggml_row_size(corrected.type, n_embd * n_tokens), @intCast(n_embd * n_tokens * @as(i64, @intCast(c.ggml_element_size(corrected)))));
-                const tmp: *Tensor = c.ggml_add(ctx, slice_rest, first_prediction); // [n_embd, n_tokens, n_altup - 1]
-                corrected = c.ggml_concat(ctx, slice_first, tmp, 2); // [n_embd, n_tokens, n_altup]
+                const slice_rest: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, corrected, n_embd, n_tokens, n_altup - 1, llama.impl.c.ggml_row_size(corrected.type, n_embd), llama.impl.c.ggml_row_size(corrected.type, n_embd * n_tokens), @intCast(n_embd * n_tokens * @as(i64, @intCast(llama.impl.c.ggml_element_size(corrected)))));
+                const tmp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, slice_rest, first_prediction); // [n_embd, n_tokens, n_altup - 1]
+                corrected = llama.impl.c.ggml_concat(ctx, slice_first, tmp, 2); // [n_embd, n_tokens, n_altup]
             }
             cur = corrected; // [n_embd, n_tokens, n_altup]
             cur = b.buildCvec(cur, il);
@@ -328,19 +318,19 @@ const Graph = struct {
         {
             const target_magnitude = self.calcMagnitude(view2dSlice(ctx, cur, self.i_altup_act)); // [n_embd, n_tokens]
             // A view that skips the first slice (the active altup).
-            const alt_slice: *Tensor = c.ggml_view_3d(ctx, cur, n_embd, n_tokens, n_altup - 1, c.ggml_row_size(cur.type, n_embd), c.ggml_row_size(cur.type, n_embd * n_tokens), @intCast(n_embd * n_tokens * @as(i64, @intCast(c.ggml_element_size(cur)))));
-            var altup_unembd: *Tensor = c.ggml_mul_mat(ctx, model.altup_unembd_proj, alt_slice); // [n_embd, n_tokens, n_altup - 1]
+            const alt_slice: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_3d(ctx, cur, n_embd, n_tokens, n_altup - 1, llama.impl.c.ggml_row_size(cur.type, n_embd), llama.impl.c.ggml_row_size(cur.type, n_embd * n_tokens), @intCast(n_embd * n_tokens * @as(i64, @intCast(llama.impl.c.ggml_element_size(cur)))));
+            var altup_unembd: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, model.altup_unembd_proj, alt_slice); // [n_embd, n_tokens, n_altup - 1]
             const new_magnitude = self.calcMagnitude(altup_unembd);
-            altup_unembd = c.ggml_div(ctx, c.ggml_mul(ctx, altup_unembd, target_magnitude), new_magnitude);
+            altup_unembd = llama.impl.c.ggml_div(ctx, llama.impl.c.ggml_mul(ctx, altup_unembd, target_magnitude), new_magnitude);
             b.cb(altup_unembd, "altup_unembd", -1);
 
             // Equivalent to `torch.mean(hidden_states, dim=0)`.
             cur = view2dSlice(ctx, cur, 0); // [n_embd, n_tokens]
             var i: c_int = 0;
             while (i < n_altup - 1) : (i += 1) {
-                cur = c.ggml_add(ctx, cur, view2dSlice(ctx, altup_unembd, i));
+                cur = llama.impl.c.ggml_add(ctx, cur, view2dSlice(ctx, altup_unembd, i));
             }
-            cur = c.ggml_scale(ctx, cur, 1.0 / @as(f32, @floatFromInt(n_altup))); // [n_embd, n_tokens]
+            cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / @as(f32, @floatFromInt(n_altup))); // [n_embd, n_tokens]
             b.cb(cur, "unembd_merged", -1);
         }
         // cur now has shape [n_embd, n_tokens].
@@ -349,7 +339,7 @@ const Graph = struct {
         {
             // Skip computing output for unused tokens.
             const inp_out_ids = b.buildInpOutIds();
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
         }
         cur = b.buildNorm(cur, model.output_norm, null, .rms, -1);
 
@@ -360,9 +350,9 @@ const Graph = struct {
 
         {
             // Final logit soft-capping.
-            cur = c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
-            cur = c.ggml_tanh(ctx, cur);
-            cur = c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
+            cur = llama.impl.c.ggml_scale(ctx, cur, 1.0 / hp.f_final_logit_softcapping);
+            cur = llama.impl.c.ggml_tanh(ctx, cur);
+            cur = llama.impl.c.ggml_scale(ctx, cur, hp.f_final_logit_softcapping);
         }
         b.cb(cur, "result_output", -1);
         b.res.t_logits = cur;
@@ -370,9 +360,9 @@ const Graph = struct {
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `calc_magnitude`
     /// (models/gemma3n.cpp:312 @b1b770d90).
-    fn calcMagnitude(self: *const Graph, x: *Tensor) *Tensor {
+    fn calcMagnitude(self: *const Graph, x: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
         const ctx = self.b.ctx0;
-        return c.ggml_sqrt(ctx, c.ggml_sum_rows(ctx, c.ggml_sqr(ctx, x)));
+        return llama.impl.c.ggml_sqrt(ctx, llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_sqr(ctx, x)));
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `build_inp_per_layer`
@@ -381,23 +371,23 @@ const Graph = struct {
     /// token id 0, the padding row the multimodal path below reads.
     ///
     /// Return: `[n_embd_altup, n_layer, n_tokens]`.
-    fn buildInpPerLayer(self: *const Graph) *Tensor {
+    fn buildInpPerLayer(self: *const Graph) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const model = self.model;
-        var inp_per_layer: *Tensor = undefined;
-        const tok_embd_scale = libm.sqrtfInt(self.n_embd_altup);
+        var inp_per_layer: *llama.impl.c.ggml_tensor = undefined;
+        const tok_embd_scale = stdlib.libm.sqrtfInt(self.n_embd_altup);
         if (b.ubatch.token != null) {
-            const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma3n.cpp", 319, "out of memory");
+            const inp = std.heap.c_allocator.create(llama.graph.InpEmbd) catch llama.impl.abort("models/gemma3n.cpp", 319, "out of memory");
             inp.* = .{ .n_embd = b.n_embd };
-            inp.tokens = c.ggml_new_tensor_1d(ctx, c.GGML_TYPE_I32, b.ubatch.n_tokens);
-            c.ggml_set_input(inp.tokens);
+            inp.tokens = llama.impl.c.ggml_new_tensor_1d(ctx, llama.impl.c.GGML_TYPE_I32, b.ubatch.n_tokens);
+            llama.impl.c.ggml_set_input(inp.tokens);
             b.res.t_inp_tokens = inp.tokens;
-            inp_per_layer = c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.tokens);
-            inp_per_layer = c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_altup, b.n_layer, b.n_tokens);
-            inp_per_layer = c.ggml_scale(ctx, inp_per_layer, tok_embd_scale);
+            inp_per_layer = llama.impl.c.ggml_get_rows(ctx, model.per_layer_tok_embd, inp.tokens);
+            inp_per_layer = llama.impl.c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_altup, b.n_layer, b.n_tokens);
+            inp_per_layer = llama.impl.c.ggml_scale(ctx, inp_per_layer, tok_embd_scale);
             b.cb(inp_per_layer, "inp_per_layer_selected", -1);
-            _ = b.res.addInput(graph.InpEmbd, inp);
+            _ = b.res.addInput(llama.graph.InpEmbd, inp);
         } else {
             // The multimodal embedding path uses the padding token's (ID 0)
             // embedding.
@@ -406,12 +396,12 @@ const Graph = struct {
             const embd_size = model.per_layer_tok_embd.?.ne[0]; // n_embd_altup * n_layer
 
             // Extract and dequantize the padding token's embedding (row 0).
-            const padding: *Tensor = c.ggml_view_1d(ctx, model.per_layer_tok_embd, embd_size, 0);
-            inp_per_layer = c.ggml_cast(ctx, padding, c.GGML_TYPE_F32);
-            inp_per_layer = c.ggml_scale(ctx, inp_per_layer, tok_embd_scale);
+            const padding: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_view_1d(ctx, model.per_layer_tok_embd, embd_size, 0);
+            inp_per_layer = llama.impl.c.ggml_cast(ctx, padding, llama.impl.c.GGML_TYPE_F32);
+            inp_per_layer = llama.impl.c.ggml_scale(ctx, inp_per_layer, tok_embd_scale);
 
             // Reshape to [n_embd_altup, n_layer, 1].
-            inp_per_layer = c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_altup, b.n_layer, 1);
+            inp_per_layer = llama.impl.c.ggml_reshape_3d(ctx, inp_per_layer, self.n_embd_altup, b.n_layer, 1);
             b.cb(inp_per_layer, "inp_per_layer_multimodal", -1);
         }
         return inp_per_layer;
@@ -423,38 +413,38 @@ const Graph = struct {
     /// the last dimension.
     ///
     /// Return: `[n_embd_altup, n_tokens, n_layer]`.
-    fn projectPerLayerInputs(self: *const Graph, inp_batch: *Tensor, inp_per_layer_: *Tensor) *Tensor {
+    fn projectPerLayerInputs(self: *const Graph, inp_batch: *llama.impl.c.ggml_tensor, inp_per_layer_: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
-        const per_layer_projection_scale = 1.0 / libm.sqrtfInt(b.n_embd);
-        const per_layer_input_scale = 1.0 / libm.sqrtf(2.0);
+        const per_layer_projection_scale = 1.0 / stdlib.libm.sqrtfInt(b.n_embd);
+        const per_layer_input_scale = 1.0 / @sqrt(@as(f32, 2.0));
 
-        var per_layer_proj: *Tensor = c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
-        per_layer_proj = c.ggml_scale(ctx, per_layer_proj, per_layer_projection_scale);
-        per_layer_proj = c.ggml_reshape_3d(ctx, per_layer_proj, self.n_embd_altup, b.n_layer, b.n_tokens);
+        var per_layer_proj: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
+        per_layer_proj = llama.impl.c.ggml_scale(ctx, per_layer_proj, per_layer_projection_scale);
+        per_layer_proj = llama.impl.c.ggml_reshape_3d(ctx, per_layer_proj, self.n_embd_altup, b.n_layer, b.n_tokens);
 
         per_layer_proj = b.buildNorm(per_layer_proj, self.model.per_layer_proj_norm, null, .rms, -1);
         b.cb(per_layer_proj, "per_layer_proj", -1);
 
-        var inp_per_layer: *Tensor = c.ggml_add(ctx, per_layer_proj, inp_per_layer_);
-        inp_per_layer = c.ggml_scale(ctx, inp_per_layer, per_layer_input_scale);
+        var inp_per_layer: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, per_layer_proj, inp_per_layer_);
+        inp_per_layer = llama.impl.c.ggml_scale(ctx, inp_per_layer, per_layer_input_scale);
         b.cb(inp_per_layer, "inp_per_layer", -1);
 
         // Permute to [n_embd_altup, n_tokens, n_layer].
-        inp_per_layer = c.ggml_cont(ctx, c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3));
+        inp_per_layer = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, inp_per_layer, 0, 2, 1, 3));
         return inp_per_layer;
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `laurel` (models/gemma3n.cpp:375
     /// @b1b770d90).
-    fn laurel(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
+    fn laurel(self: *const Graph, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const layer = &self.model.layers[@intCast(il)];
         var tmp = cur;
         tmp = b.buildLoraMm(layer.laurel_l.?, tmp, null);
         tmp = b.buildLoraMm(layer.laurel_r.?, tmp, null);
         tmp = b.buildNorm(tmp, layer.laurel_post_norm, null, .rms, il);
-        tmp = c.ggml_add(b.ctx0, tmp, cur);
+        tmp = llama.impl.c.ggml_add(b.ctx0, tmp, cur);
         b.cb(tmp, "laurel_out", il);
         return tmp;
     }
@@ -463,12 +453,12 @@ const Graph = struct {
     /// (models/gemma3n.cpp:387 @b1b770d90).
     ///
     /// Return: `[n_embd, n_tokens]`, as `x`.
-    fn gaussianTopk(self: *const Graph, x: *Tensor) *Tensor {
+    fn gaussianTopk(self: *const Graph, x: *llama.impl.c.ggml_tensor) *llama.impl.c.ggml_tensor {
         const ctx = self.b.ctx0;
-        const mean: *Tensor = c.ggml_mean(ctx, x);
-        const std_: *Tensor = c.ggml_sqrt(ctx, c.ggml_scale(ctx, c.ggml_sum_rows(ctx, c.ggml_sqr(ctx, c.ggml_sub(ctx, x, mean))), 1.0 / @as(f32, @floatFromInt(x.ne[0] - 1))));
-        const cutoff_x: *Tensor = c.ggml_add(ctx, mean, c.ggml_scale(ctx, std_, self.f_sparsity_std_mul));
-        return c.ggml_relu(ctx, c.ggml_sub(ctx, x, cutoff_x));
+        const mean: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mean(ctx, x);
+        const std_: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sqrt(ctx, llama.impl.c.ggml_scale(ctx, llama.impl.c.ggml_sum_rows(ctx, llama.impl.c.ggml_sqr(ctx, llama.impl.c.ggml_sub(ctx, x, mean))), 1.0 / @as(f32, @floatFromInt(x.ne[0] - 1))));
+        const cutoff_x: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, mean, llama.impl.c.ggml_scale(ctx, std_, self.f_sparsity_std_mul));
+        return llama.impl.c.ggml_relu(ctx, llama.impl.c.ggml_sub(ctx, x, cutoff_x));
     }
 
     // AltUp.
@@ -478,24 +468,24 @@ const Graph = struct {
     /// `compute_router_modalities()`.
     ///
     /// Return: `[n_altup, n_tokens]`, from `x` `[n_embd, n_tokens]`.
-    fn altupComputeRouterModalities(self: *const Graph, x: *Tensor, il: c_int) *Tensor {
+    fn altupComputeRouterModalities(self: *const Graph, x: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const layer = &self.model.layers[@intCast(il)];
         var router_inputs = b.buildNorm(x, layer.altup_router_norm, null, .rms, il);
 
         // router_input_scale
-        router_inputs = c.ggml_scale(ctx, router_inputs, 1.0 / @as(f32, @floatFromInt(b.n_embd)));
+        router_inputs = llama.impl.c.ggml_scale(ctx, router_inputs, 1.0 / @as(f32, @floatFromInt(b.n_embd)));
 
-        const output: *Tensor = c.ggml_mul_mat(ctx, layer.altup_router, router_inputs);
-        return c.ggml_tanh(ctx, output); // [n_altup, n_tokens]
+        const output: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, layer.altup_router, router_inputs);
+        return llama.impl.c.ggml_tanh(ctx, output); // [n_altup, n_tokens]
     }
 
     /// Ports `llama_model_gemma3n`'s `graph`'s `altup_predict`
     /// (models/gemma3n.cpp:414 @b1b770d90).
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, as `cur`.
-    fn altupPredict(self: *const Graph, cur: *Tensor, il: c_int) *Tensor {
+    fn altupPredict(self: *const Graph, cur: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const layer = &self.model.layers[@intCast(il)];
@@ -508,15 +498,15 @@ const Graph = struct {
         b.cb(all_coefs, "all_coefs", il);
         // The first dimension has n_altup^2 elements; reshape it to 2D, for
         // a 3D tensor.
-        all_coefs = c.ggml_reshape_3d(ctx, all_coefs, n_altup, n_altup, b.n_tokens);
+        all_coefs = llama.impl.c.ggml_reshape_3d(ctx, all_coefs, n_altup, n_altup, b.n_tokens);
 
         // Permute to [n_altup, n_embd, n_tokens].
-        const cur_permuted: *Tensor = c.ggml_cont(ctx, c.ggml_permute(ctx, cur, 1, 2, 0, 3));
-        var predictions: *Tensor = c.ggml_mul_mat(ctx, cur_permuted, all_coefs); // [n_altup, n_embd, n_tokens]
+        const cur_permuted: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, cur, 1, 2, 0, 3));
+        var predictions: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul_mat(ctx, cur_permuted, all_coefs); // [n_altup, n_embd, n_tokens]
 
         // The final shape must be cur's: [n_embd, n_tokens, n_altup].
-        predictions = c.ggml_cont(ctx, c.ggml_permute(ctx, predictions, 0, 2, 1, 3));
-        predictions = c.ggml_add(ctx, predictions, cur);
+        predictions = llama.impl.c.ggml_cont(ctx, llama.impl.c.ggml_permute(ctx, predictions, 0, 2, 1, 3));
+        predictions = llama.impl.c.ggml_add(ctx, predictions, cur);
         b.cb(predictions, "predictions", il);
 
         return predictions;
@@ -527,7 +517,7 @@ const Graph = struct {
     ///
     /// Return: `[n_embd, n_tokens, n_altup]`, from `predictions`
     /// `[n_embd, n_tokens, n_altup]` and `activated` `[n_embd, n_tokens]`.
-    fn altupCorrect(self: *const Graph, predictions: *Tensor, activated: *Tensor, il: c_int) *Tensor {
+    fn altupCorrect(self: *const Graph, predictions: *llama.impl.c.ggml_tensor, activated: *llama.impl.c.ggml_tensor, il: c_int) *llama.impl.c.ggml_tensor {
         const b = self.b;
         const ctx = b.ctx0;
         const layer = &self.model.layers[@intCast(il)];
@@ -535,18 +525,18 @@ const Graph = struct {
         b.cb(modalities, "modalities", il);
 
         const active_prediction = view2dSlice(ctx, predictions, self.i_altup_act);
-        var innovation: *Tensor = c.ggml_sub(ctx, activated, active_prediction); // [n_embd, n_tokens]
+        var innovation: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_sub(ctx, activated, active_prediction); // [n_embd, n_tokens]
         b.cb(innovation, "innovation", il);
 
         var all_coefs = b.buildLoraMm(layer.altup_correct_coef.?, modalities, null); // [n_altup, n_tokens]
-        all_coefs = c.ggml_scale_bias(ctx, all_coefs, 1.0, 1.0); // + 1.0
+        all_coefs = llama.impl.c.ggml_scale_bias(ctx, all_coefs, 1.0, 1.0); // + 1.0
         b.cb(all_coefs, "all_coefs", il);
-        all_coefs = c.ggml_transpose(ctx, all_coefs); // [n_tokens, n_altup]
-        all_coefs = c.ggml_cont_3d(ctx, all_coefs, 1, b.n_tokens, self.n_altup); // [1, n_tokens, n_altup]
+        all_coefs = llama.impl.c.ggml_transpose(ctx, all_coefs); // [n_tokens, n_altup]
+        all_coefs = llama.impl.c.ggml_cont_3d(ctx, all_coefs, 1, b.n_tokens, self.n_altup); // [1, n_tokens, n_altup]
 
-        innovation = c.ggml_repeat_4d(ctx, innovation, b.n_embd, b.n_tokens, self.n_altup, 1);
-        var corrected: *Tensor = c.ggml_mul(ctx, innovation, all_coefs); // [n_embd, n_tokens, n_altup]
-        corrected = c.ggml_add(ctx, corrected, predictions); // [n_embd, n_tokens, n_altup]
+        innovation = llama.impl.c.ggml_repeat_4d(ctx, innovation, b.n_embd, b.n_tokens, self.n_altup, 1);
+        var corrected: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_mul(ctx, innovation, all_coefs); // [n_embd, n_tokens, n_altup]
+        corrected = llama.impl.c.ggml_add(ctx, corrected, predictions); // [n_embd, n_tokens, n_altup]
         b.cb(corrected, "corrected", il);
 
         return corrected;

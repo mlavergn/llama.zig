@@ -42,16 +42,9 @@
 //! emits no code for it and it has no symbol. Recorded here so its absence is
 //! a decision rather than an oversight.
 
-const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const convert = @import("convert.zig");
-const common = @import("ops/common.zig");
-const defs = @import("defs.zig");
-const c = impl.c;
+const ggml = @import("../module.zig");
 
-const Tensor = defs.Tensor;
-const ComputeParams = defs.ComputeParams;
+const stdlib = @import("stdlib");
 
 // -----------------------------------------------------------------------------
 // libm
@@ -72,7 +65,7 @@ const ComputeParams = defs.ComputeParams;
 /// `op_softplus`, `op_floor`, `op_ceil`, `op_round` and `op_trunc`
 /// (unary-ops.cpp:3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 64, 68,
 /// 72, 76, 80, 84, 88, 92, 96 @b1b770d90); names and numbers pair up in order.
-const Op = enum {
+pub const Op = enum {
     abs,
     sgn,
     neg,
@@ -98,30 +91,30 @@ const Op = enum {
 
     inline fn apply(comptime op: Op, x: f32) f32 {
         return switch (op) {
-            .abs => libm.fabsf(x),
+            .abs => @abs(@as(f32, x)),
             .sgn => if (x > 0.0) 1.0 else (if (x < 0.0) -1.0 else 0.0),
             .neg => -x,
             .step => if (x > 0.0) 1.0 else 0.0,
-            .tanh => libm.tanhf(x),
-            .elu => if (x > 0.0) x else libm.expm1f(x),
+            .tanh => stdlib.libm.tanhf(x),
+            .elu => if (x > 0.0) x else stdlib.libm.expm1f(x),
             .relu => if (x > 0.0) x else 0.0,
-            .sigmoid => 1.0 / (1.0 + libm.expf(-x)),
-            .hardsigmoid => libm.fminf(1.0, libm.fmaxf(0.0, (x + 3.0) / 6.0)),
-            .exp => libm.expf(x),
-            .hardswish => x * libm.fminf(1.0, libm.fmaxf(0.0, (x + 3.0) / 6.0)),
+            .sigmoid => 1.0 / (1.0 + stdlib.libm.expf(-x)),
+            .hardsigmoid => stdlib.libm.fminf(1.0, stdlib.libm.fmaxf(0.0, (x + 3.0) / 6.0)),
+            .exp => stdlib.libm.expf(x),
+            .hardswish => x * stdlib.libm.fminf(1.0, stdlib.libm.fmaxf(0.0, (x + 3.0) / 6.0)),
             .sqr => x * x,
-            .sqrt => libm.sqrtf(x),
-            .sin => libm.sinf(x),
-            .cos => libm.cosf(x),
-            .log => libm.logf(x),
+            .sqrt => @sqrt(@as(f32, x)),
+            .sin => stdlib.libm.sinf(x),
+            .cos => stdlib.libm.cosf(x),
+            .log => stdlib.libm.logf(x),
             // Note this is `libm.expf(x) - 1`, *not* `libm.expm1f(x)`: the C spells it
             // out and the two differ near zero. `elu` above does use `expm1f`.
-            .expm1 => libm.expf(x) - 1.0,
-            .softplus => if (x > 20.0) x else libm.log1pf(libm.expf(x)),
-            .floor => libm.floorf(x),
-            .ceil => libm.ceilf(x),
-            .round => libm.roundf(x),
-            .trunc => libm.truncf(x),
+            .expm1 => stdlib.libm.expf(x) - 1.0,
+            .softplus => if (x > 20.0) x else stdlib.libm.log1pf(stdlib.libm.expf(x)),
+            .floor => @floor(@as(f32, x)),
+            .ceil => @ceil(@as(f32, x)),
+            .round => @round(@as(f32, x)),
+            .trunc => @trunc(@as(f32, x)),
         };
     }
 };
@@ -152,8 +145,8 @@ const Xielu = struct {
         if (x > 0.0) {
             return @mulAdd(f32, self.alpha_p * x, x, self.beta * x);
         }
-        const min_x_eps = libm.fminf(x, self.eps);
-        return @mulAdd(f32, libm.expm1f(min_x_eps) - x, self.alpha_n, self.beta * x);
+        const min_x_eps = stdlib.libm.fminf(x, self.eps);
+        return @mulAdd(f32, stdlib.libm.expm1f(min_x_eps) - x, self.alpha_n, self.beta * x);
     }
 };
 
@@ -178,7 +171,7 @@ inline fn vecUnaryOp(
 ) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
-        y[i] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[i])));
+        y[i] = ggml.cpu.ops.common.fromF32(Dst, op.apply(ggml.cpu.ops.common.toF32(Src0, x[i])));
     }
 }
 
@@ -190,22 +183,22 @@ fn applyUnaryOp(
     comptime op: Op,
     comptime Src0: type,
     comptime Dst: type,
-    params: *const ComputeParams,
-    dst: *Tensor,
+    params: *const ggml.cpu.defs.ComputeParams,
+    dst: *ggml.impl.c.ggml_tensor,
 ) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(
-        c.ggml_is_contiguous_rows(src0) and c.ggml_is_contiguous_rows(dst) and c.ggml_are_same_shape(src0, dst),
+    ggml.impl.assert(
+        ggml.impl.c.ggml_is_contiguous_rows(src0) and ggml.impl.c.ggml_is_contiguous_rows(dst) and ggml.impl.c.ggml_are_same_shape(src0, dst),
         "ggml_is_contiguous_rows(src0) && ggml_is_contiguous_rows(dst) && ggml_are_same_shape(src0, dst)",
     );
 
-    const l = defs.BinaryLocals.of(src0, src0, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src0, dst);
 
-    impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
-    impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
+    ggml.impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
+    ggml.impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
-    const ir0, const ir1 = common.getThreadRange(params, src0);
+    const ir0, const ir1 = ggml.cpu.ops.common.getThreadRange(params, src0);
 
     var ir = ir0;
     while (ir < ir1) : (ir += 1) {
@@ -227,28 +220,28 @@ fn applyUnaryOp(
 /// Five type pairs, in the C's order. The C prints to `stderr` with `fprintf`
 /// rather than going through `GGML_LOG_ERROR`, then aborts, and so does this:
 /// `impl.fprintfStderr`, which a log callback does not intercept.
-fn unaryOp(comptime op: Op, params: *const ComputeParams, dst: *Tensor) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn unaryOp(comptime op: Op, params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    const F16 = c.ggml_fp16_t;
-    const BF16 = c.ggml_bf16_t;
+    const F16 = ggml.impl.c.ggml_fp16_t;
+    const BF16 = ggml.impl.c.ggml_bf16_t;
 
-    if (src0.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32) {
+    if (src0.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOp(op, f32, f32, params, dst); // all f32
-    } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F16) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F16) {
         applyUnaryOp(op, F16, F16, params, dst); // all f16
-    } else if (src0.type == c.GGML_TYPE_BF16 and dst.type == c.GGML_TYPE_BF16) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and dst.type == ggml.impl.c.GGML_TYPE_BF16) {
         applyUnaryOp(op, BF16, BF16, params, dst); // all bf16
-    } else if (src0.type == c.GGML_TYPE_BF16 and dst.type == c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOp(op, BF16, f32, params, dst);
-    } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOp(op, F16, f32, params, dst);
     } else {
-        impl.fprintfStderr(
+        ggml.impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
-            .{ "unary_op", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type) },
+            .{ "unary_op", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type) },
         );
-        impl.abort("fatal error");
+        ggml.impl.abort("fatal error");
     }
 }
 
@@ -263,7 +256,7 @@ inline fn vecUnaryOpFunctor(
 ) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
-        y[i] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[i])));
+        y[i] = ggml.cpu.ops.common.fromF32(Dst, op.apply(ggml.cpu.ops.common.toF32(Src0, x[i])));
     }
 }
 
@@ -274,23 +267,23 @@ inline fn vecUnaryOpFunctor(
 fn applyUnaryOpFunctor(
     comptime Src0: type,
     comptime Dst: type,
-    params: *const ComputeParams,
-    dst: *Tensor,
+    params: *const ggml.cpu.defs.ComputeParams,
+    dst: *ggml.impl.c.ggml_tensor,
     op: anytype,
 ) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    impl.assert(
-        c.ggml_is_contiguous_1(src0) and c.ggml_is_contiguous_1(dst) and c.ggml_are_same_shape(src0, dst),
+    ggml.impl.assert(
+        ggml.impl.c.ggml_is_contiguous_1(src0) and ggml.impl.c.ggml_is_contiguous_1(dst) and ggml.impl.c.ggml_are_same_shape(src0, dst),
         "ggml_is_contiguous_1(src0) && ggml_is_contiguous_1(dst) && ggml_are_same_shape(src0, dst)",
     );
 
-    const l = defs.BinaryLocals.of(src0, src0, dst);
+    const l = ggml.cpu.defs.BinaryLocals.of(src0, src0, dst);
 
-    impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
-    impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
+    ggml.impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
+    ggml.impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
-    const ir0, const ir1 = common.getThreadRange(params, src0);
+    const ir0, const ir1 = ggml.cpu.ops.common.getThreadRange(params, src0);
 
     var ir = ir0;
     while (ir < ir1) : (ir += 1) {
@@ -308,28 +301,28 @@ fn applyUnaryOpFunctor(
 }
 
 /// Ports `unary_op_functor` (unary-ops.cpp:217 @b1b770d90).
-fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void {
-    const src0 = impl.one(Tensor, dst.src[0]);
+fn unaryOpFunctor(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor, op: anytype) void {
+    const src0 = ggml.impl.one(ggml.impl.c.ggml_tensor, dst.src[0]);
 
-    const F16 = c.ggml_fp16_t;
-    const BF16 = c.ggml_bf16_t;
+    const F16 = ggml.impl.c.ggml_fp16_t;
+    const BF16 = ggml.impl.c.ggml_bf16_t;
 
-    if (src0.type == c.GGML_TYPE_F32 and dst.type == c.GGML_TYPE_F32) {
+    if (src0.type == ggml.impl.c.GGML_TYPE_F32 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOpFunctor(f32, f32, params, dst, op); // all f32
-    } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F16) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F16) {
         applyUnaryOpFunctor(F16, F16, params, dst, op); // all f16
-    } else if (src0.type == c.GGML_TYPE_BF16 and dst.type == c.GGML_TYPE_BF16) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and dst.type == ggml.impl.c.GGML_TYPE_BF16) {
         applyUnaryOpFunctor(BF16, BF16, params, dst, op); // all bf16
-    } else if (src0.type == c.GGML_TYPE_BF16 and dst.type == c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_BF16 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOpFunctor(BF16, f32, params, dst, op);
-    } else if (src0.type == c.GGML_TYPE_F16 and dst.type == c.GGML_TYPE_F32) {
+    } else if (src0.type == ggml.impl.c.GGML_TYPE_F16 and dst.type == ggml.impl.c.GGML_TYPE_F32) {
         applyUnaryOpFunctor(F16, f32, params, dst, op);
     } else {
-        impl.fprintfStderr(
+        ggml.impl.fprintfStderr(
             "%s: unsupported types: dst: %s, src0: %s\n",
-            .{ "unary_op_functor", c.ggml_type_name(dst.type), c.ggml_type_name(src0.type) },
+            .{ "unary_op_functor", ggml.impl.c.ggml_type_name(dst.type), ggml.impl.c.ggml_type_name(src0.type) },
         );
-        impl.abort("fatal error");
+        ggml.impl.abort("fatal error");
     }
 }
 
@@ -343,26 +336,35 @@ fn unaryOpFunctor(params: *const ComputeParams, dst: *Tensor, op: anytype) void 
 
 comptime {
     for (@typeInfo(Op).@"enum".field_names) |name| {
-        const op: Op = @field(Op, name);
-        const S = struct {
-            fn f(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
-                unaryOp(op, params, dst);
-            }
-        };
-        @export(&S.f, .{ .name = "ggml_compute_forward_" ++ name, .linkage = .strong });
+        @export(entry(@field(Op, name)), .{ .name = "ggml_compute_forward_" ++ name, .linkage = .strong });
     }
+}
+
+/// `ggml_compute_forward_<op>`, the entry point exported above, for callers
+/// in Zig.
+///
+/// Parameters:
+///   op: the unary op.
+///
+/// Return: the one function exported under that name.
+pub fn entry(comptime op: Op) *const fn (*const ggml.cpu.defs.ComputeParams, *ggml.impl.c.ggml_tensor) callconv(.c) void {
+    return &struct {
+        fn f(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
+            unaryOp(op, params, dst);
+        }
+    }.f;
 }
 
 /// Ports `ggml_compute_forward_xielu` (unary-ops.cpp:325 @b1b770d90).
 ///
 /// The only entry point that reads `op_params`, and the only one that goes
 /// through the functor family. Note the C reads indices **1 to 4**, not 0 to 3.
-pub export fn ggml_compute_forward_xielu(params: *const ComputeParams, dst: *Tensor) callconv(.c) void {
+pub export fn ggml_compute_forward_xielu(params: *const ggml.cpu.defs.ComputeParams, dst: *ggml.impl.c.ggml_tensor) callconv(.c) void {
     const op: Xielu = .{
-        .alpha_n = impl.getOpParamsF32(dst, 1),
-        .alpha_p = impl.getOpParamsF32(dst, 2),
-        .beta = impl.getOpParamsF32(dst, 3),
-        .eps = impl.getOpParamsF32(dst, 4),
+        .alpha_n = ggml.impl.getOpParamsF32(dst, 1),
+        .alpha_p = ggml.impl.getOpParamsF32(dst, 2),
+        .beta = ggml.impl.getOpParamsF32(dst, 3),
+        .eps = ggml.impl.getOpParamsF32(dst, 4),
     };
     unaryOpFunctor(params, dst, op);
 }

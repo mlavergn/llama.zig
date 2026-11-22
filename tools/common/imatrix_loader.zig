@@ -14,10 +14,9 @@
 //! path's pairing map, also a `std::map`, is walked in that order too.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
 const c = @import("tools_h");
-const log = @import("log.zig");
-const file = @import("stdlib").file;
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
 /// (imatrix-loader.h:8, 9, 10 @b1b770d90).
@@ -118,9 +117,9 @@ const In = struct {
 /// Ports `common_imatrix_load_legacy` (imatrix-loader.cpp:10 @b1b770d90).
 fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
     const func = "common_imatrix_load_legacy";
-    const std_io = file.defaultIo();
-    const f = file.openIn(std_io, fname) catch {
-        log.err("%s: failed to open %s\n", .{ func, fname.ptr });
+    const std_io = stdlib.file.defaultIo();
+    const f = stdlib.file.openIn(std_io, fname) catch {
+        mod.log.err("%s: failed to open %s\n", .{ func, fname.ptr });
         return false;
     };
     defer f.close(std_io);
@@ -130,7 +129,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
 
     const n_entries = in.readInt(c_int);
     if (in.failed or n_entries < 1) {
-        log.err("%s: no data in file %s\n", .{ func, fname.ptr });
+        mod.log.err("%s: no data in file %s\n", .{ func, fname.ptr });
         return false;
     }
 
@@ -142,7 +141,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         defer a.free(name_buf);
         in.read(name_buf);
         if (in.failed) {
-            log.err("%s: failed reading name for entry %d from %s\n", .{ func, i + 1, fname.ptr });
+            mod.log.err("%s: failed reading name for entry %d from %s\n", .{ func, i + 1, fname.ptr });
             return false;
         }
         // `std::string{ name_as_vec.data() }`: up to the first NUL.
@@ -151,7 +150,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         const ncall = in.readInt(i32);
         const nval = in.readInt(i32);
         if (in.failed or nval < 1) {
-            log.err("%s: failed reading number of values for entry %d\n", .{ func, i });
+            mod.log.err("%s: failed reading number of values for entry %d\n", .{ func, i });
             return false;
         }
 
@@ -159,7 +158,7 @@ fn loadLegacy(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         try e.sums.resize(a, @intCast(nval));
         in.read(std.mem.sliceAsBytes(e.sums.items));
         if (in.failed) {
-            log.err("%s: failed reading data for entry %d\n", .{ func, i });
+            mod.log.err("%s: failed reading data for entry %d\n", .{ func, i });
             return false;
         }
 
@@ -212,7 +211,7 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
 
     const n_entries: i32 = @truncate(c.gguf_get_n_tensors(ctx_gguf));
     if (n_entries < 1) {
-        log.err("%s: no data in file %s\n", .{ func, fname.ptr });
+        mod.log.err("%s: no data in file %s\n", .{ func, fname.ptr });
         return false;
     }
 
@@ -288,12 +287,12 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         const counts = sc.counts;
 
         if (in_sum2 == null or counts == null or (in_sum != null and c.ggml_nelements(in_sum) != c.ggml_nelements(in_sum2))) {
-            log.err("%s: mismatched sums and counts for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
+            mod.log.err("%s: mismatched sums and counts for %.*s\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             return false;
         }
 
         if (in_sum2.?.*.type != c.GGML_TYPE_F32 or counts.?.*.type != c.GGML_TYPE_F32) {
-            log.err("%s: sums and counts for %.*s must be F32\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
+            mod.log.err("%s: sums and counts for %.*s must be F32\n", .{ func, @as(c_int, @intCast(name.len)), name.ptr });
             return false;
         }
 

@@ -268,8 +268,8 @@ pub fn encStateSlots(hparams: *const model_mod.Hparams, model: *const model_mod.
 
 pub fn freeSlots(slots: []StateSlot) void {
     if (slots.len == 0) return;
-    for (slots) |s| impl.gpa.free(s.name);
-    impl.gpa.free(slots);
+    for (slots) |s| std.heap.c_allocator.free(s.name);
+    std.heap.c_allocator.free(slots);
 }
 
 // -----------------------------------------------------------------------------

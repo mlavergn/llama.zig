@@ -8,12 +8,7 @@
 //! began at.
 
 const std = @import("std");
-const impl = @import("../../../impl.zig");
-const convert = @import("../../convert.zig");
-const blocks = @import("../../../quants/blocks.zig");
-const avx = @import("avx2.zig");
-const common = @import("common.zig");
-const c = impl.c;
+const ggml = @import("../../../module.zig");
 
 /// The shared body of `quantize_row_q8_0` and `quantize_row_q8_1`
 /// (arch/x86/quants.c:302, 400 @b1b770d90), parameterised on the block
@@ -33,92 +28,88 @@ inline fn quantizeQ8(comptime Block: type, x_in: [*c]const f32, vy: ?*anyopaque,
 
     for (0..nb) |i| {
         // Load elements into 4 AVX vectors
-        var v0 = avx.mm256_loadu_ps(x);
-        var v1 = avx.mm256_loadu_ps(x + 8);
-        var v2 = avx.mm256_loadu_ps(x + 16);
-        var v3 = avx.mm256_loadu_ps(x + 24);
+        var v0 = ggml.cpu.quants.arch.avx2.mm256_loadu_ps(x);
+        var v1 = ggml.cpu.quants.arch.avx2.mm256_loadu_ps(x + 8);
+        var v2 = ggml.cpu.quants.arch.avx2.mm256_loadu_ps(x + 16);
+        var v3 = ggml.cpu.quants.arch.avx2.mm256_loadu_ps(x + 24);
         x += 32;
 
         // Compute max(abs(e)) for the block
-        const signBit = avx.mm256_set1_ps(-0.0);
-        var maxAbs = avx.mm256_andnot_ps(signBit, v0);
-        maxAbs = avx.mm256_max_ps(maxAbs, avx.mm256_andnot_ps(signBit, v1));
-        maxAbs = avx.mm256_max_ps(maxAbs, avx.mm256_andnot_ps(signBit, v2));
-        maxAbs = avx.mm256_max_ps(maxAbs, avx.mm256_andnot_ps(signBit, v3));
+        const signBit = ggml.cpu.quants.arch.avx2.mm256_set1_ps(-0.0);
+        var maxAbs = ggml.cpu.quants.arch.avx2.mm256_andnot_ps(signBit, v0);
+        maxAbs = ggml.cpu.quants.arch.avx2.mm256_max_ps(maxAbs, ggml.cpu.quants.arch.avx2.mm256_andnot_ps(signBit, v1));
+        maxAbs = ggml.cpu.quants.arch.avx2.mm256_max_ps(maxAbs, ggml.cpu.quants.arch.avx2.mm256_andnot_ps(signBit, v2));
+        maxAbs = ggml.cpu.quants.arch.avx2.mm256_max_ps(maxAbs, ggml.cpu.quants.arch.avx2.mm256_andnot_ps(signBit, v3));
 
-        var max4 = avx.mm_max_ps(avx.mm256_extractf128_ps(maxAbs, 1), avx.mm256_castps256_ps128(maxAbs));
-        max4 = avx.mm_max_ps(max4, avx.mm_movehl_ps(max4, max4));
-        max4 = avx.mm_max_ss(max4, avx.mm_movehdup_ps(max4));
-        const max_scalar = avx.mm_cvtss_f32(max4);
+        var max4 = ggml.cpu.quants.arch.avx2.mm_max_ps(ggml.cpu.quants.arch.avx2.mm256_extractf128_ps(maxAbs, 1), ggml.cpu.quants.arch.avx2.mm256_castps256_ps128(maxAbs));
+        max4 = ggml.cpu.quants.arch.avx2.mm_max_ps(max4, ggml.cpu.quants.arch.avx2.mm_movehl_ps(max4, max4));
+        max4 = ggml.cpu.quants.arch.avx2.mm_max_ss(max4, ggml.cpu.quants.arch.avx2.mm_movehdup_ps(max4));
+        const max_scalar = ggml.cpu.quants.arch.avx2.mm_cvtss_f32(max4);
 
         // Quantize these floats
         const d = max_scalar / 127.0;
-        y[i].d = convert.cpuFp32ToFp16(d);
+        y[i].d = ggml.cpu.convert.cpuFp32ToFp16(d);
         const id: f32 = if (max_scalar != 0.0) 127.0 / max_scalar else 0.0;
-        const mul = avx.mm256_set1_ps(id);
+        const mul = ggml.cpu.quants.arch.avx2.mm256_set1_ps(id);
 
         // Apply the multiplier
-        v0 = avx.mm256_mul_ps(v0, mul);
-        v1 = avx.mm256_mul_ps(v1, mul);
-        v2 = avx.mm256_mul_ps(v2, mul);
-        v3 = avx.mm256_mul_ps(v3, mul);
+        v0 = ggml.cpu.quants.arch.avx2.mm256_mul_ps(v0, mul);
+        v1 = ggml.cpu.quants.arch.avx2.mm256_mul_ps(v1, mul);
+        v2 = ggml.cpu.quants.arch.avx2.mm256_mul_ps(v2, mul);
+        v3 = ggml.cpu.quants.arch.avx2.mm256_mul_ps(v3, mul);
 
         // Round to nearest integer
-        v0 = avx.mm256_round_ps(v0, avx.MM_ROUND_NEAREST);
-        v1 = avx.mm256_round_ps(v1, avx.MM_ROUND_NEAREST);
-        v2 = avx.mm256_round_ps(v2, avx.MM_ROUND_NEAREST);
-        v3 = avx.mm256_round_ps(v3, avx.MM_ROUND_NEAREST);
+        v0 = ggml.cpu.quants.arch.avx2.mm256_round_ps(v0, ggml.cpu.quants.arch.avx2.MM_ROUND_NEAREST);
+        v1 = ggml.cpu.quants.arch.avx2.mm256_round_ps(v1, ggml.cpu.quants.arch.avx2.MM_ROUND_NEAREST);
+        v2 = ggml.cpu.quants.arch.avx2.mm256_round_ps(v2, ggml.cpu.quants.arch.avx2.MM_ROUND_NEAREST);
+        v3 = ggml.cpu.quants.arch.avx2.mm256_round_ps(v3, ggml.cpu.quants.arch.avx2.MM_ROUND_NEAREST);
 
         // Convert floats to integers. The C's `i0`..`i3`, renamed digit for
         // digit: Zig reserves them as integer types.
-        var j0 = avx.mm256_cvtps_epi32(v0);
-        const j1 = avx.mm256_cvtps_epi32(v1);
-        var j2 = avx.mm256_cvtps_epi32(v2);
-        const j3 = avx.mm256_cvtps_epi32(v3);
+        var j0 = ggml.cpu.quants.arch.avx2.mm256_cvtps_epi32(v0);
+        const j1 = ggml.cpu.quants.arch.avx2.mm256_cvtps_epi32(v1);
+        var j2 = ggml.cpu.quants.arch.avx2.mm256_cvtps_epi32(v2);
+        const j3 = ggml.cpu.quants.arch.avx2.mm256_cvtps_epi32(v3);
 
-        if (Block == blocks.Q8_1) {
+        if (Block == ggml.quants.blocks.Q8_1) {
             // Compute the sum of the quants and set y[i].s
-            y[i].s = convert.cpuFp32ToFp16(d * @as(f32, @floatFromInt(common.hsum_i32_8(
-                avx.mm256_add_epi32(avx.mm256_add_epi32(j0, j1), avx.mm256_add_epi32(j2, j3)),
+            y[i].s = ggml.cpu.convert.cpuFp32ToFp16(d * @as(f32, @floatFromInt(ggml.cpu.quants.arch.common.hsum_i32_8(
+                ggml.cpu.quants.arch.avx2.mm256_add_epi32(ggml.cpu.quants.arch.avx2.mm256_add_epi32(j0, j1), ggml.cpu.quants.arch.avx2.mm256_add_epi32(j2, j3)),
             ))));
         }
 
         // Convert int32 to int16
-        j0 = avx.mm256_packs_epi32(j0, j1);
-        j2 = avx.mm256_packs_epi32(j2, j3);
+        j0 = ggml.cpu.quants.arch.avx2.mm256_packs_epi32(j0, j1);
+        j2 = ggml.cpu.quants.arch.avx2.mm256_packs_epi32(j2, j3);
         // Convert int16 to int8
-        j0 = avx.mm256_packs_epi16(j0, j2);
+        j0 = ggml.cpu.quants.arch.avx2.mm256_packs_epi16(j0, j2);
 
         // The packs work on 128-bit halves independently; this restores the
         // order.
-        const perm = avx.mm256_setr_epi32(.{ 0, 4, 1, 5, 2, 6, 3, 7 });
-        j0 = avx.mm256_permutevar8x32_epi32(j0, perm);
+        const perm = ggml.cpu.quants.arch.avx2.mm256_setr_epi32(.{ 0, 4, 1, 5, 2, 6, 3, 7 });
+        j0 = ggml.cpu.quants.arch.avx2.mm256_permutevar8x32_epi32(j0, perm);
 
-        avx.mm256_storeu_si256(&y[i].qs, j0);
+        ggml.cpu.quants.arch.avx2.mm256_storeu_si256(&y[i].qs, j0);
     }
 }
 
 /// Ports `quantize_row_q8_0` (arch/x86/quants.c:302 @b1b770d90), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack.
 pub export fn quantize_row_q8_0(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    quantizeQ8(blocks.Q8_0, x, vy, k);
+    quantizeQ8(ggml.quants.blocks.Q8_0, x, vy, k);
 }
 
 /// Ports `quantize_row_q8_1` (arch/x86/quants.c:400 @b1b770d90), the
 /// `__AVX2__ || __AVX__` arm with its `__AVX2__` pack and sum.
 pub export fn quantize_row_q8_1(x: [*c]const f32, vy: ?*anyopaque, k: i64) void {
-    quantizeQ8(blocks.Q8_1, x, vy, k);
+    quantizeQ8(ggml.quants.blocks.Q8_1, x, vy, k);
 }
-
-const ref = struct {
-    extern fn quantize_row_q8_K_ref(x: [*c]const f32, y: ?*anyopaque, k: i64) void;
-};
 
 /// Ports `quantize_row_q8_K` (arch/x86/quants.c:505 @b1b770d90): on x86 it
 /// has no vector arm, and calls `ggml-quants.c`'s reference quantizer as it
 /// stands.
 pub export fn quantize_row_q8_K(x: [*c]const f32, y: ?*anyopaque, k: i64) void {
-    ref.quantize_row_q8_K_ref(x, y, k);
+    ggml.quants.k.quantize_row_q8_K_ref(x, @ptrCast(@alignCast(y)), k);
 }
 
 // -----------------------------------------------------------------------------

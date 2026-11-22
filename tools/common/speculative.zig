@@ -33,33 +33,19 @@
 //! those names through libllama's module.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const ggml = @import("ggml.zig");
-const env_mod = @import("stdlib").env;
 const c = @import("tools_h");
 const llama = @import("llama");
-const params_mod = @import("params.zig");
-const common = @import("common.zig");
-const log = @import("log.zig");
-const arg = @import("arg.zig");
-const ngram_cache = @import("ngram_cache.zig");
-const ngram_map = @import("ngram_map.zig");
-const ngram_mod = @import("ngram_mod.zig");
-const draft_impls = @import("speculative_draft.zig");
-
-const Type = params_mod.SpeculativeType;
-const Params = params_mod.Params;
-const SpecParams = params_mod.Speculative;
 
 const gpa = std.heap.c_allocator;
 
 fn assertC(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
-    ggml.ggmlAssert(ok, "speculative.cpp", line, expr);
+    mod.ggml.ggmlAssert(ok, "speculative.cpp", line, expr);
 }
 
 fn oom() noreturn {
-    ggml.oom("speculative.cpp");
+    mod.ggml.oom("speculative.cpp");
 }
 
 /// The `llama-ext.h` entry points `common/speculative.cpp` calls, through
@@ -110,19 +96,19 @@ pub const ext = struct {
 // the calling function's name, as `spec %12.*s: `.
 
 pub fn spcDbg(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.dbg("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.dbg("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 pub fn spcTrc(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.trc("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.trc("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 pub fn spcInf(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.inf("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.inf("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 pub fn spcWrn(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.wrn("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.wrn("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 pub fn spcErr(comptime func: [*:0]const u8, comptime fmt: []const u8, args: anytype) void {
-    log.err("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
+    mod.log.err("spec %12.*s: " ++ fmt, .{ @as(c_int, 12), func } ++ args);
 }
 
 /// What the C++ throws out of `common_speculative_init` and its helpers.
@@ -130,7 +116,7 @@ pub const InitError = error{ Runtime, InvalidArgument, OutOfMemory };
 
 /// `throw std::runtime_error(msg)`.
 pub fn throwRuntime(msg: []const u8) InitError {
-    switch (arg.throwStr(msg)) {
+    switch (mod.arg.throwStr(msg)) {
         error.Throw => {},
     }
     return error.Runtime;
@@ -138,19 +124,19 @@ pub fn throwRuntime(msg: []const u8) InitError {
 
 /// `throw std::runtime_error(string_format(fmt, args))`.
 pub fn throwRuntimeFmt(comptime fmt: [*:0]const u8, args: anytype) InitError {
-    arg.setWhat(fmt, args);
+    mod.arg.setWhat(fmt, args);
     return error.Runtime;
 }
 
 /// `throw std::invalid_argument(string_format(fmt, args))`.
 fn throwInvalid(comptime fmt: [*:0]const u8, args: anytype) InitError {
-    arg.setWhat(fmt, args);
+    mod.arg.setWhat(fmt, args);
     return error.InvalidArgument;
 }
 
 /// Ports `common_speculative_type_from_name_map` (speculative.cpp:72
 /// @b1b770d90), a `std::map`: sorted by name.
-const type_from_name_map = [_]struct { [:0]const u8, Type }{
+const type_from_name_map = [_]struct { [:0]const u8, mod.params.SpeculativeType }{
     .{ "draft-dflash", .draft_dflash },
     .{ "draft-dspark", .draft_dspark },
     .{ "draft-eagle3", .draft_eagle3 },
@@ -164,7 +150,7 @@ const type_from_name_map = [_]struct { [:0]const u8, Type }{
     .{ "none", .none },
 };
 
-fn findType(name: []const u8) ?Type {
+fn findType(name: []const u8) ?mod.params.SpeculativeType {
     for (type_from_name_map) |e| {
         if (std.mem.eql(u8, e[0], name)) return e[1];
     }
@@ -246,10 +232,10 @@ pub fn areCompatible(model_tgt: ?*const c.llama_model, model_dft: ?*const c.llam
             const token_text_dft = c.llama_vocab_get_text(vocab_dft, i);
 
             if (std.mem.orderZ(u8, token_text_tgt, token_text_dft) != .eq) {
-                if (log.verbosity_thold >= log.level_debug) {
-                    const pt = common.tokenToPiece(gpa, vocab_tgt, i, true) catch oom();
+                if (mod.log.verbosity_thold >= mod.log.level_debug) {
+                    const pt = mod.common.tokenToPiece(gpa, vocab_tgt, i, true) catch oom();
                     defer gpa.free(pt[0 .. pt.len + 1]);
-                    const pd = common.tokenToPiece(gpa, vocab_dft, i, true) catch oom();
+                    const pd = mod.common.tokenToPiece(gpa, vocab_dft, i, true) catch oom();
                     defer gpa.free(pd[0 .. pd.len + 1]);
                     spcDbg(func, "draft model vocab must match target model to use speculation but " ++
                         "token %d content differs - target '%s', draft '%s'\n", .{ i, pt.ptr, pd.ptr });
@@ -320,7 +306,7 @@ pub const DraftParams = struct {
 /// Ports `common_speculative_impl` (speculative.cpp:177 @b1b770d90): what
 /// every drafter shares -- its type, its limit and its statistics.
 pub const Base = struct {
-    type: Type,
+    type: mod.params.SpeculativeType,
 
     n_seq: u32,
     n_max: i32, // maximum draft length after implementation-specific limits
@@ -361,14 +347,14 @@ fn timeEnd(t_start_us: i64, t_acc: *i64) void {
 /// @b1b770d90): self-speculation by looking the last n-gram up in the
 /// history.
 pub const NgramSimple = struct {
-    params: params_mod.SpeculativeNgramMap,
+    params: mod.params.SpeculativeNgramMap,
 
     // shared across all sequences
-    config: ngram_map.SimpleConfig,
+    config: mod.ngram_map.SimpleConfig,
 
     /// Ports `common_speculative_impl_ngram_simple` (speculative.cpp:2065
     /// @b1b770d90), the constructor.
-    fn init(params: *const SpecParams, config: ngram_map.SimpleConfig) NgramSimple {
+    fn init(params: *const mod.params.Speculative, config: mod.ngram_map.SimpleConfig) NgramSimple {
         const func = "common_speculative_impl_ngram_simple";
         const p = params.ngram_simple;
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'ngram-simple'\n")});
@@ -382,7 +368,7 @@ pub const NgramSimple = struct {
     fn begin(_: *NgramSimple, _: *Base, _: c.llama_seq_id, _: []const c.llama_token) void {}
 
     /// Ports `process` (speculative.cpp:2081 @b1b770d90): nothing to do.
-    fn process(_: *NgramSimple, _: *Base, _: *const common.Batch) bool {
+    fn process(_: *NgramSimple, _: *Base, _: *const mod.common.Batch) bool {
         return true;
     }
 
@@ -391,7 +377,7 @@ pub const NgramSimple = struct {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams) |*dp| {
             if (!dp.drafting) continue;
-            var r = ngram_map.simpleDraft(gpa, self.config, dp.prompt, dp.id_last) catch oom();
+            var r = mod.ngram_map.simpleDraft(gpa, self.config, dp.prompt, dp.id_last) catch oom();
             defer r.deinit(gpa);
             dp.result.?.clearRetainingCapacity();
             dp.result.?.appendSlice(gpa, r.items) catch oom();
@@ -406,13 +392,13 @@ pub const NgramSimple = struct {
 /// @b1b770d90): `ngram-map-k` and `ngram-map-k4v`, one map per sequence.
 pub const NgramMapK = struct {
     // n_seq configs
-    config: []ngram_map.Map,
+    config: []mod.ngram_map.Map,
 
     /// Ports `common_speculative_impl_ngram_map_k` (speculative.cpp:2108
     /// @b1b770d90), the constructor: `n_seq` copies of `config`.
-    fn init(base: *const Base, config: *const ngram_map.Map) NgramMapK {
+    fn init(base: *const Base, config: *const mod.ngram_map.Map) NgramMapK {
         const func = "common_speculative_impl_ngram_map_k";
-        const maps = gpa.alloc(ngram_map.Map, base.n_seq) catch oom();
+        const maps = gpa.alloc(mod.ngram_map.Map, base.n_seq) catch oom();
         for (maps) |*m| m.* = config.clone(gpa) catch oom();
 
         spcTrc(func, "adding speculative implementation '%s'\n", .{typeToStr(base.type).ptr});
@@ -429,11 +415,11 @@ pub const NgramMapK = struct {
     fn begin(self: *NgramMapK, base: *Base, seq_id: c.llama_seq_id, prompt: []const c.llama_token) void {
         assertC(seq_id < @as(c.llama_seq_id, @intCast(base.n_seq)), 2073, "seq_id < (llama_seq_id) n_seq");
 
-        ngram_map.begin(&self.config[@intCast(seq_id)], prompt);
+        mod.ngram_map.begin(&self.config[@intCast(seq_id)], prompt);
     }
 
     /// Ports `process` (speculative.cpp:2129 @b1b770d90): nothing to do.
-    fn process(_: *NgramMapK, _: *Base, _: *const common.Batch) bool {
+    fn process(_: *NgramMapK, _: *Base, _: *const mod.common.Batch) bool {
         return true;
     }
 
@@ -442,7 +428,7 @@ pub const NgramMapK = struct {
         std.debug.assert(dparams.len == base.n_seq);
         for (dparams, 0..) |*dp, s| {
             if (!dp.drafting) continue;
-            ngram_map.draft(&self.config[s], dp.prompt, dp.id_last, dp.result.?) catch oom();
+            mod.ngram_map.draft(&self.config[s], dp.prompt, dp.id_last, dp.result.?) catch oom();
         }
     }
 
@@ -452,17 +438,17 @@ pub const NgramMapK = struct {
 
         if (is_other) return;
 
-        ngram_map.accept(&self.config[@intCast(seq_id)], n_accepted);
+        mod.ngram_map.accept(&self.config[@intCast(seq_id)], n_accepted);
     }
 };
 
 /// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2158
 /// @b1b770d90): one hashed n-gram table shared by every sequence.
 pub const NgramMod = struct {
-    params: params_mod.SpeculativeNgramMod,
+    params: mod.params.SpeculativeNgramMod,
 
     // shared across all sequences
-    mod: ngram_mod.Mod,
+    mod: mod.ngram_mod.Mod,
 
     // enable trace logging if LLAMA_TRACE is set
     verbose: bool,
@@ -484,15 +470,15 @@ pub const NgramMod = struct {
 
     /// Ports `common_speculative_impl_ngram_mod` (speculative.cpp:2180
     /// @b1b770d90), the constructor.
-    fn init(base: *const Base, params: *const SpecParams) NgramMod {
+    fn init(base: *const Base, params: *const mod.params.Speculative) NgramMod {
         const func = "common_speculative_impl_ngram_mod";
         const p = params.ngram_mod;
-        const mod = ngram_mod.Mod.init(gpa, @truncate(@as(u32, @bitCast(p.n_match))), 4 * 1024 * 1024) catch oom();
+        const ngram = mod.ngram_mod.Mod.init(gpa, @truncate(@as(u32, @bitCast(p.n_match))), 4 * 1024 * 1024) catch oom();
 
         spcTrc(func, "%s", .{@as([*:0]const u8, "adding speculative implementation 'ngram-mod'\n")});
         spcTrc(func, "- n_match=%d, n_max=%d, n_min=%d\n", .{ p.n_match, p.n_max, p.n_min });
-        const mb: f32 = @as(f32, @floatFromInt(mod.sizeBytes())) / 1024 / 1024;
-        spcTrc(func, "- mod size=%zu (%.3f MB)\n", .{ mod.size(), @as(f64, mb) });
+        const mb: f32 = @as(f32, @floatFromInt(ngram.sizeBytes())) / 1024 / 1024;
+        spcTrc(func, "- mod size=%zu (%.3f MB)\n", .{ ngram.size(), @as(f64, mb) });
 
         if (p.n_match < 16) {
             spcWrn(func, "ngram_mod n_match=%d is too small - poor quality is possible, " ++
@@ -501,7 +487,7 @@ pub const NgramMod = struct {
 
         const sinfos = gpa.alloc(SeqInfo, base.n_seq) catch oom();
         @memset(sinfos, .{});
-        return .{ .params = p, .mod = mod, .verbose = env_mod.get("LLAMA_TRACE") != null, .sinfos = sinfos };
+        return .{ .params = p, .mod = ngram, .verbose = stdlib.env.get("LLAMA_TRACE") != null, .sinfos = sinfos };
     }
 
     fn deinit(self: *NgramMod) void {
@@ -569,7 +555,7 @@ pub const NgramMod = struct {
         var i: usize = 0;
         while (i < n_max) : (i += 1) {
             const token = self.mod.get(result.items.ptr + i);
-            if (token == ngram_mod.Mod.empty_entry) {
+            if (token == mod.ngram_mod.Mod.empty_entry) {
                 if (@as(i64, @intCast(i)) < self.params.n_min) {
                     result.clearRetainingCapacity();
                     return;
@@ -591,7 +577,7 @@ pub const NgramMod = struct {
     }
 
     /// Ports `process` (speculative.cpp:2287 @b1b770d90): nothing to do.
-    fn process(_: *NgramMod, _: *Base, _: *const common.Batch) bool {
+    fn process(_: *NgramMod, _: *Base, _: *const mod.common.Batch) bool {
         return true;
     }
 
@@ -635,7 +621,7 @@ pub const NgramMod = struct {
 /// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2333
 /// @b1b770d90): the three-level n-gram cache -- context, dynamic, static.
 pub const NgramCache = struct {
-    params: params_mod.SpeculativeNgramCache,
+    params: mod.params.SpeculativeNgramCache,
 
     n_draft: u16,
 
@@ -646,16 +632,16 @@ pub const NgramCache = struct {
     const SeqInfo = struct {
         cache_size: usize = 0, // number of tokens in n-gram cache
 
-        ngram_cache_context: ngram_cache.Cache,
-        ngram_cache_dynamic: ngram_cache.Cache,
-        ngram_cache_static: ngram_cache.Cache,
+        ngram_cache_context: mod.ngram_cache.Cache,
+        ngram_cache_dynamic: mod.ngram_cache.Cache,
+        ngram_cache_static: mod.ngram_cache.Cache,
     };
 
     /// Ports `common_speculative_impl_ngram_cache` (speculative.cpp:2348
     /// @b1b770d90), the constructor: each sequence gets a copy of the
     /// static and dynamic caches the paths name; a dynamic cache that does
     /// not exist yet starts empty, and the destructor creates it.
-    fn init(base: *const Base, params: *const SpecParams, n_draft: u16) NgramCache {
+    fn init(base: *const Base, params: *const mod.params.Speculative, n_draft: u16) NgramCache {
         const func = "common_speculative_impl_ngram_cache";
         const path_static = params.ngram_cache.lookup_cache_static;
         const path_dynamic = params.ngram_cache.lookup_cache_dynamic;
@@ -668,15 +654,15 @@ pub const NgramCache = struct {
 
         const sinfos = gpa.alloc(SeqInfo, base.n_seq) catch oom();
         for (sinfos) |*si| si.* = .{
-            .ngram_cache_context = ngram_cache.Cache.init(gpa) catch oom(),
-            .ngram_cache_dynamic = ngram_cache.Cache.init(gpa) catch oom(),
-            .ngram_cache_static = ngram_cache.Cache.init(gpa) catch oom(),
+            .ngram_cache_context = mod.ngram_cache.Cache.init(gpa) catch oom(),
+            .ngram_cache_dynamic = mod.ngram_cache.Cache.init(gpa) catch oom(),
+            .ngram_cache_static = mod.ngram_cache.Cache.init(gpa) catch oom(),
         };
 
         if (path_static.len != 0) {
             const path = gpa.dupeSentinel(u8, path_static, 0) catch oom();
             defer gpa.free(path);
-            var loaded = ngram_cache.load(gpa, path) catch |e| switch (e) {
+            var loaded = mod.ngram_cache.load(gpa, path) catch |e| switch (e) {
                 error.OpenFailed => {
                     spcErr(func, "failed to open static lookup cache: %s\n", .{path.ptr});
                     _ = c.ggml_abort("speculative.cpp", 2375, "Couldn't read static lookup cache");
@@ -684,22 +670,22 @@ pub const NgramCache = struct {
                 },
                 error.OutOfMemory => oom(),
             };
-            defer ngram_cache.deinitCache(&loaded);
+            defer mod.ngram_cache.deinitCache(&loaded);
             for (sinfos) |*si| {
-                ngram_cache.deinitCache(&si.ngram_cache_static);
-                si.ngram_cache_static = ngram_cache.cloneCache(gpa, &loaded) catch oom();
+                mod.ngram_cache.deinitCache(&si.ngram_cache_static);
+                si.ngram_cache_static = mod.ngram_cache.cloneCache(gpa, &loaded) catch oom();
             }
         }
 
         if (path_dynamic.len != 0) {
             const path = gpa.dupeSentinel(u8, path_dynamic, 0) catch oom();
             defer gpa.free(path);
-            if (ngram_cache.load(gpa, path)) |loaded_cache| {
+            if (mod.ngram_cache.load(gpa, path)) |loaded_cache| {
                 var loaded = loaded_cache;
-                defer ngram_cache.deinitCache(&loaded);
+                defer mod.ngram_cache.deinitCache(&loaded);
                 for (sinfos) |*si| {
-                    ngram_cache.deinitCache(&si.ngram_cache_dynamic);
-                    si.ngram_cache_dynamic = ngram_cache.cloneCache(gpa, &loaded) catch oom();
+                    mod.ngram_cache.deinitCache(&si.ngram_cache_dynamic);
+                    si.ngram_cache_dynamic = mod.ngram_cache.cloneCache(gpa, &loaded) catch oom();
                 }
             } else |e| switch (e) {
                 error.OpenFailed => {
@@ -731,19 +717,19 @@ pub const NgramCache = struct {
         if (self.params.lookup_cache_dynamic.len != 0 and self.sinfos.len != 0) {
             const dynamic_cache = &self.sinfos[0].ngram_cache_dynamic;
             for (self.sinfos) |*si| {
-                ngram_cache.merge(dynamic_cache, &si.ngram_cache_context) catch oom();
+                mod.ngram_cache.merge(dynamic_cache, &si.ngram_cache_context) catch oom();
             }
 
             const path = gpa.dupeSentinel(u8, self.params.lookup_cache_dynamic, 0) catch oom();
             defer gpa.free(path);
             spcInf("~common_speculative_impl_ngram_cache", "saving dynamic lookup cache at %s\n", .{path.ptr});
-            ngram_cache.save(dynamic_cache, path);
+            mod.ngram_cache.save(dynamic_cache, path);
         }
 
         for (self.sinfos) |*si| {
-            ngram_cache.deinitCache(&si.ngram_cache_context);
-            ngram_cache.deinitCache(&si.ngram_cache_dynamic);
-            ngram_cache.deinitCache(&si.ngram_cache_static);
+            mod.ngram_cache.deinitCache(&si.ngram_cache_context);
+            mod.ngram_cache.deinitCache(&si.ngram_cache_dynamic);
+            mod.ngram_cache.deinitCache(&si.ngram_cache_static);
         }
         gpa.free(self.sinfos);
     }
@@ -770,13 +756,13 @@ pub const NgramCache = struct {
         if (sinfo.cache_size < inp.items.len) {
             // Update context ngram cache with the full history so n-grams
             // ending at the new tokens have their preceding context
-            ngram_cache.update(&sinfo.ngram_cache_context, ngram_cache.ngram_min, ngram_cache.ngram_max, inp.items, @intCast(inp.items.len - sinfo.cache_size), false) catch oom();
+            mod.ngram_cache.update(&sinfo.ngram_cache_context, mod.ngram_cache.ngram_min, mod.ngram_cache.ngram_max, inp.items, @intCast(inp.items.len - sinfo.cache_size), false) catch oom();
             sinfo.cache_size = inp.items.len;
         }
 
         result.append(gpa, dparams.id_last) catch oom();
 
-        ngram_cache.draft(inp.items, result, gpa, self.n_draft, ngram_cache.ngram_min, ngram_cache.ngram_max, &sinfo.ngram_cache_context, &sinfo.ngram_cache_dynamic, &sinfo.ngram_cache_static) catch oom();
+        mod.ngram_cache.draft(inp.items, result, gpa, self.n_draft, mod.ngram_cache.ngram_min, mod.ngram_cache.ngram_max, &sinfo.ngram_cache_context, &sinfo.ngram_cache_dynamic, &sinfo.ngram_cache_static) catch oom();
 
         if (result.items.len > 0) {
             // delete first token in result (which is the id_last token)
@@ -785,7 +771,7 @@ pub const NgramCache = struct {
     }
 
     /// Ports `process` (speculative.cpp:2458 @b1b770d90): nothing to do.
-    fn process(_: *NgramCache, _: *Base, _: *const common.Batch) bool {
+    fn process(_: *NgramCache, _: *Base, _: *const mod.common.Batch) bool {
         return true;
     }
 
@@ -812,10 +798,10 @@ pub const Impl = struct {
     kind: Kind,
 
     pub const Kind = union(enum) {
-        draft_simple: draft_impls.DraftSimple,
-        eagle3: draft_impls.Eagle3,
-        dflash: draft_impls.DFlash,
-        mtp: draft_impls.Mtp,
+        draft_simple: mod.speculative_draft.DraftSimple,
+        eagle3: mod.speculative_draft.Eagle3,
+        dflash: mod.speculative_draft.DFlash,
+        mtp: mod.speculative_draft.Mtp,
         ngram_simple: NgramSimple,
         ngram_map_k: NgramMapK,
         ngram_mod: NgramMod,
@@ -836,7 +822,7 @@ pub const Impl = struct {
         }
     }
 
-    fn process(self: *Impl, batch: *const common.Batch) bool {
+    fn process(self: *Impl, batch: *const mod.common.Batch) bool {
         return switch (self.kind) {
             inline else => |*k| k.process(&self.base, batch),
         };
@@ -888,17 +874,17 @@ pub const Speculative = struct {
 };
 
 /// Ports `get_common_ngram_map` (speculative.cpp:2493 @b1b770d90).
-fn getCommonNgramMap(t: Type, config: params_mod.SpeculativeNgramMap) ngram_map.Map {
+fn getCommonNgramMap(t: mod.params.SpeculativeType, config: mod.params.SpeculativeNgramMap) mod.ngram_map.Map {
     const size_key = config.size_n;
     const size_value = config.size_m;
     const key_only = t == .ngram_map_k;
     const min_hits = config.min_hits;
 
-    return ngram_map.Map.init(gpa, size_key, size_value, key_only, min_hits) catch oom();
+    return mod.ngram_map.Map.init(gpa, size_key, size_value, key_only, min_hits) catch oom();
 }
 
 /// Ports `create_state_ngram_cache` (speculative.cpp:2504 @b1b770d90).
-fn createStateNgramCache(base: *const Base, params: *const SpecParams) NgramCache {
+fn createStateNgramCache(base: *const Base, params: *const mod.params.Speculative) NgramCache {
     const n_draft: u16 = 8; // TODO get from config?
 
     return NgramCache.init(base, params, n_draft);
@@ -908,7 +894,7 @@ fn createStateNgramCache(base: *const Base, params: *const SpecParams) NgramCach
 /// @b1b770d90): the types, comma-separated.
 ///
 /// Return: the text, the allocator's.
-pub fn typeNameStr(a: std.mem.Allocator, types: []const Type) ![:0]u8 {
+pub fn typeNameStr(a: std.mem.Allocator, types: []const mod.params.SpeculativeType) ![:0]u8 {
     var result: std.ArrayList(u8) = .empty;
     for (types, 0..) |t, i| {
         if (i > 0) try result.append(a, ',');
@@ -922,7 +908,7 @@ pub fn typeNameStr(a: std.mem.Allocator, types: []const Type) ![:0]u8 {
 pub fn allTypesStr() [:0]const u8 {
     return comptime blk: {
         var s: [:0]const u8 = "";
-        const info = @typeInfo(Type).@"enum";
+        const info = @typeInfo(mod.params.SpeculativeType).@"enum";
         for (info.field_names, info.field_values, 0..) |name, value, i| {
             if (std.mem.eql(u8, name, "count")) continue;
             s = s ++ (if (i > 0) "," else "") ++ typeToStr(@fromBackingInt(@intCast(value)));
@@ -932,7 +918,7 @@ pub fn allTypesStr() [:0]const u8 {
 }
 
 /// Ports `common_speculative_type_to_str` (speculative.cpp:2536 @b1b770d90).
-pub fn typeToStr(t: Type) [:0]const u8 {
+pub fn typeToStr(t: mod.params.SpeculativeType) [:0]const u8 {
     return switch (t) {
         .none => "none",
         .draft_simple => "draft-simple",
@@ -954,8 +940,8 @@ pub fn typeToStr(t: Type) [:0]const u8 {
 /// `std::invalid_argument`.
 ///
 /// Return: the types, the allocator's.
-pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Type {
-    var types: std.ArrayList(Type) = .empty;
+pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]mod.params.SpeculativeType {
+    var types: std.ArrayList(mod.params.SpeculativeType) = .empty;
     errdefer types.deinit(a);
     try types.ensureTotalCapacity(a, names.len);
 
@@ -963,12 +949,12 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Type {
         if (findType(nm)) |t| {
             if (t == .none) {
                 types.deinit(a);
-                return a.dupe(Type, &.{.none});
+                return a.dupe(mod.params.SpeculativeType, &.{.none});
             }
             types.appendAssumeCapacity(t);
             continue;
         }
-        arg.setWhat("unknown speculative type: %.*s", .{ @as(c_int, @intCast(nm.len)), nm.ptr });
+        mod.arg.setWhat("unknown speculative type: %.*s", .{ @as(c_int, @intCast(nm.len)), nm.ptr });
         return error.InvalidArgument;
     }
 
@@ -979,7 +965,7 @@ pub fn typesFromNames(a: std.mem.Allocator, names: []const []const u8) ![]Type {
 /// @b1b770d90).
 ///
 /// Return: the type, or `.count` for an unknown name.
-pub fn typeFromName(name: []const u8) Type {
+pub fn typeFromName(name: []const u8) mod.params.SpeculativeType {
     return findType(name) orelse .count;
 }
 
@@ -989,12 +975,12 @@ pub fn typeFromName(name: []const u8) Type {
 /// a `dflash` model -- or none.
 ///
 /// Return: the types, the allocator's; empty when unknown.
-pub fn typesFromGguf(a: std.mem.Allocator, path: [:0]const u8) ![]Type {
-    const gguf_ctx = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }) orelse return a.alloc(Type, 0);
+pub fn typesFromGguf(a: std.mem.Allocator, path: [:0]const u8) ![]mod.params.SpeculativeType {
+    const gguf_ctx = c.gguf_init_from_file(path.ptr, .{ .no_alloc = true, .ctx = null }) orelse return a.alloc(mod.params.SpeculativeType, 0);
     defer c.gguf_free(gguf_ctx);
 
     const arch_id = c.gguf_find_key(gguf_ctx, "general.architecture");
-    if (arch_id < 0 or c.gguf_get_kv_type(gguf_ctx, arch_id) != c.GGUF_TYPE_STRING) return a.alloc(Type, 0);
+    if (arch_id < 0 or c.gguf_get_kv_type(gguf_ctx, arch_id) != c.GGUF_TYPE_STRING) return a.alloc(mod.params.SpeculativeType, 0);
 
     const arch = std.mem.span(c.gguf_get_val_str(gguf_ctx, arch_id));
     if (!std.mem.eql(u8, arch, "dflash")) {
@@ -1004,22 +990,22 @@ pub fn typesFromGguf(a: std.mem.Allocator, path: [:0]const u8) ![]Type {
 
         const name = try std.fmt.allocPrintSentinel(a, "blk.{d}.nextn.eh_proj.weight", .{block_count -% 1}, 0);
         defer a.free(name);
-        if (c.gguf_find_tensor(gguf_ctx, name.ptr) >= 0) return a.dupe(Type, &.{.draft_mtp});
+        if (c.gguf_find_tensor(gguf_ctx, name.ptr) >= 0) return a.dupe(mod.params.SpeculativeType, &.{.draft_mtp});
 
-        return a.alloc(Type, 0);
+        return a.alloc(mod.params.SpeculativeType, 0);
     }
 
     // the Markov head distinguishes draft-dspark from draft-dflash
-    const t: Type = if (c.gguf_find_tensor(gguf_ctx, "markov_w1.weight") >= 0) .draft_dspark else .draft_dflash;
+    const t: mod.params.SpeculativeType = if (c.gguf_find_tensor(gguf_ctx, "markov_w1.weight") >= 0) .draft_dspark else .draft_dflash;
 
     spcInf("common_speculative_types_from_gguf", "auto-detected speculative type '%s' from the draft model metadata\n", .{typeToStr(t).ptr});
 
-    return a.dupe(Type, &.{t});
+    return a.dupe(mod.params.SpeculativeType, &.{t});
 }
 
 /// Ports `common_get_enabled_speculative_configs` (speculative.cpp:2617
 /// @b1b770d90): the types as a bit set.
-fn getEnabledConfigs(configs: []const Type) u32 {
+fn getEnabledConfigs(configs: []const mod.params.SpeculativeType) u32 {
     var result: u32 = 0;
     for (configs) |t| result |= @as(u32, 1) << @intCast(@backingInt(t));
     return result;
@@ -1027,7 +1013,7 @@ fn getEnabledConfigs(configs: []const Type) u32 {
 
 /// Ports `common_speculative_n_max` (speculative.cpp:2625 @b1b770d90), the
 /// overload over parameters: the longest draft any configured type asks for.
-pub fn nMaxParams(spec: *const SpecParams) i32 {
+pub fn nMaxParams(spec: *const mod.params.Speculative) i32 {
     var n_max: i32 = 0;
 
     for (spec.types.items) |t| {
@@ -1063,7 +1049,7 @@ pub fn nMax(spec: ?*const Speculative) i32 {
 ///
 /// Return: the rates, the allocator's; empty when synthetic acceptance is
 /// off.
-pub fn synthRatesResolve(a: std.mem.Allocator, spec: *const SpecParams, n_max: i32) InitError![]f64 {
+pub fn synthRatesResolve(a: std.mem.Allocator, spec: *const mod.params.Speculative, n_max: i32) InitError![]f64 {
     const has_length = spec.synth_len != -1.0;
     const has_rates = spec.synth_rates.items.len != 0;
 
@@ -1144,7 +1130,7 @@ pub fn getSynthProbs(spec: ?*const Speculative) []const f64 {
 /// @b1b770d90): the parameters a draft model and its context load with.
 ///
 /// Return: a copy of `params`; its lists are shared with `params`.
-pub fn baseParamsToSpeculative(params: *const Params) Params {
+pub fn baseParamsToSpeculative(params: *const mod.params.Params) mod.params.Params {
     const has_draft = params.speculative.hasDft();
 
     const params_spec = &params.speculative.draft;
@@ -1211,7 +1197,7 @@ pub const InitResult = struct {
     /// Ports `common_speculative_init_result` (speculative.cpp:2829
     /// @b1b770d90), the constructor: a draft model and its context, or an
     /// MTP context over the target model.
-    pub fn init(params: *Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
+    pub fn init(params: *mod.params.Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
         const func: [*:0]const u8 = "common_speculative_init_result";
         var self: InitResult = .{};
         const has_draft = params.speculative.hasDft();
@@ -1220,8 +1206,8 @@ pub const InitResult = struct {
             if (t == .draft_mtp) spec_mtp = true;
         }
 
-        const mparams = common.modelParamsToLlama(params);
-        var cparams = common.contextParamsToLlama(params);
+        const mparams = mod.common.modelParamsToLlama(params);
+        var cparams = mod.common.contextParamsToLlama(params);
 
         if (spec_mtp) cparams.ctx_type = c.LLAMA_CONTEXT_TYPE_MTP;
 
@@ -1236,20 +1222,20 @@ pub const InitResult = struct {
         if (has_draft) {
             const model_path = try gpa.dupeSentinel(u8, params.speculative.draft.mparams.path, 0);
             defer gpa.free(model_path);
-            log.inf("%s: loading draft model '%s'\n", .{ func, model_path.ptr });
+            mod.log.inf("%s: loading draft model '%s'\n", .{ func, model_path.ptr });
 
             var paths_arena = std.heap.ArenaAllocator.init(gpa);
             defer paths_arena.deinit();
-            const paths = try common.modelPaths(paths_arena.allocator(), &params.speculative.draft.mparams);
-            const model_dft = common.modelLoad(paths, mparams) orelse {
-                log.err("%s: failed to load draft model, '%s'\n", .{ func, model_path.ptr });
+            const paths = try mod.common.modelPaths(paths_arena.allocator(), &params.speculative.draft.mparams);
+            const model_dft = mod.common.modelLoad(paths, mparams) orelse {
+                mod.log.err("%s: failed to load draft model, '%s'\n", .{ func, model_path.ptr });
                 return self;
             };
 
             self.model_ = model_dft;
 
             const ctx_dft = c.llama_init_from_model(model_dft, cparams) orelse {
-                log.err("%s: failed to create MTP context\n", .{func});
+                mod.log.err("%s: failed to create MTP context\n", .{func});
                 return self;
             };
 
@@ -1258,10 +1244,10 @@ pub const InitResult = struct {
             const model_path = try gpa.dupeSentinel(u8, params.model.path, 0);
             defer gpa.free(model_path);
 
-            log.inf("%s: creating MTP draft context against the target model '%s'\n", .{ func, model_path.ptr });
+            mod.log.inf("%s: creating MTP draft context against the target model '%s'\n", .{ func, model_path.ptr });
 
             const ctx_dft = c.llama_init_from_model(model_tgt, cparams) orelse {
-                log.err("%s: failed to create MTP context\n", .{func});
+                mod.log.err("%s: failed to create MTP context\n", .{func});
                 return self;
             };
 
@@ -1293,7 +1279,7 @@ pub const InitResult = struct {
 
 /// Ports `common_speculative_init_from_params` (speculative.cpp:2899
 /// @b1b770d90).
-pub fn initFromParams(params: *Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
+pub fn initFromParams(params: *mod.params.Params, model_tgt: ?*c.llama_model, ctx_tgt: ?*c.llama_context) !InitResult {
     return InitResult.init(params, model_tgt, ctx_tgt);
 }
 
@@ -1321,10 +1307,10 @@ pub fn getOutputLimits(n_batch: i32, n_parallel: i32, n_draft: i32) OutputLimits
 /// then those that run a model -- and the synthetic acceptance rates.
 ///
 /// Return: the context, freed with `free`; null when no drafter applies.
-pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
+pub fn init(params: *mod.params.Speculative, n_seq: u32) InitError!?*Speculative {
     const func = "common_speculative_init";
     // Compute the implementations to use based on the config and their order of preference
-    var configs: std.ArrayList(Type) = .empty; // list of speculative configs to try
+    var configs: std.ArrayList(mod.params.SpeculativeType) = .empty; // list of speculative configs to try
     defer configs.deinit(gpa);
     {
         const enabled_configs = getEnabledConfigs(params.types.items);
@@ -1332,7 +1318,7 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
         const has_ctx_dft = params.draft.ctx_dft != null;
         // this list here defines the priority of the speculators
         // the one with highest priority are listed first
-        const order = [_]struct { Type, bool }{
+        const order = [_]struct { mod.params.SpeculativeType, bool }{
             .{ .ngram_simple, true },
             .{ .ngram_map_k, true },
             .{ .ngram_map_k4v, true },
@@ -1368,19 +1354,19 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
             },
             .draft_simple => {
                 impl.base.n_max = params.draft.n_max;
-                impl.kind = .{ .draft_simple = try draft_impls.DraftSimple.init(&impl.base, params) };
+                impl.kind = .{ .draft_simple = try mod.speculative_draft.DraftSimple.init(&impl.base, params) };
             },
             .draft_eagle3 => {
                 impl.base.n_max = params.draft.n_max;
-                impl.kind = .{ .eagle3 = try draft_impls.Eagle3.init(&impl.base, params) };
+                impl.kind = .{ .eagle3 = try mod.speculative_draft.Eagle3.init(&impl.base, params) };
             },
             .draft_mtp => {
                 impl.base.n_max = params.draft.n_max;
-                impl.kind = .{ .mtp = try draft_impls.Mtp.init(&impl.base, params) };
+                impl.kind = .{ .mtp = try mod.speculative_draft.Mtp.init(&impl.base, params) };
             },
             .draft_dflash, .draft_dspark => {
                 impl.base.n_max = params.draft.n_max;
-                impl.kind = .{ .dflash = try draft_impls.DFlash.init(&impl.base, params, t) };
+                impl.kind = .{ .dflash = try mod.speculative_draft.DFlash.init(&impl.base, params, t) };
             },
             .ngram_simple => {
                 var map = getCommonNgramMap(t, params.ngram_simple);
@@ -1389,7 +1375,7 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
                 const ngram_size_key = map.size_key;
                 const mgram_size_value = map.size_value;
 
-                const config_simple: ngram_map.SimpleConfig = .{
+                const config_simple: mod.ngram_map.SimpleConfig = .{
                     .size_ngram = ngram_size_key,
                     .size_mgram = mgram_size_value,
                 };
@@ -1444,7 +1430,7 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
     for (rates, 0..) |rate, i| {
         result.synth_probs.appendAssumeCapacity(if (rate_prev > 0.0) rate / rate_prev else 0.0);
         var buf: [64]u8 = undefined;
-        const n = libc.snprintf(&buf, buf.len, "%.6g", rate);
+        const n = stdlib.libc.snprintf(&buf, buf.len, "%.6g", rate);
         if (i > 0) try rates_str.appendSlice(gpa, ", ");
         try rates_str.appendSlice(gpa, buf[0..@intCast(n)]);
         rate_prev = rate;
@@ -1500,7 +1486,7 @@ pub fn begin(spec: ?*Speculative, seq_id: c.llama_seq_id, prompt: []const c.llam
 /// the target's batch through every drafter that keeps state.
 ///
 /// Return: false once one fails; the rest are skipped, as `&&` skips them.
-pub fn process(spec: ?*Speculative, batch: *const common.Batch) bool {
+pub fn process(spec: ?*Speculative, batch: *const mod.common.Batch) bool {
     var result = true;
 
     const s = spec orelse return result;
@@ -1689,7 +1675,7 @@ pub fn printStats(spec: ?*const Speculative) void {
 /// `printf`'s `%.nf` does.
 fn appendFmt(out: *std.ArrayList(u8), comptime fmt: [*:0]const u8, args: anytype) void {
     var buf: [128]u8 = undefined;
-    const n = @call(.auto, libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
     out.appendSlice(gpa, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 
@@ -1701,8 +1687,8 @@ test {
 }
 
 test "the type names round-trip and none ends a list" {
-    try std.testing.expectEqual(Type.ngram_map_k4v, typeFromName("ngram-map-k4v"));
-    try std.testing.expectEqual(Type.count, typeFromName("bogus"));
+    try std.testing.expectEqual(mod.params.SpeculativeType.ngram_map_k4v, typeFromName("ngram-map-k4v"));
+    try std.testing.expectEqual(mod.params.SpeculativeType.count, typeFromName("bogus"));
     try std.testing.expectEqualStrings("none,draft-simple,draft-eagle3,draft-mtp,draft-dflash,draft-dspark,ngram-simple,ngram-map-k,ngram-map-k4v,ngram-mod,ngram-cache", allTypesStr());
 }
 
@@ -1713,7 +1699,7 @@ test "the output limits clamp to the batch" {
 }
 
 test "a synthetic length solves to rates that sum to it" {
-    var p: SpecParams = .{};
+    var p: mod.params.Speculative = .{};
     p.synth_len = 2.5;
     const rates = try synthRatesResolve(std.testing.allocator, &p, 4);
     defer std.testing.allocator.free(rates);

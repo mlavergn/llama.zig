@@ -15,11 +15,8 @@
 //! wait runs against the steady clock, one deadline for the whole wait.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const detail = @import("detail.zig");
-const sync = stdlib.sync;
-
-extern "c" fn pthread_equal(t1: std.c.pthread_t, t2: std.c.pthread_t) c_int;
 
 /// One `std::function<void()>` the pool runs: a function and its argument.
 pub const Task = struct {
@@ -79,11 +76,11 @@ pub const ThreadPool = struct {
     threads: std.ArrayList(Worker) = .empty,
     dynamic_threads: std.ArrayList(Worker) = .empty,
     finished_threads: std.ArrayList(Worker) = .empty,
-    cond: sync.Condition = .{},
-    mutex: sync.Mutex = .{},
+    cond: stdlib.sync.Condition = .{},
+    mutex: stdlib.sync.Mutex = .{},
     /// Held by a dynamic worker from before its spawn until it has
     /// recorded its own handle, so `move_to_finished` always finds it.
-    started: sync.Mutex = .{},
+    started: stdlib.sync.Mutex = .{},
 
     /// Ports `ThreadPool` (httplib.cpp:7655 @b1b770d90), the constructor:
     /// starts the `n` base threads. The C throws when `max_n` is below `n`;
@@ -103,7 +100,7 @@ pub const ThreadPool = struct {
             .base_thread_count = n,
             .max_thread_count = if (max_n == 0) n else max_n,
             .max_queued_requests = 0,
-            .idle_timeout_sec = detail.thread_pool_idle_timeout,
+            .idle_timeout_sec = mod.detail.thread_pool_idle_timeout,
         };
         try self.threads.ensureTotalCapacity(allocator, n);
         for (0..n) |_| {
@@ -205,7 +202,7 @@ pub const ThreadPool = struct {
     /// `ThreadPool`; `mutex` is held.
     fn moveToFinished(self: *ThreadPool, id: std.c.pthread_t) void {
         for (self.dynamic_threads.items, 0..) |w, i| {
-            if (pthread_equal(w.id, id) != 0) {
+            if (stdlib.libc.pthread_equal(w.id, id) != 0) {
                 self.finished_threads.append(self.allocator, w) catch {
                     // the C's push_back throws here; detach rather than leak a joinable
                     w.thread.detach();

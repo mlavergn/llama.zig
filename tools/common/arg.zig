@@ -23,20 +23,13 @@
 //! external dependency.
 
 const std = @import("std");
-const libc = @import("stdlib").libc;
+const mod = @import("module.zig");
 const stdlib = @import("stdlib");
-const num = @import("stdlib").num;
-const env_mod = @import("stdlib").env;
 const builtin = @import("builtin");
 const c = @import("tools_h");
-const params_mod = @import("params.zig");
-const io = @import("io.zig");
-const log = @import("log.zig");
-const build_info = @import("build_info.zig");
-const options = @import("arg_options.zig");
 
-pub const Params = params_mod.Params;
-pub const Example = params_mod.Example;
+pub const Params = mod.params.Params;
+pub const Example = mod.params.Example;
 pub const ExampleSet = std.EnumSet(Example);
 
 // -----------------------------------------------------------------------------
@@ -54,7 +47,7 @@ pub fn what() []const u8 {
 /// `throw std::...(string_format(fmt, args))`: formats with the C's
 /// `snprintf`, so `%d` and `%s` read as the C's do.
 pub fn throw(comptime fmt: [*:0]const u8, args: anytype) error{Throw} {
-    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
     return error.Throw;
 }
@@ -62,7 +55,7 @@ pub fn throw(comptime fmt: [*:0]const u8, args: anytype) error{Throw} {
 /// Records `e.what()` without throwing, for a message the caller returns
 /// with a different error.
 pub fn setWhat(comptime fmt: [*:0]const u8, args: anytype) void {
-    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, stdlib.libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
 }
 
@@ -75,7 +68,7 @@ pub fn throwStr(s: []const u8) error{Throw} {
 
 /// `std::stoi`, as libc++ throws (string.cpp's `as_integer_helper`).
 pub fn stoi(s: [:0]const u8) error{Throw}!c_int {
-    return switch (num.stoi(s)) {
+    return switch (stdlib.num.stoi(s)) {
         .ok => |v| v,
         else => |e| throwStr(std.mem.span(e.what())),
     };
@@ -85,7 +78,7 @@ pub fn stoi(s: [:0]const u8) error{Throw}!c_int {
 ///
 /// Return: the value, or `error.Throw` with the exception set.
 pub fn stoull(s: []const u8) error{Throw}!u64 {
-    return switch (num.stoull(s)) {
+    return switch (stdlib.num.stoull(s)) {
         .ok => |v| v,
         else => |e| throwStr(std.mem.span(e.what())),
     };
@@ -93,7 +86,7 @@ pub fn stoull(s: []const u8) error{Throw}!u64 {
 
 /// `std::stoul`.
 pub fn stoul(s: [:0]const u8) error{Throw}!c_ulong {
-    const p = num.strtoul(s, 10);
+    const p = stdlib.num.strtoul(s, 10);
     if (p.range) return throwStr("stoul: out of range");
     if (p.end == 0) return throwStr("stoul: no conversion");
     return p.value;
@@ -101,7 +94,7 @@ pub fn stoul(s: [:0]const u8) error{Throw}!c_ulong {
 
 /// `std::stof`.
 pub fn stof(s: [:0]const u8) error{Throw}!f32 {
-    const p = num.strtof(s);
+    const p = stdlib.num.strtof(s);
     if (p.range) return throwStr("stof: out of range");
     if (p.end == 0) return throwStr("stof: no conversion");
     return p.value;
@@ -210,10 +203,10 @@ pub const Arg = struct {
             // for compatibility, we need to check LLAMA_ARG_NO_ env as well
             var buf: [256]u8 = undefined;
             if (self.negEnv(&buf)) |neg| {
-                if (env_mod.get(neg) != null) return "0"; // falsey
+                if (stdlib.env.get(neg) != null) return "0"; // falsey
             }
         }
-        if (env_mod.get(env)) |v| return v;
+        if (stdlib.env.get(env)) |v| return v;
         return null;
     }
 
@@ -223,10 +216,10 @@ pub const Arg = struct {
         if (self.args_neg.len != 0) {
             var buf: [256]u8 = undefined;
             if (self.negEnv(&buf)) |neg| {
-                if (env_mod.get(neg) != null) return true;
+                if (stdlib.env.get(neg) != null) return true;
             }
         }
-        return env_mod.get(env) != null;
+        return stdlib.env.get(env) != null;
     }
 
     /// Ports `to_string` (arg.cpp:161 @b1b770d90), a member of `common_arg`: the option
@@ -374,9 +367,9 @@ pub const Context = struct {
     /// `string_format(...)` for a help text, built when the table is.
     pub fn fmt(self: *Context, comptime f: [*:0]const u8, args: anytype) ![]const u8 {
         const a = self.params.arena;
-        const n: usize = @intCast(@call(.auto, libc.snprintf, .{ null, 0, f } ++ args));
+        const n: usize = @intCast(@call(.auto, stdlib.libc.snprintf, .{ null, 0, f } ++ args));
         const buf = try a.alloc(u8, n + 1);
-        _ = @call(.auto, libc.snprintf, .{ buf.ptr, n + 1, f } ++ args);
+        _ = @call(.auto, stdlib.libc.snprintf, .{ buf.ptr, n + 1, f } ++ args);
         return buf[0..n];
     }
 };
@@ -404,7 +397,7 @@ pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const
     params.use_color = stdlib.tty.canUseColors();
 
     var ctx: Context = .{ .ex = ex, .params = params, .print_usage = print_usage };
-    try options.addAll(&ctx);
+    try mod.arg_options.addAll(&ctx);
     return ctx;
 }
 
@@ -431,7 +424,7 @@ fn refuseSystemConfig(a: std.mem.Allocator) !void {
     }
     for (paths.items) |p| {
         if (@import("stdlib").fs.stat(p, true) != null) {
-            io.eprintf("error: config file %s found, but config files are not supported by this port\n", .{p.ptr});
+            mod.io.eprintf("error: config file %s found, but config files are not supported by this port\n", .{p.ptr});
             stdlib.stdio.exit(1);
         }
     }
@@ -440,7 +433,7 @@ fn refuseSystemConfig(a: std.mem.Allocator) !void {
 /// `common_get_env` (common/common.cpp:949 @b1b770d90), read as a path: an
 /// unset or empty variable is an empty path.
 fn nonEmptyEnv(name: [:0]const u8) ?[*:0]const u8 {
-    const v = env_mod.get(name) orelse return null;
+    const v = stdlib.env.get(name) orelse return null;
     return if (v.len == 0) null else v.ptr;
 }
 
@@ -453,7 +446,7 @@ pub fn homeDirectory() ?[*:0]const u8 {
 }
 
 /// Ports `postprocess_cpu_params` (common/common.cpp:309 @b1b770d90).
-pub fn postprocessCpuParams(cpuparams: *params_mod.CpuParams, role_model: ?*const params_mod.CpuParams) void {
+pub fn postprocessCpuParams(cpuparams: *mod.params.CpuParams, role_model: ?*const mod.params.CpuParams) void {
     var n_set: i32 = 0;
 
     if (cpuparams.n_threads < 0) {
@@ -471,7 +464,7 @@ pub fn postprocessCpuParams(cpuparams: *params_mod.CpuParams, role_model: ?*cons
 
     if (n_set != 0 and n_set < cpuparams.n_threads) {
         // Not enough set bits, may experience performance issues.
-        log.wrn("cmn  %12.*s: Not enough set bits in CPU mask (%d) to satisfy requested thread count: %d\n", .{ @as(c_int, 12), "postprocess_cpu_params", n_set, cpuparams.n_threads });
+        mod.log.wrn("cmn  %12.*s: Not enough set bits in CPU mask (%d) to satisfy requested thread count: %d\n", .{ @as(c_int, 12), "postprocess_cpu_params", n_set, cpuparams.n_threads });
     }
 }
 
@@ -480,7 +473,7 @@ pub fn postprocessCpuParams(cpuparams: *params_mod.CpuParams, role_model: ?*cons
 const ParseError = error{ InvalidArgument, Other };
 
 /// Ports `spec_types_is_default` (arg.cpp:335 @b1b770d90).
-fn specTypesIsDefault(params: *const params_mod.Params) bool {
+fn specTypesIsDefault(params: *const mod.params.Params) bool {
     const t = params.speculative.types.items;
     return t.len == 1 and t[0] == .none;
 }
@@ -491,7 +484,7 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
     const a = params.arena;
 
     // setup log directly from params.verbosity: see tools/cli/cli.cpp
-    log.verbosity_thold = params.verbosity;
+    mod.log.verbosity_thold = params.verbosity;
 
     // config file applies first, so env variables and CLI arguments override it
     try refuseSystemConfig(a);
@@ -546,10 +539,10 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
         const gop = try seen_args.getOrPut(a, arg);
         if (gop.found_existing) {
             const skip = std.mem.eql(u8, arg, "--spec-type");
-            if (!skip) log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{arg.ptr});
+            if (!skip) mod.log.wrn("DEPRECATED: argument '%s' specified multiple times, use comma-separated values instead (only last value will be used)\n", .{arg.ptr});
         }
         if (opt.hasValueFromEnv()) {
-            io.eprintf("warn: %s environment variable is set, but will be overwritten by command line argument %s\n", .{ opt.env.?.ptr, arg.ptr });
+            mod.io.eprintf("warn: %s environment variable is set, but will be overwritten by command line argument %s\n", .{ opt.env.?.ptr, arg.ptr });
         }
         (blk: {
             switch (opt.handler) {
@@ -664,7 +657,7 @@ fn parseEx(argv: []const [:0]const u8, ctx: *Context) !void {
 
     const mcp_enabled = params.mcp_servers_config.len != 0 or params.mcp_servers_json.len != 0;
     if ((params.server_tools.items.len != 0 or mcp_enabled or params.ui_mcp_proxy) and !params.cors_origins_explicit) {
-        log.wrn("server tools, MCP servers or MCP proxy are enabled, using localhost as default CORS origin (change via --cors-origins)\n", .{});
+        mod.log.wrn("server tools, MCP servers or MCP proxy are enabled, using localhost as default CORS origin (change via --cors-origins)\n", .{});
         params.cors_origins = "localhost";
     }
 
@@ -747,7 +740,7 @@ pub fn processEscapes(a: std.mem.Allocator, input: []const u8) ![]const u8 {
                     // Handle \x12, etc
                     if (input_idx + 2 < input_len) {
                         const x = [2]u8{ input[input_idx + 1], input[input_idx + 2] };
-                        const parsed = num.strtol(&x, 16);
+                        const parsed = stdlib.num.strtol(&x, 16);
                         const val = parsed.value;
                         if (parsed.end == 2) {
                             input_idx += 2;
@@ -804,11 +797,11 @@ fn printUsage(ctx: *Context) !void {
     };
     for (sections) |sec| {
         if (sec[1].items.len == 0) continue;
-        io.printf("%s----- %s -----\n\n", .{ @as([*:0]const u8, if (first) "" else "\n\n"), sec[0] });
+        mod.io.printf("%s----- %s -----\n\n", .{ @as([*:0]const u8, if (first) "" else "\n\n"), sec[0] });
         first = false;
         for (sec[1].items) |opt| {
             const s = try opt.toString(a);
-            io.printf("%.*s", .{ @as(c_int, @intCast(s.len)), s.ptr });
+            mod.io.printf("%.*s", .{ @as(c_int, @intCast(s.len)), s.ptr });
         }
     }
 }
@@ -829,12 +822,12 @@ pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usa
 
     parseEx(argv, &ctx) catch |e| switch (e) {
         error.InvalidArgument => {
-            io.eprintf("%.*s\n", .{ @as(c_int, @intCast(what_len)), &what_buf });
+            mod.io.eprintf("%.*s\n", .{ @as(c_int, @intCast(what_len)), &what_buf });
             params.* = params_org;
             return false;
         },
         error.Other => {
-            io.eprintf("%.*s\n", .{ @as(c_int, @intCast(what_len)), &what_buf });
+            mod.io.eprintf("%.*s\n", .{ @as(c_int, @intCast(what_len)), &what_buf });
             stdlib.stdio.exit(1); // for other exceptions, we exit with status code 1
         },
         else => |other| return other,
@@ -845,7 +838,7 @@ pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usa
         stdlib.stdio.exit(0);
     }
     if (params.completion) {
-        io.eprintf("error: --completion-bash is not supported by this port\n", .{});
+        mod.io.eprintf("error: --completion-bash is not supported by this port\n", .{});
         stdlib.stdio.exit(1);
     }
     return true;
@@ -857,11 +850,11 @@ pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usa
 pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_model_kv_override), allocator: std.mem.Allocator) !bool {
     const func = "string_parse_kv_override";
     const sep_idx = std.mem.indexOfScalar(u8, data, '=') orelse {
-        log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
+        mod.log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
         return false;
     };
     if (sep_idx >= 128) {
-        log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
+        mod.log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
         return false;
     }
     var kvo: c.llama_model_kv_override = std.mem.zeroes(c.llama_model_kv_override);
@@ -870,10 +863,10 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
     const sep = data[sep_idx + 1 ..];
     if (std.mem.startsWith(u8, sep, "int:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
-        kvo.unnamed_0.val_i64 = num.atol(std.mem.sliceTo(sep[4..], 0));
+        kvo.unnamed_0.val_i64 = stdlib.num.atol(std.mem.sliceTo(sep[4..], 0));
     } else if (std.mem.startsWith(u8, sep, "float:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
-        kvo.unnamed_0.val_f64 = num.atof(std.mem.sliceTo(sep[6..], 0));
+        kvo.unnamed_0.val_f64 = stdlib.num.atof(std.mem.sliceTo(sep[6..], 0));
     } else if (std.mem.startsWith(u8, sep, "bool:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
         const v = sep[5..];
@@ -882,20 +875,20 @@ pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_mod
         } else if (std.mem.eql(u8, v, "false")) {
             kvo.unnamed_0.val_bool = false;
         } else {
-            log.comErr(func, "%s: invalid boolean value for KV override '%s'\n", .{ func, data.ptr });
+            mod.log.comErr(func, "%s: invalid boolean value for KV override '%s'\n", .{ func, data.ptr });
             return false;
         }
     } else if (std.mem.startsWith(u8, sep, "str:")) {
         kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_STR;
         const v = sep[4..];
         if (v.len > 127) {
-            log.comErr(func, "%s: malformed KV override '%s', value cannot exceed 127 chars\n", .{ func, data.ptr });
+            mod.log.comErr(func, "%s: malformed KV override '%s', value cannot exceed 127 chars\n", .{ func, data.ptr });
             return false;
         }
         @memcpy(kvo.unnamed_0.val_str[0..v.len], v);
         kvo.unnamed_0.val_str[127] = 0;
     } else {
-        log.comErr(func, "%s: invalid type for KV override '%s'\n", .{ func, data.ptr });
+        mod.log.comErr(func, "%s: invalid type for KV override '%s'\n", .{ func, data.ptr });
         return false;
     }
     try overrides.append(allocator, kvo);

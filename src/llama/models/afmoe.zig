@@ -11,21 +11,11 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
-const libm = @import("stdlib").libm;
-const impl = @import("../impl.zig");
-const loader = @import("../loader.zig");
-const model_mod = @import("../model.zig");
-const graph = @import("../graph.zig");
-const hparams_mod = @import("../hparams.zig");
-
-const c = impl.c;
-const Exception = impl.Exception;
-const Thrown = impl.Thrown;
-const Model = model_mod.Model;
-const Tensor = c.ggml_tensor;
+const llama = @import("../module.zig");
+const stdlib = @import("stdlib");
 
 /// Ports `llama_model_afmoe`'s `load_arch_hparams` (models/afmoe.cpp:3 @b1b770d90).
-pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchHparams(self: *llama.model.Model, ml: *const llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const meta = &ml.meta;
     const hp = &self.hparams;
 
@@ -41,14 +31,14 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // Interleaved sliding-window attention; the pattern is three sliding,
     // one full (global_attn_every_n_layers = 4).
     if (hp.n_swa > 0) {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.standard);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.standard);
         try self.loadSwaPattern(ml, 4, false, exc);
 
         hp.rope_freq_base_train_swa = hp.rope_freq_base_train;
         hp.rope_freq_scale_train_swa = hp.rope_freq_scale_train;
         if (try meta.getKey(f32, .rope_freq_base_swa, false, exc)) |v| hp.rope_freq_base_train_swa = v;
     } else {
-        hp.swa_type = @backingInt(hparams_mod.SwaType.none);
+        hp.swa_type = @backingInt(llama.hparams.SwaType.none);
     }
 
     // RoPE on every layer but each n_no_rope_layer_step-th.
@@ -58,8 +48,8 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     }
 
     // A sigmoid when unset.
-    if (hp.expert_gating_func == @backingInt(hparams_mod.ExpertGatingFunc.none)) {
-        hp.expert_gating_func = @backingInt(hparams_mod.ExpertGatingFunc.sigmoid);
+    if (hp.expert_gating_func == @backingInt(llama.hparams.ExpertGatingFunc.none)) {
+        hp.expert_gating_func = @backingInt(llama.hparams.ExpertGatingFunc.sigmoid);
     }
 
     self.type = switch (hp.nLayer()) {
@@ -70,12 +60,12 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 }
 
 /// Ports `llama_model_afmoe`'s `load_arch_tensors` (models/afmoe.cpp:42 @b1b770d90).
-pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!void {
+pub fn loadArchTensors(self: *llama.model.Model, _: *llama.loader.Loader, exc: *llama.impl.Exception) llama.impl.Thrown!void {
     const l = self.loadLocals();
     const hp = &self.hparams;
     const n_expert_shared: i64 = hp.n_expert_shared;
-    const nr = loader.tensor_not_required;
-    const dup = loader.tensor_duplicated;
+    const nr = llama.loader.tensor_not_required;
+    const dup = llama.loader.tensor_duplicated;
 
     self.tok_embd = try self.createTensor(.{ .tensor = .token_embd, .suffix = "weight" }, &.{ l.n_embd, l.n_vocab }, 0, exc);
 
@@ -140,23 +130,23 @@ pub fn loadArchTensors(self: *Model, _: *loader.Loader, exc: *Exception) Thrown!
 }
 
 /// Ports `llama_model_afmoe`'s `build_arch_graph` (models/afmoe.cpp:107 @b1b770d90).
-pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const graph.Params) void {
+pub fn buildArchGraph(model: *const llama.model.Model, b: *const llama.graph.Builder, _: *const llama.graph.Params) void {
     buildGraph(model, b);
 }
 
 /// Ports the constructor of `llama_model_afmoe`'s `graph`
 /// (models/afmoe.cpp:111 @b1b770d90).
-fn buildGraph(model: *const Model, b: *const graph.Builder) void {
+fn buildGraph(model: *const llama.model.Model, b: *const llama.graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/afmoe.cpp", 113, "n_embd_head == hparams.n_embd_head_k()");
+    llama.impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/afmoe.cpp", 113, "n_embd_head == hparams.n_embd_head_k()");
 
-    var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
+    var inpL: *llama.impl.c.ggml_tensor = b.buildInpEmbd(model.tok_embd.?);
 
     // MuP scaling, the embeddings by sqrt(hidden_size): with mup_enabled
     // and hidden_size 1024, a scale of 32.
-    inpL = c.ggml_scale(ctx, inpL, libm.sqrtfInt(b.n_embd));
+    inpL = llama.impl.c.ggml_scale(ctx, inpL, stdlib.libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_embd_scaled", -1);
 
     // The positions.
@@ -164,7 +154,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKvIswa();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
+    const kq_scale: f32 = 1.0 / stdlib.libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {
@@ -186,7 +176,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const Vcur = qkv.v;
 
             // The gate, from the input.
-            var gate: *Tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
+            var gate: *llama.impl.c.ggml_tensor = b.buildLoraMm(layer.wqkv_gate.?, attn_inp, null);
             b.cb(gate, "attn_gate_proj", il);
 
             // The Q and K norms.
@@ -206,9 +196,9 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(cur, "attn_out", il);
 
             // The attention gate, attn_out * sigmoid(gate), before o_proj.
-            gate = c.ggml_sigmoid(ctx, gate);
+            gate = llama.impl.c.ggml_sigmoid(ctx, gate);
             b.cb(gate, "attn_gate_sig", il);
-            cur = c.ggml_mul(ctx, cur, gate);
+            cur = llama.impl.c.ggml_mul(ctx, cur, gate);
             b.cb(cur, "attn_gated", il);
 
             // Then the output projection.
@@ -221,11 +211,11 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         b.cb(cur, "attn_post_norm", il);
 
         if (il == b.n_layer - 1) {
-            cur = c.ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = c.ggml_get_rows(ctx, inpSA, inp_out_ids);
+            cur = llama.impl.c.ggml_get_rows(ctx, cur, inp_out_ids);
+            inpSA = llama.impl.c.ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        const ffn_inp: *Tensor = c.ggml_add(ctx, cur, inpSA);
+        const ffn_inp: *llama.impl.c.ggml_tensor = llama.impl.c.ggml_add(ctx, cur, inpSA);
         b.cb(ffn_inp, "ffn_inp", il);
 
         // The feed-forward norm before.
@@ -256,7 +246,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 const ffn_shexp = b.buildFfn(cur, layer.ffn_up_shexp, null, null, layer.ffn_gate_shexp, null, null, layer.ffn_down_shexp, null, null, null, .silu, .par, il);
                 b.cb(ffn_shexp, "ffn_shexp", il);
 
-                cur = c.ggml_add(ctx, moe_out, ffn_shexp);
+                cur = llama.impl.c.ggml_add(ctx, moe_out, ffn_shexp);
                 b.cb(cur, "ffn_out", il);
             } else {
                 cur = moe_out;
@@ -271,7 +261,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         cur = b.buildNorm(cur, layer.ffn_post_norm, null, .rms, il);
         b.cb(cur, "ffn_post_norm", il);
 
-        cur = c.ggml_add(ctx, cur, ffn_inp);
+        cur = llama.impl.c.ggml_add(ctx, cur, ffn_inp);
         cur = b.buildCvec(cur, il);
         b.cb(cur, "l_out", il);
 

@@ -27,22 +27,10 @@
 //! `llama_*` C symbol.
 
 const std = @import("std");
+const mod = @import("module.zig");
 const peg = @import("peg");
-const exception = @import("exception.zig");
-const msg_mod = @import("msg.zig");
-const params_mod = @import("params.zig");
-const prompt_mod = @import("prompt.zig");
-const input_mod = @import("input.zig");
-const parse_mod = @import("parse.zig");
-const templates_mod = @import("templates.zig");
-const util = @import("util.zig");
 
 const Allocator = std.mem.Allocator;
-const Error = exception.Error;
-const Msg = msg_mod.Msg;
-const Input = input_mod.Input;
-const Prompt = prompt_mod.Prompt;
-const GrammarTrigger = params_mod.GrammarTrigger;
 
 /// Ports `common_sampling_add_preserved_tokens` (sampling.cpp:1055
 /// @b1b770d90): each string that is a single token in the vocabulary added
@@ -51,16 +39,16 @@ const GrammarTrigger = params_mod.GrammarTrigger;
 /// Parameters:
 /// - `vocab`: a `llama_vocab *`, only passed through.
 /// - `preserved`: grown with `a`.
-pub fn addPreservedTokens(a: Allocator, preserved: *std.ArrayList(i32), vocab: *const anyopaque, tokens: []const []const u8) Error!void {
+pub fn addPreservedTokens(a: Allocator, preserved: *std.ArrayList(i32), vocab: *const anyopaque, tokens: []const []const u8) mod.exception.Error!void {
     for (tokens) |t| {
-        const ids = try input_mod.commonTokenize(a, vocab, t, false, true);
+        const ids = try mod.input.commonTokenize(a, vocab, t, false, true);
         defer a.free(ids);
         if (ids.len == 1) try setInsert(a, preserved, ids[0]);
     }
 }
 
 /// `std::set<llama_token>::insert`.
-fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) Error!void {
+fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) mod.exception.Error!void {
     const at = std.sort.lowerBound(i32, set.items, id, struct {
         fn order(x: i32, y: i32) std.math.Order {
             return std.math.order(x, y);
@@ -81,16 +69,16 @@ fn setInsert(a: Allocator, set: *std.ArrayList(i32), id: i32) Error!void {
 ///
 /// Return: `error.RuntimeError` for a single-token word that is not
 /// preserved, or for a lazy grammar left without triggers.
-pub fn addGrammarTriggers(a: Allocator, out: *std.ArrayList(GrammarTrigger), preserved: []const i32, grammar_lazy: bool, vocab: *const anyopaque, triggers: []const GrammarTrigger) Error!void {
+pub fn addGrammarTriggers(a: Allocator, out: *std.ArrayList(mod.params.GrammarTrigger), preserved: []const i32, grammar_lazy: bool, vocab: *const anyopaque, triggers: []const mod.params.GrammarTrigger) mod.exception.Error!void {
     for (triggers) |trigger| {
         if (trigger.type == .word) {
             const word = trigger.value;
-            const ids = try input_mod.commonTokenize(a, vocab, word, false, true);
+            const ids = try mod.input.commonTokenize(a, vocab, word, false, true);
             defer a.free(ids);
             if (ids.len == 1) {
                 const token = ids[0];
                 if (std.mem.indexOfScalar(i32, preserved, token) == null) {
-                    return exception.throw(error.RuntimeError, "Grammar trigger word should be marked as preserved token: {s}", .{word});
+                    return mod.exception.throw(error.RuntimeError, "Grammar trigger word should be marked as preserved token: {s}", .{word});
                 }
                 try out.append(a, .{ .type = .token, .value = word, .token = token });
             } else {
@@ -101,7 +89,7 @@ pub fn addGrammarTriggers(a: Allocator, out: *std.ArrayList(GrammarTrigger), pre
         }
     }
     if (grammar_lazy and out.items.len == 0) {
-        return exception.throw(error.RuntimeError, "Error: no triggers set for lazy grammar!", .{});
+        return mod.exception.throw(error.RuntimeError, "Error: no triggers set for lazy grammar!", .{});
     }
 }
 
@@ -117,10 +105,10 @@ pub const Session = struct {
     /// Everything the templates produced; never freed singly.
     arena: *std.heap.ArenaAllocator,
 
-    prompt_parts: Prompt = .{},
+    prompt_parts: mod.prompt.Prompt = .{},
     grammar_text: []const u8 = "",
     grammar_lazy: bool = false,
-    grammar_triggers: std.ArrayList(GrammarTrigger) = .empty,
+    grammar_triggers: std.ArrayList(mod.params.GrammarTrigger) = .empty,
     /// A `std::set<llama_token>`: sorted, unique.
     preserved_tokens: std.ArrayList(i32) = .empty,
     stops: std.ArrayList([]const u8) = .empty,
@@ -130,14 +118,14 @@ pub const Session = struct {
 
     /// `parser_params`: its format, generation prompt and parser, kept
     /// apart so the session can move -- `parserParams` points at them.
-    parser_format: msg_mod.Format = .content_only,
-    parser_generation_prompt: Input,
+    parser_format: mod.msg.Format = .content_only,
+    parser_generation_prompt: mod.input.Input,
     parser_debug: bool = false,
     parser_arena: ?peg.Arena = null,
 
-    delimiters: msg_mod.MsgDelimiters = .{},
-    input: Input,
-    result: Msg = .{},
+    delimiters: mod.msg.MsgDelimiters = .{},
+    input: mod.input.Input,
+    result: mod.msg.Msg = .{},
     templated: bool = false,
     finished: bool = false,
 
@@ -145,7 +133,7 @@ pub const Session = struct {
     /// constructor: no template; feeding it parses content only.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn initEmpty(gpa: Allocator) Error!Session {
+    pub fn initEmpty(gpa: Allocator) mod.exception.Error!Session {
         const arena = try gpa.create(std.heap.ArenaAllocator);
         arena.* = .init(gpa);
         var self: Session = .{
@@ -155,7 +143,7 @@ pub const Session = struct {
             .input = .init(gpa),
         };
         errdefer self.deinit();
-        try Msg.setField(gpa, &self.result.role, "assistant");
+        try mod.msg.Msg.setField(gpa, &self.result.role, "assistant");
         return self;
     }
 
@@ -171,12 +159,12 @@ pub const Session = struct {
     ///   caller has, or null.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn init(gpa: Allocator, tmpls: *const templates_mod.Templates, vocab: ?*const anyopaque, inputs: *const templates_mod.TemplatesInputs, params: SessionParams) Error!Session {
+    pub fn init(gpa: Allocator, tmpls: *const mod.templates.Templates, vocab: ?*const anyopaque, inputs: *const mod.templates.TemplatesInputs, params: SessionParams) mod.exception.Error!Session {
         var self = try initEmpty(gpa);
         errdefer self.deinit();
         const a = self.arena.allocator();
 
-        const applied = try templates_mod.apply(a, tmpls, inputs);
+        const applied = try mod.templates.apply(a, tmpls, inputs);
 
         self.templated = true;
         self.prompt_parts = applied.prompt;
@@ -190,9 +178,9 @@ pub const Session = struct {
 
         self.parser_format = applied.format;
         self.parser_generation_prompt = if (vocab) |v|
-            try input_mod.tokenize(a, v, applied.generation_prompt)
+            try mod.input.tokenize(a, v, applied.generation_prompt)
         else
-            try Input.fromText(a, applied.generation_prompt);
+            try mod.input.Input.fromText(a, applied.generation_prompt);
         self.parser_debug = params.debug;
         self.parser_arena = applied.parser;
 
@@ -205,7 +193,7 @@ pub const Session = struct {
 
             const Tok = struct {
                 fn run(vv: *const anyopaque, al: Allocator, text: []const u8) anyerror!std.ArrayList(i32) {
-                    return .fromOwnedSlice(try input_mod.commonTokenize(al, vv, text, false, true));
+                    return .fromOwnedSlice(try mod.input.commonTokenize(al, vv, text, false, true));
                 }
             };
             self.delimiters.tokenize(a, v, Tok.run) catch |e| return switch (e) {
@@ -218,7 +206,7 @@ pub const Session = struct {
 
         if (inputs.continue_final_message != .none and !params.echo) {
             // start from the prefill so it is not emitted as part of the first delta
-            const m = try parse_mod.parse(gpa, &self.input, true, &self.parserParams());
+            const m = try mod.parse.parse(gpa, &self.input, true, &self.parserParams());
             self.result.deinit(gpa);
             self.result = m;
         }
@@ -236,7 +224,7 @@ pub const Session = struct {
     /// The C++ copy.
     ///
     /// Return: owned by `gpa`; release with `deinit`.
-    pub fn clone(self: *const Session, gpa: Allocator) Error!Session {
+    pub fn clone(self: *const Session, gpa: Allocator) mod.exception.Error!Session {
         var out = try initEmpty(gpa);
         errdefer out.deinit();
         const a = out.arena.allocator();
@@ -256,7 +244,7 @@ pub const Session = struct {
         out.parser_format = self.parser_format;
         out.parser_generation_prompt = try self.parser_generation_prompt.clone(a);
         out.parser_debug = self.parser_debug;
-        if (self.parser_arena) |*p| out.parser_arena = p.clone(a) catch |e| return util.fromPeg(e);
+        if (self.parser_arena) |*p| out.parser_arena = p.clone(a) catch |e| return mod.util.fromPeg(e);
         for (self.delimiters.delimiters.items) |d| {
             try out.delimiters.delimiters.append(a, .{
                 .role = d.role,
@@ -275,7 +263,7 @@ pub const Session = struct {
 
     /// `parser_params`, pointing into this session: valid while it stays
     /// where it is and unchanged.
-    pub fn parserParams(self: *const Session) parse_mod.ParserParams {
+    pub fn parserParams(self: *const Session) mod.parse.ParserParams {
         return .{
             .format = self.parser_format,
             .generation_prompt = &self.parser_generation_prompt,
@@ -285,17 +273,17 @@ pub const Session = struct {
     }
 
     /// Ports `prompt` (chat.h:411 @b1b770d90).
-    pub fn prompt(self: *const Session) *const Prompt {
+    pub fn prompt(self: *const Session) *const mod.prompt.Prompt {
         return &self.prompt_parts;
     }
 
     /// Ports `format` (chat.h:412 @b1b770d90).
-    pub fn format(self: *const Session) msg_mod.Format {
+    pub fn format(self: *const Session) mod.msg.Format {
         return self.parser_format;
     }
 
     /// Ports `msg` (chat.h:413 @b1b770d90).
-    pub fn msg(self: *const Session) *const Msg {
+    pub fn msg(self: *const Session) *const mod.msg.Msg {
         return &self.result;
     }
 
@@ -330,7 +318,7 @@ pub const Session = struct {
     }
 
     /// Ports `message_delimiters` (chat.h:422 @b1b770d90).
-    pub fn messageDelimiters(self: *const Session) *const msg_mod.MsgDelimiters {
+    pub fn messageDelimiters(self: *const Session) *const mod.msg.MsgDelimiters {
         return &self.delimiters;
     }
 
@@ -348,7 +336,7 @@ pub const Session = struct {
     /// - `sampling`: a pointer to a struct with `grammar_type`, `grammar`,
     ///   `grammar_lazy`, `generation_prompt`, `preserved_tokens` (sorted,
     ///   unique) and `grammar_triggers`, as `tools_common`'s `Sampling`.
-    pub fn applySampling(self: *const Session, a: Allocator, sampling: anytype) Error!void {
+    pub fn applySampling(self: *const Session, a: Allocator, sampling: anytype) mod.exception.Error!void {
         if (!self.templated) return;
         const S = @typeInfo(@TypeOf(sampling)).pointer.child;
         if (self.grammar_text.len != 0) {
@@ -374,7 +362,7 @@ pub const Session = struct {
     /// parse that is not empty.
     ///
     /// Return: the message, borrowed until the next `feed` or `finish`.
-    pub fn feed(self: *Session, chunk: *const Input) Error!*const Msg {
+    pub fn feed(self: *Session, chunk: *const mod.input.Input) mod.exception.Error!*const mod.msg.Msg {
         @import("llama").impl.assert(!self.finished, "common/chat.cpp", 1946, "!finished && \"feed() after finish()\"");
         try self.input.appendInput(chunk);
         return self.update(true);
@@ -384,15 +372,15 @@ pub const Session = struct {
     /// whole reply parsed as complete.
     ///
     /// Return: the message, borrowed until `deinit`.
-    pub fn finish(self: *Session, chunk: ?*const Input) Error!*const Msg {
+    pub fn finish(self: *Session, chunk: ?*const mod.input.Input) mod.exception.Error!*const mod.msg.Msg {
         @import("llama").impl.assert(!self.finished, "common/chat.cpp", 1956, "!finished && \"finish() called twice\"");
         self.finished = true;
         if (chunk) |c| try self.input.appendInput(c);
         return self.update(false);
     }
 
-    fn update(self: *Session, is_partial: bool) Error!*const Msg {
-        var m = try parse_mod.parse(self.gpa, &self.input, is_partial, &self.parserParams());
+    fn update(self: *Session, is_partial: bool) mod.exception.Error!*const mod.msg.Msg {
+        var m = try mod.parse.parse(self.gpa, &self.input, is_partial, &self.parserParams());
         if (!m.empty()) {
             self.result.deinit(self.gpa);
             self.result = m;
@@ -415,10 +403,10 @@ test "an empty session parses what it is fed as content, and keeps the last mess
     var s = try Session.initEmpty(a);
     defer s.deinit();
     try std.testing.expectEqualStrings("assistant", s.msg().role);
-    var chunk = try Input.fromText(a, "Hel");
+    var chunk = try mod.input.Input.fromText(a, "Hel");
     defer chunk.deinit();
     _ = try s.feed(&chunk);
-    var c2 = try Input.fromText(a, "lo");
+    var c2 = try mod.input.Input.fromText(a, "lo");
     defer c2.deinit();
     var copy = try s.clone(a);
     defer copy.deinit();
