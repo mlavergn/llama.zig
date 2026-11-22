@@ -14,10 +14,10 @@
 //! path's pairing map, also a `std::map`, is walked in that order too.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
 const log = @import("log.zig");
-const strings = @import("strings.zig");
-const file = @import("file.zig");
+const file = @import("stdlib").file;
 
 /// `LLM_KV_IMATRIX_DATASETS`, `LLM_KV_IMATRIX_CHUNK_COUNT`, `LLM_KV_IMATRIX_CHUNK_SIZE`
 /// (imatrix-loader.h:8, 9, 10 @b1b770d90).
@@ -83,14 +83,10 @@ pub const Imatrix = struct {
         var it = self.entries.keyIterator();
         var i: usize = 0;
         while (it.next()) |k| : (i += 1) names[i] = k.*;
-        std.mem.sort([]const u8, names, {}, lessThan);
+        std.mem.sort([]const u8, names, {}, stdlib.strings.lessThan);
         return names;
     }
 };
-
-fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
-}
 
 /// `std::ifstream` in binary mode, as far as the legacy reader uses it:
 /// `read` sets a sticky fail flag on a short read, `peek` looks at one byte.
@@ -254,21 +250,21 @@ pub fn load(fname: [:0]const u8, imatrix: *Imatrix) !bool {
         const name = std.mem.sliceTo(&t.*.name, 0);
         if (name.len == 0) continue;
 
-        if (strings.removeSuffix(name, ".in_sum")) |base| {
+        if (stdlib.strings.removeSuffix(name, ".in_sum")) |base| {
             const gop = try sums_counts_for.getOrPut(a, base);
             if (!gop.found_existing) {
                 gop.key_ptr.* = try a.dupe(u8, base);
                 gop.value_ptr.* = .{};
             }
             gop.value_ptr.in_sum = t;
-        } else if (strings.removeSuffix(name, ".in_sum2")) |base| {
+        } else if (stdlib.strings.removeSuffix(name, ".in_sum2")) |base| {
             const gop = try sums_counts_for.getOrPut(a, base);
             if (!gop.found_existing) {
                 gop.key_ptr.* = try a.dupe(u8, base);
                 gop.value_ptr.* = .{};
             }
             gop.value_ptr.sums = t;
-        } else if (strings.removeSuffix(name, ".counts")) |base| {
+        } else if (stdlib.strings.removeSuffix(name, ".counts")) |base| {
             const gop = try sums_counts_for.getOrPut(a, base);
             if (!gop.found_existing) {
                 gop.key_ptr.* = try a.dupe(u8, base);

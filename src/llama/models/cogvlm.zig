@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -108,7 +109,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
     const n_embd_head: i64 = hp.nEmbdHeadV(0);
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     impl.assert(n_embd_head == hp.nEmbdHeadK(0), "models/cogvlm.cpp", 74, "n_embd_head == hparams.n_embd_head_k()");
     impl.assert(n_embd_head == b.n_rot, "models/cogvlm.cpp", 75, "n_embd_head == n_rot");

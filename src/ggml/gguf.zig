@@ -75,6 +75,8 @@
 //!   returns `const void *`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const c = impl.c;
 
@@ -403,13 +405,6 @@ inline fn ctxOfConst(p: ?*const c.struct_gguf_context) *const Context {
 /// (gguf.cpp:27, 28 @b1b770d90). The `_WIN32` arm names `_ftelli64` and
 /// `_fseeki64`; this target compiles the other one.
 const Libc = struct {
-    extern fn ftello(stream: *c.FILE) i64;
-    extern fn fseeko(stream: *c.FILE, offset: i64, whence: c_int) c_int;
-    extern fn fread(ptr: *anyopaque, size: usize, nitems: usize, stream: *c.FILE) usize;
-    extern fn fwrite(ptr: *const anyopaque, size: usize, nitems: usize, stream: *c.FILE) usize;
-    extern fn fputc(char: c_int, stream: *c.FILE) c_int;
-    extern fn fclose(stream: *c.FILE) c_int;
-    extern fn strerror(errnum: c_int) [*:0]const u8;
     const SEEK_SET: c_int = 0;
     const SEEK_END: c_int = 2;
 };
@@ -447,18 +442,18 @@ const Reader = struct {
     /// the three seeks fails — in which case the original position is restored
     /// first, as the C++ does.
     fn fileRemain(file: *c.FILE) u64 {
-        const cur = Libc.ftello(file);
+        const cur = libc.ftello(file);
         if (cur < 0) return 0;
-        if (Libc.fseeko(file, 0, Libc.SEEK_END) != 0) {
-            _ = Libc.fseeko(file, cur, Libc.SEEK_SET);
+        if (libc.fseeko(file, 0, Libc.SEEK_END) != 0) {
+            _ = libc.fseeko(file, cur, Libc.SEEK_SET);
             return 0;
         }
-        const end = Libc.ftello(file);
+        const end = libc.ftello(file);
         if (end < 0) {
-            _ = Libc.fseeko(file, cur, Libc.SEEK_SET);
+            _ = libc.fseeko(file, cur, Libc.SEEK_SET);
             return 0;
         }
-        _ = Libc.fseeko(file, cur, Libc.SEEK_SET);
+        _ = libc.fseeko(file, cur, Libc.SEEK_SET);
         return @intCast(end - cur);
     }
 
@@ -1158,7 +1153,7 @@ fn initFromReader(gr: *Reader, params: c.gguf_init_params) ?*Context {
     impl.assert(@as(i64, @intCast(ctx.info.items.len)) == n_tensors, "int64_t(ctx->info.size()) == n_tensors");
 
     // we require the data section to be aligned, so take into account any padding
-    if (n_tensors > 0 and !gr.seek(gr.start() +% impl.pad(gr.tell() -% gr.start(), ctx.alignment))) {
+    if (n_tensors > 0 and !gr.seek(gr.start() +% stdlib.num.pad(usize, gr.tell() -% gr.start(), ctx.alignment))) {
         impl.logError("%s: failed to seek to beginning of data section\n", .{"gguf_init_from_reader"});
         ctx.destroy();
         return null;
@@ -1191,7 +1186,7 @@ fn initFromReader(gr: *Reader, params: c.gguf_init_params) ?*Context {
                 ctx.destroy();
                 return null;
             }
-            const padded_size = impl.pad(nbytes, ctx.alignment);
+            const padded_size = stdlib.num.pad(usize, nbytes, ctx.alignment);
             if (std.math.maxInt(usize) - ctx.size < padded_size) {
                 impl.logError(
                     "%s: tensor '%s' size overflow, cannot accumulate size %zu + %zu\n",
@@ -1359,7 +1354,7 @@ fn fileReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, l
 
     if (reader.offset != offset) {
         if (offset > std.math.maxInt(i64) or
-            Libc.fseeko(reader.file, @intCast(offset), Libc.SEEK_SET) != 0)
+            libc.fseeko(reader.file, @intCast(offset), Libc.SEEK_SET) != 0)
         {
             return 0;
         }
@@ -1367,7 +1362,7 @@ fn fileReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, l
         reader.offset = offset;
     }
 
-    const nread = Libc.fread(output.?, 1, len, reader.file);
+    const nread = libc.fread(output.?, 1, len, reader.file);
     reader.offset += nread;
     return nread;
 }
@@ -1383,7 +1378,7 @@ fn fileReaderCallback(userdata: ?*anyopaque, output: ?*anyopaque, offset: u64, l
 export fn gguf_init_from_file_ptr(file: ?*c.FILE, params: c.gguf_init_params) callconv(.c) ?*c.struct_gguf_context {
     const f = file orelse return null;
 
-    const cur = Libc.ftello(f);
+    const cur = libc.ftello(f);
     if (cur < 0) return null;
 
     var reader: FileReader = .{ .file = f, .offset = @intCast(cur) };
@@ -1445,13 +1440,13 @@ export fn gguf_init_from_file(fname: [*:0]const u8, params: c.gguf_init_params) 
     const file = c.ggml_fopen(fname, "rb") orelse {
         impl.logError(
             "%s: failed to open GGUF file '%s' (%s)\n",
-            .{ "gguf_init_from_file", fname, Libc.strerror(std.c._errno().*) },
+            .{ "gguf_init_from_file", fname, stdlib.errno.strerror(std.c._errno().*) },
         );
         return null;
     };
 
     const result = gguf_init_from_file_ptr(file, params);
-    _ = Libc.fclose(file);
+    _ = libc.fclose(file);
     return result;
 }
 
@@ -1957,7 +1952,7 @@ export fn gguf_add_tensor(ctx: ?*c.struct_gguf_context, tensor: ?*const c.ggml_t
     var ti: TensorInfo = .{ .t = tensor.?.*, .offset = 0 };
     ti.offset = if (self.info.items.len == 0) 0 else blk: {
         const back = &self.info.items[self.info.items.len - 1];
-        break :blk back.offset + impl.pad(c.ggml_nbytes(&back.t), self.alignment);
+        break :blk back.offset + stdlib.num.pad(usize, c.ggml_nbytes(&back.t), self.alignment);
     };
     self.info.append(allocator, ti) catch oom();
 }
@@ -1990,7 +1985,7 @@ export fn gguf_set_tensor_type(ctx: ?*c.struct_gguf_context, name: [*:0]const u8
     var i: i64 = tensor_id + 1;
     while (i < n_tensors) : (i += 1) {
         const prev = &self.info.items[@intCast(i - 1)];
-        self.info.items[@intCast(i)].offset = prev.offset + impl.pad(c.ggml_nbytes(&prev.t), self.alignment);
+        self.info.items[@intCast(i)].offset = prev.offset + stdlib.num.pad(usize, c.ggml_nbytes(&prev.t), self.alignment);
     }
 }
 
@@ -2234,7 +2229,7 @@ const FileWriter = struct {
     /// `ex.what()` is emitted here instead.
     fn writeByte(self: *FileWriter, val: u8) WriteError!void {
         const real_val: c_int = val;
-        const ret = Libc.fputc(real_val, self.file);
+        const ret = libc.fputc(real_val, self.file);
         if (ret != real_val) {
             impl.logError(
                 "%s: failed to write GGUF data: unexpected fputc result '%d' instead of '%d'\n",
@@ -2248,7 +2243,7 @@ const FileWriter = struct {
     /// (gguf.cpp:1630 @b1b770d90).
     fn writeBytes(self: *FileWriter, val: []const u8) WriteError!void {
         if (val.len == 0) return;
-        const ret = Libc.fwrite(@ptrCast(val.ptr), 1, val.len, self.file);
+        const ret = libc.fwrite(@ptrCast(val.ptr), 1, val.len, self.file);
         if (ret != val.len) {
             impl.logError(
                 "%s: failed to write GGUF data: unexpected fwrite number of bytes written, '%zu' instead of '%zu'\n",
@@ -2261,7 +2256,7 @@ const FileWriter = struct {
     /// Ports `gguf_writer_file`'s `const void *` `write` (gguf.cpp:1638 @b1b770d90).
     fn writeData(self: *FileWriter, data: [*]const u8, size: usize) WriteError!void {
         if (size == 0) return;
-        const ret = Libc.fwrite(@ptrCast(data), 1, size, self.file);
+        const ret = libc.fwrite(@ptrCast(data), 1, size, self.file);
         if (ret != size) {
             impl.logError(
                 "%s: failed to write GGUF data: unexpected fwrite number of bytes written, '%zu' instead of '%zu'\n",
@@ -2391,7 +2386,7 @@ export fn gguf_write_to_file(ctx: ?*const c.struct_gguf_context, fname: [*:0]con
         impl.logError("%s: failed to write GGUF data into '%s'\n", .{ "gguf_write_to_file", fname });
     }
 
-    _ = Libc.fclose(file);
+    _ = libc.fclose(file);
     return success;
 }
 
@@ -2592,7 +2587,7 @@ test "tensor metadata round-trips with shape, type and offset" {
     try std.testing.expectEqual(@as(usize, 20), c.ggml_nbytes(a));
     try std.testing.expectEqual(@as(usize, 32), gguf_get_tensor_offset(ctx, 1));
     try std.testing.expectEqual(
-        impl.pad(c.ggml_nbytes(a), gguf_get_alignment(ctx)),
+        stdlib.num.pad(usize, c.ggml_nbytes(a), gguf_get_alignment(ctx)),
         gguf_get_tensor_offset(ctx, 1),
     );
 
@@ -2646,13 +2641,13 @@ test "a GGUF that starts mid-file aligns its data section to its own start" {
     const want = gguf_get_data_offset(at_zero);
 
     const f = TestLibc.tmpfile() orelse return error.SkipZigTest;
-    defer _ = Libc.fclose(f);
+    defer _ = libc.fclose(f);
     const prefix = "prefix!";
     const data: [32]u8 = @splat(0);
-    try std.testing.expectEqual(prefix.len, Libc.fwrite(prefix.ptr, 1, prefix.len, f));
-    try std.testing.expectEqual(bytes.len, Libc.fwrite(bytes.ptr, 1, bytes.len, f));
-    try std.testing.expectEqual(data.len, Libc.fwrite(&data, 1, data.len, f));
-    try std.testing.expectEqual(@as(c_int, 0), Libc.fseeko(f, prefix.len, Libc.SEEK_SET));
+    try std.testing.expectEqual(prefix.len, libc.fwrite(prefix.ptr, 1, prefix.len, f));
+    try std.testing.expectEqual(bytes.len, libc.fwrite(bytes.ptr, 1, bytes.len, f));
+    try std.testing.expectEqual(data.len, libc.fwrite(&data, 1, data.len, f));
+    try std.testing.expectEqual(@as(c_int, 0), libc.fseeko(f, prefix.len, Libc.SEEK_SET));
 
     const back = gguf_init_from_file_ptr(f, .{ .no_alloc = true, .ctx = null }) orelse
         return error.ParseFailed;

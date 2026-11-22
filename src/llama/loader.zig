@@ -35,6 +35,7 @@
 //! `sscanf` so its edge cases are the C++'s.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const arch = @import("arch.zig");
 const gguf_meta = @import("gguf_meta.zig");
@@ -49,8 +50,6 @@ const c = impl.c;
 const allocator = impl.allocator;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
-
-extern "c" fn atoi(s: [*:0]const u8) c_int;
 
 const MiB: usize = 1024 * 1024;
 const GiB: usize = 1024 * MiB;
@@ -122,29 +121,6 @@ pub fn ftypeName(ftype: c_uint) [:0]const u8 {
 
 // -----------------------------------------------------------------------------
 // Metadata as text
-
-/// Ports `replace_all` (llama-impl.cpp:101 @b1b770d90).
-///
-/// Parameters:
-/// - `s`: the string, rewritten in place.
-/// - `search`: what to replace; nothing happens when it is empty.
-/// - `replace`: what replaces it.
-///
-/// Return: nothing.
-pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
-    if (search.len == 0) return;
-    var builder: std.ArrayList(u8) = .empty;
-    builder.ensureTotalCapacity(allocator, s.items.len) catch oom();
-    var last_pos: usize = 0;
-    while (std.mem.findPos(u8, s.items, last_pos, search)) |pos| {
-        builder.appendSlice(allocator, s.items[last_pos..pos]) catch oom();
-        builder.appendSlice(allocator, replace) catch oom();
-        last_pos = pos + search.len;
-    }
-    builder.appendSlice(allocator, s.items[last_pos..]) catch oom();
-    s.deinit(allocator);
-    s.* = builder;
-}
 
 fn oom() noreturn {
     impl.abort("llama-model-loader.cpp", 0, "out of memory");
@@ -507,7 +483,7 @@ pub const Loader = struct {
         overrides: ?[*]const c.llama_model_kv_override,
         exc: *Exception,
     ) Thrown!Loader {
-        const trace: c_int = if (std.c.getenv("LLAMA_TRACE")) |t| atoi(t) else 0;
+        const trace: c_int = if (stdlib.env.getenv("LLAMA_TRACE")) |t| stdlib.num.atoiC(t) else 0;
 
         var self: Loader = .{ .meta = gguf_meta.Meta.init(undefined, .unknown, overrides) };
         errdefer self.deinit();
@@ -902,7 +878,7 @@ pub const Loader = struct {
                 value.shrinkRetainingCapacity(max_value_len - 3);
                 value.appendSlice(allocator, "...") catch oom();
             }
-            replaceAll(&value, "\n", "\\n");
+            impl.replaceAll(&value, "\n", "\\n");
 
             impl.logInfo("%s: - kv %3d: %42s %-16s = %.*s\n", .{
                 "llama_model_loader", i, name, tn, @as(c_int, @intCast(value.items.len)), value.items.ptr,
@@ -2078,10 +2054,10 @@ test "replace_all leaves an empty search alone and replaces every match" {
     var s: std.ArrayList(u8) = .empty;
     defer s.deinit(allocator);
     try s.appendSlice(allocator, "a\"b\"\\");
-    replaceAll(&s, "", "x");
+    impl.replaceAll(&s, "", "x");
     try std.testing.expectEqualStrings("a\"b\"\\", s.items);
-    replaceAll(&s, "\\", "\\\\");
-    replaceAll(&s, "\"", "\\\"");
+    impl.replaceAll(&s, "\\", "\\\\");
+    impl.replaceAll(&s, "\"", "\\\"");
     try std.testing.expectEqualStrings("a\\\"b\\\"\\\\", s.items);
 }
 

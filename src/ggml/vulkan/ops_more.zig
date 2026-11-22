@@ -9,6 +9,7 @@
 //! (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
 
@@ -22,8 +23,6 @@ const push = m.push;
 const ops = m.ops;
 const u32Of = ops.u32Of;
 const typeSize = ops.typeSize;
-
-extern fn powf(x: f32, y: f32) f32;
 
 fn at(cg: *const CGraph, i: c_int) *Tensor {
     return cg.nodes[@intCast(i)].?;
@@ -54,7 +53,7 @@ pub fn makeRopeConstants(dst: *const Tensor, src0: *const Tensor, has_ff: bool, 
     var corr_dims: [2]f32 = undefined;
     c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, c.ggml_rope_get_truncate(dst), &corr_dims);
 
-    const theta_scale = powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
+    const theta_scale = libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     const ts0 = c.ggml_type_size(src0.type);
     const tsd = c.ggml_type_size(dst.type);

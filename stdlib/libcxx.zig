@@ -46,6 +46,7 @@
 //! grammar passes a lambda.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // -----------------------------------------------------------------------------
 // Sorting
@@ -704,6 +705,18 @@ pub fn uniformF32(g: *Mt19937) f32 {
     return canonicalF32(g);
 }
 
+/// `uniform_real_distribution<T>(a, b)(g)`
+/// (`__random/uniform_real_distribution.h`): `(b - a) * canonical + a`,
+/// contracted as clang contracts it.
+pub fn uniformReal(comptime T: type, g: *Mt19937, a: T, b: T) T {
+    const u = switch (T) {
+        f32 => canonicalF32(g),
+        f64 => canonicalF64(g),
+        else => @compileError("uniform_real_distribution over " ++ @typeName(T)),
+    };
+    return @mulAdd(T, b - a, u, a);
+}
+
 /// Ports `std::discrete_distribution<int>` constructed over `weights` and
 /// drawn once (discrete_distribution.h).
 ///
@@ -747,6 +760,142 @@ pub fn discreteDraw(allocator: std.mem.Allocator, weights: anytype, g: *Mt19937)
     return upperBound(cum, u);
 }
 
+/// Ports `__independent_bits_engine<mt19937, unsigned long>`
+/// (uniform_int_distribution.h), the bit source `uniform_int_distribution`
+/// draws from for a 64-bit result type.
+///
+/// The engine yields 32 bits, so `_Rp` is 2^32 in the 64-bit working type
+/// and `__m` is 32; `__y0_` and `__y1_` then reject nothing until `__w0_`
+/// reaches 32, but the arithmetic is kept whole so a width above 32 — two
+/// engine draws per value — takes the same path as the C++.
+const IndependentBits = struct {
+    e: *Mt19937,
+    w: usize,
+    w0: usize,
+    n: usize,
+    n0: usize,
+    y0: u64,
+    y1: u64,
+    mask0: u32,
+    mask1: u32,
+
+    const rp: u64 = 1 << 32;
+    const m: usize = 32;
+    const wdt: usize = 64;
+    const edt: usize = 32;
+
+    /// Ports `__independent_bits_engine::__independent_bits_engine`.
+    ///
+    /// Parameters:
+    /// - `e`: the engine; borrowed for the lifetime of the result.
+    /// - `w`: how many bits each value has, 1 to 64.
+    ///
+    /// Return: the bits engine.
+    fn init(e: *Mt19937, w: usize) IndependentBits {
+        var self: IndependentBits = undefined;
+        self.e = e;
+        self.w = w;
+        self.n = w / m + @intFromBool(w % m != 0);
+        self.w0 = w / self.n;
+        self.y0 = if (self.w0 < wdt) (rp >> @intCast(self.w0)) << @intCast(self.w0) else 0;
+        if (rp - self.y0 > self.y0 / @as(u64, self.n)) {
+            self.n += 1;
+            self.w0 = w / self.n;
+            self.y0 = if (self.w0 < wdt) (rp >> @intCast(self.w0)) << @intCast(self.w0) else 0;
+        }
+        self.n0 = self.n - w % self.n;
+        self.y1 = if (self.w0 < wdt - 1) (rp >> @intCast(self.w0 + 1)) << @intCast(self.w0 + 1) else 0;
+        self.mask0 = if (self.w0 > 0) ~@as(u32, 0) >> @intCast(edt - self.w0) else 0;
+        self.mask1 = if (self.w0 < edt - 1) ~@as(u32, 0) >> @intCast(edt - (self.w0 + 1)) else ~@as(u32, 0);
+        return self;
+    }
+
+    /// Ports `__independent_bits_engine::__eval(true_type)`.
+    ///
+    /// Return: the next `w`-bit value.
+    fn next(self: *const IndependentBits) u64 {
+        const w_rt: usize = 64;
+        var sp: u64 = 0;
+        var k: usize = 0;
+        while (k < self.n0) : (k += 1) {
+            var u: u32 = undefined;
+            while (true) {
+                u = self.e.next();
+                if (@as(u64, u) < self.y0) break;
+            }
+            if (self.w0 < w_rt) sp <<= @intCast(self.w0) else sp = 0;
+            sp +%= u & self.mask0;
+        }
+        while (k < self.n) : (k += 1) {
+            var u: u32 = undefined;
+            while (true) {
+                u = self.e.next();
+                if (@as(u64, u) < self.y1) break;
+            }
+            if (self.w0 < w_rt - 1) sp <<= @intCast(self.w0 + 1) else sp = 0;
+            sp +%= u & self.mask1;
+        }
+        return sp;
+    }
+};
+
+/// Ports `uniform_int_distribution<T>::operator()(_URNG&, const
+/// param_type&)` (uniform_int_distribution.h) over a `std::mt19937`, for a
+/// 64-bit `T` (`ptrdiff_t`, `size_t`, `int64_t` on LP64): the working type
+/// is 64 bits wide, so every such `T` draws alike.
+///
+/// Parameters:
+/// - `T`: the result type, 64 bits wide.
+/// - `g`: the engine; advanced as many times as the rejection loop needs.
+/// - `a`: the smallest value.
+/// - `b`: the largest value, at least `a`.
+///
+/// Return: a value in `[a, b]`.
+pub fn uniformInt(comptime T: type, g: *Mt19937, a: T, b: T) T {
+    comptime std.debug.assert(@bitSizeOf(T) == 64);
+    const dt: usize = 64;
+    const r: u64 = @as(u64, @bitCast(b)) -% @as(u64, @bitCast(a)) +% 1;
+    if (r == 1) return a;
+    if (r == 0) return @bitCast(IndependentBits.init(g, dt).next());
+    var w: usize = dt - @clz(r) - 1;
+    if ((r & (@as(u64, std.math.maxInt(u64)) >> @intCast(dt - w))) != 0) w += 1;
+    const e = IndependentBits.init(g, w);
+    var u: u64 = undefined;
+    while (true) {
+        u = e.next();
+        if (u < r) break;
+    }
+    return @bitCast(u +% @as(u64, @bitCast(a)));
+}
+
+/// Ports `std::__shuffle` (shuffle.h), which `std::shuffle` forwards to.
+///
+/// The swap is skipped when the draw is zero, and the last element is never
+/// the left side of a swap — both libc++'s, and both observable in which
+/// draws are made.
+///
+/// Parameters:
+/// - `T`: the element type.
+/// - `items`: the range to permute in place.
+/// - `g`: the engine; advanced once per element but the last, or more when a
+///   draw is rejected.
+///
+/// Return: nothing.
+pub fn shuffle(comptime T: type, items: []T, g: *Mt19937) void {
+    var d: i64 = @intCast(items.len);
+    if (d <= 1) return;
+    var first: usize = 0;
+    const last: usize = items.len - 1;
+    d -= 1;
+    while (first < last) : ({
+        first += 1;
+        d -= 1;
+    }) {
+        const i = uniformInt(i64, g, 0, d);
+        if (i != 0) std.mem.swap(T, &items[first], &items[first + @as(usize, @intCast(i))]);
+    }
+}
+
 /// Ports `std::upper_bound` with `std::__less<>` over doubles (upper_bound.h).
 ///
 /// Parameters:
@@ -785,6 +934,12 @@ pub inline fn max(comptime T: type, a: T, b: T) T {
 /// Return: the smaller operand, by libc++'s rule.
 pub inline fn min(comptime T: type, a: T, b: T) T {
     return if (b < a) b else a;
+}
+
+/// `std::clamp(v, lo, hi)` (`__algorithm/clamp.h`): `v < lo ? lo : hi < v ?
+/// hi : v`, so a NaN `v` passes through.
+pub inline fn clamp(comptime T: type, v: T, lo: T, hi: T) T {
+    return if (v < lo) lo else if (hi < v) hi else v;
 }
 
 // -----------------------------------------------------------------------------
@@ -1011,6 +1166,24 @@ pub fn nextPrime(n: usize) usize {
 // -----------------------------------------------------------------------------
 // std::unordered_map<std::string, V>
 
+/// `__constrain_hash` (`__hash_table`): a hash's bucket, by mask when the
+/// bucket count is a power of two, else by division.
+pub fn constrain(h: u64, bc: usize) usize {
+    if ((bc & (bc - 1)) == 0) return @intCast(h & (bc - 1));
+    return @intCast(if (h < bc) h else h % bc);
+}
+
+/// `__is_hash_power2` (`__hash_table`).
+pub fn isHashPow2(bc: usize) bool {
+    return bc > 2 and (bc & (bc - 1)) == 0;
+}
+
+/// `__next_hash_pow2` (`__hash_table`).
+pub fn nextHashPow2(n: usize) usize {
+    if (n < 2) return n;
+    return @as(usize, 1) << @intCast(@bitSizeOf(usize) - @clz(n - 1));
+}
+
 /// Ports `std::unordered_map<std::string, V>` as libc++ lays it out
 /// (__hash_table): one singly linked list of every node behind a sentinel,
 /// each bucket pointing at the node *before* its group, a prime bucket
@@ -1091,20 +1264,6 @@ pub fn StringMap(comptime V: type) type {
             self.nodes.deinit(self.allocator);
             self.keys.deinit(self.allocator);
             self.allocator.free(self.buckets);
-        }
-
-        fn constrain(h: u64, bc: usize) usize {
-            if ((bc & (bc - 1)) == 0) return @intCast(h & (bc - 1));
-            return @intCast(if (h < bc) h else h % bc);
-        }
-
-        fn isHashPow2(bc: usize) bool {
-            return bc > 2 and (bc & (bc - 1)) == 0;
-        }
-
-        fn nextHashPow2(n: usize) usize {
-            if (n < 2) return n;
-            return @as(usize, 1) << @intCast(@bitSizeOf(usize) - @clz(n - 1));
         }
 
         fn keyOf(self: *const Self, i: u32) []const u8 {
@@ -1300,10 +1459,6 @@ pub const U32Set = struct {
         self.allocator.free(self.buckets);
     }
 
-    const constrain = StringMap(void).constrain;
-    const isHashPow2 = StringMap(void).isHashPow2;
-    const nextHashPow2 = StringMap(void).nextHashPow2;
-
     /// `size()`.
     pub fn count(self: *const Self) usize {
         return self.nodes.items.len - 1;
@@ -1475,10 +1630,6 @@ pub fn I32Map(comptime V: type) type {
             self.allocator.free(self.buckets);
         }
 
-        const constrain = StringMap(void).constrain;
-        const isHashPow2 = StringMap(void).isHashPow2;
-        const nextHashPow2 = StringMap(void).nextHashPow2;
-
         /// `std::hash<int>`.
         fn hashOf(k: i32) u64 {
             return @bitCast(@as(i64, k));
@@ -1642,6 +1793,118 @@ pub fn I32Map(comptime V: type) type {
 }
 
 // -----------------------------------------------------------------------------
+// std::random_device
+
+/// libc++'s `_LIBCPP_USING_ARC4_RANDOM`: Apple and the BSDs.
+pub const uses_arc4random = builtin.os.tag.isDarwin() or builtin.os.tag.isBSD();
+/// libc++'s `_LIBCPP_USING_WIN32_RANDOM`: Windows.
+pub const uses_win32_random = builtin.os.tag == .windows;
+
+/// libc++'s `std::random_device` (`src/random.cpp`), as `__config` picks it:
+/// `arc4random` on Apple and the BSDs, `rand_s` on Windows, and everywhere
+/// else, Linux included, `/dev/urandom` (`_LIBCPP_USING_DEV_RANDOM`, the
+/// default token). Where the C++ throws `std::system_error`, these return an
+/// error with `errno` left as the C library set it.
+pub const RandomDevice = struct {
+    fd: c_int = -1,
+
+    pub const Error = error{ OpenFailed, Eof, ReadFailed };
+
+    /// `RNDGETENTCNT`, `_IOR('R', 0x00, int)`, in the generic ioctl encoding
+    /// aarch64 and x86_64 share.
+    const rnd_get_ent_cnt: c_ulong = 0x80045200;
+
+    const libc = @import("libc.zig");
+
+    /// The constructor: opens `/dev/urandom` where the device is a file.
+    ///
+    /// Return: the device; `error.OpenFailed` where the C++ throws.
+    pub fn open() Error!RandomDevice {
+        if (comptime uses_arc4random or uses_win32_random) return .{};
+        const fd = libc.open("/dev/urandom", @as(c_int, 0)); // O_RDONLY
+        if (fd < 0) return error.OpenFailed;
+        return .{ .fd = fd };
+    }
+
+    /// The destructor.
+    pub fn close(self: *RandomDevice) void {
+        if (self.fd >= 0) _ = libc.close(self.fd);
+        self.fd = -1;
+    }
+
+    /// `entropy()`: 32 for `arc4random`, 0 for `rand_s`, and for the device
+    /// the kernel's `RNDGETENTCNT` count clamped to `[0, 32]`, 0 when the
+    /// ioctl fails.
+    pub fn entropy(self: *const RandomDevice) f64 {
+        if (comptime uses_arc4random) return 32;
+        if (comptime uses_win32_random) return 0;
+        var ent: c_int = 0;
+        if (libc.ioctl(self.fd, rnd_get_ent_cnt, &ent) < 0) return 0;
+        if (ent < 0) return 0;
+        if (ent > 32) return 32;
+        return @floatFromInt(ent);
+    }
+
+    /// `operator()`: four bytes from the device, retrying on `EINTR`.
+    ///
+    /// Return: the value; `error.Eof` or `error.ReadFailed` where the C++
+    /// throws.
+    pub fn next(self: *const RandomDevice) Error!u32 {
+        if (comptime uses_arc4random) return libc.arc4random();
+        if (comptime uses_win32_random) {
+            var r: c_uint = 0;
+            if (libc.rand_s(&r) != 0) return error.ReadFailed;
+            return r;
+        }
+        var r: u32 = 0;
+        const p: [*]u8 = @ptrCast(&r);
+        var got: usize = 0;
+        while (got < @sizeOf(u32)) {
+            const n = libc.read(self.fd, p + got, @sizeOf(u32) - got);
+            if (n == 0) return error.Eof;
+            if (n < 0) {
+                if (std.c._errno().* == @backingInt(std.c.E.INTR)) continue;
+                return error.ReadFailed;
+            }
+            got += @intCast(n);
+        }
+        return r;
+    }
+
+    /// `what()` of the `std::system_error` libc++ throws for `err`.
+    pub fn what(err: Error) [:0]const u8 {
+        return switch (err) {
+            error.OpenFailed => "random_device failed to open /dev/urandom",
+            error.Eof => "random_device got EOF",
+            error.ReadFailed => if (uses_win32_random) "random_device rand_s failed." else "random_device got an unexpected error",
+        };
+    }
+};
+
+/// `std::random_device{}()`: one draw from a fresh device. Where the C++
+/// throws, nothing catches: libc++abi's message, then `abort`, as the
+/// reference process ends.
+///
+/// Return: the value.
+pub fn randomDevice() u32 {
+    var rd = RandomDevice.open() catch |e| terminate(e);
+    defer rd.close();
+    return rd.next() catch |e| terminate(e);
+}
+
+fn terminate(err: RandomDevice.Error) noreturn {
+    const stdio = @import("stdio.zig");
+    const errno_mod = @import("errno.zig");
+    const s = stdio.stderr();
+    s.write("libc++abi: terminating due to uncaught exception of type std::system_error: ");
+    s.write(RandomDevice.what(err));
+    s.write(": ");
+    s.write(std.mem.span(errno_mod.strerror(std.c._errno().*)));
+    s.write("\n");
+    std.c.abort();
+}
+
+// -----------------------------------------------------------------------------
 // Unit Tests
 
 test {
@@ -1769,4 +2032,30 @@ test "a string map filled after reserveStorage iterates as one filled without" {
         try std.testing.expectEqual(x.value.*, y.value.*);
     }
     try std.testing.expect(b.next() == null);
+}
+
+test "uniformInt stays in range and degenerate ranges draw nothing" {
+    var g = Mt19937.init(1);
+    for (0..1000) |k| {
+        const b: i64 = @intCast(k % 37);
+        const v = uniformInt(i64, &g, 0, b);
+        try std.testing.expect(v >= 0 and v <= b);
+    }
+    var h = Mt19937.init(1);
+    const before = h;
+    try std.testing.expectEqual(@as(i64, 5), uniformInt(i64, &h, 5, 5));
+    try std.testing.expectEqualSlices(u32, &before.x, &h.x);
+    try std.testing.expectEqual(before.i, h.i);
+}
+
+test "shuffle is a permutation" {
+    var g = Mt19937.init(Mt19937.default_seed);
+    var items: [64]i64 = undefined;
+    for (&items, 0..) |*p, i| p.* = @intCast(i);
+    shuffle(i64, &items, &g);
+    var seen: [64]bool = @splat(false);
+    for (items) |v| {
+        try std.testing.expect(!seen[@intCast(v)]);
+        seen[@intCast(v)] = true;
+    }
 }

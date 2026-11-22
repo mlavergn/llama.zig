@@ -6,7 +6,7 @@
 //! the generic form of `src/llama/libcxx.zig`'s `StringMap`.
 
 const std = @import("std");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 // -----------------------------------------------------------------------------
 // std::unordered_map<K, V, Hash, Eq>
@@ -108,7 +108,7 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
                 const value = if (owns) try src.value.clone(allocator) else src.value;
                 m.nodes.appendAssumeCapacity(.{ .next = none, .hash = src.hash, .key = src.key, .value = value });
                 const idx: u32 = @intCast(m.nodes.items.len - 1);
-                const chash = constrain(src.hash, bc);
+                const chash = libcxx.constrain(src.hash, bc);
                 if (chash != current) {
                     m.buckets[chash] = own;
                     current = chash;
@@ -118,20 +118,6 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
                 m.len += 1;
             }
             return m;
-        }
-
-        fn constrain(h: u64, bc: usize) usize {
-            if ((bc & (bc - 1)) == 0) return @intCast(h & (bc - 1));
-            return @intCast(if (h < bc) h else h % bc);
-        }
-
-        fn isHashPow2(bc: usize) bool {
-            return bc > 2 and (bc & (bc - 1)) == 0;
-        }
-
-        fn nextHashPow2(n: usize) usize {
-            if (n < 2) return n;
-            return @as(usize, 1) << @intCast(@bitSizeOf(usize) - @clz(n - 1));
         }
 
         /// `bucket_count()`.
@@ -147,13 +133,13 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
         fn findNode(self: *const Self, key: K, hash: u64) ?u32 {
             const bc = self.buckets.len;
             if (bc == 0) return null;
-            const chash = constrain(hash, bc);
+            const chash = libcxx.constrain(hash, bc);
             var nd = self.buckets[chash];
             if (nd == none) return null;
             nd = self.nodes.items[nd].next;
             while (nd != none) : (nd = self.nodes.items[nd].next) {
                 const h = self.nodes.items[nd].hash;
-                if (!(h == hash or constrain(h, bc) == chash)) break;
+                if (!(h == hash or libcxx.constrain(h, bc) == chash)) break;
                 if (h == hash and eqlFn(self.nodes.items[nd].key, key)) return nd;
             }
             return null;
@@ -186,19 +172,19 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
             var bc = self.buckets.len;
             const size1: f32 = @floatFromInt(self.len + 1);
             if (size1 > @as(f32, @floatFromInt(bc)) * self.max_load_factor) {
-                const grow = 2 * bc + @intFromBool(!isHashPow2(bc));
+                const grow = 2 * bc + @intFromBool(!libcxx.isHashPow2(bc));
                 const need: usize = @intFromFloat(@ceil(size1 / self.max_load_factor));
                 try self.rehash(@max(grow, need));
                 bc = self.buckets.len;
             }
-            const chash = constrain(hash, bc);
+            const chash = libcxx.constrain(hash, bc);
             const nodes = self.nodes.items;
             const pn = self.buckets[chash];
             if (pn == none) {
                 nodes[h].next = nodes[head].next;
                 nodes[head].next = h;
                 self.buckets[chash] = head;
-                if (nodes[h].next != none) self.buckets[constrain(nodes[nodes[h].next].hash, bc)] = h;
+                if (nodes[h].next != none) self.buckets[libcxx.constrain(nodes[nodes[h].next].hash, bc)] = h;
             } else {
                 nodes[h].next = nodes[pn].next;
                 nodes[pn].next = h;
@@ -230,7 +216,7 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
                 try self.doRehash(n);
             } else if (n < bc) {
                 const need: usize = @intFromFloat(@ceil(@as(f32, @floatFromInt(self.len)) / self.max_load_factor));
-                n = @max(n, if (isHashPow2(bc)) nextHashPow2(need) else libcxx.nextPrime(need));
+                n = @max(n, if (libcxx.isHashPow2(bc)) libcxx.nextHashPow2(need) else libcxx.nextPrime(need));
                 if (n < bc) try self.doRehash(n);
             }
         }
@@ -248,13 +234,13 @@ pub fn HashMap(comptime K: type, comptime V: type, comptime hashFn: fn (K) u64, 
             var cp = nodes[pp].next;
             if (cp == none) return;
 
-            var chash = constrain(nodes[cp].hash, bucket_count);
+            var chash = libcxx.constrain(nodes[cp].hash, bucket_count);
             self.buckets[chash] = pp;
             var phash = chash;
             pp = cp;
             cp = nodes[cp].next;
             while (cp != none) : (cp = nodes[pp].next) {
-                chash = constrain(nodes[cp].hash, bucket_count);
+                chash = libcxx.constrain(nodes[cp].hash, bucket_count);
                 if (chash == phash) {
                     pp = cp;
                 } else if (self.buckets[chash] == none) {

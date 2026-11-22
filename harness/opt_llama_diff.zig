@@ -46,6 +46,7 @@
 //! Usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
@@ -56,7 +57,6 @@ const A = harness_root.api;
 const gpa = std.heap.c_allocator;
 
 extern fn _ZNK11llama_model10get_tensorEPKc(model: *const c.struct_llama_model, name: [*:0]const u8) ?*c.ggml_tensor;
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 
 // -----------------------------------------------------------------------------
 // The transcript
@@ -565,7 +565,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("usage: opt_llama_diff <base-qwen35.gguf> <tmp-dir> [--abort <case> <ref|port>]\n", .{});
         std.process.exit(2);
     }
-    _ = setenv("GGML_NO_BACKTRACE", "1", 1);
+    _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
     const base = try gpa.dupeSentinel(u8, args[1], 0);
     const path = try std.fmt.allocPrintSentinel(gpa, "{s}/tiny-qwen35-f32.gguf", .{args[2]}, 0);
 

@@ -40,6 +40,7 @@
 //! and rounds 0.125 to two places as 0.13, where `printf` gives 0.12.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const llama = @import("llama");
 
 /// `common_json::dump_safe`'s text, for `LOG_JSON`; the tools reach it here.
@@ -47,8 +48,6 @@ pub const json = @import("json/module.zig");
 
 const api = llama.api;
 const c = llama.impl.c;
-
-extern "c" fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 const MiB: i64 = 1024 * 1024;
 
@@ -105,13 +104,13 @@ pub const Log = struct {
         if (verbosity > self.verbosity) return;
         if (self.out == null and self.sink == null) return;
         var stack: [1024]u8 = undefined;
-        const n: usize = @intCast(@call(.auto, snprintf, .{ &stack, stack.len, format } ++ args));
+        const n: usize = @intCast(@call(.auto, libc.snprintf, .{ &stack, stack.len, format } ++ args));
         var heap: ?[]u8 = null;
         defer if (heap) |h| std.heap.c_allocator.free(h);
         const text = if (n < stack.len) stack[0..n] else blk: {
             const h = std.heap.c_allocator.alloc(u8, n + 1) catch return;
             heap = h;
-            _ = @call(.auto, snprintf, .{ h.ptr, n + 1, format } ++ args);
+            _ = @call(.auto, libc.snprintf, .{ h.ptr, n + 1, format } ++ args);
             break :blk h[0..n];
         };
         if (self.sink) |sink| {

@@ -14,7 +14,7 @@
 //! sampler sees on a real vocabulary.
 
 const std = @import("std");
-const libcxx = @import("libcxx");
+const libcxx = @import("stdlib").libcxx;
 
 const TokenData = extern struct {
     id: i32,

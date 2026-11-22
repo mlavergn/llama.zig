@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -105,7 +106,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 
             // Phi-2 scales Q to avoid precision issues; see
             // https://github.com/ml-explore/mlx-examples/blob/08e862336ade809bc37d1035f94b359e7d1a5152/phi2/phi2.py#L64-L66
-            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)));
+            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / libm.sqrtfInt(n_embd_head));
 
             cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);
         }

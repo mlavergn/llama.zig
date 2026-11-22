@@ -31,8 +31,9 @@
 //!   multiplied in `double` and rounded once to `float`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const core = @import("core.zig");
 
 const c = impl.c;
@@ -694,7 +695,7 @@ fn dryApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
     const FLOAT_MAX_LOG: f32 = 88.7228391;
     var max_exponent: c_int = 0;
     if (ctx.dry_base > 1.000001) {
-        max_exponent = core.cvtzs(FLOAT_MAX_LOG / impl.logf(ctx.dry_base));
+        max_exponent = core.cvtzs(FLOAT_MAX_LOG / libm.logf(ctx.dry_base));
     }
 
     for (core.items(cur_p)) |*d| {
@@ -715,7 +716,7 @@ fn dryApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
             if (max_exponent > 0 and repeat_exp > max_exponent) {
                 repeat_exp = max_exponent;
             }
-            const penalty: f32 = @floatCast(@as(f64, ctx.dry_multiplier) * impl.pow(ctx.dry_base, @floatFromInt(repeat_exp)));
+            const penalty: f32 = @floatCast(@as(f64, ctx.dry_multiplier) * libm.pow(ctx.dry_base, @floatFromInt(repeat_exp)));
             d.logit -= penalty;
         }
     }

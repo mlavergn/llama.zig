@@ -18,7 +18,7 @@
 //! the C++'s `shared_ptr` as a `SharedProc` reference.
 
 const std = @import("std");
-const tc = @import("tools_common");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const common = @import("common.zig");
 const context = @import("context.zig");
@@ -663,7 +663,7 @@ pub const Sched = struct {
             try child_env.append(sa, try std.mem.concat(sa, u8, &.{ models_mod.env_child_role, "=", models_mod.roleTypeToStr(.measure) }));
 
             const proc = try SharedProc.create();
-            if (!proc.proc.sproc.create(child_args.items, tc.subproc.option_no_window, child_env.items, null)) {
+            if (!proc.proc.sproc.create(child_args.items, stdlib.subproc.option_no_window, child_env.items, null)) {
                 proc.release();
                 srv(.err, "measure_next", "failed to spawn measure process for model name=%s\n", .{z});
                 meta.memory.status = .failed;
@@ -702,7 +702,7 @@ pub const Sched = struct {
                 self.notifyMemory(name, &it.meta.memory);
             }
         }
-        models.cv.notifyAll();
+        models.cv.broadcast();
         self.measureNext() catch |err| switch (err) {
             else => {},
         };
@@ -769,7 +769,7 @@ pub const Sched = struct {
             info.status = .failed;
         }
         self.notifyMemory(name, info);
-        models.cv.notifyAll();
+        models.cv.broadcast();
     }
 
     fn parseMeasured(_: *Sched, a: Allocator, info: *MemoryInfo, payload: *const Value) common.Error!void {

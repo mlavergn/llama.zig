@@ -13,6 +13,7 @@
 //! `build_latent_moe`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -339,7 +340,7 @@ const Graph = struct {
             .kv_lora_rank = hp.n_lora_kv,
             .n_embd_head_qk_rope = hp.nRot(0),
             .n_embd_head_qk_nope = @as(i64, hp.nEmbdHeadKMla()) - hp.nRot(0),
-            .kq_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadKMla())),
+            .kq_scale = 1.0 / libm.sqrtfInt(hp.nEmbdHeadKMla()),
         };
 
         const res_bs: u32 = hp.attn_res_block_size;

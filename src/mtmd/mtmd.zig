@@ -27,6 +27,9 @@
 //! no caller outside upstream's `tools/mtmd/debug/`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
+const libcxx = @import("stdlib").libcxx;
 const impl = @import("impl.zig");
 const names = @import("names.zig");
 const clip = @import("clip.zig");
@@ -44,15 +47,7 @@ const gpa = impl.gpa;
 const Token = c.llama_token;
 const token_null: Token = -1; // LLAMA_TOKEN_NULL
 
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-extern fn free(p: ?*anyopaque) void;
-extern fn expf(x: f32) f32;
-extern fn sinf(x: f32) f32;
-extern fn cosf(x: f32) f32;
-extern fn lround(x: f64) c_long;
 // chatterbox's host voice encoder and perceiver (cbx_ref_cond)
-extern fn tanhf(x: f32) f32;
-extern fn exp(x: f64) f64;
 
 /// `MTMD_SERIALIZATION_VERSION` (mtmd.cpp:51 @b1b770d90).
 const serialization_version: u64 = 4;
@@ -1680,7 +1675,7 @@ const Tokenizer = struct {
     fn deinit(self: *Tokenizer) void {
         for (self.bm_from_lazy.items) |b| b.destroy();
         self.bm_from_lazy.deinit(gpa);
-        for (self.text_from_lazy.items) |s| free(s);
+        for (self.text_from_lazy.items) |s| libc.free(s);
         self.text_from_lazy.deinit(gpa);
         for (self.soundtracks.items) |*st| st.deinit();
         self.soundtracks.deinit(gpa);
@@ -1962,10 +1957,10 @@ const Tokenizer = struct {
                                 try self.addTextTokens(ctx.tok_sli_img_start.items);
                             } else if (ctx.sli_img_start_tmpl) |tmpl| {
                                 // If using a template to preceed a slice image
-                                const sz: usize = @intCast(snprintf(null, 0, tmpl, y + 1, x + 1) + 1);
+                                const sz: usize = @intCast(libc.snprintf(null, 0, tmpl, y + 1, x + 1) + 1);
                                 const buf = try gpa.alloc(u8, sz);
                                 defer gpa.free(buf);
-                                _ = snprintf(buf.ptr, sz, tmpl, y + 1, x + 1);
+                                _ = libc.snprintf(buf.ptr, sz, tmpl, y + 1, x + 1);
                                 try self.addTextStr(buf[0 .. sz - 1], true);
                             }
 
@@ -2247,7 +2242,7 @@ const Tokenizer = struct {
         const end: u32 = if (bitmap == st.pieces.items[st.pieces.items.len - 1])
             n_tokens
         else
-            std.math.clamp(@as(u32, @intFromFloat(nearbyint(@as(f64, @floatFromInt(st.n_samples)) / samples_per_row))), begin, n_tokens);
+            std.math.clamp(@as(u32, @intFromFloat(libm.nearbyint(@as(f64, @floatFromInt(st.n_samples)) / samples_per_row))), begin, n_tokens);
         st.n_assigned = end;
         if (end == begin) return 0;
 
@@ -2266,7 +2261,7 @@ const Tokenizer = struct {
     /// as `add_media` writes it for MiniCPM-V 4.6/4.7.
     fn addImageId(self: *Tokenizer) Error!void {
         var buf: [64]u8 = undefined;
-        const n = snprintf(&buf, buf.len, "<image_id>%u</image_id>", self.n_images_added);
+        const n = libc.snprintf(&buf, buf.len, "<image_id>%u</image_id>", self.n_images_added);
         try self.addTextStr(buf[0..@intCast(n)], true);
     }
 
@@ -2831,7 +2826,7 @@ const CbxPerceiver = struct {
                 }
                 var sum: f64 = 0.0;
                 for (sc) |*e| {
-                    e.* = exp(e.* - mx);
+                    e.* = libm.exp(e.* - mx);
                     sum += e.*;
                 }
                 for (0..d_head) |i| {
@@ -2866,7 +2861,7 @@ fn cbxRefCond(ctx: *Context, ve_mel: *const impl.ImageF32, pse: []const f32, out
     const n_mel: usize = 40;
     const n_partial: c_int = 160;
     const n_h: usize = 256;
-    const step: c_int = @intCast(lround((@as(f64, 16000.0) / 1.3) / @as(f64, n_partial))); // reference rate 1.3
+    const step: c_int = @intCast(libm.lround((@as(f64, 16000.0) / 1.3) / @as(f64, n_partial))); // reference rate 1.3
     if (ve_mel.nx() < n_partial or mel.len < @as(usize, @intCast(ve_mel.nx())) * n_mel) {
         impl.logErr("%s: voice encoder mel too short\n", .{func});
         return 1;
@@ -2936,12 +2931,12 @@ fn cbxRefCond(ctx: *Context, ve_mel: *const impl.ImageF32, pse: []const f32, out
                 }
                 // torch gate order: input, forget, cell, output
                 for (0..n_h) |i| {
-                    const gi = 1.0 / (1.0 + expf(-g[i]));
-                    const gf = 1.0 / (1.0 + expf(-g[i + n_h]));
-                    const gc = tanhf(g[i + 2 * n_h]);
-                    const go = 1.0 / (1.0 + expf(-g[i + 3 * n_h]));
+                    const gi = 1.0 / (1.0 + libm.expf(-g[i]));
+                    const gf = 1.0 / (1.0 + libm.expf(-g[i + n_h]));
+                    const gc = libm.tanhf(g[i + 2 * n_h]);
+                    const go = 1.0 / (1.0 + libm.expf(-g[i + 3 * n_h]));
                     cl[i] = @mulAdd(f32, gf, cl[i], gi * gc);
-                    x[i] = go * tanhf(cl[i]);
+                    x[i] = go * libm.tanhf(cl[i]);
                 }
                 @memcpy(hl, x);
                 in = hl;
@@ -3356,14 +3351,14 @@ fn genWavLfm3a(ctx: *Context, state: *GenState, inp: *const GenInp, out: *GenOut
         for (0..n_frames) |f| {
             const fr = feats.items[f * 2 * n_bins ..];
             for (0..n_bins) |j| {
-                const mag = expf(fr[j]);
+                const mag = libm.expf(fr[j]);
                 // clang vectorizes this loop by two, and only there folds the
                 // sin/cos pair into __sincosf_stret: the odd last bin is two
                 // calls, as `mtmd.o`'s disassembly reads
                 const phase = fr[n_bins + j];
-                const sc: [2]f32 = if (j < n_bins & ~@as(usize, 1)) audio.sinCos(phase) else .{ sinf(phase), cosf(phase) };
-                spec[2 * j + 0] = mag * sc[1];
-                spec[2 * j + 1] = mag * sc[0];
+                const sc: libm.SinCos = if (j < n_bins & ~@as(usize, 1)) libm.sinCos(phase) else .{ .sin = libm.sinf(phase), .cos = libm.cosf(phase) };
+                spec[2 * j + 0] = mag * sc.cos;
+                spec[2 * j + 1] = mag * sc.sin;
             }
             var pcm = try state.istft.?.processFrame(spec.ptr);
             defer pcm.deinit(gpa);
@@ -4089,8 +4084,6 @@ pub fn mtmd_image_tokens_get_ny(image_tokens: *const ImageTokens) callconv(.c) u
     return image_tokens.ny;
 }
 
-extern "c" fn nearbyint(x: f64) f64;
-
 /// Ports `mtmd_canvas_scale` (mtmd.cpp:3672 @b1b770d90): a tile coordinate
 /// mapped onto the canvas as the reference maps it,
 /// `round(linspace(0, canvas - 1, grid))`, with `round()` breaking ties to
@@ -4098,7 +4091,7 @@ extern "c" fn nearbyint(x: f64) f64;
 fn canvasScale(coord: u32, grid: u32, canvas: u32) u32 {
     if (grid <= 1 or canvas <= 1) return 0;
     const v = @as(f64, @floatFromInt(coord)) * @as(f64, @floatFromInt(canvas - 1)) / @as(f64, @floatFromInt(grid - 1));
-    const r: u32 = @intFromFloat(nearbyint(v));
+    const r: u32 = @intFromFloat(libm.nearbyint(v));
     return @min(r, canvas - 1);
 }
 
@@ -4647,7 +4640,7 @@ pub const AudioStream = struct {
             }
             try audio.logMelFrame(&m.cache, window.ptr, m.n_fft, self.n_mel, frame.ptr);
             for (0..nm) |i| {
-                const v = stdMaxF32(frame[i], m.log_mel_max - 8.0);
+                const v = libcxx.max(f32, frame[i], m.log_mel_max - 8.0);
                 try self.mel.append(gpa, (v + 4.0) / 4.0);
             }
             self.n_frames += 1;
@@ -4807,8 +4800,8 @@ pub const AudioStream = struct {
             }
             const sr: f64 = @floatFromInt(hparams.audio_sample_rate);
             const spt: f64 = @floatFromInt(self.samples_per_tok);
-            m.soft_seq_rows = lround(15.0 * sr / spt);
-            m.max_seq_rows = lround(30.0 * sr / spt);
+            m.soft_seq_rows = libm.lround(15.0 * sr / spt);
+            m.max_seq_rows = libm.lround(30.0 * sr / spt);
         }
 
         m.enc_state = try clip.encStateInit(self.ctx_clip, self.n_step_mel);
@@ -5207,11 +5200,6 @@ pub const AudioStream = struct {
         return @intCast(n_out);
     }
 };
-
-/// `std::max(float, float)`: `(a < b) ? b : a`, which decides where a NaN goes.
-fn stdMaxF32(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
 
 /// Ports `mtmd_support_audio_stream` (mtmd.cpp:4176 @b1b770d90).
 pub fn mtmd_support_audio_stream(ctx: *const Context) callconv(.c) bool {

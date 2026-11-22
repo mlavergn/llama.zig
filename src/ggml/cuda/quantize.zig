@@ -10,6 +10,7 @@
 //! its own `src1` layout.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -88,7 +89,7 @@ pub fn quantizeMmqFewQ8_1(x: ?*const f32, vy: ?*anyopaque, ds_layout: mmq.Q8_1Ds
 
     const block_num_y = @divTrunc(ne00 + 4 * block_size_mmq - 1, 4 * block_size_mmq);
     const p: kernels.LaunchParams = .{
-        .grid = .{ .x = u32Of(@as(i64, @intCast(impl.pad(@intCast(ne1), mmq_few_ncols)))), .y = u32Of(block_num_y), .z = u32Of(ne2 * ne3) },
+        .grid = .{ .x = u32Of(@as(i64, @intCast(stdlib.num.pad(usize, @intCast(ne1), mmq_few_ncols)))), .y = u32Of(block_num_y), .z = u32Of(ne2 * ne3) },
         .block = .{ .x = block_size_mmq },
         .stream = stream,
     };

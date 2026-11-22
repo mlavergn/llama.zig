@@ -21,6 +21,8 @@
 //! hyper-connection and attention builders.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -562,19 +564,12 @@ fn buildGraphEnc(model: *const Model, b: *const graph.Builder) void {
 /// past `int`'s range, throws from inside the graph build in the C++, where
 /// nothing catches it.
 fn stoi(s: [:0]const u8) i64 {
-    var end: [*c]u8 = undefined;
-    // strtol saturates at LONG_MIN and LONG_MAX, both past int's range.
-    const v = strtol(s.ptr, &end, 10);
-    if (@intFromPtr(end) == @intFromPtr(s.ptr)) {
-        c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion");
-    }
-    if (v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) {
-        c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range");
-    }
-    return v;
+    return switch (stdlib.num.stoi(s)) {
+        .ok => |v| v,
+        .no_conversion => c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion"),
+        .out_of_range => c.ggml_abort("models/dflash.cpp", 476, "terminating due to uncaught exception of type std::out_of_range: stoi: out of range"),
+    };
 }
-
-extern "c" fn strtol(s: [*:0]const u8, end: *[*c]u8, base: c_int) c_long;
 
 /// Ports `build_inp_target_features` (models/dflash.cpp:438 @b1b770d90): the
 /// target features of an injection batch, the batch's host embeddings or
@@ -1044,7 +1039,7 @@ fn buildLilicorrScores(b: *const graph.Builder, model: *const Model, tok_embd: *
         const q: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], 0));
         const k: *Tensor = c.ggml_cont(ctx, c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], hid * qkv.nb[0]));
         const v: *Tensor = c.ggml_view_4d(ctx, qkv, head_dim, nodes, heads, n_blocks, qkv.nb[1], hd * qkv.nb[0], qkv.nb[2], 2 * hid * qkv.nb[0]);
-        const attn: *Tensor = c.ggml_soft_max_ext(ctx, c.ggml_mul_mat(ctx, k, q), model.lilicorr_attention_bias, 1.0 / impl.sqrtf(@floatFromInt(head_dim)), 0.0);
+        const attn: *Tensor = c.ggml_soft_max_ext(ctx, c.ggml_mul_mat(ctx, k, q), model.lilicorr_attention_bias, 1.0 / libm.sqrtfInt(head_dim), 0.0);
         var joined: *Tensor = c.ggml_out_prod(ctx, v, c.ggml_transpose(ctx, attn));
         joined = c.ggml_permute(ctx, joined, 0, 2, 1, 3);
         var attn_output: *Tensor = c.ggml_cont_2d(ctx, joined, hidden, nodes * n_blocks);
@@ -1123,7 +1118,7 @@ fn buildGraphDec(comptime iswa: bool, model: *const Model, b: *const graph.Build
     // Optional iSWA: the matching attention input.
     const inp_attn = if (iswa) b.buildAttnInpKvIswa() else b.buildAttnInpKv();
 
-    const kq_scale: f32 = if (hp.f_attention_scale != 0.0) hp.f_attention_scale else 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = if (hp.f_attention_scale != 0.0) hp.f_attention_scale else 1.0 / libm.sqrtfInt(n_embd_head);
 
     // Drafts for M-RoPE targets use degenerate sections (the temporal
     // dimension only).
@@ -1673,7 +1668,7 @@ fn buildGraphDsv41(model: *const Model, b: *const graph.Builder) void {
     const n_heads_group = @divTrunc(b.n_head, n_groups);
     const o_lora_rank: i64 = hp.dsv4_o_lora_rank;
     const o_group_dim = n_heads_group * n_embd_head;
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     impl.assert(n_embd_head == b.n_embd_head_v, "models/dflash.cpp", 1476, "n_embd_head == n_embd_head_v");
     impl.assert(@rem(b.n_head, n_groups) == 0, "models/dflash.cpp", 1477, "n_head % n_groups == 0");
@@ -1860,7 +1855,7 @@ fn buildGraphMistralLarge4(model: *const Model, b: *const graph.Builder) void {
     const n_tokens = b.n_tokens;
     const n_embd = b.n_embd;
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k_mla);
 
     const inp_pos = b.buildInpPos();
 

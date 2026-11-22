@@ -13,6 +13,7 @@
 //! `build_inp_per_layer`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -123,7 +124,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // Important: do not normalize weights for raw embeddings input (i.e.
     // encoded image embeddings): `build_inp_embd` scales the token rows only.
-    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(b.n_embd)));
+    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -255,7 +256,7 @@ fn buildInpPerLayer(model: *const Model, b: *const graph.Builder, inpL: *Tensor)
     const n_embd_per_layer: i64 = b.hparams.n_embd_per_layer;
 
     var cur: *Tensor = c.ggml_mul_mat(ctx, model.per_layer_model_proj, inpL); // [n_embd_per_layer * n_layer, n_tokens]
-    cur = c.ggml_scale(ctx, cur, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd)));
+    cur = c.ggml_scale(ctx, cur, 1.0 / libm.sqrtfInt(b.n_embd));
     cur = c.ggml_reshape_3d(ctx, cur, n_embd_per_layer, b.n_layer, b.n_tokens);
 
     cur = b.buildNorm(cur, model.per_layer_proj_norm, null, .rms, -1);

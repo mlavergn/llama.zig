@@ -118,7 +118,7 @@ zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
 
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/unicode_diff$GATE_SUFFIX" -Ofast -lc \
     --dep unicode --dep inputs -Mroot=harness/unicode_diff.zig \
-    --dep llama_c --dep sync -Municode=src/llama/unicode.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_c.zig" \
+    --dep llama_c --dep stdlib -Municode=src/llama/unicode.zig -Mstdlib=stdlib/module.zig -Mllama_c="$tmp/llama_c.zig" \
     -Minputs="$tmp/inputs/inputs.zig" \
     "$tmp/unicode.o" "$tmp/unicode-data.o" "$tmp/unicode_ref.o" \
     "$GATE_GGML" -lc++ \

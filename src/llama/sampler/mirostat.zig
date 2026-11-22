@@ -21,8 +21,9 @@
 //!   each fused.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const core = @import("core.zig");
 
 const c = impl.c;
@@ -74,15 +75,15 @@ fn mirostatApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void
     // `size_t(ctx->m - 1)` and `cur_p->size - 1`, both unsigned.
     const m_lim: usize = @bitCast(@as(isize, ctx.m - 1));
     while (i < m_lim and i < cur_p.*.size -% 1) : (i += 1) {
-        const t_i = impl.logf(@as(f32, @floatFromInt(i + 2)) / @as(f32, @floatFromInt(i + 1)));
-        const b_i = impl.logf(cur_p.*.data[i].p / cur_p.*.data[i + 1].p);
+        const t_i = libm.logf(@as(f32, @floatFromInt(i + 2)) / @as(f32, @floatFromInt(i + 1)));
+        const b_i = libm.logf(cur_p.*.data[i].p / cur_p.*.data[i + 1].p);
         sum_ti_bi = @mulAdd(f32, t_i, b_i, sum_ti_bi);
         sum_ti_sq = @mulAdd(f32, t_i, t_i, sum_ti_sq);
     }
     s_hat = sum_ti_bi / sum_ti_sq;
 
     const epsilon_hat = s_hat - 1;
-    const k = impl.powf((epsilon_hat * impl.powf(2, ctx.mu)) / (1 - impl.powf(@floatFromInt(ctx.n_vocab), -epsilon_hat)), 1 / s_hat);
+    const k = libm.powf((epsilon_hat * libm.powf(2, ctx.mu)) / (1 - libm.powf(@floatFromInt(ctx.n_vocab), -epsilon_hat)), 1 / s_hat);
 
     core.topKImpl(cur_p, libcxx.max(c_int, core.cvtzs(k), 1));
 
@@ -92,7 +93,7 @@ fn mirostatApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void
 
     cur_p.*.selected = idx;
 
-    const observed_surprise = -impl.log2f(cur_p.*.data[@intCast(idx)].p);
+    const observed_surprise = -libm.log2f(cur_p.*.data[@intCast(idx)].p);
     const e = observed_surprise - ctx.tau;
 
     ctx.mu = @mulAdd(f32, -ctx.eta, e, ctx.mu);
@@ -191,7 +192,7 @@ fn mirostatV2Apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) vo
 
     var cut: usize = 0;
     while (cut < cur_p.*.size) : (cut += 1) {
-        if (-impl.log2f(cur_p.*.data[cut].p) > ctx.mu) break;
+        if (-libm.log2f(cur_p.*.data[cut].p) > ctx.mu) break;
     }
     cur_p.*.size = cut;
 
@@ -205,7 +206,7 @@ fn mirostatV2Apply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) vo
 
     cur_p.*.selected = idx;
 
-    const observed_surprise = -impl.log2f(cur_p.*.data[@intCast(idx)].p);
+    const observed_surprise = -libm.log2f(cur_p.*.data[@intCast(idx)].p);
     const e = observed_surprise - ctx.tau;
 
     ctx.mu = @mulAdd(f32, -ctx.eta, e, ctx.mu);
@@ -297,11 +298,6 @@ fn adaptivePName(smpl: [*c]const Sampler) callconv(.c) [*c]const u8 {
     return "adaptive-p";
 }
 
-/// Ports `std::clamp(v, lo, hi)` for floats: `v < lo ? lo : hi < v ? hi : v`.
-fn clamp(v: f32, lo: f32, hi: f32) f32 {
-    return if (v < lo) lo else if (hi < v) hi else v;
-}
-
 /// Ports `llama_sampler_adaptive_p_apply` (llama-sampler.cpp:3746 @b1b770d90).
 ///
 /// Re-weights candidates toward a target probability that adapts to the
@@ -319,8 +315,9 @@ fn adaptivePApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     ctx.original_probs.resize(impl.allocator, cur_p.*.size) catch impl.abort(src, 3763, "out of memory");
     for (core.items(cur_p), 0..) |d, i| ctx.original_probs.items[i] = d.p;
 
-    const target = clamp(ctx.target, 0.0, 1.0);
-    const adapted_target = clamp(
+    const target = libcxx.clamp(f32, ctx.target, 0.0, 1.0);
+    const adapted_target = libcxx.clamp(
+        f32,
         if (ctx.total_weight == 0.0) target else @mulAdd(f32, target, 2.0, -ctx.weighted_sum / ctx.total_weight),
         0.0,
         1.0,
@@ -411,7 +408,7 @@ var adaptive_p_iface: SamplerI = .{
 /// Return: the sampler.
 pub export fn llama_sampler_init_adaptive_p(target: f32, decay: f32, seed: u32) callconv(.c) [*c]Sampler {
     const seed_cur = core.getRngSeed(seed);
-    const clamped_decay = clamp(decay, 0.0, 0.99);
+    const clamped_decay = libcxx.clamp(f32, decay, 0.0, 0.99);
     return core.llama_sampler_init(&adaptive_p_iface, core.create(AdaptiveP, .{
         .target = target,
         .decay = clamped_decay,

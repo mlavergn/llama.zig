@@ -27,6 +27,7 @@
 //! exact `what()` text upstream's `common_json_error` carries.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const errors = @import("errors.zig");
 
@@ -894,7 +895,7 @@ pub const Value = union(Type) {
     pub fn getStringSet(self: *const Value, gpa: std.mem.Allocator) Error![][]const u8 {
         const all = try self.getSlice(gpa, []const u8);
         errdefer gpa.free(all);
-        std.mem.sort([]const u8, all, {}, lessBytes);
+        std.mem.sort([]const u8, all, {}, stdlib.strings.lessThan);
         var n: usize = 0;
         for (all) |s| {
             if (n > 0 and std.mem.eql(u8, all[n - 1], s)) continue;
@@ -999,14 +1000,14 @@ pub const Value = union(Type) {
 };
 
 /// `JSON_ASSERT`, which `json.cpp` defines as `GGML_ASSERT`.
-fn jsonAssert(comptime cond: []const u8) noreturn {
-    @import("errors.zig").writeStderr("json.hpp" ++ ":0: GGML_ASSERT(" ++ cond ++ ") failed\n");
-    std.process.abort();
+fn jsonAssert(comptime cond: [:0]const u8) noreturn {
+    ggml_abort("json.hpp", 0, "GGML_ASSERT(%s) failed", cond.ptr);
 }
 
-fn lessBytes(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
-}
+/// ggml's `ggml_abort`, declared here so `cli/json` needs no libllama
+/// module: the CLI and the server link libggml, and `json-diff` links the
+/// reference's stand-in.
+extern fn ggml_abort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) noreturn;
 
 /// Whether `T` is `int64_t`, `uint64_t` or `double` in the C++ on this
 /// target -- `number_integer_t`, `number_unsigned_t`, `number_float_t` --

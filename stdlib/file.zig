@@ -11,7 +11,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const strings = @import("strings.zig");
+const errno = @import("errno.zig");
 
 /// The `Io` for shared code no `main` hands one to: `tools_common` is also
 /// compiled into `llama-server-core`, whose callers pass none. The global
@@ -39,11 +39,45 @@ pub const Out = struct {
         return .{ .w = f.writer(io, &.{}) };
     }
 
+    /// Opens `path` to write at its end, creating it when missing:
+    /// `std::ofstream` opened `std::ios::app`, `fopen(path, "ab")`. One
+    /// writer, so writing from the size at open lands where `O_APPEND`
+    /// would.
+    ///
+    /// Parameters:
+    /// - `io`: the `Io` the file is written through; must outlive `Out`.
+    /// - `path`: the file, relative to the working directory or absolute.
+    ///
+    /// Return: the file; the open or stat error.
+    pub fn append(io: std.Io, path: []const u8) !Out {
+        const f = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = false });
+        errdefer f.close(io);
+        var out: Out = .{ .w = f.writer(io, &.{}) };
+        try out.w.seekTo(try f.length(io));
+        return out;
+    }
+
     /// Writes `bytes` at the current offset.
     ///
     /// Return: nothing; `error.WriteFailed` when not all were written.
     pub fn write(self: *Out, bytes: []const u8) std.Io.Writer.Error!void {
         try self.w.interface.writeAll(bytes);
+    }
+
+    /// Writes `text` as a C stream opened in text mode writes it
+    /// (`fopen(path, "w")`, a default `std::ofstream`): on Windows the C
+    /// library turns each LF into CR LF; elsewhere text mode is binary.
+    ///
+    /// Return: nothing; `error.WriteFailed` when not all was written.
+    pub fn writeText(self: *Out, text: []const u8) std.Io.Writer.Error!void {
+        if (comptime builtin.os.tag != .windows) return self.write(text);
+        var rest = text;
+        while (std.mem.indexOfScalar(u8, rest, '\n')) |nl| {
+            try self.write(rest[0..nl]);
+            try self.write("\r\n");
+            rest = rest[nl + 1 ..];
+        }
+        try self.write(rest);
     }
 
     /// Writes `n` zero bytes at the current offset: upstream's `zeros`,
@@ -72,6 +106,20 @@ pub const Out = struct {
     /// - `io`: the `Io` it was created with.
     pub fn close(self: *Out, io: std.Io) void {
         self.w.file.close(io);
+    }
+
+    /// Closes the file and says whether that failed, as `fclose` and a
+    /// stream's `close` do: nothing is buffered, so only the system's
+    /// `close` can fail (a delayed write error on a network file system),
+    /// which `std.Io.File.close` does not report. Windows reports nothing.
+    ///
+    /// Return: false when `close` failed.
+    pub fn closeChecked(self: *Out, io: std.Io) bool {
+        if (comptime builtin.os.tag == .windows) {
+            self.close(io);
+            return true;
+        }
+        return std.posix.errno(std.posix.system.close(self.w.file.handle)) == .SUCCESS;
     }
 };
 
@@ -116,50 +164,49 @@ pub fn readAt(io: std.Io, f: std.Io.File, buf: []u8, off: u64) bool {
     return n == buf.len;
 }
 
-/// The `errno` a file error came from, for upstream's `strerror(errno)`.
-/// std keeps most apart; where it folds several into one error, the one a
-/// model or data file meets: `EINVAL` for a bad name, `ENXIO` for no device,
-/// `EFBIG` for too large, `ENOENT` for not found.
+/// Reads all of `path` as `std::ifstream(path, std::ios::binary)` and
+/// `ss << f.rdbuf()` read it, or a loop of `read`s: a read error ends the
+/// copy, keeping what came before it, so a directory, which opens, reads
+/// as nothing.
 ///
-/// Return: the `errno`, or null for an error no `errno` stands behind.
-pub fn errnoOf(err: anyerror) ?c_int {
-    const E = std.c.E;
-    const e: E = switch (err) {
-        error.FileNotFound => .NOENT,
-        error.AccessDenied => .ACCES,
-        error.PermissionDenied => .PERM,
-        error.IsDir => .ISDIR,
-        error.NotDir => .NOTDIR,
-        error.SymLinkLoop => .LOOP,
-        error.NameTooLong => .NAMETOOLONG,
-        error.BadPathName => .INVAL,
-        error.ProcessFdQuotaExceeded => .MFILE,
-        error.SystemFdQuotaExceeded => .NFILE,
-        error.SystemResources => .NOMEM,
-        error.NoSpaceLeft => .NOSPC,
-        error.FileTooBig => .FBIG,
-        error.DeviceBusy => .BUSY,
-        error.FileBusy => .TXTBSY,
-        error.PathAlreadyExists => .EXIST,
-        error.NoDevice => .NXIO,
-        error.ReadOnlyFileSystem => .ROFS,
-        error.WouldBlock => .AGAIN,
-        error.FileLocksUnsupported => .OPNOTSUPP,
-        error.InputOutput => .IO,
-        error.BrokenPipe => .PIPE,
-        error.DiskQuota => .DQUOT,
-        else => return null,
-    };
-    return @backingInt(e);
+/// Return: the bytes, owned by `a`; null when the file cannot be opened;
+/// `error.OutOfMemory`.
+pub fn readStream(io: std.Io, a: std.mem.Allocator, path: []const u8) std.mem.Allocator.Error!?[]u8 {
+    const f = openIn(io, path) catch return null;
+    defer f.close(io);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    var buf: [65536]u8 = undefined;
+    while (true) {
+        const n = f.readStreaming(io, &.{&buf}) catch break;
+        if (n == 0) break;
+        try out.appendSlice(a, buf[0..n]);
+    }
+    return try out.toOwnedSlice(a);
 }
 
-/// What upstream prints for a file error: `strerror(errno)`, through
-/// `errnoOf`; the error's name when no `errno` stands behind it.
+/// The first line of `path`, as `std::getline` reads it from a fresh
+/// `std::ifstream`: up to the first `'\n'`, which is dropped; a read error
+/// ends it.
 ///
-/// Return: the text, static or the C library's; valid until the next call.
-pub fn errnoText(err: anyerror) [*:0]const u8 {
-    if (errnoOf(err)) |n| return strings.strerror(n);
-    return @errorName(err);
+/// Return: the line, owned by `a`; null when the file cannot be opened;
+/// empty when the file is.
+pub fn readFirstLine(io: std.Io, a: std.mem.Allocator, path: []const u8) std.mem.Allocator.Error!?[]u8 {
+    const f = openIn(io, path) catch return null;
+    defer f.close(io);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = f.readStreaming(io, &.{&buf}) catch break;
+        if (n == 0) break;
+        if (std.mem.indexOfScalar(u8, buf[0..n], '\n')) |nl| {
+            try out.appendSlice(a, buf[0..nl]);
+            break;
+        }
+        try out.appendSlice(a, buf[0..n]);
+    }
+    return try out.toOwnedSlice(a);
 }
 
 /// Deletes `path`: `remove`, `std::filesystem::remove`.
@@ -199,8 +246,23 @@ test "an output reads back as written: zeros, a seek back, an overwrite" {
     try std.testing.expect(std.mem.allEqual(u8, buf[4..5000], 0));
     try std.testing.expectEqualStrings("tail", buf[5000..]);
     try std.testing.expect(!readAt(io, f, &buf, 1));
+
+    var app = try Out.append(io, path);
+    try app.write("!");
+    try std.testing.expect(app.closeChecked(io));
+    const all = (try readStream(io, std.testing.allocator, path)) orelse return error.TestUnexpectedResult;
+    defer std.testing.allocator.free(all);
+    try std.testing.expectEqual(@as(usize, 5005), all.len);
+    try std.testing.expectEqualStrings("tail!", all[5000..]);
+
     try std.testing.expect(remove(io, path));
     try std.testing.expect(!remove(io, path));
+    try std.testing.expect((try readStream(io, std.testing.allocator, path)) == null);
+}
+
+test "a directory opens and reads as nothing" {
+    const all = (try readStream(std.testing.io, std.testing.allocator, ".")) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), all.len);
 }
 
 test "Windows text mode: CR LF becomes LF, a lone CR stays, Ctrl-Z ends the file" {
@@ -214,6 +276,20 @@ test "a file error reads as the C library's text for its errno" {
     const io = std.testing.io;
     const missing = openIn(io, "/nonexistent/file.gguf");
     try std.testing.expectError(error.FileNotFound, missing);
-    try std.testing.expectEqualStrings(std.mem.span(strings.strerror(@backingInt(std.c.E.NOENT))), std.mem.span(errnoText(error.FileNotFound)));
-    try std.testing.expectEqualStrings("Unexpected", std.mem.span(errnoText(error.Unexpected)));
+    try std.testing.expectEqualStrings(std.mem.span(errno.strerror(@backingInt(std.c.E.NOENT))), std.mem.span(errno.text(error.FileNotFound)));
+    try std.testing.expectEqualStrings("Unexpected", std.mem.span(errno.text(error.Unexpected)));
+}
+
+test "readFirstLine stops at the first newline and drops it" {
+    const io = std.testing.io;
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/etag", .{&tmp.sub_path});
+    defer a.free(path);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = "\"abc\"\nrest\n" });
+    const line = (try readFirstLine(io, a, path)) orelse return error.TestUnexpectedResult;
+    defer a.free(line);
+    try std.testing.expectEqualStrings("\"abc\"", line);
+    try std.testing.expect((try readFirstLine(io, a, "/nonexistent/etag")) == null);
 }

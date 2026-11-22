@@ -38,7 +38,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const sync = @import("sync");
+const sync = @import("sync/module.zig");
 const env = @import("env.zig");
 
 const fd_t = std.posix.fd_t;

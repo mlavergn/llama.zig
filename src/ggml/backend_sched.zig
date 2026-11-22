@@ -41,6 +41,7 @@
 //! readable against the C rather than disappearing.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const backend = @import("backend.zig");
 const c = impl.c;
@@ -1607,8 +1608,8 @@ export fn ggml_backend_sched_new(
 /// Return: the parsed value, or `fallback` when unset or unparseable —
 /// `atoi` returns 0 on garbage, and so does this.
 fn envInt(comptime name: [*:0]const u8, fallback: c_int) c_int {
-    const raw = std.c.getenv(name) orelse return fallback;
-    return std.fmt.parseInt(c_int, std.mem.span(raw), 10) catch 0;
+    const raw = stdlib.env.getenv(name) orelse return fallback;
+    return stdlib.num.atoiC(raw);
 }
 
 /// Ports `ggml_backend_sched_free` (src/ggml-backend.cpp:2372 @b1b770d90).

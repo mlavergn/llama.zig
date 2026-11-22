@@ -645,7 +645,7 @@ pub const Chat = struct {
                     var buf: [256]u8 = undefined;
                     const n = c.llama_token_to_piece(session.vocab, id, &buf, buf.len, 0, true);
                     const first: u8 = if (n > 0) buf[0] else 0;
-                    if (isSpace(first) and !isSpace(gp[0])) continue;
+                    if (std.ascii.isWhitespace(first) and !std.ascii.isWhitespace(gp[0])) continue;
                 }
                 c.llama_sampler_accept(rb, id);
             }
@@ -653,11 +653,6 @@ pub const Chat = struct {
         return rb;
     }
 };
-
-/// `std::isspace` in the C locale.
-fn isSpace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
 
 /// The rendered prompt split into runs of one trust level: its parts, a
 /// template part trusted -- special tokens parsed -- and an input part not.
@@ -670,20 +665,6 @@ fn segmentsFor(a: Allocator, prompt: *const common_chat.prompt.Prompt) ![]chat.S
         try out.append(a, .{ .text = part.text, .trusted = !part.is_input });
     }
     return out.items;
-}
-
-/// Ports `tty_can_use_colors` (common/common.cpp:1040 @b1b770d90): `--color
-/// auto`'s answer.
-///
-/// Parameters:
-/// - `io`: for asking the two streams.
-/// - `environ`: the process environment, `std.process.Init`'s map.
-pub fn ttyCanUseColors(io: std.Io, environ: anytype) bool {
-    if (environ.get("NO_COLOR")) |v| if (v.len != 0) return false;
-    if (environ.get("TERM")) |v| if (std.mem.eql(u8, v, "dumb")) return false;
-    const out = std.Io.File.stdout().isTty(io) catch false;
-    const err = std.Io.File.stderr().isTty(io) catch false;
-    return out or err;
 }
 
 // -----------------------------------------------------------------------------

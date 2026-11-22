@@ -36,6 +36,8 @@
 //! checks both, as the C does.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const types = @import("types.zig");
 const context = @import("context.zig");
@@ -47,10 +49,6 @@ const Context = context.Context;
 const Tensor = c.ggml_tensor;
 const CGraph = impl.CGraph;
 const HashSet = impl.HashSet;
-
-extern fn fclose(stream: *std.c.FILE) c_int;
-extern fn fprintf(stream: *std.c.FILE, fmt: [*:0]const u8, ...) c_int;
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 extern fn ggml_backend_buffer_get_usage(buffer: ?*anyopaque) c.enum_ggml_backend_buffer_usage;
 extern fn ggml_backend_tensor_set(tensor: *Tensor, data: ?*const anyopaque, offset: usize, size: usize) void;
@@ -141,7 +139,7 @@ pub export fn ggml_hash_set_free(hash_set: *HashSet) void {
 ///
 /// Return: the aligned address of the block.
 fn incrPtrAligned(p: *usize, size: usize, alignment: usize) usize {
-    const ptr = impl.pad(p.*, alignment);
+    const ptr = stdlib.num.pad(usize, p.*, alignment);
     p.* = ptr + size;
     return ptr;
 }
@@ -171,7 +169,7 @@ fn graphNbytes(size: usize, grads: bool) usize {
 
 /// Ports `ggml_graph_overhead_custom` (ggml.c:7415 @b1b770d90).
 pub export fn ggml_graph_overhead_custom(size: usize, grads: bool) usize {
-    return types.object_size + impl.pad(graphNbytes(size, grads), c.GGML_MEM_ALIGN);
+    return types.object_size + stdlib.num.pad(usize, graphNbytes(size, grads), c.GGML_MEM_ALIGN);
 }
 
 /// Ports `ggml_graph_overhead` (ggml.c:7419 @b1b770d90).
@@ -1446,12 +1444,12 @@ fn graphGetParent(cgraph: *const CGraph, node: *const Tensor) ?*Tensor {
 fn dumpDotNodeEdge(fp: *std.c.FILE, gb: *const CGraph, node: *Tensor, parent: *Tensor, label: [*:0]const u8) void {
     const gparent = graphGetParent(gb, node);
     const gparent0 = graphGetParent(gb, parent);
-    _ = fprintf(fp, "  \"%p\" -> \"%p\" [ arrowhead = %s; style = %s; label = \"%s\"; ]\n", if (gparent0) |g| g else parent, if (gparent) |g| g else node, if (gparent != null) @as([*:0]const u8, "empty") else "vee", if (gparent != null) @as([*:0]const u8, "dashed") else "solid", label);
+    _ = libc.fprintf(fp, "  \"%p\" -> \"%p\" [ arrowhead = %s; style = %s; label = \"%s\"; ]\n", if (gparent0) |g| g else parent, if (gparent) |g| g else node, if (gparent != null) @as([*:0]const u8, "empty") else "vee", if (gparent != null) @as([*:0]const u8, "dashed") else "solid", label);
 }
 
 /// Ports `ggml_graph_dump_dot_leaf_edge` (ggml.c:7804 @b1b770d90).
 fn dumpDotLeafEdge(fp: *std.c.FILE, node: *Tensor, parent: *Tensor, label: [*:0]const u8) void {
-    _ = fprintf(fp, "  \"%p\" -> \"%p\" [ label = \"%s\"; ]\n", parent, node, label);
+    _ = libc.fprintf(fp, "  \"%p\" -> \"%p\" [ label = \"%s\"; ]\n", parent, node, label);
 }
 
 /// Ports `ggml_graph_dump_dot` (ggml.c:7811 @b1b770d90).
@@ -1472,9 +1470,9 @@ pub export fn ggml_graph_dump_dot(gb: *const CGraph, cgraph: ?*const CGraph, fil
     impl.assert(fp != null, "fp");
     const f = fp.?;
 
-    _ = fprintf(f, "digraph G {\n");
-    _ = fprintf(f, "  newrank = true;\n");
-    _ = fprintf(f, "  rankdir = TB;\n");
+    _ = libc.fprintf(f, "digraph G {\n");
+    _ = libc.fprintf(f, "  newrank = true;\n");
+    _ = libc.fprintf(f, "  rankdir = TB;\n");
 
     for (0..@intCast(gb.n_nodes)) |i| {
         const node = gb.nodes[i].?;
@@ -1485,63 +1483,63 @@ pub export fn ggml_graph_dump_dot(gb: *const CGraph, cgraph: ?*const CGraph, fil
         if (graphGetParent(gb, node) != null) continue;
 
         if ((node.flags & c.GGML_TENSOR_FLAG_PARAM) != 0) {
-            _ = snprintf(&color, color.len, "yellow");
+            _ = libc.snprintf(&color, color.len, "yellow");
         } else if (grad != null) {
             if (graphFind(cgraph, node)) {
-                _ = snprintf(&color, color.len, "green");
+                _ = libc.snprintf(&color, color.len, "green");
             } else {
-                _ = snprintf(&color, color.len, "lightblue");
+                _ = libc.snprintf(&color, color.len, "lightblue");
             }
         } else {
-            _ = snprintf(&color, color.len, "white");
+            _ = libc.snprintf(&color, color.len, "white");
         }
 
-        _ = fprintf(f, "  \"%p\" [ style = filled; fillcolor = %s; shape = record; label=\"", node, &color);
+        _ = libc.fprintf(f, "  \"%p\" [ style = filled; fillcolor = %s; shape = record; label=\"", node, &color);
 
         if (node.name[0] != 0) {
-            _ = fprintf(f, "%s (%s)|", &node.name, types.ggml_type_name(node.type));
+            _ = libc.fprintf(f, "%s (%s)|", &node.name, types.ggml_type_name(node.type));
         } else {
-            _ = fprintf(f, "(%s)|", types.ggml_type_name(node.type));
+            _ = libc.fprintf(f, "(%s)|", types.ggml_type_name(node.type));
         }
 
         if (types.ggml_is_matrix(node)) {
-            _ = fprintf(f, "%d [%lld, %lld] | <x>%s", @as(c_int, @intCast(i)), node.ne[0], node.ne[1], types.ggml_op_symbol(node.op));
+            _ = libc.fprintf(f, "%d [%lld, %lld] | <x>%s", @as(c_int, @intCast(i)), node.ne[0], node.ne[1], types.ggml_op_symbol(node.op));
         } else {
-            _ = fprintf(f, "%d [%lld, %lld, %lld] | <x>%s", @as(c_int, @intCast(i)), node.ne[0], node.ne[1], node.ne[2], types.ggml_op_symbol(node.op));
+            _ = libc.fprintf(f, "%d [%lld, %lld, %lld] | <x>%s", @as(c_int, @intCast(i)), node.ne[0], node.ne[1], node.ne[2], types.ggml_op_symbol(node.op));
         }
 
         if (grad) |g| {
-            _ = fprintf(f, " | <g>%s\"; ]\n", types.ggml_op_symbol(g.op));
+            _ = libc.fprintf(f, " | <g>%s\"; ]\n", types.ggml_op_symbol(g.op));
         } else {
-            _ = fprintf(f, "\"; ]\n");
+            _ = libc.fprintf(f, "\"; ]\n");
         }
     }
 
     for (0..@intCast(gb.n_leafs)) |i| {
         const node = gb.leafs[i].?;
 
-        _ = snprintf(&color, color.len, "pink");
+        _ = libc.snprintf(&color, color.len, "pink");
 
-        _ = fprintf(f, "  \"%p\" [ style = filled; fillcolor = %s; shape = record; label=\"<x>", node, &color);
+        _ = libc.fprintf(f, "  \"%p\" [ style = filled; fillcolor = %s; shape = record; label=\"<x>", node, &color);
 
         if (node.name[0] != 0) {
-            _ = fprintf(f, "%s (%s)|", &node.name, types.ggml_type_name(node.type));
+            _ = libc.fprintf(f, "%s (%s)|", &node.name, types.ggml_type_name(node.type));
         } else {
-            _ = fprintf(f, "(%s)|", types.ggml_type_name(node.type));
+            _ = libc.fprintf(f, "(%s)|", types.ggml_type_name(node.type));
         }
 
-        _ = fprintf(f, "CONST %d [%lld, %lld]", @as(c_int, @intCast(i)), node.ne[0], node.ne[1]);
+        _ = libc.fprintf(f, "CONST %d [%lld, %lld]", @as(c_int, @intCast(i)), node.ne[0], node.ne[1]);
         if (types.ggml_nelements(node) < 5 and node.data != null) {
-            _ = fprintf(f, " | (");
+            _ = libc.fprintf(f, " | (");
             for (0..@intCast(types.ggml_nelements(node))) |j| {
                 // FIXME: use ggml-backend to obtain the tensor data -- the C's
                 // note. Until then every element prints as a placeholder.
-                _ = fprintf(f, "#");
-                if (j < @as(usize, @intCast(types.ggml_nelements(node) - 1))) _ = fprintf(f, ", ");
+                _ = libc.fprintf(f, "#");
+                if (j < @as(usize, @intCast(types.ggml_nelements(node) - 1))) _ = libc.fprintf(f, ", ");
             }
-            _ = fprintf(f, ")");
+            _ = libc.fprintf(f, ")");
         }
-        _ = fprintf(f, "\"; ]\n");
+        _ = libc.fprintf(f, "\"; ]\n");
     }
 
     for (0..@intCast(gb.n_nodes)) |i| {
@@ -1550,7 +1548,7 @@ pub export fn ggml_graph_dump_dot(gb: *const CGraph, cgraph: ?*const CGraph, fil
         for (0..c.GGML_MAX_SRC) |j| {
             if (node.src[j] != null) {
                 var label: [16]u8 = undefined;
-                _ = snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
+                _ = libc.snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
                 dumpDotNodeEdge(f, gb, node, impl.one(Tensor, node.src[j]), @ptrCast(&label));
             }
         }
@@ -1562,15 +1560,15 @@ pub export fn ggml_graph_dump_dot(gb: *const CGraph, cgraph: ?*const CGraph, fil
         for (0..c.GGML_MAX_SRC) |j| {
             if (node.src[j] != null) {
                 var label: [16]u8 = undefined;
-                _ = snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
+                _ = libc.snprintf(&label, label.len, "src %d", @as(c_int, @intCast(j)));
                 dumpDotLeafEdge(f, node, impl.one(Tensor, node.src[j]), @ptrCast(&label));
             }
         }
     }
 
-    _ = fprintf(f, "}\n");
+    _ = libc.fprintf(f, "}\n");
 
-    _ = fclose(f);
+    _ = libc.fclose(f);
 
     impl.logInfo("%s: dot -Tpng %s -o %s.png && open %s.png\n", .{ "ggml_graph_dump_dot", filename, filename, filename });
 }

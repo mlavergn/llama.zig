@@ -17,6 +17,7 @@
 //! `state_out` is a vector, iterated in insertion order, and stays a list.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -27,9 +28,6 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// `string_format` into an arena, for the slot and node names built with
 /// `std::to_string` upstream.
@@ -190,7 +188,7 @@ pub const CodeGen = struct {
         const n_head = hparams.n_head;
         const n_head_kv = hparams.n_head_kv;
         const d_head = @divTrunc(ne(layer.q_w, 1), n_head); // real head_dim, not n_embd / n_head
-        const kq_scale = 1.0 / sqrtf(@floatFromInt(d_head));
+        const kq_scale = 1.0 / libm.sqrtfInt(d_head);
 
         const residual = cur_in;
 
@@ -490,7 +488,7 @@ pub const Code2Wav = struct {
         const n_head = hparams.wav_tfm_n_head;
         const n_head_kv = hparams.wav_tfm_n_head_kv;
         const d_head = @divTrunc(ne(layer.q_w, 1), n_head);
-        const kq_scale = 1.0 / sqrtf(@floatFromInt(d_head));
+        const kq_scale = 1.0 / libm.sqrtfInt(d_head);
         const W: i64 = hparams.wav_tfm_swa; // == N, frames per batch
         const N = ne(cur_in, 1);
         const prefix = W - 1;

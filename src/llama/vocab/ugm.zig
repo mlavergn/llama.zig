@@ -12,7 +12,7 @@
 
 const std = @import("std");
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const unicode = @import("../unicode.zig");
 const vm = @import("module.zig");
 

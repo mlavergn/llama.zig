@@ -19,6 +19,7 @@
 //! graph, as upstream constructs `code_gen` and `code2wav` from `*this`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -30,8 +31,6 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
 
 /// `DRAMA3_N_ROT` (drama3-gen.cpp:7 @b1b770d90): tower RoPE, interleaved,
 /// first 64 dims of each head.
@@ -131,7 +130,7 @@ const Builder = struct {
             c.ggml_reshape_4d(ctx0, k_all, d_head, n_head_kv, pos + 1, 1),
             c.ggml_reshape_4d(ctx0, v_all, d_head, n_head_kv, pos + 1, 1),
             null,
-            1.0 / sqrtf(@floatFromInt(d_head)),
+            1.0 / libm.sqrtfInt(d_head),
             il,
             null,
         );
@@ -251,7 +250,7 @@ const Builder = struct {
         const ew = model.gen_code_embd_w;
         const cb1 = c.ggml_view_2d(ctx0, ew, n_embd_cb, ne(ew, 1), nb(ew, 1), nb(ew, 2));
         var out_embd = c.ggml_add(ctx0, c.ggml_get_rows(ctx0, model.gen_code_out_embd_w, inp_code0), c.ggml_get_rows(ctx0, cb1, code1));
-        out_embd = c.ggml_scale(ctx0, out_embd, 1.0 / sqrtf(2.0));
+        out_embd = c.ggml_scale(ctx0, out_embd, 1.0 / libm.sqrtf(2.0));
         g.cb(out_embd, "gen_audio_out", -1);
         c.ggml_build_forward_expand(g.gf, out_embd);
 

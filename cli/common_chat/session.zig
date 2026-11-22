@@ -375,7 +375,7 @@ pub const Session = struct {
     ///
     /// Return: the message, borrowed until the next `feed` or `finish`.
     pub fn feed(self: *Session, chunk: *const Input) Error!*const Msg {
-        util.ggmlAssert(!self.finished, "!finished && \"feed() after finish()\"");
+        @import("llama").impl.assert(!self.finished, "common/chat.cpp", 1946, "!finished && \"feed() after finish()\"");
         try self.input.appendInput(chunk);
         return self.update(true);
     }
@@ -385,7 +385,7 @@ pub const Session = struct {
     ///
     /// Return: the message, borrowed until `deinit`.
     pub fn finish(self: *Session, chunk: ?*const Input) Error!*const Msg {
-        util.ggmlAssert(!self.finished, "!finished && \"finish() called twice\"");
+        @import("llama").impl.assert(!self.finished, "common/chat.cpp", 1956, "!finished && \"finish() called twice\"");
         self.finished = true;
         if (chunk) |c| try self.input.appendInput(c);
         return self.update(false);

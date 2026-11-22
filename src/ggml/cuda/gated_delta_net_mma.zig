@@ -30,7 +30,7 @@
 //! against the arithmetic; the GB10 pickup compares them with `nvcc`'s.
 
 const std = @import("std");
-const sync = @import("sync");
+const sync = @import("stdlib").sync;
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");

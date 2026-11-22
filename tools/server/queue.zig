@@ -34,15 +34,14 @@
 //! over `libcxx.I32Map`.
 
 const std = @import("std");
-const sync = @import("sync");
-const llama = @import("llama");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const tools = @import("tools_common");
 
 const c = @import("tools_h");
 const log = tools.log;
-const I32Map = llama.libcxx.I32Map;
-
-extern fn abort() noreturn;
+const I32Map = @import("stdlib").libcxx.I32Map;
 
 fn timeMs() i64 {
     return c.ggml_time_ms();
@@ -50,10 +49,7 @@ fn timeMs() i64 {
 
 /// `GGML_ASSERT` with the C's message.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    if (!ok) {
-        log.err("%s:%d: GGML_ASSERT(%s) failed\n", .{ "server-queue.cpp", line, cond });
-        abort();
-    }
+    tools.ggml.ggmlAssert(ok, "server-queue.cpp", line, cond);
 }
 
 /// `std::unordered_set<int>` as libc++ lays it out (see the file header).
@@ -102,54 +98,6 @@ pub const IdSet = struct {
     }
 };
 
-/// The port's mutex, with the C++'s `std::mutex` operations.
-const Mutex = struct {
-    m: sync.Mutex = .{},
-
-    fn lock(self: *Mutex) void {
-        self.m.lock();
-    }
-    fn unlock(self: *Mutex) void {
-        self.m.unlock();
-    }
-};
-
-/// The port's condition variable, with the C++'s `std::condition_variable`
-/// operations the queues use.
-const Cond = struct {
-    c: sync.Condition = .{},
-
-    fn wait(self: *Cond, m: *Mutex) void {
-        self.c.wait(&m.m);
-    }
-
-    /// `wait_for(lock, seconds)`. Return: false on timeout.
-    fn waitFor(self: *Cond, m: *Mutex, ns: u64) bool {
-        return self.c.timedWait(&m.m, ns);
-    }
-
-    /// `wait_until(lock, deadline)`, the deadline from `deadlineIn`.
-    ///
-    /// Return: false on a timeout.
-    fn waitUntil(self: *Cond, m: *Mutex, deadline: u64) bool {
-        const now = tools.clock.monotonicNs();
-        if (now >= deadline) return false;
-        return self.c.timedWait(&m.m, deadline - now);
-    }
-
-    /// The moment `ns` nanoseconds from now, on the monotonic clock.
-    fn deadlineIn(ns: u64) u64 {
-        return tools.clock.monotonicNs() + ns;
-    }
-
-    fn notifyOne(self: *Cond) void {
-        self.c.signal();
-    }
-    fn notifyAll(self: *Cond) void {
-        self.c.broadcast();
-    }
-};
-
 /// Ports `task_resets_idle_timer` (server-queue.cpp:24 @b1b770d90).
 fn taskResetsIdleTimer(t: anytype) bool {
     return t != .metrics;
@@ -179,12 +127,12 @@ pub fn Queue(comptime Task: type) type {
         queue_tasks_deferred: std.ArrayList(Task) = .empty,
         queue_tasks_unhandled: std.ArrayList(Task) = .empty,
 
-        mutex_tasks: Mutex = .{},
-        condition_tasks: Cond = .{},
+        mutex_tasks: sync.Mutex = .{},
+        condition_tasks: sync.Condition = .{},
 
         worker: struct {
             thread: ?std.Thread = null,
-            cv: Cond = .{},
+            cv: sync.Condition = .{},
             err: ?anyerror = null,
             stop: bool = false,
             busy: bool = false,
@@ -229,7 +177,7 @@ pub fn Queue(comptime Task: type) type {
             log.dbg("que  %12.*s: new task, id = %d, front = %d\n", .{ @as(c_int, 12), "post", task_id, @as(c_int, @intFromBool(front)) });
             try self.push(&self.queue_tasks, task, front);
             if (reset_timer) self.time_last_task = timeMs();
-            self.condition_tasks.notifyOne();
+            self.condition_tasks.signal();
             return task_id;
         }
 
@@ -251,7 +199,7 @@ pub fn Queue(comptime Task: type) type {
                 try self.push(&self.queue_tasks, task.*, front);
             }
             if (reset_timer) self.time_last_task = timeMs();
-            self.condition_tasks.notifyOne();
+            self.condition_tasks.signal();
         }
 
         /// Ports `server_queue`'s `defer` (server-queue.cpp:76 @b1b770d90).
@@ -261,7 +209,7 @@ pub fn Queue(comptime Task: type) type {
             log.dbg("que  %12.*s: defer task, id = %d\n", .{ @as(c_int, 12), "defer", task.id });
             try self.queue_tasks_deferred.append(self.gpa, task);
             self.time_last_task = timeMs();
-            self.condition_tasks.notifyOne();
+            self.condition_tasks.signal();
         }
 
         /// Ports `server_queue`'s `get_new_id` (server-queue.cpp:84 @b1b770d90).
@@ -297,7 +245,7 @@ pub fn Queue(comptime Task: type) type {
                 }
             }
             self.time_last_task = timeMs();
-            self.condition_tasks.notifyOne();
+            self.condition_tasks.signal();
         }
 
         /// Ports `server_queue`'s `wait_until_no_sleep` (server-queue.cpp:115 @b1b770d90):
@@ -311,7 +259,7 @@ pub fn Queue(comptime Task: type) type {
                 if (!self.req_stop_sleeping) {
                     log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "requesting to stop sleeping\n" });
                     self.req_stop_sleeping = true;
-                    self.condition_tasks.notifyOne(); // only main thread is waiting on this
+                    self.condition_tasks.signal(); // only main thread is waiting on this
                 }
                 log.dbg("que  %12.*s: %s", .{ @as(c_int, 12), "wait_until_no_sleep", "waiting until no sleep\n" });
                 while (self.sleeping) self.condition_tasks.wait(&self.mutex_tasks);
@@ -341,7 +289,7 @@ pub fn Queue(comptime Task: type) type {
             self.mutex_tasks.lock();
             defer self.mutex_tasks.unlock();
             self.running = false;
-            self.condition_tasks.notifyAll();
+            self.condition_tasks.broadcast();
         }
 
         /// Ports `server_queue`'s `queue_tasks_deferred_size` (server-queue.h:112 @b1b770d90).
@@ -435,7 +383,7 @@ pub fn Queue(comptime Task: type) type {
                 self.mutex_tasks.lock();
                 self.worker.busy = false;
                 self.mutex_tasks.unlock();
-                self.condition_tasks.notifyAll();
+                self.condition_tasks.broadcast();
             }
         }
 
@@ -445,8 +393,8 @@ pub fn Queue(comptime Task: type) type {
             self.mutex_tasks.lock();
             self.worker.stop = true;
             self.mutex_tasks.unlock();
-            self.worker.cv.notifyOne();
-            self.condition_tasks.notifyAll();
+            self.worker.cv.signal();
+            self.condition_tasks.broadcast();
             t.join();
             self.worker.thread = null;
         }
@@ -465,7 +413,7 @@ pub fn Queue(comptime Task: type) type {
                 self.worker.busy = true;
                 self.worker.yielding = true;
             }
-            self.worker.cv.notifyOne();
+            self.worker.cv.signal();
 
             // run the work on the current thread, so that all ggml compute stays on the same thread
             var exception: ?anyerror = null;
@@ -479,7 +427,7 @@ pub fn Queue(comptime Task: type) type {
 
                 // the yield is over, wait for the worker to finish its current task
                 self.worker.yielding = false;
-                self.condition_tasks.notifyAll();
+                self.condition_tasks.broadcast();
                 while (self.worker.busy) self.condition_tasks.wait(&self.mutex_tasks);
 
                 // put the declined tasks back, keeping their order
@@ -573,14 +521,14 @@ pub fn Queue(comptime Task: type) type {
                         }
                         self.sleeping = false;
                         self.time_last_task = timeMs();
-                        self.condition_tasks.notifyAll(); // notify wait_until_no_sleep()
+                        self.condition_tasks.broadcast(); // notify wait_until_no_sleep()
                         self.mutex_tasks.unlock();
                         break; // process new tasks
                     } else {
                         // wait for new tasks or timeout for checking sleeping condition
                         var res = self.queue_tasks.items.len != 0 or !self.running;
                         if (!res) {
-                            _ = self.condition_tasks.waitFor(&self.mutex_tasks, max_wait_time);
+                            _ = self.condition_tasks.timedWait(&self.mutex_tasks, max_wait_time);
                             res = self.queue_tasks.items.len != 0 or !self.running;
                         }
                         self.mutex_tasks.unlock();
@@ -620,8 +568,8 @@ pub fn Response(comptime ResultPtr: type) type {
         running: bool = true,
         waiting_task_ids: IdSet,
         queue_results: std.ArrayList(ResultPtr) = .empty,
-        mutex_results: Mutex = .{},
-        condition_results: Cond = .{},
+        mutex_results: sync.Mutex = .{},
+        condition_results: sync.Condition = .{},
 
         pub fn init(gpa: std.mem.Allocator) !Self {
             return .{ .gpa = gpa, .waiting_task_ids = try IdSet.init(gpa) };
@@ -713,7 +661,7 @@ pub fn Response(comptime ResultPtr: type) type {
                 while (true) {
                     if (!self.running) {
                         log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "operator()", "recv" });
-                        abort(); // we cannot return here since the caller is HTTP code
+                        libc.abort(); // we cannot return here since the caller is HTTP code
                     }
                     if (self.queue_results.items.len != 0) break;
                     self.condition_results.wait(&self.mutex_results);
@@ -728,7 +676,7 @@ pub fn Response(comptime ResultPtr: type) type {
         ///
         /// Return: null on a timeout.
         pub fn recvWithTimeout(self: *Self, id_tasks: *const IdSet, timeout: c_int) ?ResultPtr {
-            const deadline = Cond.deadlineIn(@as(u64, @intCast(@max(timeout, 0))) * std.time.ns_per_s);
+            const deadline = stdlib.clock.steadyNs() + @as(i64, @max(timeout, 0)) * std.time.ns_per_s;
             self.mutex_results.lock();
             defer self.mutex_results.unlock();
             while (true) {
@@ -736,7 +684,7 @@ pub fn Response(comptime ResultPtr: type) type {
                 const ok = self.condition_results.waitUntil(&self.mutex_results, deadline);
                 if (!self.running) {
                     log.dbg("res  %12.*s: %s : queue result stop\n", .{ @as(c_int, 12), "recv_with_timeout", "recv_with_timeout" });
-                    abort(); // we cannot return here since the caller is HTTP code
+                    libc.abort(); // we cannot return here since the caller is HTTP code
                 }
                 if (!ok) return null;
             }
@@ -751,7 +699,7 @@ pub fn Response(comptime ResultPtr: type) type {
             if (self.waiting_task_ids.contains(result.id)) {
                 log.dbg("res  %12.*s: task id = %d pushed to result queue\n", .{ @as(c_int, 12), "send", result.id });
                 try self.queue_results.append(self.gpa, result);
-                self.condition_results.notifyAll();
+                self.condition_results.broadcast();
                 return;
             }
             result.destroy(self.gpa);
@@ -769,13 +717,13 @@ pub fn Response(comptime ResultPtr: type) type {
                 res_copy.id = e.key; // override id with target task id
                 try self.queue_results.append(self.gpa, res_copy);
             }
-            self.condition_results.notifyAll();
+            self.condition_results.broadcast();
         }
 
         /// Ports `server_response`'s `terminate` (server-queue.cpp:512 @b1b770d90).
         pub fn terminate(self: *Self) void {
             self.running = false;
-            self.condition_results.notifyAll();
+            self.condition_results.broadcast();
         }
     };
 }

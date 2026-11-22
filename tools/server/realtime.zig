@@ -36,7 +36,7 @@
 //! are `gpa`'s; an event lives as long as it takes to send it.
 
 const std = @import("std");
-const sync = @import("sync");
+const sync = @import("stdlib").sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");

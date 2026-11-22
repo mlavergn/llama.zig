@@ -11,6 +11,7 @@
 //! `defer`s below free them in the reverse order the destructors run.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const chat = @import("common_chat");
 const c = tc.c;
@@ -251,7 +252,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     log.inf("timings: prompt eval %.2fs + generation %.2fs + vocoder %.2fs = total %.2fs\n", .{ t_prompt_s, t_gen_s, t_wav_s, t_total_s });
     log.inf("         output audio = %.2fs (audio time = %.2fx process time)\n", .{ audio_s, if (t_total_s > 0) audio_s / t_total_s else 0.0 });
     const out_file = try a.dupeSentinel(u8, params.out_file, 0);
-    var f = tc.file.Out.create(init.io, out_file) catch {
+    var f = stdlib.file.Out.create(init.io, out_file) catch {
         log.err("failed to open %s\n", .{out_file.ptr});
         return 1;
     };
@@ -265,9 +266,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
 /// Ports `main` (tts.cpp:46 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

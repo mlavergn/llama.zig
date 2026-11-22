@@ -12,7 +12,7 @@
 //! with `@mulAdd` where it occurs:
 //!
 //! - the YaRN blend `theta_interp*(1 - ramp_mix) + theta_extrap*ramp_mix`,
-//! - the magnitude correction `1.0f + 0.1f*logf(...)`,
+//! - the magnitude correction `1.0f + 0.1f*libm.logf(...)`,
 //! - the rotation's two outputs, `x0*cos - x1*sin` and `x0*sin + x1*cos`.
 //!
 //! Where both operands of the `+` or `-` are products, clang fuses the
@@ -32,15 +32,13 @@
 //! `j2`, `j3`, digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn logf(x: f32) f32;
 
 /// Typed pointer at a byte offset; see `common.ptr`.
 const at = common.ptr;
@@ -87,11 +85,11 @@ fn ropeYarn(
         theta = @mulAdd(f32, theta_interp, 1 - ramp_mix, theta_extrap * ramp_mix);
 
         // Get n-d magnitude scaling corrected for interpolation
-        mscale *= @mulAdd(f32, 0.1, logf(1.0 / freq_scale), 1.0);
+        mscale *= @mulAdd(f32, 0.1, libm.logf(1.0 / freq_scale), 1.0);
     }
     // `cosf(theta)` and `sinf(theta)`: on Darwin clang folds the pair into one
-    // `__sincosf_stret` call, which rounds differently -- see `common.sinCos`.
-    const sc = common.sinCos(theta);
+    // `__sincosf_stret` call, which rounds differently -- see `stdlib.libm.sinCos`.
+    const sc = libm.sinCos(theta);
     return .{ .cos = sc.cos * mscale, .sin = sc.sin * mscale };
 }
 
@@ -296,7 +294,7 @@ fn ropeFlt(comptime T: type, params: *const ComputeParams, dst: *Tensor, forward
     // row index used to determine which thread to use
     var ir: i64 = 0;
 
-    const theta_scale = powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
+    const theta_scale = libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     var corr_dims: [2]f32 = undefined;
     c.ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, truncate, &corr_dims);

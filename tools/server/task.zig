@@ -32,6 +32,7 @@
 //! took.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -1012,7 +1013,7 @@ pub const CompletionTokenOutput = struct {
     /// log(0) is the lowest float instead.
     pub fn logarithm(x: f32) f32 {
         // the JSON library converts -inf to null, so we need to prevent that
-        return if (x == 0.0) -std.math.floatMax(f32) else logf(x);
+        return if (x == 0.0) -std.math.floatMax(f32) else libm.logf(x);
     }
 
     /// Ports `str_to_bytes` (server-task.cpp:301 @b1b770d90), a member of `completion_token_output`.
@@ -1020,8 +1021,6 @@ pub const CompletionTokenOutput = struct {
         return .{ .s = str };
     }
 };
-
-extern fn logf(x: f32) f32;
 
 // -----------------------------------------------------------------------------
 // the prompt cache
@@ -1467,7 +1466,7 @@ pub const PromptCache = struct {
                 const data = best.data.drft;
 
                 if (data.len != 0) {
-                    common.ggmlAssert(ctx_dft != null, "server-task.cpp", 1893, "ctx_dft");
+                    tools.ggml.ggmlAssert(ctx_dft != null, "server-task.cpp", 1893, "ctx_dft");
 
                     const sz = data.len;
                     const n = c.llama_state_seq_set_data_ext(ctx_dft, data.ptr, sz, id_slot, 0);

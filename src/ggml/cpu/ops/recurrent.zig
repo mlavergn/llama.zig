@@ -39,6 +39,7 @@
 //! renamed `j0` where it appears.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -51,9 +52,6 @@ const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
 const F32 = simd.F32;
-
-extern fn expf(x: f32) f32;
-extern fn sqrtf(x: f32) f32;
 
 /// `ggml_barrier(params->threadpool)`; see `common.barrier`.
 const barrier = common.barrier;
@@ -352,7 +350,7 @@ fn gatedDeltaNetOneChunk(params: *const ComputeParams, dst: *Tensor, ir0: i64, i
     const rq3 = @divTrunc(nev3, neq3);
     const rk3 = @divTrunc(nev3, nek3);
 
-    const scale = 1.0 / sqrtf(@floatFromInt(S_v));
+    const scale = 1.0 / libm.sqrtfInt(S_v);
 
     const sv: usize = @intCast(S_v);
     const sv2 = sv * sv;
@@ -398,11 +396,11 @@ fn gatedDeltaNetOneChunk(params: *const ComputeParams, dst: *Tensor, ir0: i64, i
 
             if (kda) {
                 // precompute exp(g) into delta scratch (reused below)
-                for (0..sv) |i| delta[i] = expf(g_d[i]);
+                for (0..sv) |i| delta[i] = libm.expf(g_d[i]);
                 // S[i][:] *= exp(g[i]) => for each row j of M: M[j][i] *= exp(g[i])
                 for (0..sv) |j| vec.mul_f32(S_v, s_out + j * sv, s_out + j * sv, delta);
             } else {
-                vec.scale_f32(S_v * S_v, s_out, expf(g_d[0]));
+                vec.scale_f32(S_v * S_v, s_out, libm.expf(g_d[0]));
             }
 
             // delta[j] = sum_i S[i][j] * k[i] = dot(row j of M, k)
@@ -591,7 +589,7 @@ fn dsv4HcCombF32(params: *const ComputeParams, dst: *Tensor) void {
             var sum: f32 = 0.0;
             for (0..hc) |idst| {
                 const idx = idst + hc * isrc;
-                const v = expf(comb[idx] - max);
+                const v = libm.expf(comb[idx] - max);
                 comb[idx] = v;
                 sum += v;
             }
@@ -633,7 +631,7 @@ pub export fn ggml_compute_forward_dsv4_hc_comb(params: *const ComputeParams, ds
 /// Ports `ggml_compute_forward_dsv4_hc_pre_f32` (ops.cpp:11356 @b1b770d90).
 ///
 /// `sum += xv * wv` is fused, one rounding per step. In the gated form the
-/// weight is `1.0f / (1.0f + expf(-gv))`, rounded on its own before the
+/// weight is `1.0f / (1.0f + libm.expf(-gv))`, rounded on its own before the
 /// fused step; the store is `scale * sum`, rounded.
 fn dsv4HcPreF32(params: *const ComputeParams, dst: *Tensor) void {
     const x = impl.one(Tensor, dst.src[0]);
@@ -689,7 +687,7 @@ fn dsv4HcPreF32(params: *const ComputeParams, dst: *Tensor) void {
             const xv = at(f32, x.data, j0 * nbx0 + ih * nbx1 + it * nbx2).*;
             const wv: f32 = if (gated) blk: {
                 const gv = at(f32, weights.data, j0 * nbw0 + ih * nbw1 + it * nbw2).*;
-                break :blk 1.0 / (1.0 + expf(-gv));
+                break :blk 1.0 / (1.0 + libm.expf(-gv));
             } else at(f32, weights.data, ih * nbw0 + it * nbw1).*;
             // sum += xv * wv, fused
             sum = @mulAdd(f32, xv, wv, sum);

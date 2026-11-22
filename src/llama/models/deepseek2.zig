@@ -19,6 +19,7 @@
 //! `llama_model_mistral4` (`mistral4.zig`) build with.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -216,9 +217,9 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, params: *con
 /// `attn_factor` `llama_hparams`'s `yarn_attn_factor_adjust` adjusted.
 fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
     const hp = b.hparams;
-    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * impl.logf(1.0 / b.freq_scale));
-    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * impl.logf(1.0 / b.freq_scale));
-    return 1.0 * mscale * mscale / impl.sqrtf(@floatFromInt(n_embd_head_k));
+    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * libm.logf(1.0 / b.freq_scale));
+    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * libm.logf(1.0 / b.freq_scale));
+    return 1.0 * mscale * mscale / libm.sqrtfInt(n_embd_head_k);
 }
 
 /// Ports the constructor of `llama_model_deepseek2`'s `graph_mtp`

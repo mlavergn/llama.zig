@@ -10,6 +10,7 @@
 //! `build_arch_graph`, and its `graph<iswa>`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -149,7 +150,7 @@ fn buildGraph(comptime iswa: bool, model: *const Model, b: *const graph.Builder)
         Qcur = b.buildRope(Qcur, inp_pos, il);
         Kcur = b.buildRope(Kcur, inp_pos, il);
 
-        const attn_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(head_dim_q));
+        const attn_scale: f32 = 1.0 / libm.sqrtfInt(head_dim_q);
 
         cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, attn_scale, il);
         b.cb(cur, "attn_out", il);

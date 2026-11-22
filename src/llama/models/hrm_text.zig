@@ -14,6 +14,7 @@
 //! `build_stack`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -131,7 +132,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 fn buildStack(model: *const Model, b: *const graph.Builder, inp_attn: *graph.InpAttnKv, inp_pos: *Tensor, cur_: *Tensor, slot_base: c_int) *Tensor {
     const ctx = b.ctx0;
     var cur = cur_;
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(b.n_embd_head_k));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
 
     const lps: c_int = @intCast(model.hparams.n_hrm_layers_per_stack);
 

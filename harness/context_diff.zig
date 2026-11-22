@@ -1329,16 +1329,9 @@ fn sidePath(buf: []u8, what: []const u8) [:0]const u8 {
 }
 
 fn fileHash(path: [:0]const u8) u64 {
-    const f = std.c.fopen(path.ptr, "rb") orelse return 0;
-    defer _ = std.c.fclose(f);
-    var h = std.hash.Wyhash.init(0);
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        h.update(buf[0..n]);
-    }
-    return h.final();
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path, std.heap.page_allocator, .unlimited) catch return 0;
+    defer std.heap.page_allocator.free(data);
+    return std.hash.Wyhash.hash(0, data);
 }
 
 fn saveState(comptime S: type, ctx: anytype, tokens: []const i32, saved: *std.ArrayList(u8), probe_seq3: bool) void {

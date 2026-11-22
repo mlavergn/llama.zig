@@ -30,14 +30,6 @@ pub fn oom(comptime file: [*:0]const u8) noreturn {
     unreachable;
 }
 
-/// Ports `GGML_PAD` (ggml.h:94 @b1b770d90): `x` rounded up to a multiple of
-/// `n`, a power of two.
-///
-/// Return: the padded size.
-pub fn pad(x: usize, n: usize) usize {
-    return (x + n - 1) & ~(n - 1);
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 
@@ -45,11 +37,4 @@ const std = @import("std");
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "pad rounds up to the alignment" {
-    try std.testing.expectEqual(@as(usize, 0), pad(0, 32));
-    try std.testing.expectEqual(@as(usize, 32), pad(1, 32));
-    try std.testing.expectEqual(@as(usize, 32), pad(32, 32));
-    try std.testing.expectEqual(@as(usize, 64), pad(33, 32));
 }

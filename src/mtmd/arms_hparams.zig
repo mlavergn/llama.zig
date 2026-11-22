@@ -24,7 +24,7 @@ const impl = @import("impl.zig");
 const clip = @import("clip.zig");
 const names = @import("names.zig");
 const model_mod = @import("model.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const gpa = impl.gpa;
 
 /// `load_hparams`'s locals the switch reads and writes.

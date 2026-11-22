@@ -10,6 +10,7 @@
 //! it began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -17,8 +18,6 @@ const c = impl.c;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Ports `window_partition` (deepseekocr.cpp:5 @b1b770d90).
 fn windowPartition(ctx0: ?*c.ggml_context, x: T, window: c_int) T {
@@ -208,7 +207,7 @@ pub fn buildSam(g: *graph.Graph, inp_raw: T) T {
             // casting mask to F16 only required when flash-attn is enabled
             if (g.flash_attn_type == .enabled) mask = c.ggml_cast(ctx0, mask, c.GGML_TYPE_F16);
 
-            const scale: f32 = 1.0 / sqrtf(@floatFromInt(d_heads));
+            const scale: f32 = 1.0 / libm.sqrtfInt(d_heads);
 
             cur = g.buildAttn(layer.o_w, layer.o_b, Q, K, V, mask, scale, il, null); // [B, H*W, n_embd]
             cur = c.ggml_reshape_4d(ctx0, c.ggml_cont(ctx0, cur), n_embd, W, H, B);
@@ -352,7 +351,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     if (is_overview) {
         // global view: weave one newline per row + trailing view separator
-        const h: c_int = @intFromFloat(sqrtf(@floatFromInt(ne(cur, 1))));
+        const h: c_int = @intFromFloat(libm.sqrtfInt(ne(cur, 1)));
         const w = h;
         const n_dim = ne(cur, 0);
 
@@ -363,7 +362,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         cur = c.ggml_concat(ctx0, cur, vs, 1); // (n_dim, h*(w+1) + 1, n_batch)
     } else {
         // tile row: interleave tiles within each row, add newline per row
-        const grid_x: c_int = @intFromFloat(sqrtf(@floatFromInt(clip_n_patches)));
+        const grid_x: c_int = @intFromFloat(libm.sqrtfInt(clip_n_patches));
         const grid_y = grid_x;
         const n_dim = ne(cur, 0);
 

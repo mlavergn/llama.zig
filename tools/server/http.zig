@@ -64,11 +64,12 @@
 //! pre-routing lambda keeps a reference to `common_params`.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const httplib = @import("httplib/module.zig");
 const tools_common = @import("tools_common");
 const json = @import("cli_fit").json;
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const ui = @import("ui.zig");
 
 const log = tools_common.log;
@@ -204,11 +205,6 @@ fn asciiLower(a: std.mem.Allocator, s_in: []const u8) error{OutOfMemory}![]u8 {
     return out;
 }
 
-/// `isspace` in the "C" locale.
-fn cIsSpace(c: u8) bool {
-    return c == ' ' or (c >= '\t' and c <= '\r');
-}
-
 /// One `%u` of glibc's `sscanf`: leading white space skipped, an optional
 /// sign, at least one decimal digit, converted as `strtoul` converts (an
 /// overflow saturates at `ULONG_MAX`, a '-' negates modulo 2^64) and then
@@ -217,7 +213,7 @@ fn cIsSpace(c: u8) bool {
 /// Return: the value and the bytes consumed, or null on a matching failure.
 fn scanfU(s_in: []const u8) ?struct { value: u32, len: usize } {
     var i: usize = 0;
-    while (i < s_in.len and cIsSpace(s_in[i])) i += 1;
+    while (i < s_in.len and std.ascii.isWhitespace(s_in[i])) i += 1;
     var neg = false;
     if (i < s_in.len and (s_in[i] == '+' or s_in[i] == '-')) {
         neg = s_in[i] == '-';
@@ -282,15 +278,6 @@ fn hostName(a: std.mem.Allocator, host: []const u8) error{OutOfMemory}![]u8 {
     return asciiLower(a, host[0 .. std.mem.findScalar(u8, host, ':') orelse host.len]);
 }
 
-/// Ports `string_strip` (common/common.cpp:479 @b1b770d90): white space off both ends.
-fn stringStrip(s_in: []const u8) []const u8 {
-    var start: usize = 0;
-    var end = s_in.len;
-    while (start < end and cIsSpace(s_in[start])) start += 1;
-    while (end > start and cIsSpace(s_in[end - 1])) end -= 1;
-    return s_in[start..end];
-}
-
 /// Ports `request_host_is_allowed` (server-http.cpp:109 @b1b770d90), the
 /// DNS rebinding guard: a page whose own name resolves to 127.0.0.1 reaches
 /// a loopback connection with that name in `Host`, so on a loopback
@@ -307,7 +294,7 @@ fn requestHostIsAllowed(a: std.mem.Allocator, cors_origins: []const u8, req: *co
     const host_lower = try asciiLower(a, host);
     var it = std.mem.splitScalar(u8, cors_origins, ',');
     while (it.next()) |entry| {
-        const allowed = stringStrip(entry);
+        const allowed = stdlib.strings.strip(entry);
         if (std.mem.find(u8, allowed, "://")) |sep| {
             if (std.mem.eql(u8, try asciiLower(a, allowed[sep + 3 ..]), host_lower)) return true;
         }
@@ -338,7 +325,7 @@ fn requestOriginIsAllowed(a: std.mem.Allocator, cors_origins: []const u8, req: *
         }
         var it = std.mem.splitScalar(u8, cors_origins, ',');
         while (it.next()) |allowed| {
-            if (std.mem.eql(u8, stringStrip(allowed), origin)) return true;
+            if (std.mem.eql(u8, stdlib.strings.strip(allowed), origin)) return true;
         }
         return false;
     }
@@ -678,7 +665,7 @@ const GcpParams = struct {
     /// Ports `getenv` (server-http.cpp:185 @b1b770d90), a member of
     /// `gcp_params`.
     fn getenvOr(a: std.mem.Allocator, name: [:0]const u8, default_value: []const u8, ensure_leading_slash: bool) error{OutOfMemory}![]const u8 {
-        const val = tools_common.env.get(name) orelse return default_value;
+        const val = stdlib.env.get(name) orelse return default_value;
         if (val.len == 0) return default_value;
         if (ensure_leading_slash and val[0] != '/') return std.mem.concat(a, u8, &.{ "/", val });
         return a.dupe(u8, val);
@@ -819,7 +806,7 @@ pub const Context = struct {
         var n_threads_http = params.n_threads_http;
         if (n_threads_http < 1) {
             // +4 threads for monitoring, health and MCP.
-            const hw: i32 = @bitCast(httplib.socket.hardwareConcurrency() -% 1);
+            const hw: i32 = @bitCast(stdlib.thread.hardwareConcurrency() -% 1);
             n_threads_http = @max(params.n_parallel + 4, hw);
         }
         self.n_threads_http = n_threads_http;
@@ -866,7 +853,7 @@ pub const Context = struct {
         }
 
         // a router child has no API key; the router strips the browser headers, so only a browser sends them here
-        self.managed_by_router = tools_common.env.get(server_env_router_port) != null;
+        self.managed_by_router = stdlib.env.get(server_env_router_port) != null;
 
         // register server middlewares
         srv.setPreRoutingHandler(.{ .ctx = self, .func = preRouting });
@@ -1395,7 +1382,7 @@ pub const Context = struct {
 
         if (self.handlers.get(gcp.path_predict) != null) {
             srvErr("register_gcp_compat", "AIP_PREDICT_ROUTE=%s conflicts with an existing llama-server route\n", .{cz(a, gcp.path_predict)});
-            tools_common.cExit(1);
+            stdlib.stdio.exit(1);
         }
 
         // camelCase alias -> canonical path (first registration wins on collision)
@@ -1408,10 +1395,8 @@ pub const Context = struct {
         }
 
         if (gcp.path_health.len != 0) {
-            const health_handler = self.handlers.get("/health") orelse {
-                std.debug.print("GGML_ASSERT(health_handler != handlers.end()) failed\n", .{});
-                std.process.abort();
-            };
+            const health_handler = self.handlers.get("/health") orelse
+                @import("llama").impl.abort("server-http.cpp", 1002, "GGML_ASSERT(health_handler != handlers.end()) failed");
             try self.get(gcp.path_health, health_handler.*);
         }
         try self.post(gcp.path_predict, .{ .ctx = predict, .func = Predict.handle });

@@ -16,14 +16,14 @@
 //! `sampling.zig`'s, whole.
 
 const std = @import("std");
-const num = @import("num.zig");
+const stdlib = @import("stdlib");
+const num = @import("stdlib").num;
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const llama = @import("llama");
 const params_mod = @import("params.zig");
 const log = @import("log.zig");
 const common = @import("common.zig");
-const strings = @import("strings.zig");
 const arg = @import("arg.zig");
 const fit = @import("cli_fit");
 const sampling = @import("sampling.zig");
@@ -229,7 +229,7 @@ pub fn setProcessPriority(prio: c.ggml_sched_priority) bool {
     };
     if (setpriority(0, 0, v) != 0) {
         const e = std.c._errno().*;
-        comWrn("set_process_priority", "failed to set process priority %d : %s (%d)\n", .{ @as(c_int, @intCast(prio)), strings.strerror(e), e });
+        comWrn("set_process_priority", "failed to set process priority %d : %s (%d)\n", .{ @as(c_int, @intCast(prio)), stdlib.errno.strerror(e), e });
         return false;
     }
     return true;

@@ -29,7 +29,9 @@
 //! `http.zig` serves none and neither does this.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -55,8 +57,6 @@ const Params = tc.params.Params;
 const gpa = context.gpa;
 const srv = common.srv;
 
-extern fn setlocale(cat: c_int, locale: [*:0]const u8) ?[*:0]const u8;
-
 /// `LC_NUMERIC`, as `<locale.h>` numbers it on each target.
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
@@ -81,7 +81,7 @@ fn signalHandler(sig: std.posix.SIG) callconv(.c) void {
         // in case it hangs, we can force terminate the server by hitting Ctrl+C twice
         // this is for better developer experience, we can remove when the server is stable enough
         io.eprintf("Received second interrupt, terminating immediately.\n", .{});
-        io.exitFlushed(1);
+        stdlib.stdio.exit(1);
     }
 
     if (shutdown_handler) |h| h(signal);
@@ -228,7 +228,7 @@ pub fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     var role = models_mod.Role.init();
     defer role.deinit();
 
-    _ = setlocale(lc_numeric, "C");
+    _ = libc.setlocale(lc_numeric, "C");
 
     if (comptime builtin.os.tag != .windows) {
         // Ignore SIGPIPE so the server does not crash if a child (MCP server, tools runtime) exits while we are writing to its stdin

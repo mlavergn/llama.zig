@@ -44,6 +44,8 @@
 //! digit for digit.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
@@ -55,14 +57,6 @@ const simd = @import("../simd.zig");
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-
-extern fn expf(x: f32) f32;
-extern fn tanhf(x: f32) f32;
-extern fn powf(x: f32, y: f32) f32;
-extern fn sqrtf(x: f32) f32;
-extern fn fmaxf(x: f32, y: f32) f32;
-extern fn log2(x: f64) f64;
-extern fn floor(x: f64) f64;
 
 const inf = std.math.inf(f32);
 
@@ -99,9 +93,9 @@ inline fn up(n: i64, m: i64) i64 {
 inline fn alibiSlope(max_bias: f32, h: u32, n_head_log2: u32, m0: f32, m1: f32) f32 {
     if (!(max_bias > 0.0)) return 1.0;
     return if (h < n_head_log2)
-        powf(m0, @floatFromInt(h + 1))
+        libm.powf(m0, @floatFromInt(h + 1))
     else
-        powf(m1, @floatFromInt(2 * (h - n_head_log2) + 1));
+        libm.powf(m1, @floatFromInt(2 * (h - n_head_log2) + 1));
 }
 
 /// The scale, ALiBi bias and softcap every forward path reads out of
@@ -123,7 +117,7 @@ const AttnParams = struct {
             scale /= logit_softcap;
         }
 
-        const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(floor(log2(@floatFromInt(n_head))));
+        const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(libm.floor(libm.log2(@floatFromInt(n_head))));
 
         const nhl: f32 = @floatFromInt(n_head_log2);
         return .{
@@ -131,8 +125,8 @@ const AttnParams = struct {
             .max_bias = max_bias,
             .logit_softcap = logit_softcap,
             .n_head_log2 = n_head_log2,
-            .m0 = powf(2.0, -(max_bias) / nhl),
-            .m1 = powf(2.0, -(max_bias / 2.0) / nhl),
+            .m0 = libm.powf(2.0, -(max_bias) / nhl),
+            .m1 = libm.powf(2.0, -(max_bias / 2.0) / nhl),
         };
     }
 };
@@ -335,7 +329,7 @@ fn oneChunk(
             s = s * ap.scale; // scale KQ value
 
             if (ap.logit_softcap != 0.0) {
-                s = ap.logit_softcap * tanhf(s);
+                s = ap.logit_softcap * libm.tanhf(s);
             }
 
             s += mv; // apply mask
@@ -343,23 +337,23 @@ fn oneChunk(
             const Mold = M;
 
             var ms: f32 = 1.0; // upon new higher max val, scale VKQ and KQ sum with this value
-            var vs: f32 = 1.0; // post-softmax KQ value, expf(s - M)
+            var vs: f32 = 1.0; // post-softmax KQ value, libm.expf(s - M)
 
             const v_data = at(u8, v.data, off(ik1, nbv1) + off(iv2, nbv2) + off(iv3, nbv3));
 
             if (s > M) {
-                // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
+                // s is new maximum, ms < 1.0f, vs == libm.expf(s - s) == 1.0f
                 M = s;
-                ms = expf(Mold - M);
+                ms = libm.expf(Mold - M);
 
-                // V = V*expf(Mold - M)
+                // V = V*libm.expf(Mold - M)
                 vec.scale_f32(DV, VKQ32, ms);
             } else {
                 // no new maximum, ms == 1.0f, vs != 1.0f
-                vs = expf(s - M);
+                vs = libm.expf(s - M);
             }
 
-            // V += v*expf(s - M)
+            // V += v*libm.expf(s - M)
             if (v.type == c.GGML_TYPE_F16) {
                 vec.mad_f16_f32(DV, VKQ32, @ptrCast(@alignCast(v_data)), vs);
             } else if (v_to_float) |to_float| {
@@ -382,11 +376,11 @@ fn oneChunk(
             var vs: f32 = 1.0;
 
             if (s > M) {
-                ms = expf(M - s);
+                ms = libm.expf(M - s);
                 M = s;
                 vec.scale_f32(DV, VKQ32, ms);
             } else {
-                vs = expf(s - M);
+                vs = libm.expf(s - M);
             }
 
             S = @mulAdd(f32, S, ms, vs);
@@ -638,10 +632,10 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
                 }
 
                 const Mold = M[tq];
-                const Mnew = fmaxf(Mold, tile_max);
+                const Mnew = libm.fmaxf(Mold, tile_max);
 
                 if (Mnew > Mold) {
-                    const ms = expf(Mold - Mnew);
+                    const ms = libm.expf(Mold - Mnew);
                     vec.scale_f32(DV, VKQ32 + tq * dv, ms);
                     S[tq] *= ms;
                 }
@@ -679,10 +673,10 @@ fn tiled(params: *const ComputeParams, dst: *Tensor, ir0: i64, ir1: i64) void {
                 var vs: f32 = 1.0;
 
                 if (s > M[tq]) {
-                    ms = expf(M[tq] - s);
+                    ms = libm.expf(M[tq] - s);
                     vec.scale_f32(DV, VKQ32 + tq * dv, ms);
                 } else {
-                    vs = expf(s - M[tq]);
+                    vs = libm.expf(s - M[tq]);
                 }
 
                 // one expression, fused
@@ -763,9 +757,9 @@ fn reducePartials(params: *const ComputeParams, dst: *Tensor, n_chunks: i64, chu
 
             if (S_chunk == 0.0) continue;
 
-            const M_new = fmaxf(M_final, M_chunk);
-            const scale_old = expf(M_final - M_new);
-            const scale_new = expf(M_chunk - M_new);
+            const M_new = libm.fmaxf(M_final, M_chunk);
+            const scale_old = libm.expf(M_final - M_new);
+            const scale_new = libm.expf(M_chunk - M_new);
 
             // `a*b + c*d`: clang fuses the left product.
             for (0..dv) |d| {
@@ -998,8 +992,8 @@ fn flashAttnBackF32(params: *const ComputeParams, masked: bool, dst: *Tensor) vo
     const tsize = c.ggml_type_size(result_type);
 
     const offs_q: usize = 0;
-    const offs_k = offs_q + impl.pad(elem_q * tsize, c.GGML_MEM_ALIGN);
-    const offs_v = offs_k + impl.pad(elem_k * tsize, c.GGML_MEM_ALIGN);
+    const offs_k = offs_q + stdlib.num.pad(usize, elem_q * tsize, c.GGML_MEM_ALIGN);
+    const offs_v = offs_k + stdlib.num.pad(usize, elem_k * tsize, c.GGML_MEM_ALIGN);
 
     const grad_q = at(u8, dst.data, 0);
     const grad_k = at(u8, dst.data, offs_k);
@@ -1037,7 +1031,7 @@ fn flashAttnBackF32(params: *const ComputeParams, masked: bool, dst: *Tensor) vo
     const ir0 = dr * ith;
     const ir1 = @min(ir0 + dr, nr);
 
-    const scale: f32 = 1.0 / sqrtf(@floatFromInt(D));
+    const scale: f32 = 1.0 / libm.sqrtfInt(D);
 
     // how often k2 (and v2) is repeated in q2
     const nrep = @divTrunc(neq2, nek2);

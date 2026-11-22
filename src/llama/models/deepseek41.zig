@@ -13,6 +13,8 @@
 //! `build_attention41`. The base class's builders are `deepseek4.zig`'s.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -49,8 +51,8 @@ const engram_dead: i64 = -1;
 
 /// Ports `dsv41_env_on` (models/deepseek41.cpp:18 @b1b770d90).
 fn envOn(name: [*:0]const u8) bool {
-    const v = std.c.getenv(name) orelse return true;
-    return impl.atoi(v) != 0;
+    const v = stdlib.env.getenv(name) orelse return true;
+    return stdlib.num.atoiC(v) != 0;
 }
 
 /// The `out_of_range` lambda of `load_arch_hparams`.
@@ -526,7 +528,7 @@ fn buildEngram(b: *const Builder, model: *const Model, x: *Tensor, rows: *Tensor
     const engram_gate = layer.engram_gate.?;
     const egate: *Tensor = if (c.ggml_is_quantized(engram_gate.type)) c.ggml_cast(ctx, engram_gate, c.GGML_TYPE_F32) else engram_gate;
     var dot: *Tensor = c.ggml_mul(ctx, c.ggml_mul(ctx, c.ggml_rms_norm(ctx, x, b.norm_rms_eps), c.ggml_rms_norm(ctx, key, b.norm_rms_eps)), egate);
-    dot = c.ggml_scale(ctx, c.ggml_sum_rows(ctx, dot), 1.0 / impl.sqrtf(@floatFromInt(n_embd)));
+    dot = c.ggml_scale(ctx, c.ggml_sum_rows(ctx, dot), 1.0 / libm.sqrtfInt(n_embd));
     b.cb(dot, "engram_dot", il);
 
     // sigmoid(copysign(sqrt(max(|dot|, 1e-6)), dot)); sign(0) = +1 as in
@@ -598,7 +600,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
     const n_idx_embd: i64 = hp.indexer_head_size;
     const n_idx_head: i64 = hp.indexer_n_head;
     const nt = cur.ne[1];
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
     const ratio: i64 = hp.dsv4_compress_ratios[uil];
 
     const comp_rope = ratio != 0;
@@ -729,7 +731,7 @@ fn buildAttention41(self: *Graph, b: *const Builder, model: *const Model, inp_ds
             iq = rope.apply(iq, inp_pos, n_idx_embd - n_embd_head_rope);
             iq = c.ggml_view_4d(ctx, iq, iq.ne[0], iq.ne[1], n_tok, n_stream, iq.nb[1], iq.nb[2], iq.nb[2] * n_tok_u, 0);
 
-            var iw: *Tensor = c.ggml_scale(ctx, b.buildLoraMm(layer.indexer_proj.?, cur, null), 1.0 / impl.sqrtf(@floatFromInt(n_idx_embd * n_idx_head)));
+            var iw: *Tensor = c.ggml_scale(ctx, b.buildLoraMm(layer.indexer_proj.?, cur, null), 1.0 / libm.sqrtfInt(n_idx_embd * n_idx_head));
             iw = c.ggml_view_4d(ctx, iw, iw.ne[0], n_tok, 1, n_stream, iw.nb[1], iw.nb[1] * n_tok_u, iw.nb[1] * n_tok_u, 0);
 
             // Queries are chunked so the [n_ih, tokens, n_comp] scores stay

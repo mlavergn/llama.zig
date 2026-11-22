@@ -10,6 +10,7 @@
 //! `build_plamo2_mamba_layer`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -270,7 +271,7 @@ fn buildPlamo2AttnLayer(b: *const graph.Builder, inp: *graph.InpAttnKv, inp_pos:
 
         Kcur = b.buildRope(Kcur, inp_pos, il);
 
-        cur = b.buildAttn(inp, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_v)), il);
+        cur = b.buildAttn(inp, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head_v), il);
     }
 
     b.cb(cur, "attn_out", il);

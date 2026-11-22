@@ -23,6 +23,7 @@
 //! Usage: arch_diff
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const harness_root = @import("harness_root");
 
 const A = harness_root.arch;
@@ -42,14 +43,6 @@ extern fn ref_ext_kv_name(arch: c_int, kv: c_int, buf: [*]u8, n: usize) c_int;
 extern fn ref_kv_name(arch: c_int, kv: c_int, suffix: ?[*:0]const u8, buf: [*]u8, n: usize) c_int;
 extern fn ref_tensor_name(arch: c_int, tensor: c_int, suffix: ?[*:0]const u8, bid: c_int, xid: c_int, buf: [*]u8, n: usize) c_int;
 extern fn ref_tensor_info(tensor: c_int, layer: *c_int, op: *c_int, buf: [*]u8, n: usize) c_int;
-
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn dup2(old: c_int, new: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
 
 const sigabrt = 6;
 
@@ -202,24 +195,24 @@ fn checkKeys() void {
 /// its `file:line: ` prefix.
 fn abortsWith(body: *const fn (ctx: c_int) void, ctx: c_int, out: []u8) ?[]const u8 {
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) return null;
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) return null;
+    const pid = libc.fork();
     if (pid == 0) {
-        _ = dup2(fds[1], 2);
-        _ = close(fds[0]);
+        _ = libc.dup2(fds[1], 2);
+        _ = libc.close(fds[0]);
         body(ctx);
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var len: usize = 0;
     while (len < out.len) {
-        const got = read(fds[0], out[len..].ptr, out.len - len);
+        const got = libc.read(fds[0], out[len..].ptr, out.len - len);
         if (got <= 0) break;
         len += @intCast(got);
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     const sig = status & 0x7f;
     if (sig != sigabrt) return null;
     const text = out[0..len];

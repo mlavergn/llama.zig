@@ -27,7 +27,8 @@
 //! during sleep wakes the server first.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tc = @import("tools_common");
@@ -66,7 +67,7 @@ const srv = common.srv;
 const throw = common.throw;
 
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    common.ggmlAssert(ok, "server-context.cpp", line, cond);
+    tc.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
 }
 
 // -----------------------------------------------------------------------------
@@ -2012,13 +2013,15 @@ pub const Routes = struct {
         const name = try std.fmt.allocPrint(a, "{d:0>12}.txt", .{c.ggml_time_ms()});
         const file_path = try std.fs.path.joinZ(a, &.{ dir, name });
         const text = if (prompt.isString()) prompt.string else try json.dump(a, prompt, 2);
-        const f = std.c.fopen(file_path.ptr, "w");
-        if (f) |fp| {
+        const io = stdlib.file.defaultIo();
+        if (stdlib.file.Out.create(io, file_path)) |out| {
+            var f = out;
+            defer f.close(io);
             // `f << s.c_str()`: up to the first NUL
-            const z = try a.dupeSentinel(u8, text, 0);
-            _ = std.c.fwrite(z.ptr, 1, std.mem.len(z.ptr), fp);
-            _ = std.c.fclose(fp);
-        } else {
+            f.writeText(std.mem.sliceTo(text, 0)) catch |err| switch (err) {
+                else => {}, // the stream's failure unchecked
+            };
+        } else |_| {
             srv(.err, "handle_completions_impl", "failed to create %s\n", .{file_path.ptr});
         }
     }
@@ -2214,7 +2217,7 @@ fn getResModelInfo(a: Allocator, meta: *const Meta) !Value {
         meta.has_inp_video,
         meta.model_output_modalities,
     ));
-    try o.put("created", @as(i64, ctime(null)));
+    try o.put("created", stdlib.clock.timeSeconds());
     try o.put("owned_by", "llamacpp");
     var m = common.Obj.init(a);
     // an enum is its underlying type in a `common_json_value`
@@ -2672,6 +2675,3 @@ const LiveAsr = struct {
 test {
     std.testing.refAllDecls(@This());
 }
-
-extern "c" fn time(t: ?*i64) i64;
-const ctime = time;

@@ -16,6 +16,7 @@
 //! which of two colliding names keeps its own.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const errors = @import("errors.zig");
 const arena_mod = @import("arena.zig");
@@ -258,10 +259,6 @@ const Generator = struct {
     }
 };
 
-fn lessBytes(_: void, x: []const u8, y: []const u8) bool {
-    return std.mem.order(u8, x, y) == .lt;
-}
-
 /// Ports `build_grammar` (peg-parser.cpp:1619 @b1b770d90), a member of
 /// `common_peg_arena`: every reachable rule, then `root` -- the root parser,
 /// or, lazily, the trigger rules as alternatives.
@@ -307,7 +304,7 @@ pub fn buildGrammar(arena: *const Arena, builder: *GrammarBuilder, lazy: bool) E
             const parser = try arena.get(e.value.*);
             if (parser.* == .rule and parser.rule.trigger) try names.append(a, parser.rule.name);
         }
-        std.mem.sort([]const u8, names.items, {}, lessBytes);
+        std.mem.sort([]const u8, names.items, {}, stdlib.strings.lessThan);
         var rhs: std.ArrayList(u8) = .empty;
         try arena_mod.joinTo(a, &rhs, names.items, " | ");
         _ = builder.addRule("root", rhs.items) catch |err| return errors.fromSchema(err);

@@ -34,7 +34,7 @@
 const std = @import("std");
 const json = @import("json");
 const peg = @import("peg");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const msg_mod = @import("msg.zig");
 const exception = @import("exception.zig");
 

@@ -12,12 +12,13 @@
 //! tagged union, `Pipeline`, dispatched where the C++ calls a virtual.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("impl.zig");
 const mtmd = @import("mtmd.zig");
 const helper = @import("helper.zig");
 const clip = @import("clip.zig");
 const llama = @import("llama");
-const libcxx = llama.libcxx;
+const libcxx = @import("stdlib").libcxx;
 const lapi = llama.api;
 const c = impl.c;
 const gpa = impl.gpa;
@@ -29,8 +30,6 @@ const EmbdBatch = helper.EmbdBatch;
 const logInf = helper.logInf;
 const logWrn = helper.logWrn;
 const logErr = helper.logErr;
-
-extern fn exp(x: f64) f64;
 
 // -----------------------------------------------------------------------------
 // mtmd-helper.h
@@ -107,15 +106,6 @@ fn findSpecialToken(vocab: ?*const c.struct_llama_vocab, piece: []const u8) Toke
     return token_null;
 }
 
-/// `std::min` and `std::max` as libc++ defines them, which decides where a
-/// NaN goes.
-fn stdMin(a: f32, b: f32) f32 {
-    return if (b < a) b else a;
-}
-fn stdMax(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
-
 /// The `buf.insert` of `put_bytes` (mtmd-helper-gen.cpp:55 @b1b770d90).
 fn putBytes(b: *std.ArrayList(u8), bytes: []const u8) void {
     b.appendSlice(gpa, bytes) catch oom();
@@ -153,7 +143,7 @@ fn writeWav16Header(buf: *std.ArrayList(u8), data_sz: u32, rate: i32) void {
 fn appendWav16Pcm(buf: *std.ArrayList(u8), pcm: []const f32) void {
     buf.ensureUnusedCapacity(gpa, pcm.len * 2) catch oom();
     for (pcm) |v| {
-        const s: i16 = @intFromFloat(@round(stdMax(-1.0, stdMin(1.0, v)) * 32767.0));
+        const s: i16 = @intFromFloat(@round(libcxx.max(f32, -1.0, libcxx.min(f32, 1.0, v)) * 32767.0));
         buf.appendSliceAssumeCapacity(std.mem.asBytes(&s));
     }
 }
@@ -1342,93 +1332,6 @@ const Soprano = struct {
 // -----------------------------------------------------------------------------
 // LFM3-Audio
 
-/// `__independent_bits_engine<mt19937, uint64_t>`, as `src/ggml/opt.zig`
-/// ports it: the bits `std::shuffle` draws.
-const IndependentBits = struct {
-    e: *libcxx.Mt19937,
-    n: usize,
-    n0: usize,
-    w0: usize,
-    y0: u64,
-    y1: u64,
-    mask0: u32,
-    mask1: u32,
-
-    const rp: u64 = 1 << 32;
-    const m: usize = 32;
-
-    fn init(e: *libcxx.Mt19937, w: usize) IndependentBits {
-        var self: IndependentBits = undefined;
-        self.e = e;
-        self.n = w / m + @intFromBool(w % m != 0);
-        self.w0 = w / self.n;
-        self.y0 = (rp >> @intCast(self.w0)) << @intCast(self.w0);
-        if (rp - self.y0 > self.y0 / @as(u64, self.n)) {
-            self.n += 1;
-            self.w0 = w / self.n;
-            self.y0 = (rp >> @intCast(self.w0)) << @intCast(self.w0);
-        }
-        self.n0 = self.n - w % self.n;
-        self.y1 = (rp >> @intCast(self.w0 + 1)) << @intCast(self.w0 + 1);
-        self.mask0 = if (self.w0 > 0) ~@as(u32, 0) >> @intCast(32 - self.w0) else 0;
-        self.mask1 = if (self.w0 < 31) ~@as(u32, 0) >> @intCast(32 - (self.w0 + 1)) else ~@as(u32, 0);
-        return self;
-    }
-
-    fn next(self: *const IndependentBits) u64 {
-        var sp: u64 = 0;
-        var k: usize = 0;
-        while (k < self.n0) : (k += 1) {
-            var u: u32 = undefined;
-            while (true) {
-                u = self.e.next();
-                if (@as(u64, u) < self.y0) break;
-            }
-            sp <<= @intCast(self.w0);
-            sp +%= u & self.mask0;
-        }
-        while (k < self.n) : (k += 1) {
-            var u: u32 = undefined;
-            while (true) {
-                u = self.e.next();
-                if (@as(u64, u) < self.y1) break;
-            }
-            sp <<= @intCast(self.w0 + 1);
-            sp +%= u & self.mask1;
-        }
-        return sp;
-    }
-};
-
-/// `uniform_int_distribution<ptrdiff_t>` over `[0, b]`, `b` at most `n_cb`.
-fn uniformInt(g: *libcxx.Mt19937, b: u64) u64 {
-    const r: u64 = b + 1;
-    if (r == 1) return 0;
-    var w: usize = 64 - @clz(r) - 1;
-    if ((r & (@as(u64, std.math.maxInt(u64)) >> @intCast(64 - w))) != 0) w += 1;
-    const e = IndependentBits.init(g, w);
-    while (true) {
-        const u = e.next();
-        if (u < r) return u;
-    }
-}
-
-/// `std::shuffle` (shuffle.h), the loop `src/ggml/opt.zig` ports for its
-/// dataset: which draws are made is libc++'s, and the seed reproduces them.
-fn shuffle(items: []c_int, g: *libcxx.Mt19937) void {
-    if (items.len <= 1) return;
-    var d: u64 = items.len - 1;
-    var first: usize = 0;
-    const last: usize = items.len - 1;
-    while (first < last) : ({
-        first += 1;
-        d -= 1;
-    }) {
-        const i = uniformInt(g, d);
-        if (i != 0) std.mem.swap(c_int, &items[first], &items[first + @as(usize, @intCast(i))]);
-    }
-}
-
 /// `std::nth_element(..., std::greater<float>())` then `sorted[k]`: only the
 /// k-th largest value is read, which any selection gives.
 fn nthLargest(sorted: []f32, k: usize) f32 {
@@ -1576,7 +1479,7 @@ const Lfm3a = struct {
 
         self.out_type = inp.out_type;
         self.so.stream = inp.stream;
-        self.rng = libcxx.Mt19937.init(if (inp.seed == std.math.maxInt(u32)) clip.randomDevice() else inp.seed);
+        self.rng = libcxx.Mt19937.init(if (inp.seed == std.math.maxInt(u32)) libcxx.randomDevice() else inp.seed);
         return if (self.base.initGenState(inp.seed)) 0 else 1;
     }
 
@@ -1708,7 +1611,7 @@ const Lfm3a = struct {
     fn sampleFrame(self: *Lfm3a, h_state: ?[*]const f32, codes: *[n_cb]i32, fb: *?[*]const f32, is_eos: *bool) bool {
         var order: [n_cb]c_int = undefined;
         for (&order, 0..) |*o, i| o.* = @intCast(i);
-        shuffle(&order, &self.rng);
+        libcxx.shuffle(c_int, &order, &self.rng);
 
         @memset(codes, -1);
         var inp = mtmd.mtmd_gen_inp_default(self.base.mctx);
@@ -1796,7 +1699,7 @@ const Lfm3a = struct {
         var sum: f64 = 0.0;
         const temp: f64 = self.temp;
         for (0..n_vocab) |v| {
-            prob[v] = if (l[v] < lmin) 0.0 else exp(@as(f64, l[v] - lmax) / temp);
+            prob[v] = if (l[v] < lmin) 0.0 else libm.exp(@as(f64, l[v] - lmax) / temp);
             sum += prob[v];
         }
         var r = libcxx.canonicalF64(&self.rng) * sum;
@@ -2360,7 +2263,7 @@ const Drama3 = struct {
             logErr("mtmd_helper_gen_audio: cannot reset the sequence\n", .{});
             return 1;
         }
-        self.rng = libcxx.Mt19937.init(if (inp.seed == std.math.maxInt(u32)) clip.randomDevice() else inp.seed);
+        self.rng = libcxx.Mt19937.init(if (inp.seed == std.math.maxInt(u32)) libcxx.randomDevice() else inp.seed);
         return if (self.base.initGenState(inp.seed)) 0 else 1;
     }
 
@@ -2472,7 +2375,7 @@ const Drama3 = struct {
         const prob = gpa.alloc(f64, cand.len) catch oom();
         defer gpa.free(prob);
         for (cand, 0..) |e, i| {
-            prob[i] = exp(@as(f64, e[0] - lmax));
+            prob[i] = libm.exp(@as(f64, e[0] - lmax));
             sum += prob[i];
         }
         var n_keep = cand.len;

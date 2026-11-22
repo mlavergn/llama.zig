@@ -19,6 +19,7 @@
 //! leave them.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const c = impl.c;
 
@@ -596,7 +597,7 @@ pub export fn ggml_nbytes(tensor: *const c.ggml_tensor) usize {
 
 /// Ports `ggml_nbytes_pad` (ggml.c:1334 @b1b770d90).
 pub export fn ggml_nbytes_pad(tensor: *const c.ggml_tensor) usize {
-    return impl.pad(ggml_nbytes(tensor), c.GGML_MEM_ALIGN);
+    return stdlib.num.pad(usize, ggml_nbytes(tensor), c.GGML_MEM_ALIGN);
 }
 
 /// Ports `ggml_element_size` (ggml.c:1397 @b1b770d90).
@@ -827,17 +828,13 @@ const golden_op_symbol: u64 = 0x889b46b6e2bd5c8e;
 const golden_unary_name: u64 = 0x78d971e2f43bd703;
 const golden_glu_name: u64 = 0xbcc1426328c349eb;
 
-fn mix(h: u64, v: u64) u64 {
-    return h ^ (v +% 0x9e3779b97f4a7c15 +% (h << 6) +% (h >> 2));
-}
-
 /// Folds a C string into the checksum, distinguishing absent from empty.
 fn mixStr(h_in: u64, s: ?[*:0]const u8) u64 {
-    const str = s orelse return mix(h_in, 0xdeadbeef);
+    const str = s orelse return impl.mix(h_in, 0xdeadbeef);
     var h = h_in;
     var i: usize = 0;
-    while (str[i] != 0) : (i += 1) h = mix(h, str[i]);
-    return mix(h, 0);
+    while (str[i] != 0) : (i += 1) h = impl.mix(h, str[i]);
+    return impl.mix(h, 0);
 }
 
 test "traits table matches the C checksum" {
@@ -846,11 +843,11 @@ test "traits table matches the C checksum" {
     while (t < c.GGML_TYPE_COUNT) : (t += 1) {
         const tr = &type_traits[t];
         h = mixStr(h, @ptrCast(tr.type_name));
-        h = mix(h, @bitCast(tr.blck_size));
-        h = mix(h, tr.type_size);
-        h = mix(h, if (tr.is_quantized) 1 else 0);
-        h = mix(h, if (tr.to_float != null) 1 else 0);
-        h = mix(h, if (tr.from_float_ref != null) 1 else 0);
+        h = impl.mix(h, @bitCast(tr.blck_size));
+        h = impl.mix(h, tr.type_size);
+        h = impl.mix(h, if (tr.is_quantized) 1 else 0);
+        h = impl.mix(h, if (tr.to_float != null) 1 else 0);
+        h = impl.mix(h, if (tr.from_float_ref != null) 1 else 0);
     }
     try std.testing.expectEqual(golden_traits, h);
 }

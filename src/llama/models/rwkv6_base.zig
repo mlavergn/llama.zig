@@ -10,6 +10,7 @@
 //! port passes to each function instead.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
@@ -154,7 +155,7 @@ pub fn buildRwkv6TimeMix(model: *const Model, b: *const graph.Builder, inp: *con
     if (is_qrwkv) {
         // `pow(head_size, -0.5f)`: the double overload, narrowed to the
         // float parameter.
-        const scale: f32 = @floatCast(impl.pow(@floatFromInt(head_size), -0.5));
+        const scale: f32 = @floatCast(libm.pow(@floatFromInt(head_size), -0.5));
         wkv_output = c.ggml_gated_linear_attn(ctx, k, v, r, w, wkv_state, scale);
     } else {
         wkv_output = c.ggml_rwkv_wkv6(ctx, k, v, r, layer.time_mix_first, w, wkv_state);

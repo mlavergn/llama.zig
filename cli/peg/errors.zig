@@ -17,6 +17,7 @@
 //! caller -- `make peg-diff` -- can capture them.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("json");
 
 /// Every fallible call in `cli/peg/`. `OutOfRange` is `std::out_of_range`,
@@ -96,22 +97,7 @@ pub var stderr_sink: *const fn (text: []const u8) void = writeStderr;
 pub var log_dbg_sink: ?*const fn (text: []const u8) void = null;
 
 fn writeStderr(text: []const u8) void {
-    var rest = text;
-    while (rest.len > 0) {
-        const n = writeFd2(rest);
-        if (n <= 0) return;
-        rest = rest[@intCast(n)..];
-    }
-}
-
-/// `write(2, bytes, n)`. On Windows `std.c.write` takes a `HANDLE`, so this
-/// is the CRT's `_write` on descriptor 2 there, as MinGW's `write` is.
-pub fn writeFd2(bytes: []const u8) isize {
-    if (comptime @import("builtin").os.tag == .windows) {
-        const crt_write = @extern(*const fn (c_int, [*]const u8, c_uint) callconv(.c) c_int, .{ .name = "_write" });
-        return crt_write(2, bytes.ptr, @intCast(@min(bytes.len, std.math.maxInt(c_int))));
-    }
-    return std.c.write(2, bytes.ptr, bytes.len);
+    stdlib.stdio.stderr().write(text);
 }
 
 /// `fprintf(stderr, fmt, args...)`, through `stderr_sink`.

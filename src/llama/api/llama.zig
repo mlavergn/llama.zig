@@ -24,7 +24,6 @@ const c = impl.c;
 
 extern "c" fn strncpy(dst: [*c]u8, src: [*c]const u8, n: usize) [*c]u8;
 extern "c" fn strcmp(a: [*c]const u8, b: [*c]const u8) c_int;
-extern "c" fn strlen(s: [*c]const u8) usize;
 
 /// `LLAMA_VERSION`, which the C++ takes from the `llama-version.h` the build
 /// configures: the pinned tag without its `v`. It must equal
@@ -289,7 +288,7 @@ pub fn llama_split_prefix(split_prefix: [*c]u8, maxlen: usize, split_path: [*c]c
 
     var postfix: [32]u8 = undefined;
     _ = c.snprintf(&postfix, postfix.len, "-%05d-of-%05d.gguf", split_no +% 1, split_count);
-    const str_postfix = postfix[0..strlen(&postfix)];
+    const str_postfix = std.mem.sliceTo(&postfix, 0);
     if (str_split_path.len <= str_postfix.len) return 0;
 
     const size_prefix = str_split_path.len - str_postfix.len;

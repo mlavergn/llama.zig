@@ -31,6 +31,7 @@
 //! `api.impl.llama_log_set`, beside the C++'s.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 
 /// `llama.h`, and through it `ggml.h`, `ggml-backend.h`, `ggml-cpu.h` and
 /// `ggml-opt.h`; and `gguf.h`, which the vocabulary and the model loader
@@ -62,25 +63,18 @@ pub const allocator = std.heap.c_allocator;
 ///
 /// Return: the stream.
 pub fn cStdout() *c.FILE {
-    if (comptime is_windows) return @ptrCast(@alignCast(__acrt_iob_func(1)));
-    return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
+    return @ptrCast(@alignCast(stdlib.stdio.cStream(.stdout)));
 }
 
-const is_windows = @import("builtin").os.tag == .windows;
-
-/// What the `stdout` and `stderr` macros expand to (MinGW's `stdio.h`, line 124).
-extern "c" fn __acrt_iob_func(index: c_uint) *anyopaque;
-
 /// The port's mutex, under every `std::mutex` it ports: a futex, with no C
-/// library under it (`src/sync/`).
-pub const Mutex = @import("sync").Mutex;
+/// library under it (`stdlib/sync/`).
+pub const Mutex = @import("stdlib").sync.Mutex;
 
 /// C's `stderr`; see `cStdout`.
 ///
 /// Return: the stream.
 pub fn cStderr() *c.FILE {
-    if (comptime is_windows) return @ptrCast(@alignCast(__acrt_iob_func(2)));
-    return @extern(*const *c.FILE, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
+    return @ptrCast(@alignCast(stdlib.stdio.cStream(.stderr)));
 }
 
 /// Writes `parts` to C's `stderr` in order -- the bytes and the stream of
@@ -98,8 +92,8 @@ pub fn cStderr() *c.FILE {
 ///
 /// Return: nothing.
 pub fn writeStderr(parts: []const []const u8) void {
-    const f = cStderr();
-    for (parts) |part| _ = c.fwrite(part.ptr, 1, part.len, f);
+    // unbuffered, as C's `stderr` is, so it lands where `fprintf` would
+    for (parts) |part| stdlib.stdio.stderr().write(part);
 }
 
 // -----------------------------------------------------------------------------
@@ -212,6 +206,29 @@ pub fn logCont(comptime format: [:0]const u8, args: anytype) void {
 
 // -----------------------------------------------------------------------------
 // Assertions
+
+/// Ports `replace_all` (llama-impl.cpp:101 @b1b770d90).
+///
+/// Parameters:
+/// - `s`: the string, rewritten in place.
+/// - `search`: what to replace; nothing happens when it is empty.
+/// - `replace`: what replaces it.
+///
+/// Return: nothing.
+pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
+    if (search.len == 0) return;
+    var builder: std.ArrayList(u8) = .empty;
+    builder.ensureTotalCapacity(allocator, s.items.len) catch abort("llama-impl.cpp", 101, "out of memory");
+    var last_pos: usize = 0;
+    while (std.mem.findPos(u8, s.items, last_pos, search)) |pos| {
+        builder.appendSlice(allocator, s.items[last_pos..pos]) catch abort("llama-impl.cpp", 101, "out of memory");
+        builder.appendSlice(allocator, replace) catch abort("llama-impl.cpp", 101, "out of memory");
+        last_pos = pos + search.len;
+    }
+    builder.appendSlice(allocator, s.items[last_pos..]) catch abort("llama-impl.cpp", 101, "out of memory");
+    s.deinit(allocator);
+    s.* = builder;
+}
 
 /// Mirrors `GGML_ABORT` (ggml.h:114 @b1b770d90), through ggml's own
 /// `ggml_abort`, so the message and backtrace are the C++'s.
@@ -377,20 +394,6 @@ pub const TimeMeas = struct {
 // do. Zig's `@exp`, `@log` and friends are Zig's own implementations, free to
 // differ from Apple's in the last bit -- `src/ggml/cpu/unary_ops.zig` records
 // the same choice.
-
-pub extern fn expf(x: f32) f32;
-pub extern fn logf(x: f32) f32;
-pub extern fn log2f(x: f32) f32;
-pub extern fn exp2f(x: f32) f32;
-pub extern fn powf(x: f32, y: f32) f32;
-pub extern fn sqrtf(x: f32) f32;
-pub extern fn exp(x: f64) f64;
-pub extern fn pow(x: f64, y: f64) f64;
-pub extern fn atoi(s: [*:0]const u8) c_int;
-
-/// libc's `arc4random`, which is what libc++'s `std::random_device` draws
-/// from on Apple platforms.
-pub extern fn arc4random() u32;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

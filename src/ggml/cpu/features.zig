@@ -23,6 +23,7 @@
 //! hardcoded.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const convert = @import("convert.zig");
@@ -272,7 +273,6 @@ pub const golden_generic = builtin.cpu.arch == .aarch64 and
 var is_first_call = true;
 
 extern fn ggml_time_us() i64;
-extern fn atoi(str: [*:0]const u8) c_int;
 
 /// Ports `ggml_cpu_init` (ggml-cpu.c:3874 @b1b770d90).
 ///
@@ -306,8 +306,8 @@ pub export fn ggml_cpu_init() void {
 
         initArmArchFeatures();
 
-        if (std.c.getenv("GGML_CPU_DISABLE_FUSION")) |env| {
-            disable_fusion = atoi(env) == 1;
+        if (stdlib.env.getenv("GGML_CPU_DISABLE_FUSION")) |env| {
+            disable_fusion = stdlib.num.atoiC(env) == 1;
         }
 
         is_first_call = false;

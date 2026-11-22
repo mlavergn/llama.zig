@@ -19,12 +19,12 @@
 //! A `msg_t` owns its strings. The client is `httplib/client.zig`'s.
 
 const std = @import("std");
-const sync = @import("sync");
+const sync = @import("stdlib").sync;
 const json = @import("json");
 const http = @import("http.zig");
 const common = @import("common.zig");
 const httplib_client = @import("httplib/client.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
@@ -97,7 +97,7 @@ fn shouldStripProxyHeader(header_name: []const u8) bool {
 /// characters from a `std::mt19937` seeded by `std::random_device`.
 fn generateMultipartBoundary(a: Allocator) ![]u8 {
     const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
-    var gen = libcxx.Mt19937.init(common.randomDevice());
+    var gen = libcxx.Mt19937.init(libcxx.randomDevice());
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, "----llama-cpp-proxy-");
     // the C++ draws through std::uniform_int_distribution; the seed is the

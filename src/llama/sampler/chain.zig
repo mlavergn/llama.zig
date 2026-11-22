@@ -26,7 +26,7 @@
 
 const std = @import("std");
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const core = @import("core.zig");
 const basic = @import("basic.zig");
 const mirostat = @import("mirostat.zig");

@@ -28,6 +28,7 @@
 //! an ownership model the C does not have.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
@@ -337,7 +338,7 @@ const DeviceContext = struct {
         // The C's `#ifdef __APPLE__`: iOS reads the brand string too.
         if (!builtin.os.tag.isDarwin()) return;
         var len: usize = self.description.len;
-        if (sysctlbyname("machdep.cpu.brand_string", &self.description, &len, null, 0) == 0 and len > 0) {
+        if (libc.sysctlbyname("machdep.cpu.brand_string", &self.description, &len, null, 0) == 0 and len > 0) {
             // `len` counts the NUL the call wrote.
             self.description_len = len - 1;
             self.description[self.description_len] = 0;
@@ -377,10 +378,10 @@ const DeviceContext = struct {
     /// `/proc/cpuinfo`, trimmed of whitespace. On a CPU whose cpuinfo has no
     /// such line -- most ARM kernels -- the description stays "CPU".
     fn initLinux(self: *DeviceContext) void {
-        const f = fopen("/proc/cpuinfo", "r") orelse return;
-        defer _ = fclose(f);
+        const f = libc.fopen("/proc/cpuinfo", "r") orelse return;
+        defer _ = libc.fclose(f);
         var buf: [1024]u8 = undefined;
-        while (fgets(&buf, buf.len, f) != null) {
+        while (libc.fgets(&buf, buf.len, f) != null) {
             const line = std.mem.sliceTo(&buf, 0);
             if (!std.mem.startsWith(u8, line, "model name")) continue;
             const colon = std.mem.findScalar(u8, line, ':') orelse continue;
@@ -394,13 +395,6 @@ const DeviceContext = struct {
         }
     }
 };
-
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;
-extern fn fclose(f: *std.c.FILE) c_int;
-extern fn fgets(buf: [*]u8, n: c_int, f: *std.c.FILE) ?[*]u8;
-
-extern fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: ?*usize, newp: ?*const anyopaque, newlen: usize) c_int;
-extern fn sysconf(name: c_int) c_long;
 
 /// `_SC_PHYS_PAGES` and `_SC_PAGE_SIZE`: Darwin's values, and glibc's.
 const sc_phys_pages: c_int = if (builtin.os.tag.isDarwin()) 200 else 85;
@@ -432,8 +426,8 @@ fn deviceGetMemory(dev: c.ggml_backend_dev_t, free: *usize, total: *usize) callc
         free.* = status.ullAvailPhys;
         return;
     }
-    const pages = sysconf(sc_phys_pages);
-    const page_size = sysconf(sc_page_size);
+    const pages = libc.sysconf(sc_phys_pages);
+    const page_size = libc.sysconf(sc_page_size);
     total.* = @intCast(pages * page_size);
     // "free" system memory is ill-defined, for practical purposes assume
     // that all of it is free:

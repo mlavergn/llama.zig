@@ -197,7 +197,7 @@ report_unit() {
             grep -oE '\.option = "vk_[a-z0-9_]+"' build/llamacpp.zig | sed -E 's/.*"(vk_[a-z0-9_]+)"/pub const \1 = false;/'
         } > "$d/config.zig"
         if ! zig build-obj ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} -mcpu baseline -femit-bin="$d/$base.o" "${INCLUDES[@]}" -lc \
-                --dep config --dep ggml_c --dep llama_c --dep sync -Mroot="$f" -Msync=src/sync/module.zig -Mconfig="$d/config.zig" \
+                --dep config --dep ggml_c --dep llama_c --dep stdlib -Mroot="$f" -Mstdlib=stdlib/module.zig -Mconfig="$d/config.zig" \
                 -Mggml_c="$tmp/ggml_c.zig" -Mllama_c="$tmp/llama_c.zig" 2>"$d/$base.log"; then
             echo "failed to compile $f:" >&2
             grep error "$d/$base.log" | head -5 >&2

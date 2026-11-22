@@ -7,6 +7,7 @@
 //! began at.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const c = tc.c;
@@ -72,7 +73,7 @@ fn writeUtf8ToStdout(a: std.mem.Allocator, str: [:0]const u8, invalid_utf8: *boo
         }
         const wstr = try a.alloc(u16, @intCast(n + 1));
         _ = win.MultiByteToWideChar(CP_UTF8, 0, str.ptr, @intCast(str.len), wstr.ptr, n);
-        io.flushStdout();
+        stdlib.stdio.stdout().flush();
         _ = win.WriteConsoleW(h, wstr.ptr, @intCast(n), null, null);
         return;
     }
@@ -203,9 +204,9 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, init.io, argv);

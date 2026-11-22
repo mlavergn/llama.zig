@@ -10,6 +10,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -102,7 +103,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_embd_base: i64 = 256;
     const scale_embd: f32 = 12.0;
     const scale_depth: f32 = 1.4;
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
 
     const n_embd_head_qk_rope: u32 = hp.nRot(0);
     const n_embd_head_qk_nope: u32 = hp.nEmbdHeadK(0) -% hp.nRot(0);
@@ -201,7 +202,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         }
         // Scale the hidden states for the residual connection (the C++
         // asks whether this is correct).
-        const scale_res: f32 = scale_depth / impl.sqrtf(@floatFromInt(b.n_layer));
+        const scale_res: f32 = scale_depth / libm.sqrtfInt(b.n_layer);
         cur = c.ggml_scale(ctx, cur, scale_res);
         b.cb(cur, "hidden_scaled", il);
 

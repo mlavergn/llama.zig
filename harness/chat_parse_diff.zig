@@ -12,6 +12,7 @@
 //! Usage: chat_parse_diff <records> <transcript>
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const json = @import("json");
 const peg = @import("peg");
 const jinja = @import("zigjinja");
@@ -473,10 +474,6 @@ fn run(st: *State, a: Allocator, n: usize, r: *const Value) !void {
 }
 
 const FILE = opaque {};
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*FILE;
-extern "c" fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: *FILE) usize;
-extern "c" fn fflush(f: *FILE) c_int;
-extern "c" fn fclose(f: *FILE) c_int;
 
 /// Whether a record before the start of a resumed run rebuilds state the
 /// records after it read: templates, kept applies.
@@ -513,7 +510,7 @@ pub fn main(init: std.process.Init) !void {
     const records = try std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .unlimited);
     defer gpa.free(records);
     const path = try gpa.dupeSentinel(u8, args[2], 0);
-    const file = fopen(path, if (start == 0) "wb" else "ab") orelse return error.CannotOpen;
+    const file = libc.fopen(path, if (start == 0) "wb" else "ab") orelse return error.CannotOpen;
 
     var st: State = .{};
     var lines = std.mem.splitScalar(u8, records, '\n');
@@ -529,10 +526,10 @@ pub fn main(init: std.process.Init) !void {
         if (n < start and !buildsState(&r)) continue;
         try run(&st, a, n, &r);
         if (n >= start) {
-            _ = fwrite(out.items.ptr, 1, out.items.len, file);
-            _ = fflush(file);
+            _ = libc.fwrite(out.items.ptr, 1, out.items.len, file);
+            _ = libc.fflush(file);
         }
         out.clearRetainingCapacity();
     }
-    _ = fclose(file);
+    _ = libc.fclose(file);
 }

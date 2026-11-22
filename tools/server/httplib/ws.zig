@@ -20,7 +20,8 @@
 //! `set_proxy*`, TLS and `set_*timeout` setters are not ported.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
@@ -517,10 +518,10 @@ pub const WebSocket = struct {
         self.ping_mutex.lock();
         defer self.ping_mutex.unlock();
         while (true) {
-            const deadline = socket.steadyNowUs() + @as(i64, @intCast(self.ping_interval_sec)) * std.time.us_per_s;
+            const deadline = stdlib.clock.steadyUs() + @as(i64, @intCast(self.ping_interval_sec)) * std.time.us_per_s;
             // The predicate keeps a spurious wakeup from sending a ping early
             while (!self.closed.load(.seq_cst)) {
-                const now = socket.steadyNowUs();
+                const now = stdlib.clock.steadyUs();
                 if (now >= deadline) break;
                 if (!self.ping_cv.timedWait(&self.ping_mutex, @as(u64, @intCast(deadline - now)) * std.time.ns_per_us)) break;
             }

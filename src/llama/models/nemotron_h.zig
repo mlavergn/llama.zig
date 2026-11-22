@@ -13,6 +13,7 @@
 //! shares.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -334,7 +335,7 @@ fn buildAttentionLayer(model: *const Model, b: *const graph.Builder, cur_: *Tens
     const layer = &model.layers[@intCast(il)];
     const qkv = b.buildQkv(layer, cur_, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
     const cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, kq_scale, il);
     b.cb(cur, "attn_out", il);
     return cur;

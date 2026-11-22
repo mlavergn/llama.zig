@@ -9,6 +9,7 @@
 //! `session.zig`, where the tests can reach it without spawning a process.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const cli = @import("module.zig");
 
@@ -26,6 +27,8 @@ pub const std_options: std.Options = .{
 /// failure to generate, having written the reason to stderr -- a refused
 /// flag must exit non-zero, so failures are not merely reported.
 pub fn main(init: std.process.Init) !void {
+    // the environment `getenv` would read, for `stdlib.env` (`NO_COLOR`, `TERM`)
+    stdlib.env.set(init.environ_map);
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
 
@@ -68,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
             const color = switch (settings.color) {
                 .on => true,
                 .off => false,
-                .auto => cli.conversation.ttyCanUseColors(init.io, init.environ_map),
+                .auto => stdlib.tty.canUseColors(),
             };
             // Upstream is interactive by default and this binary is not, so it says so rather than quietly differing.
             if (!settings.one_shot and !settings.interactive) {
@@ -304,7 +307,7 @@ fn readMaybeFile(
     path: []const u8,
 ) ![]u8 {
     if (literal.len > 0) return gpa.dupe(u8, literal);
-    if (path.len > 0) return readFile(gpa, io, path);
+    if (path.len > 0) return std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(4 << 20));
     return gpa.alloc(u8, 0);
 }
 
@@ -329,7 +332,7 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSourc
     const text: []const u8 = switch (src) {
         .none => return "",
         .gbnf => |g| return g,
-        .gbnf_file, .schema_file => |path| readFile(gpa, io, path) catch |e| {
+        .gbnf_file, .schema_file => |path| std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(4 << 20)) catch |e| {
             if (e == error.OutOfMemory) return e;
             // the message of `read_file` (common/arg.cpp:44 @b1b770d90), newline included
             try grammar_error.print(gpa, "error: failed to open file '{s}'\n", .{path});
@@ -350,18 +353,6 @@ fn resolveGrammar(gpa: std.mem.Allocator, io: std.Io, src: cli.args.GrammarSourc
         try grammar_error.appendSlice(gpa, cli.json.schema.what());
         return error.GrammarSource;
     };
-}
-
-/// Reads a whole file.
-///
-/// Parameters:
-/// - `gpa`: allocator for the contents.
-/// - `io`: the I/O implementation.
-/// - `path`: what to read.
-///
-/// Return: the contents, owned by the caller.
-fn readFile(gpa: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
-    return std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(4 << 20));
 }
 
 /// Swallows libllama's INFO and DEBUG chatter, passing warnings and errors on.

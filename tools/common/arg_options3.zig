@@ -17,9 +17,7 @@
 //! `common_json`, reached as `cli_fit`'s `json`.
 
 const std = @import("std");
-const strings = @import("strings.zig");
-const fs_stat = @import("fs_stat.zig");
-const file = @import("file.zig");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
@@ -64,73 +62,10 @@ fn reasoningFormatFromName(format: []const u8) !params_mod.ReasoningFormat {
     return throwStr(std.fmt.bufPrint(&buf, "Unknown reasoning format: {s}", .{format}) catch "Unknown reasoning format");
 }
 
-/// `stat`'s answer, as libc++'s `posix_stat` classifies it.
-const Status = enum { unknown, not_found, directory, other };
-
-fn statOf(path: [:0]const u8, err: *c_int) Status {
-    var st: fs_stat.Info = .{};
-    const e = fs_stat.statErrno(path.ptr, true, &st);
-    if (e == 0) return if (st.mode & fs_stat.IFMT == fs_stat.IFDIR) .directory else .other;
-    if (e == @backingInt(std.c.E.NOENT) or e == @backingInt(std.c.E.NOTDIR)) return .not_found;
-    err.* = e;
-    return .unknown;
-}
-
 /// Ports `fs_is_directory` (common/common.cpp:944 @b1b770d90).
 fn fsIsDirectory(p: *Params, path: []const u8) !bool {
-    var e: c_int = 0;
-    return statOf(try p.arena.dupeSentinel(u8, path, 0), &e) == .directory;
-}
-
-/// `path::parent_path` for a POSIX path: everything before the last
-/// element, its trailing separators dropped, the root kept.
-fn parentPath(path: []const u8) []const u8 {
-    // no relative path: the root, or nothing
-    if (std.mem.indexOfNone(u8, path, "/") == null) return path;
-    if (path[path.len - 1] == '/') {
-        // the last element is the empty filename after the separator
-        return std.mem.trimEnd(u8, path, "/");
-    }
-    const cut = std.mem.lastIndexOfScalar(u8, path, '/') orelse return "";
-    const parent = std.mem.trimEnd(u8, path[0 .. cut + 1], "/");
-    return if (parent.len == 0) "/" else parent;
-}
-
-/// Reproduces libc++'s `__create_directories`, line 471 of
-/// `src/filesystem/operations.cpp` in Zig's bundled libc++ 22: `mkdir -p`,
-/// the error an `errno`.
-fn createDirectories(a: std.mem.Allocator, path: []const u8) !c_int {
-    const pz = try a.dupeSentinel(u8, path, 0);
-    var e: c_int = 0;
-    switch (statOf(pz, &e)) {
-        .unknown => return e,
-        .directory => return 0,
-        .other => return @backingInt(std.c.E.EXIST),
-        .not_found => {},
-    }
-    const parent = parentPath(path);
-    if (parent.len != 0) {
-        const parz = try a.dupeSentinel(u8, parent, 0);
-        switch (statOf(parz, &e)) {
-            .unknown => return e,
-            .not_found => {
-                if (std.mem.eql(u8, parent, path)) return @backingInt(std.c.E.INVAL);
-                const r = try createDirectories(a, parent);
-                if (r != 0) return r;
-            },
-            .other => return @backingInt(std.c.E.NOTDIR),
-            .directory => {},
-        }
-    }
-    // `__create_directory`: `mkdir(p, 0777)`, its failure as an `errno`
-    std.Io.Dir.cwd().createDir(file.defaultIo(), pz, .default_dir) catch |err| {
-        const mec = file.errnoOf(err) orelse @backingInt(std.c.E.IO);
-        if (mec != @backingInt(std.c.E.EXIST)) return mec;
-        var ignored: c_int = 0;
-        if (statOf(pz, &ignored) != .directory) return mec;
-        return 0;
-    };
-    return 0;
+    _ = p;
+    return stdlib.fs.isDirectory(path);
 }
 
 /// The handlers of `--slot-save-path` and `--media-path`: a directory, with
@@ -161,7 +96,7 @@ pub fn add(ctx: *Context) !void {
             q.hostnames.clearRetainingCapacity();
             const hosts = try options1.parseCsvRow(q.arena, value);
             for (hosts.items) |h| {
-                const host = strings.strip(h);
+                const host = stdlib.strings.strip(h);
                 if (host.len != 0) try q.hostnames.append(q.arena, host);
             }
             if (q.hostnames.items.len == 0) return throwStr("--host requires at least one address");
@@ -650,9 +585,9 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{"--log-prompts-dir"}, .value_hint = "PATH", .help = "Log prompts to directory (auto-created if not present; only used for debugging, default: disabled)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
             q.path_prompts_log_dir = try arg.dupe(q, value);
-            const e = try createDirectories(q.arena, value);
+            const e = stdlib.fs.createDirectories(value);
             if (e != 0) {
-                io.eprintf("warning: failed to create prompts-log-dir '%s': %s\n", .{ value.ptr, strings.strerror(e) });
+                io.eprintf("warning: failed to create prompts-log-dir '%s': %s\n", .{ value.ptr, stdlib.errno.strerror(e) });
             }
         }
     }.f } }).setExamples(&.{ .server, .cli }));
@@ -707,13 +642,4 @@ pub fn add(ctx: *Context) !void {
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "parentPath is path::parent_path's" {
-    const cases = [_][2][]const u8{
-        .{ "a/b", "a" },   .{ "a/b/", "a/b" }, .{ "a//b", "a" }, .{ "a", "" },
-        .{ "/a", "/" },    .{ "/", "/" },      .{ "", "" },      .{ "a/b//", "a/b" },
-        .{ "/a/b", "/a" },
-    };
-    for (cases) |cs| try std.testing.expectEqualStrings(cs[1], parentPath(cs[0]));
 }

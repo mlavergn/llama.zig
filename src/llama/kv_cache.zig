@@ -20,6 +20,8 @@
 //! the owning cache allocates and the viewing one retains.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const arch_mod = @import("arch.zig");
 const hparams_mod = @import("hparams.zig");
@@ -62,7 +64,7 @@ fn isPowerOf2(n: c_int) bool {
 /// matrix is always F32 here.
 fn genHadamard(data: []f32, n: usize) void {
     std.debug.assert(isPowerOf2(@intCast(n)));
-    data[0] = @floatCast(1.0 / @as(f64, impl.sqrtf(@floatFromInt(n))));
+    data[0] = @floatCast(1.0 / @as(f64, libm.sqrtfInt(n)));
     var s: usize = 1;
     while (s < n) : (s *= 2) {
         for (0..s) |i| {
@@ -520,9 +522,9 @@ pub const KvCache = struct {
             // two knobs turn the same thing off: the environment variable,
             // for the whole process, and the model setting, for the contexts
             // of one model (see `llama_model_set_attn_rot`)
-            const env_rot_disable = std.c.getenv("LLAMA_ATTN_ROT_DISABLE");
+            const env_rot_disable = stdlib.env.getenv("LLAMA_ATTN_ROT_DISABLE");
 
-            const attn_rot_disable = !model.attn_rot or (if (env_rot_disable) |v| impl.atoi(v) != 0 else false);
+            const attn_rot_disable = !model.attn_rot or (if (env_rot_disable) |v| stdlib.num.atoiC(v) != 0 else false);
             if (attn_rot_disable) {
                 impl.logInfo("%s: attention rotation force disabled (%s)\n", .{ func, @as([*:0]const u8, if (model.attn_rot) "LLAMA_ATTN_ROT_DISABLE" else "llama_model_set_attn_rot") });
             }
@@ -568,7 +570,7 @@ pub const KvCache = struct {
 
         try self.initRotation(name_tag, exc);
 
-        if (std.c.getenv("LLAMA_KV_CACHE_DEBUG")) |v| self.debug = impl.atoi(v);
+        if (stdlib.env.getenv("LLAMA_KV_CACHE_DEBUG")) |v| self.debug = stdlib.num.atoiC(v);
         return self;
     }
 

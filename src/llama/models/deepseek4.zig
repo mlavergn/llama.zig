@@ -16,6 +16,7 @@
 //! head's the iSWA cache's.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -37,7 +38,7 @@ const src = "models/deepseek4.cpp";
 /// reference applies none.
 pub fn ropeAttnFactor(freq_scale: f32, ext_factor: f32) f32 {
     if (ext_factor == 0.0) return 1.0;
-    return 1.0 / (1.0 + 0.1 * impl.logf(1.0 / freq_scale));
+    return 1.0 / (1.0 + 0.1 * libm.logf(1.0 / freq_scale));
 }
 
 /// Ports `llama_model_deepseek4`'s `load_arch_hparams` (models/deepseek4.cpp:11 @b1b770d90).
@@ -682,7 +683,7 @@ pub fn buildLidTopK(b: *const Builder, model: *const Model, inp_dsv4: *const gra
     b.cb(indexer_q, "lid_q_rot", il);
 
     var indexer_weights = b.buildLoraMm(layer.indexer_proj.?, cur, null);
-    indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / impl.sqrtf(@floatFromInt(n_embd_indexer_head * n_indexer_head)));
+    indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / libm.sqrtfInt(n_embd_indexer_head * n_indexer_head));
     b.cb(indexer_weights, "lid_weights", il);
 
     var indexer_k = inp_dsv4.mctx.getLid().getK(ctx, il);
@@ -1159,7 +1160,7 @@ pub fn buildAttention(b: *const Builder, model: *const Model, inp: AttnInput, cu
         c.ggml_build_forward_expand(b.gf, hca_state_score);
     }
 
-    const kq_scale = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale = 1.0 / libm.sqrtfInt(n_embd_head);
 
     var out: *Tensor = undefined;
     if (inp_mtp) |m| {

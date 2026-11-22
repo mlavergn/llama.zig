@@ -29,6 +29,7 @@
 //!   SCHEMA_DIFF_STATS=1   lists every distinct error and warning seen
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const builtin = @import("builtin");
 const win_child = @import("win_child.zig");
 const json = @import("json");
@@ -37,16 +38,6 @@ const s2g = json.schema_to_grammar;
 
 extern fn ref_schema_run(prog: [*]const u8, len: usize, out_len: *usize) [*]u8;
 extern fn ref_schema_upstream(out_len: *usize) [*]u8;
-
-extern "c" fn free(p: ?*anyopaque) void;
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
 
 const gpa = std.heap.smp_allocator;
 
@@ -460,33 +451,33 @@ fn runRefForked(prog: []const u8, out: *Records) bool {
         return true;
     }
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) oom();
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) oom();
+    const pid = libc.fork();
     if (pid < 0) oom();
     if (pid == 0) {
-        _ = close(fds[0]);
+        _ = libc.close(fds[0]);
         var len: usize = 0;
         const p = ref_schema_run(prog.ptr, prog.len, &len);
         var off: usize = 0;
         while (off < len) {
-            const k = write(fds[1], p + off, len - off);
-            if (k <= 0) _exit(3);
+            const k = libc.write(fds[1], p + off, len - off);
+            if (k <= 0) libc._exit(3);
             off += @intCast(k);
         }
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
     var chunk: [65536]u8 = undefined;
     while (true) {
-        const k = read(fds[0], &chunk, chunk.len);
+        const k = libc.read(fds[0], &chunk, chunk.len);
         if (k <= 0) break;
         buf.appendSlice(gpa, chunk[0..@intCast(k)]) catch oom();
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     if (status != 0) return false;
     splitRecords(buf.items, out);
     return true;
@@ -1201,7 +1192,7 @@ const required_phrases = [_][]const u8{
 };
 
 fn envUsize(name: [*:0]const u8, def: usize) usize {
-    const v = getenv(name) orelse return def;
+    const v = std.c.getenv(name) orelse return def;
     return std.fmt.parseInt(usize, std.mem.span(v), 10) catch def;
 }
 
@@ -1233,7 +1224,7 @@ pub fn main(init: std.process.Init) !void {
     {
         var len: usize = 0;
         const p = ref_schema_upstream(&len);
-        defer free(p);
+        defer libc.free(p);
         var recs: Records = .empty;
         splitRecords(p[0..len], &recs);
         var k: usize = 0;
@@ -1345,7 +1336,7 @@ pub fn main(init: std.process.Init) !void {
     var n_names: usize = 0;
     var phrase_seen: [required_phrases.len]bool = @splat(false);
     var stats: std.StringHashMapUnmanaged(usize) = .empty;
-    const want_stats = getenv("SCHEMA_DIFF_STATS") != null;
+    const want_stats = std.c.getenv("SCHEMA_DIFF_STATS") != null;
 
     const batch = 400;
     var start: usize = 0;

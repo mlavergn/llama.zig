@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const sync = @import("sync");
+const sync = @import("sync/module.zig");
 
 /// The environment, each value allocated with a terminating NUL after its
 /// slice so `get` can hand out a C string. An `Environ.Map`, so a Windows
@@ -80,7 +80,18 @@ fn ensure() void {
     }
 }
 
-/// `getenv(name)`.
+/// `getenv(name)`, the C library's live environment: what the libraries
+/// read, since a host -- or a gate -- may `setenv` between calls, which a
+/// copy taken once would miss. It stays the C library's until std reads
+/// the environment outside `main`.
+///
+/// Return: the value, valid until the environment changes; null when
+/// `name` is not set.
+pub fn getenv(name: [*:0]const u8) ?[*:0]u8 {
+    return std.c.getenv(name);
+}
+
+/// `getenv(name)`, from the environment `main` was given (`set`).
 ///
 /// Return: the value, valid for the process's life, or null when `name` is
 /// not set.
@@ -89,6 +100,19 @@ pub fn get(name: []const u8) ?[:0]const u8 {
     const m = &(copy orelse return null);
     const v = m.get(name) orelse return null;
     return v.ptr[0..v.len :0];
+}
+
+/// `getpwuid(getuid())->pw_dir`: the password database's home for this
+/// user, where upstream falls back to it when `HOME` is unset. The C
+/// library's, as std reads no password database.
+///
+/// Return: the C library's string, valid until its next password lookup;
+/// null on Windows, or when there is no entry or no directory.
+pub fn passwdHome() ?[:0]const u8 {
+    if (comptime builtin.os.tag == .windows) return null;
+    const pw = std.c.getpwuid(std.c.getuid()) orelse return null;
+    const dir = pw.dir orelse return null;
+    return std.mem.span(dir);
 }
 
 /// The whole environment, in `environ`'s order: what a child inherits.

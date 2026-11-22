@@ -20,6 +20,7 @@
 //! lets the C++'s exception escape, which terminates, so they abort.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const config = @import("config");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
@@ -311,25 +312,12 @@ fn deviceIsSupported(vkdev: vk.VkPhysicalDevice) bool {
     return vk11_features.storageBuffer16BitAccess != 0;
 }
 
-/// `std::stoul` into the C++'s `uint32_t`: leading space, an optional sign,
-/// decimal digits, anything after them ignored; no digits throws.
+/// `std::stoul` into the C++'s `uint32_t`: `strtoul` in base 10, its two
+/// throws (no digits, out of range) as an error, the value narrowed.
 fn stoulTruncated(text: []const u8) error{InvalidNumber}!u32 {
-    var i: usize = 0;
-    while (i < text.len and std.ascii.isWhitespace(text[i])) i += 1;
-    var negative = false;
-    if (i < text.len and (text[i] == '+' or text[i] == '-')) {
-        negative = text[i] == '-';
-        i += 1;
-    }
-    const start = i;
-    var value: u64 = 0;
-    while (i < text.len and std.ascii.isDigit(text[i])) : (i += 1) {
-        value = std.math.mul(u64, value, 10) catch return error.InvalidNumber;
-        value = std.math.add(u64, value, text[i] - '0') catch return error.InvalidNumber;
-    }
-    if (i == start) return error.InvalidNumber;
-    if (negative) value = 0 -% value;
-    return @truncate(value);
+    const p = stdlib.num.strtoul(text, 10);
+    if (p.end == 0 or p.range) return error.InvalidNumber;
+    return @truncate(p.value);
 }
 
 /// `std::stringstream >> size_t` over `GGML_VK_VISIBLE_DEVICES` with commas
@@ -499,8 +487,8 @@ pub fn instanceInit() InitError!void {
     loggers.enable_sync_logger = common.envSet("GGML_VK_SYNC_LOGGER");
     loggers.memory_logger_enabled = common.envSet("GGML_VK_MEMORY_LOGGER");
     instance.allreduce_disabled = common.envSet("GGML_VK_DISABLE_ALLREDUCE");
-    if (std.c.getenv("GGML_VK_PIPELINE_STATS")) |stats| loggers.pipeline_stats_filter = std.mem.span(stats);
-    if (std.c.getenv("GGML_VK_PERF_LOGGER_FREQUENCY")) |freq| {
+    if (stdlib.env.getenv("GGML_VK_PIPELINE_STATS")) |stats| loggers.pipeline_stats_filter = std.mem.span(stats);
+    if (stdlib.env.getenv("GGML_VK_PERF_LOGGER_FREQUENCY")) |freq| {
         loggers.perf_logger_frequency = try stoulTruncated(std.mem.span(freq));
     }
 
@@ -510,7 +498,7 @@ pub fn instanceInit() InitError!void {
     defer allocator.free(devices);
 
     // Emulate behavior of CUDA_VISIBLE_DEVICES for Vulkan
-    if (std.c.getenv("GGML_VK_VISIBLE_DEVICES")) |devices_env| {
+    if (stdlib.env.getenv("GGML_VK_VISIBLE_DEVICES")) |devices_env| {
         const num_available_devices = devices.len;
         var it: VisibleDevices = .{ .text = std.mem.span(devices_env) };
         while (it.next()) |tmp| {

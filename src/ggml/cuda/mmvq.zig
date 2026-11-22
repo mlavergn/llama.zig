@@ -12,6 +12,7 @@
 //! nothing in this version of upstream calls it.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -633,7 +634,7 @@ pub fn mulMatVecQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor
         }
     }
 
-    const ne10_padded: i64 = @intCast(impl.pad(@intCast(ne10), common.matrix_row_padding));
+    const ne10_padded: i64 = @intCast(stdlib.num.pad(usize, @intCast(ne10), common.matrix_row_padding));
     var src1_q8_1 = common.PoolAlloc(u8).initAlloc(ctx.pool(), @intCast(@divTrunc(ne13 * ne12 * ne11 * ne10_padded * mmq.sizeof_block_q8_1, c.QK8_1)));
     defer src1_q8_1.deinit();
     {

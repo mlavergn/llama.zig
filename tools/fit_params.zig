@@ -9,6 +9,7 @@
 //! around it.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const fit = @import("cli_fit");
 const c = tc.c;
@@ -89,7 +90,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     } else {
         log.inf("%s: printing estimated memory in MiB to stdout (device, model, context, compute) ...\n", .{func});
 
-        io.flushStdout();
+        stdlib.stdio.stdout().flush();
         var out_buf: [4096]u8 = undefined;
         var stdout = std.Io.File.stdout().writerStreaming(init.io, &out_buf);
         fit.fitPrint(init.gpa, fit_log, &stdout.interface, model_paths, @ptrCast(&mparams), @ptrCast(&cparams)) catch |e| switch (e) {
@@ -109,9 +110,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
 /// Ports `main` (tools/fit-params/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

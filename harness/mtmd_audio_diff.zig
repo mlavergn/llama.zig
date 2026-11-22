@@ -19,6 +19,7 @@
 //! **Not a port.** Usage: `zig-out/bin/mtmd-audio-diff [--quick] [filter]`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const audio = @import("mtmd_audio");
 const mtmd = audio.deps;
 const Hparams = mtmd.model.Hparams;
@@ -42,7 +43,6 @@ extern fn ref_istft_free(s: ?*anyopaque) void;
 extern fn ref_istft_reset(s: ?*anyopaque) void;
 extern fn ref_istft_frame(s: ?*anyopaque, spec: [*]const f32, out: [*]f32) usize;
 extern fn ref_istft_flush(s: ?*anyopaque, out: [*]f32) usize;
-extern fn free(p: ?*anyopaque) void;
 
 const gpa = std.heap.c_allocator;
 
@@ -217,7 +217,7 @@ fn runCase(cfg: *const Config, hp_port: *const Hparams, hp_ref: ?*anyopaque, len
     var blob: ?*anyopaque = null;
     var blob_len: usize = 0;
     const ok_ref = ref_audio_proc_run(r, samples.ptr, samples.len, &blob, &blob_len) != 0;
-    defer free(blob);
+    defer libc.free(blob);
     const ref_bytes = @as([*]const u8, @ptrCast(blob.?))[0..blob_len];
 
     // port

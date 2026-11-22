@@ -22,6 +22,8 @@
 //! symbols still come from the C side.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 
 /// The importable half of ggml's headers.
 ///
@@ -33,9 +35,9 @@ const std = @import("std");
 pub const c = @import("ggml_c");
 
 /// The port's mutex, under every `std::mutex` and `ggml_mutex_t` it ports: a
-/// futex, with no C library under it (`src/sync/`). `.{}` needs no setup, as
+/// futex, with no C library under it (`stdlib/sync/`). `.{}` needs no setup, as
 /// libc++'s `constexpr mutex()` does not.
-pub const Mutex = @import("sync").Mutex;
+pub const Mutex = @import("stdlib").sync.Mutex;
 
 /// Mirrors `GGML_USE_ACCELERATE`, which `build/llamacpp.zig` defines for every
 /// Darwin target and no other. Ported code that takes the C's Accelerate arm
@@ -99,16 +101,6 @@ pub const logError = struct {
     }
 }.f;
 
-extern fn fprintf(stream: *anyopaque, format: [*:0]const u8, ...) c_int;
-
-/// libc's `stderr`, which Darwin names `__stderrp` behind a macro, glibc
-/// exports as itself, and MinGW's UCRT hands out through `__acrt_iob_func`.
-/// The one copy every ported file that writes to `stderr` directly reads.
-pub fn cStderr() *anyopaque {
-    if (comptime @import("builtin").os.tag == .windows) return @import("win32.zig").__acrt_iob_func(2);
-    return @extern(*const *anyopaque, .{ .name = if (@import("builtin").os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
-}
-
 /// `fprintf(stderr, ...)`, for the places the C writes to `stderr` directly
 /// instead of through `GGML_LOG_*`.
 ///
@@ -121,7 +113,7 @@ pub fn cStderr() *anyopaque {
 /// host-arms harness came to compare them with a callback installed.
 pub const fprintfStderr = struct {
     pub fn f(comptime fmt: [*:0]const u8, args: anytype) void {
-        _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
+        _ = @call(.auto, libc.fprintf, .{ stdlib.stdio.cStream(.stderr), fmt } ++ args);
     }
 }.f;
 
@@ -251,10 +243,6 @@ pub fn ggmlCalloc(num: usize, size: usize) ?*anyopaque {
 /// rather than in `backend.zig` because `context.zig` wants it too, and
 /// `ggml-impl.h` is not importable.
 pub const tensor_alignment: usize = 32;
-
-pub inline fn pad(x: usize, n: usize) usize {
-    return (x + n - 1) & ~(n - 1);
-}
 
 // -----------------------------------------------------------------------------
 // C pointer narrowing
@@ -862,10 +850,10 @@ pub fn fp32ToBf16(s: f32) u16 {
 // Unit Tests
 
 test "pad rounds up to the next multiple" {
-    try std.testing.expectEqual(@as(usize, 0), pad(0, 32));
-    try std.testing.expectEqual(@as(usize, 32), pad(1, 32));
-    try std.testing.expectEqual(@as(usize, 32), pad(32, 32));
-    try std.testing.expectEqual(@as(usize, 64), pad(33, 32));
+    try std.testing.expectEqual(@as(usize, 0), stdlib.num.pad(usize, 0, 32));
+    try std.testing.expectEqual(@as(usize, 32), stdlib.num.pad(usize, 1, 32));
+    try std.testing.expectEqual(@as(usize, 32), stdlib.num.pad(usize, 32, 32));
+    try std.testing.expectEqual(@as(usize, 64), stdlib.num.pad(usize, 33, 32));
 }
 
 test "bitset round-trips a single bit" {
@@ -895,7 +883,7 @@ const golden_fp32_to_bf16: u64 = 0xd60a7155d0aaade5;
 ///
 /// Order-dependent and avalanching, so a single wrong conversion anywhere in
 /// the swept domain changes the result.
-fn mix(h: u64, v: u64) u64 {
+pub fn mix(h: u64, v: u64) u64 {
     return h ^ (v +% 0x9e3779b97f4a7c15 +% (h << 6) +% (h >> 2));
 }
 

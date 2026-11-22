@@ -35,6 +35,7 @@
 //! Usage: chat_diff <llama-chat.cpp> <file.gguf|file.jinja>...
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -48,7 +49,6 @@ extern fn ref_from_str(p: [*]const u8, n: usize) c_int;
 extern fn ref_apply(tmpl: c_int, msgs: [*]const Message, n: usize, add_ass: bool, init: [*:0]const u8, out: *[*]u8, out_len: *usize) i32;
 extern fn ref_free_buf(p: [*]u8) void;
 
-extern "c" fn setlocale(category: c_int, locale: ?[*:0]const u8) ?[*:0]const u8;
 /// `LC_ALL` in `<locale.h>` on this target.
 const LC_ALL: c_int = 0;
 /// UTF-8 and Latin-1, where `isspace` and `toupper` reach past ASCII, and
@@ -81,19 +81,10 @@ fn esc(s: []const u8) []const u8 {
 }
 
 fn readFile(path: []const u8) []u8 {
-    const f = std.c.fopen(@ptrCast(gpa.dupeSentinel(u8, path, 0) catch unreachable), "rb") orelse {
+    return std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path, gpa, .unlimited) catch {
         std.debug.print("cannot open {s}\n", .{path});
         std.process.exit(2);
     };
-    defer _ = std.c.fclose(f);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        out.appendSlice(gpa, buf[0..n]) catch unreachable;
-    }
-    return out.toOwnedSlice(gpa) catch unreachable;
 }
 
 // -----------------------------------------------------------------------------
@@ -526,7 +517,7 @@ pub fn main(init: std.process.Init) !void {
     // maps 0xe0-0xfe -- which the C++ never reaches for a role, because it
     // passes a signed `char`. A missing locale is reported, not failed.
     for (locales) |loc| {
-        if (setlocale(LC_ALL, loc) == null) {
+        if (libc.setlocale(LC_ALL, loc) == null) {
             std.debug.print("  locale {s} not installed; its sweep is skipped\n", .{loc});
             continue;
         }
@@ -538,7 +529,7 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    _ = setlocale(LC_ALL, "C");
+    _ = libc.setlocale(LC_ALL, "C");
 
     std.debug.print("  llama_chat_apply_template\n", .{});
     for (convs[0..300]) |conv| {

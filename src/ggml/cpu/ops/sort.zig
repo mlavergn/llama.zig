@@ -28,6 +28,7 @@
 //! `j01`, `j02`, `j03`, `j11`, `j12`, `j13`, digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const convert = @import("../convert.zig");
 const common = @import("common.zig");
@@ -37,8 +38,6 @@ const simd = @import("../simd.zig");
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Byte offset `i*nb`; see `common.byteOff`.
 const off = common.byteOff;
@@ -322,7 +321,7 @@ fn fwhtImpl(comptime S: type, params: *const ComputeParams, dst: *Tensor) void {
     const start_row = ith * rows_per_thread;
     const end_row = @min(start_row + rows_per_thread, nr);
 
-    const scale: f32 = 1.0 / sqrtf(@floatFromInt(n));
+    const scale: f32 = 1.0 / libm.sqrtfInt(n);
 
     const s1: [*]const u8 = @ptrCast(src1.data.?);
     const dd: [*]u8 = @ptrCast(dst.data.?);

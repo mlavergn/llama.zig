@@ -12,6 +12,7 @@
 //! and `build_hc_post`, its `graph_mtp`, and the file's static helpers.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -259,10 +260,10 @@ pub fn buildArchGraph(model: *const Model, b: *const Builder, params: *const gra
 fn mlaKqScale(b: *const Builder, n_embd_head_k: i64) f32 {
     const hp = b.hparams;
     // First cancel the adjustment, to get the original attn_factor.
-    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * impl.logf(1.0 / b.freq_scale));
+    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * libm.logf(1.0 / b.freq_scale));
     // Then pre-scale the KQ scale with it.
-    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * impl.logf(1.0 / b.freq_scale));
-    return 1.0 * mscale * mscale / impl.sqrtf(@floatFromInt(n_embd_head_k));
+    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * libm.logf(1.0 / b.freq_scale));
+    return 1.0 * mscale * mscale / libm.sqrtfInt(n_embd_head_k);
 }
 
 /// Ports the constructor of `llama_model_xing4_0`'s `graph_mtp`

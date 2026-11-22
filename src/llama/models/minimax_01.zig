@@ -11,6 +11,7 @@
 //! `llm_graph_input_la` input that file defines for the decays.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -145,12 +146,12 @@ pub const InpLa = struct {
 
             const data: [*]f32 = @ptrCast(@alignCast(inp_slopes.data));
 
-            const start: f32 = impl.powf(2, -impl.powf(2, -(impl.log2f(@floatFromInt(n_head)) - 3)));
+            const start: f32 = libm.powf(2, -libm.powf(2, -(libm.log2fInt(n_head) - 3)));
             const ratio = start;
 
             var h: i64 = 0;
             while (h < n_head) : (h += 1) {
-                data[@intCast(h)] = start * impl.powf(ratio, @floatFromInt(h));
+                data[@intCast(h)] = start * libm.powf(ratio, @floatFromInt(h));
             }
         }
 
@@ -329,7 +330,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
         } else {
             // A lightning attention layer.
             const mctx_cur = inp_rs.mctx;

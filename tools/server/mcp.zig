@@ -29,19 +29,17 @@
 //! command is spawned as given, through `PATH`.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const json = @import("json");
-const tc = @import("tools_common");
 const common = @import("common.zig");
 
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Subproc = tc.subproc.Subproc;
+const Subproc = stdlib.subproc.Subproc;
 const srv = common.srv;
 
 const gpa = std.heap.c_allocator;
-
-extern fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 
 /// `poll(fds, 1, timeout_ms)`, the C library's on Darwin and the system
 /// call on Linux, as `std.posix.system` resolves it.
@@ -53,23 +51,6 @@ fn pollOne(pfd: *[1]std.posix.pollfd, timeout_ms: c_int) union(enum) { ready: us
     if (e != .SUCCESS) return .{ .err = e };
     return .{ .ready = @intCast(rc) };
 }
-
-/// `std::chrono::steady_clock::now()`, in nanoseconds.
-pub fn nowNs() i128 {
-    return tc.clock.monotonicNs();
-}
-
-/// `std::mutex`.
-pub const Mutex = struct {
-    m: sync.Mutex = .{},
-
-    pub fn lock(self: *Mutex) void {
-        self.m.lock();
-    }
-    pub fn unlock(self: *Mutex) void {
-        self.m.unlock();
-    }
-};
 
 /// `const std::function<bool()> &`: a context and a predicate; a null
 /// `StopFn` never stops.
@@ -94,11 +75,11 @@ const StringPipe = common.Pipe([]u8);
 /// grandchild can inherit the pipe's write end and hold it open.
 fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, comptime on_line: fn (@TypeOf(ctx), []u8) bool) void {
     const file = f orelse return;
-    const io = tc.file.defaultIo();
+    const io = stdlib.file.defaultIo();
     const poll_ms: c_int = 50;
     const max_line: usize = 8 * 1024 * 1024; // drop any single NDJSON line larger than this, so a child that never emits '\n' can't grow buf without bound
     const fd = file.handle;
-    tc.subproc.setNonBlocking(fd);
+    stdlib.subproc.setNonBlocking(fd);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
     var skipping = false; // discarding an over-long line until its terminating newline
@@ -154,10 +135,10 @@ fn pumpNdjson(f: ?std.Io.File, running: *std.atomic.Value(bool), ctx: anytype, c
 /// Return: false on an error, a close or shutdown.
 fn writeAll(f: ?std.Io.File, data: []const u8, running: *std.atomic.Value(bool)) bool {
     const file = f orelse return false;
-    const io = tc.file.defaultIo();
+    const io = stdlib.file.defaultIo();
     var total: usize = 0;
     const fd = file.handle;
-    tc.subproc.setNonBlocking(fd);
+    stdlib.subproc.setNonBlocking(fd);
     while (total < data.len and running.load(.seq_cst)) {
         // EINTR is retried; EAGAIN waits for room below
         const n = file.writeStreaming(io, "", &.{data[total..]}, 1) catch |err| switch (err) {
@@ -338,7 +319,7 @@ pub const Transport = struct {
     from_server: StringPipe, // serialized messages read from the server
 
     // per-transport: send_rpc() holds it across the reply wait. guards the members below.
-    rpc_mutex: Mutex = .{},
+    rpc_mutex: sync.Mutex = .{},
     next_id: u64 = 1, // reset to 1 per (re)spawn
     initialized: bool = false,
     last_error: std.ArrayList(u8) = .empty,
@@ -354,7 +335,7 @@ pub const Transport = struct {
     running: std.atomic.Value(bool) = .init(false),
 
     // bounded tail of the child's stderr, for diagnostics when it dies
-    err_mu: Mutex = .{},
+    err_mu: sync.Mutex = .{},
     err_tail: std.ArrayList(u8) = .empty,
 
     /// The `shared_ptr`'s count.
@@ -421,13 +402,13 @@ pub const Transport = struct {
         }
 
         const has_id = request.contains("id");
-        const deadline = nowNs() + @as(i128, self.timeout_ms) * std.time.ns_per_ms;
+        const deadline = stdlib.clock.steadyNs() + @as(i64, self.timeout_ms) * std.time.ns_per_ms;
         const Stop = struct {
             should_stop: ?StopFn,
-            deadline: i128,
+            deadline: i64,
             fn f(ctx: *anyopaque) bool {
                 const s: *@This() = @ptrCast(@alignCast(ctx));
-                return (if (s.should_stop) |p| p.call() else false) or nowNs() >= s.deadline;
+                return (if (s.should_stop) |p| p.call() else false) or stdlib.clock.steadyNs() >= s.deadline;
             }
         };
         var stop: Stop = .{ .should_stop = should_stop, .deadline = deadline };
@@ -437,14 +418,14 @@ pub const Transport = struct {
             defer gpa.free(frame);
             const reply = json.parse(a, frame) catch |e| {
                 if (e == error.OutOfMemory) return e;
-                if (nowNs() >= deadline) break;
+                if (stdlib.clock.steadyNs() >= deadline) break;
                 continue; // skip malformed frame
             };
             // no id: a notification. mismatched id: a stale reply from a timed-out request (ids are monotonic, never a future one)
             if (!has_id or (reply.contains("id") and Value.eql(try reply.at("id"), try request.at("id")))) {
                 return reply;
             }
-            if (nowNs() >= deadline) break; // a flood of notifications must not outrun the deadline
+            if (stdlib.clock.steadyNs() >= deadline) break; // a flood of notifications must not outrun the deadline
         }
 
         if (should_stop) |s| {
@@ -453,7 +434,7 @@ pub const Transport = struct {
                 return rpcError(a, "cancelled");
             }
         }
-        if (nowNs() >= deadline) {
+        if (stdlib.clock.steadyNs() >= deadline) {
             try self.notifyCancelled(a, request, "request timed out");
             return rpcError(a, "request timed out");
         }
@@ -607,12 +588,12 @@ pub const Transport = struct {
         argv_s.append(gpa, config.command) catch return false; // mcp_resolve_command: the command as given on POSIX
         argv_s.appendSlice(gpa, config.args.items) catch return false;
 
-        var options = tc.subproc.option_no_window | tc.subproc.option_search_user_path;
+        var options = stdlib.subproc.option_no_window | stdlib.subproc.option_search_user_path;
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         var envp_s: []const []const u8 = &.{};
         if (config.env.items.len == 0) {
-            options |= tc.subproc.option_inherit_environment;
+            options |= stdlib.subproc.option_inherit_environment;
         } else {
             envp_s = buildEnv(arena.allocator(), config) catch return false;
         }
@@ -767,7 +748,7 @@ pub const Transport = struct {
 /// environment with the configured overrides applied, `KEY=VALUE`.
 fn buildEnv(a: Allocator, config: *const ServerConfig) ![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
-    if (tc.env.map()) |inherited| {
+    if (stdlib.env.map()) |inherited| {
         var it = inherited.iterator();
         while (it.next()) |e| {
             if (!config.findEnv(e.key_ptr.*)) try env.append(a, try std.mem.concat(a, u8, &.{ e.key_ptr.*, "=", e.value_ptr.* }));
@@ -813,10 +794,10 @@ const warmup_timeout_seconds = 10;
 pub const Mcp = struct {
     configs: std.ArrayList(ServerConfig) = .empty,
 
-    mutex: Mutex = .{}, // guards transports, dead_servers, registry
+    mutex: sync.Mutex = .{}, // guards transports, dead_servers, registry
 
     transports: std.ArrayList(Named(*Transport)) = .empty,
-    dead_servers: std.ArrayList(Named(i128)) = .empty, // spawn-failure cooldown
+    dead_servers: std.ArrayList(Named(i64)) = .empty, // spawn-failure cooldown
     registry: std.ArrayList(ToolDef) = .empty,
 
     stopping: std.atomic.Value(bool) = .init(false),
@@ -909,7 +890,8 @@ pub const Mcp = struct {
     /// - `config_json`: `--mcp-servers-json`, or empty.
     pub fn start(self: *Mcp, config_path: []const u8, config_json: []const u8) !void {
         if (config_path.len != 0) {
-            const text = readWholeFile(config_path) orelse
+            // `fs_open_ifstream` and `ss << f.rdbuf()`
+            const text = (stdlib.file.readStream(stdlib.file.defaultIo(), gpa, config_path) catch null) orelse
                 return common.throw(error.RuntimeError, "failed to open MCP config file: {s}", .{config_path});
             defer gpa.free(text);
             try self.append(text);
@@ -935,13 +917,13 @@ pub const Mcp = struct {
             // bound warmup per server so an unresponsive one can't stall startup for the full per-call timeout
             const Stop = struct {
                 mgr: *Mcp,
-                deadline: i128,
+                deadline: i64,
                 fn f(ctx: ?*anyopaque) bool {
                     const s: *@This() = @ptrCast(@alignCast(ctx.?));
-                    return s.mgr.stopping.load(.seq_cst) or nowNs() >= s.deadline;
+                    return s.mgr.stopping.load(.seq_cst) or stdlib.clock.steadyNs() >= s.deadline;
                 }
             };
-            var stop: Stop = .{ .mgr = self, .deadline = nowNs() + warmup_timeout_seconds * std.time.ns_per_s };
+            var stop: Stop = .{ .mgr = self, .deadline = stdlib.clock.steadyNs() + warmup_timeout_seconds * std.time.ns_per_s };
             const tools = try t.listTools(.{ .ctx = &stop, .f = Stop.f });
             defer if (tools.len != 0) gpa.free(tools);
             const n = common.dupZ(cfg.name);
@@ -1007,7 +989,7 @@ pub const Mcp = struct {
             defer self.mutex.unlock();
             if (self.stopping.load(.seq_cst)) return null;
 
-            const now = nowNs();
+            const now = stdlib.clock.steadyNs();
             for (self.dead_servers.items, 0..) |d, i| {
                 if (std.mem.eql(u8, d.name, name)) {
                     if (now < d.value) return null;
@@ -1057,7 +1039,7 @@ pub const Mcp = struct {
         return result;
     }
 
-    fn setDead(self: *Mcp, name: []const u8, until: i128) !void {
+    fn setDead(self: *Mcp, name: []const u8, until: i64) !void {
         for (self.dead_servers.items) |*d| {
             if (std.mem.eql(u8, d.name, name)) {
                 d.value = until;
@@ -1067,24 +1049,6 @@ pub const Mcp = struct {
         try self.dead_servers.append(gpa, .{ .name = name, .value = until });
     }
 };
-
-/// `fs_open_ifstream` and `ss << f.rdbuf()`: the whole file, or null when
-/// it cannot be opened.
-fn readWholeFile(path: []const u8) ?[]u8 {
-    const pz = gpa.dupeSentinel(u8, path, 0) catch return null;
-    defer gpa.free(pz);
-    const fd = std.c.open(pz.ptr, .{ .ACCMODE = .RDONLY });
-    if (fd < 0) return null;
-    defer _ = std.c.close(fd);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = read(fd, &buf, buf.len);
-        if (n <= 0) break;
-        out.appendSlice(gpa, buf[0..@intCast(n)]) catch return null;
-    }
-    return out.toOwnedSlice(gpa) catch null;
-}
 
 // -----------------------------------------------------------------------------
 // Unit Tests

@@ -15,16 +15,6 @@ pub const n_per_row = golden.n_per_row;
 pub const n_rows = golden.n_rows;
 pub const n_elem = n_per_row * n_rows;
 
-/// FNV-1a, matching `fnv` in `harness/quants_golden.c`.
-pub fn fnv(bytes: []const u8) u64 {
-    var h: u64 = 0xcbf29ce484222325;
-    for (bytes) |b| {
-        h ^= b;
-        h = h *% 0x100000001b3;
-    }
-    return h;
-}
-
 /// The generator's LCG, matching `next_float` in `harness/quants_golden.c`.
 ///
 /// A fixed LCG rather than a std PRNG: the values must not depend on the

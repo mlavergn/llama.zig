@@ -111,18 +111,19 @@ pub fn add(b: *std.Build, opts: Options) void {
 
     const fit_module = b.createModule(.{ .root_source_file = b.path("cli/fit.zig"), .target = opts.target, .optimize = safe, .link_libc = true });
     fit_module.addImport("llama", opts.reference.llama.root_module);
+    fit_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     const common_module = b.createModule(.{ .root_source_file = b.path("tools/common/module.zig"), .target = opts.target, .optimize = safe, .link_libc = true });
     common_module.addImport("tools_h", tools_h_module);
     common_module.addOptions("build_info", build_info);
     common_module.addImport("cli_fit", fit_module);
-    common_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    common_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     const http_module = b.createModule(.{ .root_source_file = b.path("tools/server/http.zig"), .target = opts.target, .optimize = safe, .link_libc = true });
     http_module.addImport("tools_common", common_module);
     http_module.addImport("cli_fit", fit_module);
     http_module.addImport("llama", opts.reference.llama.root_module);
-    http_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    http_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     http_module.addImport("ui_assets", opts.ui.port_module);
 
     const port_mod = b.createModule(.{ .root_source_file = b.path("harness/http_diff.zig"), .target = opts.target, .optimize = safe, .link_libc = true, .link_libcpp = true });
@@ -130,6 +131,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     port_mod.addImport("tools_common", common_module);
     port_mod.addImport("cli_fit", fit_module);
     port_mod.addImport("llama", opts.reference.llama.root_module);
+    port_mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     llamacpp.addSdkPaths(b, port_mod, opts.sdk);
     llamacpp.addLibgcc(b, port_mod);
     llamacpp.addCudaRuntime(b, port_mod, opts.cuda);

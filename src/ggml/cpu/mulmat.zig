@@ -33,6 +33,7 @@
 //! succeeded, and a partial success still falls through to recompute the lot.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const types = @import("../types.zig");
 const defs = @import("defs.zig");
@@ -68,10 +69,6 @@ extern fn llamafile_sgemm(
     btype: c_int,
     ctype: c_int,
 ) bool;
-
-inline fn min(a: i64, b: i64) i64 {
-    return if (a < b) a else b;
-}
 
 // -----------------------------------------------------------------------------
 // ggml_compute_forward_mul_mat
@@ -182,7 +179,7 @@ fn oneChunk(
                     );
                 }
 
-                const count: usize = @intCast(min(iir0 + blck_0, ir0_end) - iir0);
+                const count: usize = @intCast(@min(iir0 + blck_0, ir0_end) - iir0);
                 var cn: i64 = 0;
                 while (cn < num_rows_per_vec_dot) : (cn += 1) {
                     const at = @as(usize, @intCast(iir0)) + @as(usize, @intCast(cn)) * l.nb1 / l.nb0;
@@ -400,10 +397,10 @@ pub export fn ggml_compute_forward_mul_mat(params: *const ComputeParams, dst: *T
         const ith1 = @divTrunc(current_chunk, nchunk0);
 
         const ir0_start = dr0 * ith0;
-        const ir0_end = min(ir0_start + dr0, nr0);
+        const ir0_end = @min(ir0_start + dr0, nr0);
 
         const ir1_start = dr1 * ith1;
-        const ir1_end = min(ir1_start + dr1, nr1);
+        const ir1_end = @min(ir1_start + dr1, nr1);
 
         // Dot kernels take one row and column at a time; mmla kernels take
         // two. These checks keep a pair from straddling a dim-1 boundary.
@@ -451,7 +448,7 @@ inline fn matrixRow(matrix_rows: [*]RowMapping, ids: *const Tensor, row_id: i64,
 ///
 /// Return: the aligned start of the block.
 fn incrPtrAligned(p: *[*]u8, size: usize, alignment: usize) [*]u8 {
-    const ptr: [*]u8 = @ptrFromInt(impl.pad(@intFromPtr(p.*), alignment));
+    const ptr: [*]u8 = @ptrFromInt(stdlib.num.pad(usize, @intFromPtr(p.*), alignment));
     p.* = ptr + size;
     return ptr;
 }
@@ -535,7 +532,7 @@ fn idOneChunk(
                     );
                 }
 
-                const count: usize = @intCast(min(iir0 + blck_0, ir0_end) - iir0);
+                const count: usize = @intCast(@min(iir0 + blck_0, ir0_end) - iir0);
                 const at: usize = @intCast(iir0);
                 @memcpy(dst_col[at .. at + count], tmp[0..count]);
             }
@@ -747,10 +744,10 @@ pub fn computeForwardMulMatId(params: *const ComputeParams, dst: *Tensor) void {
             const ith1 = @divTrunc(current_chunk, nchunk0);
 
             const ir0_start = dr0 * ith0;
-            const ir0_end = min(ir0_start + dr0, nr0);
+            const ir0_end = @min(ir0_start + dr0, nr0);
 
             const ir1_start = dr1 * ith1;
-            const ir1_end = min(ir1_start + dr1, nr1);
+            const ir1_end = @min(ir1_start + dr1, nr1);
 
             idOneChunk(
                 dst,

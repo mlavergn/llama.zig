@@ -20,13 +20,13 @@
 
 const std = @import("std");
 const ggml = @import("ggml.zig");
-const num = @import("num.zig");
-const env_mod = @import("env.zig");
+const num = @import("stdlib").num;
+const env_mod = @import("stdlib").env;
 const c = @import("tools_h");
 const S = @import("speculative.zig");
 const params_mod = @import("params.zig");
 const sampling = @import("sampling.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const common = @import("common.zig");
 const log = @import("log.zig");
 
@@ -914,27 +914,6 @@ pub const Eagle3 = struct {
 // -----------------------------------------------------------------------------
 // draft-dflash, draft-dspark
 
-/// `std::random_device{}()`, as `src/mtmd/clip.zig`'s `randomDevice`:
-/// libc++ reads `arc4random` on Apple platforms, `rand_s` on Windows and
-/// `getentropy` elsewhere; either way the seed is not reproducible.
-fn randomDevice() u32 {
-    var v: u32 = 0;
-    switch (comptime @import("builtin").os.tag) {
-        .macos, .ios, .tvos, .watchos, .visionos => std.c.arc4random_buf(@ptrCast(&v), @sizeOf(u32)),
-        .windows => {
-            const rand_s = @extern(*const fn (*c_uint) callconv(.c) c_int, .{ .name = "rand_s" });
-            var r: c_uint = 0;
-            _ = rand_s(&r);
-            v = r;
-        },
-        else => {
-            const getentropy = @extern(*const fn (*anyopaque, usize) callconv(.c) c_int, .{ .name = "getentropy" });
-            _ = getentropy(@ptrCast(&v), @sizeOf(u32));
-        },
-    }
-    return v;
-}
-
 /// Ports `common_speculative_impl_draft_dflash` (speculative.cpp:982
 /// @b1b770d90): block-diffusion drafting with the target's features
 /// injected into the draft's KV cache. DSpark is the same driver with a
@@ -1388,7 +1367,7 @@ pub const DFlash = struct {
                 if (sample and self.dflash2_seed[seq] != @as(i64, dp.seed)) {
                     self.dflash2_seed[seq] = dp.seed;
                     // the default seed means random; mixed so it differs from the target's, as in spec_retune
-                    self.dflash2_rng[seq].seed(if (dp.seed == c.LLAMA_DEFAULT_SEED) randomDevice() else dp.seed ^ 0x85ebca6b);
+                    self.dflash2_rng[seq].seed(if (dp.seed == c.LLAMA_DEFAULT_SEED) libcxx.randomDevice() else dp.seed ^ 0x85ebca6b);
                 }
 
                 var probs: std.ArrayList(f32) = .empty;

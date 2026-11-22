@@ -253,7 +253,7 @@ def main():
     port = os.path.join(out, "chat_msg_diff")
     run(["zig", "build-exe", "-OReleaseSafe", f"-femit-bin={port}",
          "--dep", "json", "--dep", "common_chat", "-Mroot=harness/chat_msg_diff.zig",
-         "--dep", "json", "-Mcommon_chat=cli/common_chat/module.zig", "-Mjson=cli/json/module.zig", "-lc"],
+         "--dep", "json", "--dep", "stdlib", "-Mcommon_chat=cli/common_chat/module.zig", "--dep", "stdlib", "-Mjson=cli/json/module.zig", "-Mstdlib=stdlib/module.zig", "-lc"],
         "could not build harness/chat_msg_diff.zig")
 
     run([ref, inp, os.path.join(out, "ref.txt")], "the reference failed")

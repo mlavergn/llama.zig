@@ -22,6 +22,7 @@
 //! arguments, one level down (see that function).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -32,10 +33,6 @@ const Tensor = c.ggml_tensor;
 const half = kernels.half;
 
 const warp_size = common.warp_size;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn log2f(x: f32) f32;
-extern fn floorf(x: f32) f32;
 
 /// Ports `CUDA_SOFT_MAX_BLOCK_SIZE` (softmax.cuh:3 @b1b770d90).
 const block_size = 1024;
@@ -197,10 +194,10 @@ pub fn opSoftMax(ctx: *common.Context, dst: *Tensor) void {
     const ne13: i64 = if (src1) |t| t.ne[3] else 1;
 
     const n_head: u32 = @truncate(@as(u64, @bitCast(src0.ne[2])));
-    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(floorf(log2f(@floatFromInt(n_head))));
+    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(libm.floorf(libm.log2fInt(n_head)));
 
-    const m0 = powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
-    const m1 = powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
+    const m0 = libm.powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
+    const m1 = libm.powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
 
     var params: Params = std.mem.zeroes(Params);
     params.nheads = src0.ne[2];

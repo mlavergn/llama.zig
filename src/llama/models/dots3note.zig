@@ -18,6 +18,7 @@
 //! MLA) and `step35.cpp` (the head-wise output gate).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -250,7 +251,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
         const n_embd_head_v_mla: i64 = if (is_swa) hp.n_embd_head_v_mla_swa else hp.nEmbdHeadVMla();
         const n_embd_head_qk_nope = n_embd_head_k_mla - n_embd_head_qk_rope;
 
-        const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
+        const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k_mla);
 
         // Norm.
         var cur = b.buildNorm(inpL, layer.attn_norm, null, .rms, il);

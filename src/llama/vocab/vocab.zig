@@ -27,8 +27,9 @@
 //! `libcxx-diff`.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const unicode = @import("../unicode.zig");
 const arch = @import("../arch.zig");
 const gguf_meta = @import("../gguf_meta.zig");
@@ -1627,7 +1628,7 @@ pub const Vocab = struct {
                                 const left_offset = base_offset;
                                 var left_length = match - base_offset;
                                 if ((d.attr & attr_lstrip) != 0) {
-                                    while (left_length > 0 and isSpace(raw_text[left_offset + left_length - 1])) left_length -= 1;
+                                    while (left_length > 0 and std.ascii.isWhitespace(raw_text[left_offset + left_length - 1])) left_length -= 1;
                                 }
                                 if (left_length > 0) next.append(allocator, .{ .raw = .{ .offset = left_offset, .length = left_length } }) catch oom();
                             }
@@ -1638,7 +1639,7 @@ pub const Vocab = struct {
                                 var right_offset = match + t.len;
                                 var right_length = base_length - ((match - base_offset) + t.len);
                                 if ((d.attr & attr_rstrip) != 0) {
-                                    while (right_length > 0 and isSpace(raw_text[right_offset])) {
+                                    while (right_length > 0 and std.ascii.isWhitespace(raw_text[right_offset])) {
                                         right_offset += 1;
                                         right_length -= 1;
                                     }
@@ -2193,55 +2194,20 @@ pub fn warnDoubleBos(comptime func: [:0]const u8) void {
     impl.logWarn("%s: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?\n", .{func.ptr});
 }
 
-/// `isspace` on a signed `char` in the "C" locale.
-fn isSpace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
-
-/// `strtol(s, NULL, 16)` over a short string: leading spaces, a sign, an
-/// optional `0x`, then hex digits up to the first that is not one.
+/// `strtol(s, NULL, 16)`, as `token_to_byte` calls it on a byte token's
+/// two hex digits.
 fn strtolHex(s: []const u8) i64 {
-    var i: usize = 0;
-    while (i < s.len and isSpace(s[i])) i += 1;
-    var neg = false;
-    if (i < s.len and (s[i] == '+' or s[i] == '-')) {
-        neg = s[i] == '-';
-        i += 1;
-    }
-    if (i + 2 < s.len + 1 and i + 1 < s.len and s[i] == '0' and (s[i + 1] == 'x' or s[i + 1] == 'X') and i + 2 < s.len and std.ascii.isHex(s[i + 2])) i += 2;
-    var v: i64 = 0;
-    while (i < s.len) : (i += 1) {
-        const d = std.fmt.charToDigit(s[i], 16) catch break;
-        v = v * 16 + d;
-    }
-    return if (neg) -v else v;
-}
-
-/// Ports `replace_all` (llama-impl.cpp:101 @b1b770d90).
-pub fn replaceAll(s: *std.ArrayList(u8), search: []const u8, replace: []const u8) void {
-    if (search.len == 0) return;
-    if (std.mem.find(u8, s.items, search) == null) return;
-    var builder: std.ArrayList(u8) = .empty;
-    builder.ensureTotalCapacity(allocator, s.items.len) catch oom();
-    var last_pos: usize = 0;
-    while (std.mem.findPos(u8, s.items, last_pos, search)) |pos| {
-        builder.appendSlice(allocator, s.items[last_pos..pos]) catch oom();
-        builder.appendSlice(allocator, replace) catch oom();
-        last_pos = pos + search.len;
-    }
-    builder.appendSlice(allocator, s.items[last_pos..]) catch oom();
-    s.deinit(allocator);
-    s.* = builder;
+    return stdlib.num.strtol(s, 16).value;
 }
 
 /// Ports `llama_escape_whitespace` (llama-vocab.cpp:3780 @b1b770d90).
 pub fn escapeWhitespace(s: *std.ArrayList(u8)) void {
-    replaceAll(s, " ", "\xe2\x96\x81");
+    impl.replaceAll(s, " ", "\xe2\x96\x81");
 }
 
 /// Ports `llama_unescape_whitespace` (llama-vocab.cpp:3784 @b1b770d90).
 pub fn unescapeWhitespace(s: *std.ArrayList(u8)) void {
-    replaceAll(s, "\xe2\x96\x81", " ");
+    impl.replaceAll(s, "\xe2\x96\x81", " ");
 }
 
 /// Ports `llama_decode_text` (llama-vocab.cpp:3788 @b1b770d90): each code

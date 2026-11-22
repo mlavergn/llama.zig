@@ -7,6 +7,7 @@
 //! Ports `llama.cpp/tools/mtmd/models/mobilenetv5.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -15,8 +16,6 @@ const c = impl.c;
 
 const T = graph.T;
 const Block = model_mod.MobilenetV5Block;
-
-extern fn sqrtf(x: f32) f32;
 
 fn neInt(t: T, i: usize) c_int {
     return @intCast(graph.ne(t, i));
@@ -220,7 +219,7 @@ pub fn buildMobilenetAttn(g: *graph.Graph, inp: T, block: *const Block) T {
     v = c.ggml_cont(ctx0, v); // [M, D, 1, B]
 
     // Multi-Query Attention
-    const scale: f32 = 1.0 / sqrtf(@floatFromInt(D));
+    const scale: f32 = 1.0 / libm.sqrtfInt(D);
 
     // Step 1: Compute Q @ K.T
     var scores = c.ggml_mul_mat(ctx0, k, q);
@@ -400,7 +399,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
     // 2. FEATURE SCALING
     // PyTorch: vision_outputs *= self.config.vision_config.hidden_size**0.5
-    const scale_factor = sqrtf(@floatFromInt(C));
+    const scale_factor = libm.sqrtfInt(C);
     cur = c.ggml_scale(ctx0, cur, scale_factor);
 
     // 3. SOFT EMBEDDING NORM

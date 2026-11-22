@@ -10,7 +10,7 @@
 const std = @import("std");
 
 pub const impl = @import("impl.zig");
-pub const libcxx = @import("libcxx.zig");
+pub const libcxx = @import("stdlib").libcxx;
 pub const regex = @import("regex.zig");
 pub const unicode = @import("unicode.zig");
 pub const arch = @import("arch.zig");

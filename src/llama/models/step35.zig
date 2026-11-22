@@ -11,6 +11,7 @@
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -325,7 +326,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Qcur, "Qcur_pos", il);
             b.cb(Kcur, "Kcur_pos", il);
 
-            const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(b.n_embd_head_k));
+            const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
             var attn_out = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
             b.cb(attn_out, "attn_out", il);
             // The head-wise attention gate, sigmoid(g_proj(x)) in torch.
@@ -495,7 +496,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Qcur, "mtp_Qcur_pos", il);
     b.cb(Kcur, "mtp_Kcur_pos", il);
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(b.n_embd_head_k));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(b.n_embd_head_k);
     var attn_out = b.buildAttn(inp_attn, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(attn_out, "mtp_attn_out", il);
 

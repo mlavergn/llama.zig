@@ -19,6 +19,7 @@
 //! behind. So does this.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const c = tc.c;
 const io = tc.io;
@@ -59,7 +60,7 @@ fn getKvF32(ctx_gguf: ?*c.gguf_context, key: [*:0]const u8) f32 {
     return if (id < 0) 0.0 else c.gguf_get_val_f32(ctx_gguf, id);
 }
 
-const Out = tc.file.Out;
+const Out = stdlib.file.Out;
 
 /// `fout`'s `failbit` exception, which a failed write raises as a failed
 /// open does, to `main`, which prints it and exits 1.
@@ -84,7 +85,7 @@ fn neString(a: std.mem.Allocator, t: *const c.ggml_tensor) ![:0]u8 {
 
 /// `GGML_PAD(x, GGUF_DEFAULT_ALIGNMENT)`.
 fn pad(x: usize) usize {
-    return tc.ggml.pad(x, c.GGUF_DEFAULT_ALIGNMENT);
+    return stdlib.num.pad(usize, x, c.GGUF_DEFAULT_ALIGNMENT);
 }
 
 /// Ports `load_gguf` (export-lora.cpp:50 @b1b770d90).
@@ -106,7 +107,7 @@ const Input = struct {
     scale: f32,
 
     fn init(a: std.mem.Allocator, std_io: std.Io, fname: [:0]const u8, scale: f32) !Input {
-        const f_in = tc.file.openIn(std_io, fname) catch return throw("failed to open input gguf from {s}", .{fname});
+        const f_in = stdlib.file.openIn(std_io, fname) catch return throw("failed to open input gguf from {s}", .{fname});
         var self: Input = .{ .io = std_io, .f_in = f_in, .scale = scale };
 
         self.ctx_gguf = try loadGguf(fname, &self.ctx_meta);
@@ -142,7 +143,7 @@ const Input = struct {
         const zname = try a.dupeSentinel(u8, name, 0);
         const i_tensor_in = c.gguf_find_tensor(self.ctx_gguf, zname.ptr); // idx of tensor in the input file
         const offset = c.gguf_get_data_offset(self.ctx_gguf) + c.gguf_get_tensor_offset(self.ctx_gguf, i_tensor_in);
-        if (!tc.file.readAt(self.io, self.f_in, buf.items[0..len], offset)) {
+        if (!stdlib.file.readAt(self.io, self.f_in, buf.items[0..len], offset)) {
             return throw("failed to read data for tensor {s}, input file may be truncated", .{name});
         }
     }
@@ -460,9 +461,9 @@ fn run(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u8 {
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, init.io, argv);

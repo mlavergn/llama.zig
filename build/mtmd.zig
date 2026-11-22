@@ -25,6 +25,7 @@ pub fn module(b: *std.Build, opts: Options) *std.Build.Module {
         .link_libc = true,
     });
     mod.addImport("llama", opts.reference.llama.root_module);
+    mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     return mod;
 }
 

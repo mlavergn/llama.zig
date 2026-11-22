@@ -12,6 +12,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -220,7 +221,7 @@ fn buildGraph(comptime has_swa: bool, model: *const Model, b: *const graph.Build
     const inp_attn = if (has_swa) b.buildAttnInpKvIswa() else b.buildAttnInpKv();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {

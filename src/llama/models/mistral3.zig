@@ -10,6 +10,7 @@
 //! `build_arch_graph`, its `input_t_cond`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
@@ -145,11 +146,11 @@ const InputTCond = struct {
         const data = allocator.alloc(f32, @intCast(n_embd)) catch oom();
         @memset(data, 0.0);
         const half: i64 = @divTrunc(n_embd, 2);
-        const log_10000 = log(10000.0);
+        const log_10000 = libm.log(10000.0);
         var i: i64 = 0;
         while (i < half) : (i += 1) {
-            const freq: f64 = impl.exp(-log_10000 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(half))) * @as(f64, @floatFromInt(n_delay));
-            const sc = sinCos(freq);
+            const freq: f64 = libm.exp(-log_10000 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(half))) * @as(f64, @floatFromInt(n_delay));
+            const sc = libm.sinCos64(freq);
             data[@intCast(i)] = @floatCast(sc.cos);
             data[@intCast(half + i)] = @floatCast(sc.sin);
         }
@@ -177,26 +178,7 @@ fn oom() noreturn {
     impl.abort("models/mistral3.cpp", 0, "out of memory");
 }
 
-extern fn log(x: f64) f64;
-extern fn sin(x: f64) f64;
-extern fn cos(x: f64) f64;
-
 /// Mirrors the `__double2` that `__sincos_stret` returns (math.h).
-const Double2 = extern struct { sin: f64, cos: f64 };
-
-extern fn __sincos_stret(x: f64) Double2;
-
-/// `sin(x)` and `cos(x)` as clang emits them when both appear, as
-/// `cpu/ops/common.zig`'s `sinCos` does for `f32`: the reference
-/// `mistral3.o` imports `___sincos_stret` on Darwin and neither `_sin` nor
-/// `_cos`; elsewhere `-fmath-errno` keeps the pair two calls.
-fn sinCos(x: f64) Double2 {
-    if (comptime builtin.os.tag.isDarwin()) {
-        return __sincos_stret(x);
-    }
-    return .{ .sin = sin(x), .cos = cos(x) };
-}
-
 /// Ports `llama_model_mistral3`'s `build_arch_graph` (models/mistral3.cpp:126
 /// @b1b770d90) and the constructor of its `graph` (models/mistral3.cpp:130
 /// @b1b770d90).
@@ -232,7 +214,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
         _ = b.res.addInput(InputTCond, inp);
     }
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     const inp_out_ids = b.buildInpOutIds();
 

@@ -22,7 +22,8 @@
 //! This build is static, as in `metal/backend.zig`.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const m = @import("module.zig");
@@ -31,8 +32,6 @@ const instance = m.instance;
 const vk = common.vk;
 const c = impl.c;
 const allocator = common.allocator;
-
-extern fn atoi(s: [*:0]const u8) c_int;
 
 /// Ports `vk_conv_shapes` (ggml-vulkan-types.h:380 @b1b770d90).
 pub const ConvShape = enum(u32) { @"128x128", @"64x32", @"32x256", @"64x128", @"256x128" };
@@ -259,7 +258,7 @@ fn regGetDevice(r: c.ggml_backend_reg_t, device: usize) callconv(.c) c.ggml_back
         Devices.mutex.lock();
         defer Devices.mutex.unlock();
         if (!Devices.initialized) {
-            const min_batch_size: c_int = if (std.c.getenv("GGML_OP_OFFLOAD_MIN_BATCH")) |e| atoi(e) else 32;
+            const min_batch_size: c_int = if (stdlib.env.getenv("GGML_OP_OFFLOAD_MIN_BATCH")) |e| stdlib.num.atoiC(e) else 32;
             const count: usize = @intCast(getDeviceCount());
             for (0..count) |i| {
                 var desc: [256]u8 = undefined;

@@ -15,7 +15,6 @@ const json = @import("json");
 const peg = @import("peg");
 const exception = @import("exception.zig");
 
-const Allocator = std.mem.Allocator;
 const Error = exception.Error;
 
 /// A `cli/peg` error as a chat one, its `what()` carried over.
@@ -95,61 +94,9 @@ pub fn contains(s: []const u8, needle: []const u8) bool {
     return std.mem.indexOf(u8, s, needle) != null;
 }
 
-/// Ports `string_replace_all` (common/common.cpp:528 @b1b770d90): every
-/// occurrence of `search`, left to right, never rescanning a replacement;
-/// an empty `search` changes nothing.
-///
-/// Return: owned by `a`.
-pub fn replaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []const u8) Error![]u8 {
-    if (search.len == 0) return a.dupe(u8, s);
-    var out: std.ArrayList(u8) = .empty;
-    var last: usize = 0;
-    var pos: usize = 0;
-    while (std.mem.indexOfPos(u8, s, pos, search)) |at| {
-        try out.appendSlice(a, s[last..at]);
-        try out.appendSlice(a, replace);
-        pos = at + search.len;
-        last = pos;
-    }
-    try out.appendSlice(a, s[last..]);
-    return out.toOwnedSlice(a);
-}
-
-/// `GGML_ASSERT(cond)`: kept in every build mode, as upstream's is; a
-/// failure writes the condition to stderr and aborts, never `@panic` --
-/// A panic handler pulls Zig's `compiler_rt` libm in.
-pub fn ggmlAssert(ok: bool, comptime cond: []const u8) void {
-    if (ok) return;
-    const text = "GGML_ASSERT(" ++ cond ++ ") failed\n";
-    _ = writeFd2(text);
-    std.c.abort();
-}
-
-/// `write(2, bytes, n)`. On Windows `std.c.write` takes a `HANDLE`, so this
-/// is the CRT's `_write` on descriptor 2 there, as MinGW's `write` is.
-fn writeFd2(bytes: []const u8) isize {
-    if (comptime @import("builtin").os.tag == .windows) {
-        const crt_write = @extern(*const fn (c_int, [*]const u8, c_uint) callconv(.c) c_int, .{ .name = "_write" });
-        return crt_write(2, bytes.ptr, @intCast(@min(bytes.len, std.math.maxInt(c_int))));
-    }
-    return std.c.write(2, bytes.ptr, bytes.len);
-}
-
-/// `std`'s `isspace` in the C locale.
-pub fn isSpace(c: u8) bool {
-    return c == ' ' or (c >= '\t' and c <= '\r');
-}
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 
 test {
     std.testing.refAllDecls(@This());
-}
-
-test "replaceAll does not rescan what it wrote" {
-    const a = std.testing.allocator;
-    const s = try replaceAll(a, "aaa", "a", "aa");
-    defer a.free(s);
-    try std.testing.expectEqualStrings("aaaaaa", s);
 }

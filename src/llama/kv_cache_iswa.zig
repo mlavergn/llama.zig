@@ -13,6 +13,7 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const hparams_mod = @import("hparams.zig");
 const batch = @import("batch.zig");
@@ -105,7 +106,7 @@ pub const KvCacheIswa = struct {
         // The SWA cache is always padded to 256, for performance
         // (https://github.com/ggml-org/llama.cpp/issues/17037).
         const want_swa: u32 = hparams.n_swa *% (if (unified) n_seq_max else 1) +% n_ubatch;
-        var size_swa: u32 = padTo(@min(size_base, want_swa), 256);
+        var size_swa: u32 = stdlib.num.pad(u32, @min(size_base, want_swa), 256);
 
         // A full-size SWA cache is as large as the base one.
         if (swa_full) {
@@ -398,11 +399,6 @@ pub const KvCacheIswa = struct {
     }
 };
 
-/// `GGML_PAD` (ggml.h:94 @b1b770d90) for a power-of-two `n`.
-fn padTo(x: u32, comptime n: u32) u32 {
-    return (x +% (n - 1)) & ~@as(u32, n - 1);
-}
-
 fn releaseAll(list: *std.ArrayList(Ubatch)) void {
     for (list.items) |*u| u.release();
     list.deinit(allocator);
@@ -568,7 +564,7 @@ test {
 }
 
 test "the SWA cache rounds up to 256 cells" {
-    try std.testing.expectEqual(@as(u32, 256), padTo(1, 256));
-    try std.testing.expectEqual(@as(u32, 256), padTo(256, 256));
-    try std.testing.expectEqual(@as(u32, 512), padTo(257, 256));
+    try std.testing.expectEqual(@as(u32, 256), stdlib.num.pad(u32, 1, 256));
+    try std.testing.expectEqual(@as(u32, 256), stdlib.num.pad(u32, 256, 256));
+    try std.testing.expectEqual(@as(u32, 512), stdlib.num.pad(u32, 257, 256));
 }

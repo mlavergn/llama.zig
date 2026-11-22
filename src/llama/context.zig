@@ -26,6 +26,8 @@
 //! they return null.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const arch_mod = @import("arch.zig");
 const cparams_mod = @import("cparams.zig");
@@ -36,7 +38,7 @@ const graph = @import("graph.zig");
 const adapter = @import("adapter.zig");
 const model_mod = @import("model.zig");
 const context_state = @import("context_state.zig");
-const libcxx = @import("libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const moe_cache_mod = @import("moe_cache.zig");
 
 const c = impl.c;
@@ -506,7 +508,7 @@ pub const Context = struct {
                 cp.yarn_attn_factor = getMscale(factor, 1.0);
             }
             // YaRN with ext_factor != 0 cancels this factor in the kernel.
-            cp.yarn_attn_factor *= 1.0 / (1.0 + 0.1 * impl.logf(factor));
+            cp.yarn_attn_factor *= 1.0 / (1.0 + 0.1 * libm.logf(factor));
         }
 
         cp.yarn_attn_factor *= hparams.rope_attn_factor;
@@ -580,7 +582,7 @@ pub const Context = struct {
         {
             cp.fused_kv_rows = false;
 
-            if (std.c.getenv("LLAMA_KV_ROWS_DISABLE") == null) {
+            if (stdlib.env.getenv("LLAMA_KV_ROWS_DISABLE") == null) {
                 cp.auto_fkvr = cp.kv_unified;
             } else {
                 impl.logInfo("%s: LLAMA_KV_ROWS_DISABLE set, disabling kv_rows\n", .{func});
@@ -591,16 +593,16 @@ pub const Context = struct {
         // Set later.
         cp.pipeline_parallel = false;
 
-        if (std.c.getenv("LLAMA_GRAPH_REUSE_DISABLE")) |v| self.graph_reuse_disable = impl.atoi(v) != 0;
+        if (stdlib.env.getenv("LLAMA_GRAPH_REUSE_DISABLE")) |v| self.graph_reuse_disable = stdlib.num.atoiC(v) != 0;
         if (self.graph_reuse_disable) impl.logWarn("%s: graph reuse disabled\n", .{func});
 
-        cp.n_ctx = padTo(cp.n_ctx, 256);
+        cp.n_ctx = stdlib.num.pad(u32, cp.n_ctx, 256);
 
         if (cp.kv_unified) {
             cp.n_ctx_seq = cp.n_ctx;
         } else {
             cp.n_ctx_seq = cp.n_ctx / cp.n_seq_max;
-            cp.n_ctx_seq = padTo(cp.n_ctx_seq, 256);
+            cp.n_ctx_seq = stdlib.num.pad(u32, cp.n_ctx_seq, 256);
             if (cp.n_ctx_seq == 0) return exc.throw(.runtime_error, "n_ctx_seq == 0", .{});
             if (cp.n_ctx != cp.n_ctx_seq * cp.n_seq_max) {
                 cp.n_ctx = cp.n_ctx_seq * cp.n_seq_max;
@@ -777,7 +779,7 @@ pub const Context = struct {
     }
 
     fn getMscale(scale: f32, mscale: f32) f32 {
-        return if (scale <= 1.0) 1.0 else (0.1 * mscale * impl.logf(scale) + 1.0);
+        return if (scale <= 1.0) 1.0 else (0.1 * mscale * libm.logf(scale) + 1.0);
     }
 
     /// Ports the destructor of `llama_context` (llama-context.cpp:633 @b1b770d90).
@@ -3227,11 +3229,6 @@ pub const Context = struct {
     }
 };
 
-/// `GGML_PAD`.
-fn padTo(x: u32, n: u32) u32 {
-    return (x + n - 1) / n * n;
-}
-
 /// Ports `llama_flash_attn_type_name` (src/llama.cpp:38 @b1b770d90).
 pub fn flashAttnTypeName(t: c.enum_llama_flash_attn_type) [:0]const u8 {
     return switch (t) {
@@ -3519,6 +3516,6 @@ test {
 }
 
 test "padding rounds up to the multiple" {
-    try std.testing.expectEqual(@as(u32, 512), padTo(300, 256));
-    try std.testing.expectEqual(@as(u32, 256), padTo(256, 256));
+    try std.testing.expectEqual(@as(u32, 512), stdlib.num.pad(u32, 300, 256));
+    try std.testing.expectEqual(@as(u32, 256), stdlib.num.pad(u32, 256, 256));
 }

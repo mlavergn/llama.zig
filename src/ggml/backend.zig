@@ -44,6 +44,7 @@
 //! function-local `static` storage for the two CPU buffer types.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const c = impl.c;
 
@@ -108,7 +109,7 @@ fn allocBufferNPlan(buft: c.ggml_backend_buffer_type_t, tensors: [*c]?*c.ggml_te
         var this_size: usize = 0;
         const t = tensors[i].?;
         if (t.data == null and t.view_src == null) {
-            this_size = impl.pad(ggml_backend_buft_get_alloc_size(buft, t), alignment);
+            this_size = stdlib.num.pad(usize, ggml_backend_buft_get_alloc_size(buft, t), alignment);
         }
 
         // flush the current buffer if adding this tensor would exceed max_size
@@ -1826,7 +1827,7 @@ fn cpuBufferGetBase(buffer: c.ggml_backend_buffer_t) callconv(.c) ?*anyopaque {
 
     // align the buffer
     if (data % impl.tensor_alignment != 0) {
-        data = impl.pad(data, impl.tensor_alignment);
+        data = stdlib.num.pad(usize, data, impl.tensor_alignment);
     }
 
     return @ptrFromInt(data);

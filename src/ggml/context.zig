@@ -19,21 +19,20 @@
 //! immediately after the struct, which is what `result + 1` means in the C.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const types = @import("types.zig");
 const c = impl.c;
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: impl.CVaList) c_int;
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
-
-/// `printf`, to the stdout the tools share (`sync.stdio`). A line longer
+/// `printf`, to the stdout the tools share (`stdlib.stdio`). A line longer
 /// than the buffer is cut; no line `ggml_print_object` prints comes close.
 fn printf(comptime fmt: [*:0]const u8, args: anytype) void {
     var buf: [512]u8 = undefined;
-    const n = @call(.auto, snprintf, .{ &buf, buf.len, fmt } ++ args);
+    const n = @call(.auto, libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
     if (n <= 0) return;
-    @import("sync").stdio.stdout().write(buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]);
+    @import("stdlib").stdio.stdout().write(buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]);
 }
 
 /// True when the C build would leave `NDEBUG` unset. `ggml_new_object` aborts
@@ -93,7 +92,7 @@ pub export fn ggml_init(params: c.struct_ggml_init_params) ?*Context {
     // A caller-supplied buffer is taken at its stated size; one we allocate is
     // rounded up so every object header inside stays aligned.
     const owned = params.mem_buffer == null;
-    if (owned) mem_size = impl.pad(mem_size, c.GGML_MEM_ALIGN);
+    if (owned) mem_size = stdlib.num.pad(usize, mem_size, c.GGML_MEM_ALIGN);
 
     ctx.* = .{
         .mem_size = mem_size,
@@ -185,7 +184,7 @@ pub fn newObject(ctx: *Context, obj_type: c.enum_ggml_object_type, size: usize) 
     const cur_end = cur_offs + cur_size;
 
     impl.assert(size <= std.math.maxInt(usize) - (@as(usize, c.GGML_MEM_ALIGN) - 1), "size <= SIZE_MAX - (GGML_MEM_ALIGN - 1)");
-    const size_needed = impl.pad(size, c.GGML_MEM_ALIGN);
+    const size_needed = stdlib.num.pad(usize, size, c.GGML_MEM_ALIGN);
 
     const mem_buffer: [*]u8 = @ptrCast(ctx.mem_buffer.?);
 
@@ -511,7 +510,7 @@ pub const ggml_format_name = if (impl.zig_varargs) formatName else c.ggml_format
 fn formatName(tensor: *c.ggml_tensor, fmt: [*:0]const u8, ...) callconv(.c) *c.ggml_tensor {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
-    _ = vsnprintf(@ptrCast(&tensor.name), tensor.name.len, fmt, impl.cVaList(&ap));
+    _ = libc.vsnprintf(@ptrCast(&tensor.name), tensor.name.len, fmt, impl.cVaList(&ap));
     return tensor;
 }
 

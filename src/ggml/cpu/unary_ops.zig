@@ -43,8 +43,10 @@
 //! a decision rather than an oversight.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const convert = @import("convert.zig");
+const common = @import("ops/common.zig");
 const defs = @import("defs.zig");
 const c = impl.c;
 
@@ -56,22 +58,6 @@ const ComputeParams = defs.ComputeParams;
 //
 // Declared rather than imported: these come from `<math.h>` via the C's
 // headers, and `src/ggml/impl.zig`'s `@cImport` does not take it.
-
-extern fn fabsf(x: f32) f32;
-extern fn tanhf(x: f32) f32;
-extern fn expf(x: f32) f32;
-extern fn expm1f(x: f32) f32;
-extern fn logf(x: f32) f32;
-extern fn log1pf(x: f32) f32;
-extern fn sqrtf(x: f32) f32;
-extern fn sinf(x: f32) f32;
-extern fn cosf(x: f32) f32;
-extern fn floorf(x: f32) f32;
-extern fn ceilf(x: f32) f32;
-extern fn roundf(x: f32) f32;
-extern fn truncf(x: f32) f32;
-extern fn fminf(x: f32, y: f32) f32;
-extern fn fmaxf(x: f32, y: f32) f32;
 
 // -----------------------------------------------------------------------------
 // The scalar operations
@@ -112,30 +98,30 @@ const Op = enum {
 
     inline fn apply(comptime op: Op, x: f32) f32 {
         return switch (op) {
-            .abs => fabsf(x),
+            .abs => libm.fabsf(x),
             .sgn => if (x > 0.0) 1.0 else (if (x < 0.0) -1.0 else 0.0),
             .neg => -x,
             .step => if (x > 0.0) 1.0 else 0.0,
-            .tanh => tanhf(x),
-            .elu => if (x > 0.0) x else expm1f(x),
+            .tanh => libm.tanhf(x),
+            .elu => if (x > 0.0) x else libm.expm1f(x),
             .relu => if (x > 0.0) x else 0.0,
-            .sigmoid => 1.0 / (1.0 + expf(-x)),
-            .hardsigmoid => fminf(1.0, fmaxf(0.0, (x + 3.0) / 6.0)),
-            .exp => expf(x),
-            .hardswish => x * fminf(1.0, fmaxf(0.0, (x + 3.0) / 6.0)),
+            .sigmoid => 1.0 / (1.0 + libm.expf(-x)),
+            .hardsigmoid => libm.fminf(1.0, libm.fmaxf(0.0, (x + 3.0) / 6.0)),
+            .exp => libm.expf(x),
+            .hardswish => x * libm.fminf(1.0, libm.fmaxf(0.0, (x + 3.0) / 6.0)),
             .sqr => x * x,
-            .sqrt => sqrtf(x),
-            .sin => sinf(x),
-            .cos => cosf(x),
-            .log => logf(x),
-            // Note this is `expf(x) - 1`, *not* `expm1f(x)`: the C spells it
+            .sqrt => libm.sqrtf(x),
+            .sin => libm.sinf(x),
+            .cos => libm.cosf(x),
+            .log => libm.logf(x),
+            // Note this is `libm.expf(x) - 1`, *not* `libm.expm1f(x)`: the C spells it
             // out and the two differ near zero. `elu` above does use `expm1f`.
-            .expm1 => expf(x) - 1.0,
-            .softplus => if (x > 20.0) x else log1pf(expf(x)),
-            .floor => floorf(x),
-            .ceil => ceilf(x),
-            .round => roundf(x),
-            .trunc => truncf(x),
+            .expm1 => libm.expf(x) - 1.0,
+            .softplus => if (x > 20.0) x else libm.log1pf(libm.expf(x)),
+            .floor => libm.floorf(x),
+            .ceil => libm.ceilf(x),
+            .round => libm.roundf(x),
+            .trunc => libm.truncf(x),
         };
     }
 };
@@ -166,55 +152,14 @@ const Xielu = struct {
         if (x > 0.0) {
             return @mulAdd(f32, self.alpha_p * x, x, self.beta * x);
         }
-        const min_x_eps = fminf(x, self.eps);
-        return @mulAdd(f32, expm1f(min_x_eps) - x, self.alpha_n, self.beta * x);
+        const min_x_eps = libm.fminf(x, self.eps);
+        return @mulAdd(f32, libm.expm1f(min_x_eps) - x, self.alpha_n, self.beta * x);
     }
 };
 
 // -----------------------------------------------------------------------------
 // Element conversion and thread range
 //
-// The same two helpers `binary_ops.zig` ports from `ggml-cpu/common.h`; they
-// are duplicated rather than shared because each file states its own
-// provenance and the C has them in a header both include.
-
-/// Ports the `to_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @b1b770d90).
-inline fn toF32(comptime T: type, v: T) f32 {
-    return switch (T) {
-        f32 => v,
-        c.ggml_fp16_t => impl.fp16ToFp32(v),
-        c.ggml_bf16_t => impl.bf16ToFp32(v.bits),
-        else => @compileError("no conversion for " ++ @typeName(T)),
-    };
-}
-
-/// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @b1b770d90).
-inline fn fromF32(comptime T: type, v: f32) T {
-    return switch (T) {
-        f32 => v,
-        c.ggml_fp16_t => convert.cpuFp32ToFp16(v),
-        c.ggml_bf16_t => .{ .bits = impl.fp32ToBf16(v) },
-        else => @compileError("no conversion for " ++ @typeName(T)),
-    };
-}
-
-/// Ports `get_thread_range` (ggml-cpu/common.h:88 @b1b770d90).
-fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, i64 } {
-    const ith: i64 = params.ith;
-    const nth: i64 = params.nth;
-
-    const nr = c.ggml_nrows(src0);
-
-    const dr = @divTrunc(nr + nth - 1, nth);
-
-    const ir0 = dr * ith;
-    const ir1 = @min(ir0 + dr, nr);
-
-    return .{ ir0, ir1 };
-}
-
 // -----------------------------------------------------------------------------
 // The kernels
 //
@@ -233,7 +178,7 @@ inline fn vecUnaryOp(
 ) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
-        y[i] = fromF32(Dst, op.apply(toF32(Src0, x[i])));
+        y[i] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[i])));
     }
 }
 
@@ -260,7 +205,7 @@ fn applyUnaryOp(
     impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
     impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
-    const ir0, const ir1 = threadRange(params, src0);
+    const ir0, const ir1 = common.getThreadRange(params, src0);
 
     var ir = ir0;
     while (ir < ir1) : (ir += 1) {
@@ -318,7 +263,7 @@ inline fn vecUnaryOpFunctor(
 ) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
-        y[i] = fromF32(Dst, op.apply(toF32(Src0, x[i])));
+        y[i] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[i])));
     }
 }
 
@@ -345,7 +290,7 @@ fn applyUnaryOpFunctor(
     impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
     impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
-    const ir0, const ir1 = threadRange(params, src0);
+    const ir0, const ir1 = common.getThreadRange(params, src0);
 
     var ir = ir0;
     while (ir < ir1) : (ir += 1) {

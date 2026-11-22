@@ -25,8 +25,9 @@
 //! exact. `make sampler-diff` is the oracle that confirms each.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const core = @import("core.zig");
 
 const c = impl.c;
@@ -213,7 +214,7 @@ fn distApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 
     var sum_cum: f64 = 0.0;
     for (core.items(cur_p)) |*d| {
-        const p = impl.expf(d.logit - max_l);
+        const p = libm.expf(d.logit - max_l);
         d.p = p;
         sum_cum += p;
     }
@@ -731,7 +732,7 @@ fn minPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
 
         var max_logit: f32 = -std.math.floatMax(f32);
         for (core.items(cur_p)) |d| max_logit = libcxx.max(f32, max_logit, d.logit);
-        const min_logit = max_logit + impl.logf(ctx.p);
+        const min_logit = max_logit + libm.logf(ctx.p);
 
         for (core.items(cur_p)) |d| {
             if (d.logit >= min_logit) {
@@ -751,7 +752,7 @@ fn minPApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void {
             core.partialSortInplace(cur_p, @intCast(cur_p.*.size));
         }
 
-        const min_logit = cur_p.*.data[0].logit + impl.logf(ctx.p);
+        const min_logit = cur_p.*.data[0].logit + libm.logf(ctx.p);
         var i: usize = 1;
 
         while (i < cur_p.*.size) : (i += 1) {
@@ -797,7 +798,7 @@ fn minPBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.str
     const max_logit = c.ggml_get_rows(ctx, logits_rows, max_idx);
     _ = c.ggml_set_name(max_logit, "max_logit");
 
-    const threshold = c.ggml_scale_bias(ctx, max_logit, 1.0, impl.logf(sctx.p));
+    const threshold = c.ggml_scale_bias(ctx, max_logit, 1.0, libm.logf(sctx.p));
     _ = c.ggml_set_name(threshold, "min_p_threshold");
 
     const sub = c.ggml_sub(ctx, logits, threshold);
@@ -895,9 +896,9 @@ fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
     const n_unrolled = if (cur_p.*.size >= 4) cur_p.*.size & ~@as(usize, 3) else 0;
     for (core.items(cur_p), 0..) |d, i| {
         if (i < n_unrolled) {
-            entropy = entropy - d.p * impl.logf(d.p);
+            entropy = entropy - d.p * libm.logf(d.p);
         } else {
-            entropy = @mulAdd(f32, -d.p, impl.logf(d.p), entropy);
+            entropy = @mulAdd(f32, -d.p, libm.logf(d.p), entropy);
         }
     }
 
@@ -905,7 +906,7 @@ fn typicalApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
     const shifted_scores = impl.allocator.alloc(f32, n) catch impl.abort(src, 1928, "out of memory");
     defer impl.allocator.free(shifted_scores);
     for (core.items(cur_p), 0..) |d, i| {
-        shifted_scores[i] = @abs(-impl.logf(d.p) - entropy);
+        shifted_scores[i] = @abs(-libm.logf(d.p) - entropy);
     }
 
     const indices = impl.allocator.alloc(usize, n) catch impl.abort(src, 1935, "out of memory");
@@ -1104,7 +1105,7 @@ fn tempExtApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
 
         if (cur_p.*.size <= 1) return;
 
-        const max_entropy = -impl.logf(1.0 / @as(f32, @floatFromInt(cur_p.*.size)));
+        const max_entropy = -libm.logf(1.0 / @as(f32, @floatFromInt(cur_p.*.size)));
 
         core.softmaxImpl(cur_p, true);
 
@@ -1112,13 +1113,13 @@ fn tempExtApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
         for (core.items(cur_p)) |d| {
             const prob = d.p;
             if (prob > 0.0) {
-                entropy = @mulAdd(f32, -prob, impl.logf(prob), entropy);
+                entropy = @mulAdd(f32, -prob, libm.logf(prob), entropy);
             }
         }
 
         const normalized_entropy = entropy / max_entropy;
 
-        const dyn_temp = @mulAdd(f32, max_temp - min_temp, impl.powf(normalized_entropy, exponent_val), min_temp);
+        const dyn_temp = @mulAdd(f32, max_temp - min_temp, libm.powf(normalized_entropy, exponent_val), min_temp);
 
         core.tempImpl(cur_p, dyn_temp);
 
@@ -1126,7 +1127,7 @@ fn tempExtApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) void 
 
         var cum_sum_double: f64 = 0.0;
         for (core.items(cur_p)) |*d| {
-            const p = impl.exp(@as(f64, d.logit) - max_l_double);
+            const p = libm.exp(@as(f64, d.logit) - max_l_double);
             d.p = @floatCast(p);
             cum_sum_double += p;
         }
@@ -1172,7 +1173,7 @@ fn tempExtBackendApply(smpl: [*c]Sampler, ctx: ?*c.struct_ggml_context, gf: ?*c.
 
     const min_temp = libcxx.max(f32, 0.0, sctx.temp - sctx.delta);
     const max_temp = sctx.temp + sctx.delta;
-    const max_entropy = impl.logf(@floatFromInt(logits[0].ne[0]));
+    const max_entropy = libm.logf(@floatFromInt(logits[0].ne[0]));
 
     const probs = c.ggml_soft_max(ctx, logits);
     _ = c.ggml_set_name(probs, "temp_ext_softmax_probs");
@@ -1393,10 +1394,10 @@ fn topNSigmaApply(smpl: [*c]Sampler, cur_p: [*c]TokenDataArray) callconv(.c) voi
     var acc: f32 = 0;
     for (core.items(cur_p)) |d| {
         if (d.logit != -inf) {
-            acc = @floatCast(@as(f64, acc) + impl.pow(d.logit - mean, 2));
+            acc = @floatCast(@as(f64, acc) + libm.pow(d.logit - mean, 2));
         }
     }
-    const std_dev: f32 = if (valid_count > 0) impl.sqrtf(acc / @as(f32, @floatFromInt(valid_count))) else 0;
+    const std_dev: f32 = if (valid_count > 0) libm.sqrtf(acc / @as(f32, @floatFromInt(valid_count))) else 0;
 
     for (core.items(cur_p)) |*d| {
         if (d.logit < @mulAdd(f32, -ctx.n, std_dev, max)) {

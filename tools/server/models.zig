@@ -32,7 +32,8 @@
 //! the condition variable is a pthread one, as `queue.zig`'s are.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
@@ -95,35 +96,11 @@ fn timeMs() i64 {
     return c.ggml_time_ms();
 }
 
-/// A `std::condition_variable` paired with `server_models::mutex`.
-const Mutex = struct {
-    m: sync.Mutex = .{},
-    pub fn lock(self: *Mutex) void {
-        self.m.lock();
-    }
-    pub fn unlock(self: *Mutex) void {
-        self.m.unlock();
-    }
-};
-
-const Cond = struct {
-    c: sync.Condition = .{},
-    pub fn wait(self: *Cond, m: *Mutex) void {
-        self.c.wait(&m.m);
-    }
-    fn waitForMs(self: *Cond, m: *Mutex, ms: u64) void {
-        _ = self.c.timedWait(&m.m, ms * std.time.ns_per_ms);
-    }
-    pub fn notifyAll(self: *Cond) void {
-        self.c.broadcast();
-    }
-};
-
 // -----------------------------------------------------------------------------
 // the child process
 
 /// `server_subproc` over `common_subproc`.
-pub const ServerSubproc = subproc_mod.Subproc(tc.subproc.Subproc);
+pub const ServerSubproc = subproc_mod.Subproc(stdlib.subproc.Subproc);
 
 /// `std::shared_ptr<server_subproc>`: shared with the monitor thread.
 pub const SharedProc = struct {
@@ -149,14 +126,12 @@ pub const SharedProc = struct {
     }
 };
 
-extern fn time(t: ?*i64) i64;
-
 /// Ports `request_child_exit` (server-models.cpp:43 @b1b770d90): the exit
 /// command on the child's stdin. SIGPIPE is ignored by the server.
 fn requestChildExit(proc: *ServerSubproc) void {
     if (proc.sproc.stdinFile()) |stdin_file| {
         // fprintf and fflush: one write of the whole line
-        stdin_file.writeStreamingAll(tc.file.defaultIo(), cmd_router_to_child_exit ++ "\n") catch |err| switch (err) {
+        stdin_file.writeStreamingAll(stdlib.file.defaultIo(), cmd_router_to_child_exit ++ "\n") catch |err| switch (err) {
             else => {}, // a child already gone: EPIPE, SIGPIPE being ignored
         };
     }
@@ -356,7 +331,7 @@ pub const Meta = struct {
 
         // unified binary dispatches by subcommand, re-inject it right after the
         // binary path so the child starts as 'llama serve ...' not 'llama ...'
-        if (tc.env.get("LLAMA_APP_CMD")) |app_cmd| {
+        if (stdlib.env.get("LLAMA_APP_CMD")) |app_cmd| {
             if (app_cmd.len != 0 and bin_path.len != 0) {
                 try args.insert(a, 1, try a.dupe(u8, app_cmd));
             }
@@ -512,46 +487,38 @@ fn unsetReservedArgs(a: Allocator, preset: *Preset, unset_model_args: bool) void
     }
 }
 
-extern fn _NSGetExecutablePath(buf: [*]u8, size: *u32) c_int;
-extern fn realpath(path: [*:0]const u8, resolved: ?[*]u8) ?[*:0]u8;
-extern fn readlink(path: [*:0]const u8, buf: [*]u8, len: usize) isize;
-
 /// Ports `get_server_exec_path` (server-common.cpp:56 @b1b770d90), its
 /// macOS and Linux arms: this program's path, with symbolic links resolved
-/// on macOS.
+/// on macOS. `std.process.executablePath` fails where `realpath` does;
+/// upstream then keeps dyld's unresolved path, so dyld is asked here too,
+/// through std's declaration of it.
 pub fn getServerExecPath(a: Allocator) Error![]const u8 {
     if (comptime builtin.os.tag.isDarwin()) {
         var small_path: [std.c.PATH_MAX]u8 = undefined;
         var size: u32 = small_path.len;
 
-        if (_NSGetExecutablePath(&small_path, &size) == 0) {
+        if (std.c._NSGetExecutablePath(&small_path, &size) == 0) {
             // resolve any symlinks to get absolute path
-            const p: [*:0]const u8 = @ptrCast(&small_path);
-            if (realpath(p, null)) |r| {
-                defer std.c.free(r);
-                return a.dupe(u8, std.mem.span(r));
-            }
-            return a.dupe(u8, std.mem.span(p));
+            const p = std.mem.sliceTo(&small_path, 0);
+            if (stdlib.fs.realPathAlloc(a, p)) |r| return r;
+            return a.dupe(u8, p);
         } else {
             // buffer was too small, allocate required size and call again
             const buf = try a.alloc(u8, size);
-            if (_NSGetExecutablePath(buf.ptr, &size) == 0) {
-                const p: [*:0]const u8 = @ptrCast(buf.ptr);
-                if (realpath(p, null)) |r| {
-                    defer std.c.free(r);
-                    return a.dupe(u8, std.mem.span(r));
-                }
-                return a.dupe(u8, std.mem.span(p));
+            if (std.c._NSGetExecutablePath(buf.ptr, &size) == 0) {
+                const p = std.mem.sliceTo(buf, 0);
+                if (stdlib.fs.realPathAlloc(a, p)) |r| return r;
+                return a.dupe(u8, p);
             }
             return throw(error.RuntimeError, "_NSGetExecutablePath failed after buffer resize", .{});
         }
     } else {
         var path: [4096]u8 = undefined;
-        const count = readlink("/proc/self/exe", &path, path.len);
-        if (count <= 0) {
+        const target = stdlib.fs.readLink("/proc/self/exe", &path) orelse "";
+        if (target.len == 0) {
             return throw(error.RuntimeError, "failed to resolve /proc/self/exe", .{});
         }
-        return a.dupe(u8, path[0..@intCast(count)]);
+        return a.dupe(u8, target);
     }
 }
 
@@ -559,7 +526,7 @@ pub fn getServerExecPath(a: Allocator) Error![]const u8 {
 /// arm.
 fn getEnvironment(a: Allocator) Allocator.Error![]const []const u8 {
     var env: std.ArrayList([]const u8) = .empty;
-    const inherited = tc.env.map() orelse return env.items;
+    const inherited = stdlib.env.map() orelse return env.items;
     var it = inherited.iterator();
     while (it.next()) |e| {
         try env.append(a, try std.mem.concat(a, u8, &.{ e.key_ptr.*, "=", e.value_ptr.* }));
@@ -604,7 +571,7 @@ const Monitor = struct {
     };
 
     models: *Models,
-    mu: Mutex = .{},
+    mu: sync.Mutex = .{},
     cmds: std.ArrayList(Cmd) = .empty,
     children: std.ArrayList(Watched) = .empty, // monitor thread only
     waiter: subproc_mod.Waiter,
@@ -909,7 +876,7 @@ const ConvModelTracker = struct {
         model: []const u8,
         ticket: u64,
     };
-    mu: Mutex = .{},
+    mu: sync.Mutex = .{},
     next_ticket: u64 = 1,
     map: std.StringHashMapUnmanaged(EntryT) = .empty,
 
@@ -1122,7 +1089,7 @@ fn unfinishedDownloadsPath(a: Allocator) Error![]const u8 {
 /// never deleted. Thread-safe. Its strings live in an arena of its own, for
 /// the router's life: a record is a few short strings.
 pub const UnfinishedDownloads = struct {
-    mutex: Mutex = .{},
+    mutex: sync.Mutex = .{},
     downloads: std.ArrayList(UnfinishedDownload) = .empty,
     arena: std.heap.ArenaAllocator = .init(std.heap.c_allocator),
 
@@ -1142,7 +1109,7 @@ pub const UnfinishedDownloads = struct {
         const sa = scratch.allocator();
         const path = try unfinishedDownloadsPath(sa);
         const z = try sa.dupeSentinel(u8, path, 0);
-        const raw = readAll(sa, z) orelse return;
+        const raw = (stdlib.file.readStream(stdlib.file.defaultIo(), sa, z) catch null) orelse return;
         self.mutex.lock();
         defer self.mutex.unlock();
         self.parse(sa, raw) catch |e| {
@@ -1234,7 +1201,7 @@ pub const UnfinishedDownloads = struct {
             if (shared) {
                 continue;
             }
-            _ = hf_cache.removeFile(gpa, p.path);
+            _ = stdlib.fs.removeIfExists(p.path);
         }
     }
 
@@ -1337,25 +1304,10 @@ pub const UnfinishedDownloads = struct {
     }
 };
 
-/// `std::ifstream in(path)`, read whole: null when it does not open.
-fn readAll(a: Allocator, path: [:0]const u8) ?[]u8 {
-    const fd = std.c.open(path.ptr, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-    if (fd < 0) return null;
-    defer _ = std.c.close(fd);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = std.c.read(fd, &buf, buf.len);
-        if (n <= 0) break;
-        out.appendSlice(a, buf[0..@intCast(n)]) catch return null;
-    }
-    return out.items;
-}
-
 /// Ports `server_models` (server-models.h:163 @b1b770d90).
 pub const Models = struct {
-    mutex: Mutex = .{},
-    cv: Cond = .{},
+    mutex: sync.Mutex = .{},
+    cv: sync.Condition = .{},
     mapping: std.ArrayList(*Instance) = .empty,
 
     // downloads that never finished, with the sidecar kinds they pull
@@ -1428,7 +1380,7 @@ pub const Models = struct {
 
         try self.unfinished_downloads.load();
         try self.loadModels();
-        self.debug_fake_timing = if (tc.env.get("LLAMA_SERVER_DEBUG_FAKE_TIMING")) |v| v.len != 0 else false;
+        self.debug_fake_timing = if (stdlib.env.get("LLAMA_SERVER_DEBUG_FAKE_TIMING")) |v| v.len != 0 else false;
     }
 
     /// The destructor: the monitor is joined first, as the C++'s member
@@ -1511,8 +1463,8 @@ pub const Models = struct {
         // parse aliases from preset's --alias option (comma-separated)
         if (meta.preset.getOption("LLAMA_ARG_ALIAS")) |alias_str| {
             if (alias_str.len != 0) {
-                for ((try tc.strings.split(sa, alias_str, ',')).items) |alias_raw| {
-                    const alias = tc.strings.strip(alias_raw);
+                for ((try stdlib.strings.split(sa, alias_str, ',')).items) |alias_raw| {
+                    const alias = stdlib.strings.strip(alias_raw);
                     if (alias.len != 0) {
                         try meta.aliases.insert(sa, alias);
                     }
@@ -1523,8 +1475,8 @@ pub const Models = struct {
         // parse tags from preset's --tags option (comma-separated)
         if (meta.preset.getOption("LLAMA_ARG_TAGS")) |tags_str| {
             if (tags_str.len != 0) {
-                for ((try tc.strings.split(sa, tags_str, ',')).items) |tag_raw| {
-                    const tag = tc.strings.strip(tag_raw);
+                for ((try stdlib.strings.split(sa, tags_str, ',')).items) |tag_raw| {
+                    const tag = stdlib.strings.strip(tag_raw);
                     if (tag.len != 0) {
                         try meta.tags.insert(sa, tag);
                     }
@@ -1807,8 +1759,8 @@ pub const Models = struct {
                 var new_aliases: StringSet = .{};
                 if (inst.meta.preset.getOption("LLAMA_ARG_ALIAS")) |alias_str| {
                     if (alias_str.len != 0) {
-                        for ((try tc.strings.split(sa, alias_str, ',')).items) |alias_raw| {
-                            const alias = tc.strings.strip(alias_raw);
+                        for ((try stdlib.strings.split(sa, alias_str, ',')).items) |alias_raw| {
+                            const alias = stdlib.strings.strip(alias_raw);
                             if (alias.len != 0) try new_aliases.insert(sa, alias);
                         }
                     }
@@ -1831,8 +1783,8 @@ pub const Models = struct {
                 inst.meta.tags.clear();
                 if (inst.meta.preset.getOption("LLAMA_ARG_TAGS")) |tags_str| {
                     if (tags_str.len != 0) {
-                        for ((try tc.strings.split(sa, tags_str, ',')).items) |tag_raw| {
-                            const tag = tc.strings.strip(tag_raw);
+                        for ((try stdlib.strings.split(sa, tags_str, ',')).items) |tag_raw| {
+                            const tag = stdlib.strings.strip(tag_raw);
                             if (tag.len != 0) try inst.meta.tags.insert(ia, tag);
                         }
                     }
@@ -1863,7 +1815,7 @@ pub const Models = struct {
 
             // clear reload flag under the lock, this releases the load() calls waiting on !is_reloading
             self.is_reloading = false;
-            self.cv.notifyAll();
+            self.cv.broadcast();
 
             try self.logAvailableModels();
 
@@ -2067,7 +2019,7 @@ pub const Models = struct {
         // the fake load time of a model; a download worker loads none
         if (self.debug_fake_timing and opts.role == .instance) {
             // do not hold the mutex here, other requests must keep making progress
-            tc.clock.sleepMs(2000);
+            stdlib.clock.sleepMs(2000);
         }
 
         if (opts.custom_meta == null) {
@@ -2190,7 +2142,7 @@ pub const Models = struct {
             meta.args = child_args; // save for debugging
 
             // the child writes its commands to stdout and its logs to stderr
-            const options = tc.subproc.option_no_window;
+            const options = stdlib.subproc.option_no_window;
             if (!proc.proc.sproc.create(child_args, options, child_env.items, null)) {
                 return throw(error.RuntimeError, "failed to spawn server instance", .{});
             }
@@ -2224,7 +2176,7 @@ pub const Models = struct {
             try self.sched.onSpawned(name);
         }
         try self.monitor.?.watch(name, proc, opts.role, port, 0);
-        self.cv.notifyAll();
+        self.cv.broadcast();
     }
 
     /// Ports `request_stop` (server-models.cpp:1321 @b1b770d90): ask the
@@ -2272,7 +2224,7 @@ pub const Models = struct {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.eraseStopping(name);
-            self.cv.notifyAll();
+            self.cv.broadcast();
         } else {
             self.updateStatus(name, .{ .status = .unloaded, .exit_code = exit_code });
         }
@@ -2421,7 +2373,7 @@ pub const Models = struct {
             self.notifySse("status_change", name, &v);
         }
         self.mutex.lock();
-        self.cv.notifyAll();
+        self.cv.broadcast();
         self.mutex.unlock();
     }
 
@@ -2476,7 +2428,7 @@ pub const Models = struct {
         }
         if (done) {
             self.mutex.lock();
-            self.cv.notifyAll(); // notify in case unload() is waiting for download to be cancelled
+            self.cv.broadcast(); // notify in case unload() is waiting for download to be cancelled
             self.mutex.unlock();
             // a stop a client asked for (pause or cancel) is no error: say so, so that every
             // client, not only the one that asked, can tell it from a failed download
@@ -2649,7 +2601,7 @@ pub const Models = struct {
                 if (should_stop) |ss| if (ss.call()) {
                     return throw(error.RuntimeError, "request cancelled while waiting for model name={s}", .{name});
                 };
-                self.cv.waitForMs(&self.mutex, 200);
+                _ = self.cv.timedWait(&self.mutex, 200 * std.time.ns_per_ms);
                 continue;
             }
             const status = it.meta.status;
@@ -2702,7 +2654,7 @@ pub const Models = struct {
                 continue;
             }
 
-            self.cv.waitForMs(&self.mutex, 200);
+            _ = self.cv.timedWait(&self.mutex, 200 * std.time.ns_per_ms);
         }
     }
 
@@ -2730,7 +2682,7 @@ pub const Models = struct {
         }
         if (self.debug_fake_timing) {
             // sleep after req_count++, so the model counts as busy while we wait here
-            tc.clock.sleepMs(2000);
+            stdlib.clock.sleepMs(2000);
         }
         srv(.trc, "proxy_request", "proxying request to model %s on port %d\n", .{ try common.zs(sa, name), meta.port });
         var proxy_path = try sa.dupe(u8, req.path);
@@ -3031,7 +2983,7 @@ fn presetOptionsEqualForCompare(a: Allocator, x: *const Preset, y: *const Preset
 /// `deinit` it.
 pub const Role = struct {
     // serializes the notify_to_router writes
-    mtx_stdout: Mutex = .{},
+    mtx_stdout: sync.Mutex = .{},
     cmd_out: ?std.Io.File = null, // the stdout the router reads the commands from
 
     /// Ports the constructor of `server_role` (server-common.cpp:2292
@@ -3050,7 +3002,7 @@ pub const Role = struct {
     /// @b1b770d90).
     pub fn deinit(self: *Role) void {
         if (self.cmd_out) |f| {
-            f.close(tc.file.defaultIo());
+            f.close(stdlib.file.defaultIo());
             self.cmd_out = null;
         }
     }
@@ -3058,12 +3010,12 @@ pub const Role = struct {
     /// Ports `is_managed_by_router` (server-common.cpp:2304 @b1b770d90):
     /// true if the current process was spawned by a router.
     pub fn isManagedByRouter(_: *const Role) bool {
-        return tc.env.get(env_router_port) != null;
+        return stdlib.env.get(env_router_port) != null;
     }
 
     /// Ports `get_role` (server-common.cpp:2308 @b1b770d90).
     pub fn getRole(_: *const Role) RoleType {
-        return roleTypeFromStr(tc.env.get(env_child_role) orelse "");
+        return roleTypeFromStr(stdlib.env.get(env_child_role) orelse "");
     }
 
     /// `std::function<void(int)>` for `setup`'s shutdown handler.
@@ -3117,7 +3069,7 @@ pub const Role = struct {
                 }
                 if (eof) {
                     srv(.inf, "operator()", "%s", .{@as([*:0]const u8, "EOF on stdin detected, forcing shutdown...\n")});
-                    tc.io.exitFlushed(1);
+                    stdlib.stdio.exit(1);
                 }
             }
         }.run, .{shutdown_handler}) catch null;
@@ -3139,7 +3091,7 @@ pub const Role = struct {
         // fprintf(nullptr) crashes in the C++ too: a child is always constructed with its stream
         // fprintf and fflush: the line in one write
         const line = std.mem.concat(a, u8, &.{ cmd_child_to_router_state, dump, "\n" }) catch return;
-        self.cmd_out.?.writeStreamingAll(tc.file.defaultIo(), line) catch |err| switch (err) {
+        self.cmd_out.?.writeStreamingAll(stdlib.file.defaultIo(), line) catch |err| switch (err) {
             else => {}, // fprintf's result unchecked
         };
     }
@@ -3357,7 +3309,7 @@ pub const ModelsRoutes = struct {
 
     /// Ports `init_routes` (server-models.cpp:2048 @b1b770d90).
     fn initRoutes(self: *ModelsRoutes) !void {
-        if (!tc.subproc.Subproc.isSupported()) {
+        if (!stdlib.subproc.Subproc.isSupported()) {
             return throw(error.RuntimeError, "subprocess is not enabled on this build", .{});
         }
 
@@ -3536,7 +3488,7 @@ pub const ModelsRoutes = struct {
         const a = res.allocator();
         var models_json = Value.emptyArray();
         const all_models = try self.models.getAllMeta(a);
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         // a download on its way has no files to resolve yet, only the kinds it pulls
         const unfinished = try self.models.unfinishedDownloadsGet(a);
 
@@ -3953,7 +3905,7 @@ pub const ModelsRoutes = struct {
     }
 };
 
-const llama_libcxx = @import("llama").libcxx;
+const llama_libcxx = @import("stdlib").libcxx;
 
 /// The response `get_router_models_sse` returns: events from the router's
 /// SSE queue until the client goes or the router stops.

@@ -20,13 +20,10 @@
 //! the last digit of a rounded float.
 
 const std = @import("std");
-const env_mod = @import("env.zig");
-const builtin = @import("builtin");
-const io = @import("io.zig");
-const file_mod = @import("file.zig");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const file_mod = @import("stdlib").file;
 const json = @import("cli_fit").json;
-
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// `ggml_log_level`.
 pub const Level = enum(c_int) { none = 0, debug = 1, info = 2, warn = 3, err = 4, cont = 5 };
@@ -64,7 +61,7 @@ var paused: bool = false;
 /// The `--log-file`, opened as C's `fopen(path, "w")` opens it: text mode on
 /// Windows. Written through `file_stream`.
 var file: ?std.Io.File = null;
-var file_stream: io.Stream = .{ .target = .out };
+var file_stream: stdlib.stdio.Stream = .{ .target = .out };
 /// Ports `stdo` (common/log.cpp:194 @b1b770d90), a member of `common_log`:
 /// whether messages go to stdout and stderr; set to true by its constructor
 /// (common/log.cpp:163 @b1b770d90).
@@ -90,14 +87,14 @@ fn col(i: usize) [*:0]const u8 {
 /// `common_log_main`'s first call sets the colours from the terminal
 /// (common/log.cpp:464 @b1b770d90).
 fn useColors() bool {
-    if (colors == null) setColorsImpl(ttyCanUseColors());
+    if (colors == null) setColorsImpl(stdlib.tty.canUseColors());
     return colors.?;
 }
 
 /// Ports `set_colors` (common/log.cpp:419 @b1b770d90), a member of `common_log`:
 /// colours only where the console renders them.
 fn setColorsImpl(on: bool) void {
-    colors = on and ttyEnableAnsi();
+    colors = on and stdlib.tty.enableAnsi();
 }
 
 /// Ports `get_colors` (common/log.cpp:415 @b1b770d90), a member of `common_log`,
@@ -107,58 +104,11 @@ pub fn getColors() bool {
     return useColors();
 }
 
-/// Ports `common_is_tty` (common/common.cpp:1032 @b1b770d90): whether
-/// `f` is attached to a terminal.
-pub fn isTty(f: std.Io.File) bool {
-    return f.isTty(file_mod.defaultIo()) catch false;
-}
-
-const win = struct {
-    const HANDLE = ?*anyopaque;
-    extern "kernel32" fn GetStdHandle(id: u32) callconv(.winapi) HANDLE;
-    extern "kernel32" fn GetConsoleMode(h: HANDLE, mode: *u32) callconv(.winapi) c_int;
-    extern "kernel32" fn SetConsoleMode(h: HANDLE, mode: u32) callconv(.winapi) c_int;
-    const STD_OUTPUT_HANDLE: u32 = @bitCast(@as(i32, -11));
-    const STD_ERROR_HANDLE: u32 = @bitCast(@as(i32, -12));
-    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-};
-
-/// Ports `tty_enable_ansi` (common/common.cpp:1060 @b1b770d90): false when
-/// stdout or stderr is a console that cannot render ANSI sequences.
-pub fn ttyEnableAnsi() bool {
-    if (comptime builtin.os.tag == .windows) {
-        // a Windows console renders ANSI sequences only in virtual terminal mode, pipes and files take them as is
-        for ([_]u32{ win.STD_OUTPUT_HANDLE, win.STD_ERROR_HANDLE }) |id| {
-            const h = win.GetStdHandle(id);
-            var mode: u32 = 0;
-            if (win.GetConsoleMode(h, &mode) != 0 and win.SetConsoleMode(h, mode | win.ENABLE_VIRTUAL_TERMINAL_PROCESSING) == 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-/// Ports `tty_can_use_colors` (common/common.cpp:1040 @b1b770d90).
-pub fn ttyCanUseColors() bool {
-    // Check NO_COLOR environment variable (https://no-color.org/)
-    if (env_mod.get("NO_COLOR")) |no_color| {
-        if (no_color.len != 0) return false;
-    }
-    // Check TERM environment variable
-    if (env_mod.get("TERM")) |term| {
-        if (std.mem.eql(u8, term, "dumb")) return false;
-    }
-    // Check if stdout and stderr are connected to a terminal
-    // We check both because log messages can go to either
-    return isTty(std.Io.File.stdout()) or isTty(std.Io.File.stderr());
-}
-
 /// Ports `common_log_set_colors` (common/log.cpp:516 @b1b770d90) for an explicit
 /// choice; `null` is `LOG_COLORS_AUTO`.
 pub fn setColors(on: ?bool) void {
     main();
-    setColorsImpl(on orelse ttyCanUseColors());
+    setColorsImpl(on orelse stdlib.tty.canUseColors());
 }
 
 /// Ports `common_log_pause` (common/log.cpp:481 @b1b770d90): messages logged while
@@ -209,7 +159,7 @@ pub fn setTimestamps(on: bool) void {
 
 /// `t_us`, the system clock in microseconds (common/log.cpp:37 @b1b770d90).
 fn tUs() i64 {
-    return @import("clock.zig").realtimeUs();
+    return @import("stdlib").clock.realtimeUs();
 }
 
 /// `common_log_main`'s first call constructs the logger, which starts its
@@ -227,13 +177,13 @@ pub fn add(level: Level, comptime fmt: [*:0]const u8, args: anytype) void {
     main();
     if (paused) return;
     var stack: [256]u8 = undefined;
-    const n: usize = @intCast(@call(.auto, snprintf, .{ &stack, stack.len, fmt } ++ args));
+    const n: usize = @intCast(@call(.auto, libc.snprintf, .{ &stack, stack.len, fmt } ++ args));
     var heap: ?[]u8 = null;
     defer if (heap) |h| std.heap.c_allocator.free(h);
     const msg: [*:0]const u8 = if (n < stack.len) @ptrCast(&stack) else blk: {
         const h = std.heap.c_allocator.alloc(u8, n + 1) catch return;
         heap = h;
-        _ = @call(.auto, snprintf, .{ h.ptr, n + 1, fmt } ++ args);
+        _ = @call(.auto, libc.snprintf, .{ h.ptr, n + 1, fmt } ++ args);
         break :blk @ptrCast(h.ptr);
     };
     const timestamp: i64 = if (timestamps) tUs() - t_start else 0;
@@ -304,18 +254,18 @@ const Entry = struct {
 /// `stdout` or `stderr` by level -- or, as JSONL, to `stdout` whatever the
 /// level. A warning's, error's or debug message's colour reset goes before
 /// its trailing newlines, so that every line carries its own colours.
-fn print(entry: Entry, to: ?*io.Stream) void {
+fn print(entry: Entry, to: ?*stdlib.stdio.Stream) void {
     const level = entry.level;
     const msg = entry.msg;
     const timestamp = entry.timestamp;
-    var fcur: *io.Stream = undefined;
+    var fcur: *stdlib.stdio.Stream = undefined;
     if (to) |t| {
         fcur = t;
     } else {
         // stderr displays DBG messages only when their verbosity level is not
         // higher than the threshold
         if (level == .debug and verbosity_thold < level_debug) return;
-        fcur = if (level != .none and !entry.jsonl) io.stderr() else io.stdout();
+        fcur = if (level != .none and !entry.jsonl) stdlib.stdio.stderr() else stdlib.stdio.stdout();
     }
 
     if (entry.jsonl) {
@@ -355,14 +305,14 @@ fn print(entry: Entry, to: ?*io.Stream) void {
     var n_head: usize = 0;
     if (level != .none and level != .cont and prefix) {
         if (timestamp != 0) {
-            n_head = @min(head.len - 1, @as(usize, @intCast(@max(0, snprintf(&head, head.len, "%s%d.%02d.%03d.%03d%s ", col(col_blue), @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))), @as(c_int, @intCast(@mod(timestamp, 1000))), col(col_default))))));
+            n_head = @min(head.len - 1, @as(usize, @intCast(@max(0, libc.snprintf(&head, head.len, "%s%d.%02d.%03d.%03d%s ", col(col_blue), @as(c_int, @intCast(@divTrunc(timestamp, 1000000 * 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000000), 60))), @as(c_int, @intCast(@mod(@divTrunc(timestamp, 1000), 1000))), @as(c_int, @intCast(@mod(timestamp, 1000))), col(col_default))))));
         }
         const rest = head[n_head..];
         const n: c_int = switch (level) {
-            .info => snprintf(rest.ptr, rest.len, "%sI %s", col(col_green), col(col_default)),
-            .warn => snprintf(rest.ptr, rest.len, "%sW %s", col(col_magenta), @as([*:0]const u8, "")),
-            .err => snprintf(rest.ptr, rest.len, "%sE %s", col(col_red), @as([*:0]const u8, "")),
-            .debug => snprintf(rest.ptr, rest.len, "%sD %s", col(col_yellow), @as([*:0]const u8, "")),
+            .info => libc.snprintf(rest.ptr, rest.len, "%sI %s", col(col_green), col(col_default)),
+            .warn => libc.snprintf(rest.ptr, rest.len, "%sW %s", col(col_magenta), @as([*:0]const u8, "")),
+            .err => libc.snprintf(rest.ptr, rest.len, "%sE %s", col(col_red), @as([*:0]const u8, "")),
+            .debug => libc.snprintf(rest.ptr, rest.len, "%sD %s", col(col_yellow), @as([*:0]const u8, "")),
             else => 0,
         };
         n_head = @min(head.len - 1, n_head + @as(usize, @intCast(@max(0, n))));

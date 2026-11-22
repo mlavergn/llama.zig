@@ -19,6 +19,7 @@
 //! rest reach it the way the C++ base class reaches the override.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -29,10 +30,6 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
-extern fn logf(x: f32) f32;
-extern fn expf(x: f32) f32;
 
 /// `chunk_size` (mtmd/models/models.h:278 @b1b770d90), a static member of
 /// `mtmd_graph_gemma4a`: the model's `attention_chunk_size`.
@@ -216,8 +213,8 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 
         // Chunked local self-attention with RPE
         if (layer.q_w != null and layer.k_w != null and layer.v_w != null and layer.o_w != null) {
-            const q_scale = (1.0 / sqrtf(@floatFromInt(d_head))) / logf(2.0);
-            const k_scale = logf(1.0 + expf(1.0)) / logf(2.0);
+            const q_scale = (1.0 / libm.sqrtfInt(d_head)) / libm.logf(2.0);
+            const k_scale = libm.logf(1.0 + libm.expf(1.0)) / libm.logf(2.0);
             const softcap: f32 = 50.0;
 
             const attn_norm_w = if (layer.attn_pre_norm_w != null) layer.attn_pre_norm_w else layer.ln_1_w;

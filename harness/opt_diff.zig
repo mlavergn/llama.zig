@@ -41,10 +41,13 @@
 //! the graph `ggml_opt_build` constructs, the AdamW/SGD step nodes and their
 //! names, and every intermediate value, not just the final weights.
 //!
-//! Separately, `opt.uniformInt` and `opt.shuffle` are compared with libc++'s
+//! Separately, `stdlib.libcxx.uniformInt` and `stdlib.libcxx.shuffle` are compared with libc++'s
 //! templates (`harness/opt_ref.cpp`) over ranges up to 2^63.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
+const libc = @import("stdlib").libc;
+const libcxx = @import("stdlib").libcxx;
 const opt = @import("opt");
 const c = @import("ggml_c");
 
@@ -54,20 +57,10 @@ pub const ggml_opt_exports = false;
 extern fn opt_ref_uniform(seed: u32, a: i64, b: i64, out: [*]i64, count: usize) u32;
 extern fn opt_ref_shuffle(seed: u32, v: [*]i64, n: usize, reps: usize) u32;
 
-extern "c" fn fork() c_int;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
 extern "c" fn dup(fd: c_int) c_int;
-extern "c" fn dup2(a: c_int, b: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn lseek(fd: c_int, off: i64, whence: c_int) i64;
 extern "c" fn ftruncate(fd: c_int, len: i64) c_int;
 extern "c" fn mkstemp(template: [*:0]u8) c_int;
 extern "c" fn unlink(path: [*:0]const u8) c_int;
-extern "c" fn fflush(stream: ?*anyopaque) c_int;
-extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 
 // -----------------------------------------------------------------------------
 // The two sides
@@ -1034,7 +1027,7 @@ fn scenarioShuffle(r: *Run) void {
     }
 }
 
-/// Compares `opt.uniformInt` and `opt.shuffle` with libc++'s templates.
+/// Compares `stdlib.libcxx.uniformInt` and `stdlib.libcxx.shuffle` with libc++'s templates.
 /// Return: checks made; aborts the run on the first difference.
 fn libcxxOracle() usize {
     var checks: usize = 0;
@@ -1051,8 +1044,8 @@ fn libcxxOracle() usize {
     for (ranges) |rg| {
         for ([_]u32{ 5489, 1, 0xdeadbeef }) |seed| {
             const tail_ref = opt_ref_uniform(seed, rg[0], rg[1], &want, want.len);
-            var g = opt.Mt19937.init(seed);
-            for (&got) |*v| v.* = opt.uniformInt(&g, rg[0], rg[1]);
+            var g = libcxx.Mt19937.init(seed);
+            for (&got) |*v| v.* = libcxx.uniformInt(i64, &g, rg[0], rg[1]);
             const tail_port = g.next();
             for (want, got, 0..) |w, p, i| {
                 checks += 1;
@@ -1078,8 +1071,8 @@ fn libcxxOracle() usize {
                 v_port[i] = @intCast(i);
             }
             const tail_ref = opt_ref_shuffle(5489, &v_ref, n, reps);
-            var g = opt.Mt19937.init(5489);
-            for (0..reps) |_| opt.shuffle(v_port[0..n], &g);
+            var g = libcxx.Mt19937.init(5489);
+            for (0..reps) |_| libcxx.shuffle(i64, v_port[0..n], &g);
             const tail_port = g.next();
             checks += n + 1;
             if (!std.mem.eql(i64, v_ref[0..n], v_port[0..n]) or tail_ref != tail_port) {
@@ -1096,15 +1089,15 @@ fn libcxxOracle() usize {
 
 /// Runs `body` in a child and reports whether it died of SIGABRT.
 fn aborts(body: *const fn (api: *const Api, sched: c.ggml_backend_sched_t) void, api: *const Api, sched: c.ggml_backend_sched_t) bool {
-    const pid = fork();
+    const pid = libc.fork();
     if (pid == 0) {
-        const devnull = open("/dev/null", 1);
-        _ = dup2(devnull, 2);
+        const devnull = libc.open("/dev/null", 1);
+        _ = libc.dup2(devnull, 2);
         body(api, sched);
-        _exit(0);
+        libc._exit(0);
     }
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     return (status & 0x7f) == 6;
 }
 
@@ -1251,22 +1244,22 @@ fn captureStderr(r: *Run, comptime body: anytype, args: anytype) []const u8 {
     const fd = mkstemp(&name);
     if (fd < 0) @panic("mkstemp");
     _ = unlink(&name);
-    _ = fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
+    _ = libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
     const saved = dup(2);
-    _ = dup2(fd, 2);
+    _ = libc.dup2(fd, 2);
     body(r, args);
-    _ = fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
-    _ = dup2(saved, 2);
-    _ = close(saved);
-    _ = lseek(fd, 0, 0);
+    _ = libc.fflush(null); // every stream: `stderr` is `__stderrp` on Darwin, `stderr` on glibc
+    _ = libc.dup2(saved, 2);
+    _ = libc.close(saved);
+    _ = libc.lseek(fd, 0, 0);
     var out: std.ArrayList(u8) = .empty;
     var chunk: [4096]u8 = undefined;
     while (true) {
-        const got = read(fd, &chunk, chunk.len);
+        const got = libc.read(fd, &chunk, chunk.len);
         if (got <= 0) break;
         out.appendSlice(r.tr.arena, chunk[0..@intCast(got)]) catch @panic("oom");
     }
-    _ = close(fd);
+    _ = libc.close(fd);
     maskTimes(out.items);
     return out.items;
 }
@@ -1370,7 +1363,7 @@ fn runScenarios(r: *Run) void {
 }
 
 pub fn main() !void {
-    _ = setenv("GGML_NO_BACKTRACE", "1", 1);
+    _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
     c.ggml_log_set(&quietLog, null);
 
     const cpu_dev = c.ggml_backend_dev_by_type(c.GGML_BACKEND_DEVICE_TYPE_CPU);

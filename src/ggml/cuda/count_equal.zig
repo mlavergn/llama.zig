@@ -7,6 +7,7 @@
 //! The kernel, `count_equal<int>`, stays CUDA.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -17,11 +18,6 @@ const Tensor = c.ggml_tensor;
 
 /// Ports `CUDA_COUNT_EQUAL_CHUNK_SIZE` (count-equal.cuh:3 @b1b770d90).
 const chunk_size = 128;
-
-/// `GGML_PAD(x, n)` on `int64_t`.
-fn pad(x: i64, n: i64) i64 {
-    return (x + n - 1) & ~(n - 1);
-}
 
 /// Ports `ggml_cuda_count_equal` (count-equal.cu:28 @b1b770d90), which
 /// launches with `<<<>>>`.
@@ -44,7 +40,7 @@ pub fn opCountEqual(ctx: *common.Context, dst: *Tensor) void {
 
     const ne: i64 = c.ggml_nelements(src0);
     impl.assert(ne < (1 << 30), "ne < (1 << 30) && \"atomicAdd implementation only supports int\"");
-    const dne: i64 = pad(@divTrunc(ne + 4 * nsm - 1, 4 * nsm), chunk_size);
+    const dne: i64 = stdlib.num.pad(i64, @divTrunc(ne + 4 * nsm - 1, 4 * nsm), chunk_size);
 
     common.cudaCheck(cu.cudaMemsetAsync(dst_d, 0, c.ggml_nbytes(dst), stream), "cudaMemsetAsync(dst_d, 0, ggml_nbytes(dst), stream)", @src());
 

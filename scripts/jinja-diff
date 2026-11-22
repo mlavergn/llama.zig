@@ -75,11 +75,11 @@ zig translate-c "${GATE_TC[@]}" -I llama.cpp/include -I llama.cpp/ggml/include \
 zig build-exe "${GATE_EXE[@]}" -femit-bin="$tmp/jinja_diff$GATE_SUFFIX" "${JINJA_DIFF_O:--Ofast}" -lc \
     --dep chat --dep zigjinja --dep inputs --dep common_chat --dep json -Mroot=harness/jinja_diff.zig \
     --dep zigjinja --dep llama_h=llama_c -Mchat=cli/chat.zig \
-    --dep json --dep peg --dep llama --dep zigjinja -Mcommon_chat=cli/common_chat/module.zig \
-    --dep json --dep llama -Mpeg=cli/peg/module.zig \
-    --dep llama -Mjson=cli/json/module.zig \
+    --dep json --dep peg --dep llama --dep zigjinja --dep stdlib -Mcommon_chat=cli/common_chat/module.zig \
+    --dep json --dep llama --dep stdlib -Mpeg=cli/peg/module.zig \
+    --dep llama --dep stdlib -Mjson=cli/json/module.zig \
     -Mzigjinja=../zigjinja/src/root.zig \
-    --dep llama_c --dep sync -Mllama=src/llama/harness_root.zig -Msync=src/sync/module.zig -Mllama_c="$tmp/llama_h.zig" \
+    --dep llama_c --dep stdlib -Mllama=src/llama/harness_root.zig -Mstdlib=stdlib/module.zig -Mllama_c="$tmp/llama_h.zig" \
     -Minputs="$tmp/inputs/inputs.zig" \
     "${OBJS[@]}" "$GATE_LLAMA_REF" "$GATE_GGML" -lc++ \
     ${PLATFORM_LIBS[@]+"${PLATFORM_LIBS[@]}"} 2>"$tmp/berr" \

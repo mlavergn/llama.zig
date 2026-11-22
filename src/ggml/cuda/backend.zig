@@ -23,7 +23,9 @@
 //! As in `metal/backend.zig`: this build is static.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const config = @import("config");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
@@ -478,7 +480,7 @@ fn commInit(backends: [*c]c.ggml_backend_t, n_backends: usize) callconv(.c) ?*an
     };
     for (0..n_backends) |i| ret.dev_ids[i] = backendCtx(backends[i]).device;
 
-    if (std.c.getenv("GGML_CUDA_ALLREDUCE")) |env_c| {
+    if (stdlib.env.getenv("GGML_CUDA_ALLREDUCE")) |env_c| {
         const env = std.mem.span(env_c);
         if (std.mem.eql(u8, env, "nccl")) {
             commInitNccl(ret);
@@ -761,10 +763,8 @@ fn deviceDescription(device: c_int, out: []u8) [:0]u8 {
 pub fn getDeviceDescription(device: c_int, description: [*c]u8, description_size: usize) callconv(.c) void {
     var buf: [320]u8 = undefined;
     const d = deviceDescription(device, &buf);
-    _ = snprintf(description, description_size, "%s", d.ptr);
+    _ = libc.snprintf(description, description_size, "%s", d.ptr);
 }
-
-extern fn snprintf(buf: [*c]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `ggml_cuda_physical_device_share_count` (ggml-cuda.cu:5953 @b1b770d90).
 fn physicalDeviceShareCount(device: c_int) c_int {

@@ -39,6 +39,7 @@
 //! Usage: batch_diff <vocab.gguf> [seed]
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
@@ -122,15 +123,7 @@ extern fn ref_ubatch_free(u: *RefUbatch) void;
 extern fn ref_ubatch_owned(u: *const RefUbatch) c_int;
 extern fn ref_ubatch_state_rows(u: *const RefUbatch, rows: *[*c]const i32) usize;
 
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 extern "c" fn unsetenv(name: [*:0]const u8) c_int;
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn dup2(old: c_int, new: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
 
 const sigabrt = 6;
 
@@ -1288,20 +1281,20 @@ var abort_vocab: Vocabs = undefined;
 
 fn abortsInChild(body: *const fn (side: c_int) void, side: c_int) bool {
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) return false;
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) return false;
+    const pid = libc.fork();
     if (pid == 0) {
-        _ = dup2(fds[1], 2);
-        _ = close(fds[0]);
+        _ = libc.dup2(fds[1], 2);
+        _ = libc.close(fds[0]);
         body(side);
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var buf: [4096]u8 = undefined;
-    while (read(fds[0], &buf, buf.len) > 0) {}
-    _ = close(fds[0]);
+    while (libc.read(fds[0], &buf, buf.len) > 0) {}
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     return (status & 0x7f) == sigabrt;
 }
 
@@ -1442,7 +1435,7 @@ pub fn main(init: std.process.Init) !void {
         .{ .env = "x", .sessions = 50 },
     };
     for (modes) |md| {
-        if (md.env) |e| _ = setenv("LLAMA_BATCH_DEBUG", e, 1) else _ = unsetenv("LLAMA_BATCH_DEBUG");
+        if (md.env) |e| _ = libc.setenv("LLAMA_BATCH_DEBUG", e, 1) else _ = unsetenv("LLAMA_BATCH_DEBUG");
         std.debug.print("  LLAMA_BATCH_DEBUG={s}\n", .{md.env orelse "(unset)"});
 
         _ = arena.reset(.retain_capacity);

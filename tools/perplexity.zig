@@ -24,9 +24,10 @@
 //! independent-bits engine. Winogrande and multiple choice scale a raw draw.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const fit = @import("cli_fit");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const c = tc.c;
 const io = tc.io;
 const log = tc.log;
@@ -38,14 +39,7 @@ comptime {
     _ = @import("llama");
 }
 
-const libm = struct {
-    extern "c" fn expf(x: f32) f32;
-    extern "c" fn logf(x: f32) f32;
-    extern "c" fn exp(x: f64) f64;
-    extern "c" fn log(x: f64) f64;
-    extern "c" fn sqrt(x: f64) f64;
-    extern "c" fn sqrtf(x: f32) f32;
-};
+const libm = @import("stdlib").libm;
 
 const gpa = std.heap.c_allocator;
 
@@ -58,15 +52,11 @@ fn cint(v: anytype) c_int {
     return @intCast(v);
 }
 
-fn hardwareConcurrency() usize {
-    return tc.cpu.hardwareConcurrency();
-}
-
 /// Ports `softmax` (perplexity.cpp:40 @b1b770d90).
 fn softmax(a: std.mem.Allocator, logits: []const f32) ![]f32 {
     const probs = try a.alloc(f32, logits.len);
     var max_logit = logits[0];
-    for (logits) |v| max_logit = @max(max_logit, v);
+    for (logits) |v| max_logit = libcxx.max(f32, max_logit, v);
     var sum_exp: f64 = 0.0;
     for (logits, 0..) |l, i| {
         // Subtract the maximum logit value from the current logit value for numerical stability
@@ -84,7 +74,7 @@ const LogSoftmax = struct { log_softmax: f64, logit: f32, prob: f32 };
 
 fn logSoftmax(n_vocab: usize, logits: [*]const f32, tok: usize) LogSoftmax {
     var max_logit = logits[0];
-    for (1..n_vocab) |i| max_logit = @max(max_logit, logits[i]);
+    for (1..n_vocab) |i| max_logit = libcxx.max(f32, max_logit, logits[i]);
     var sum_exp: f64 = 0.0;
     for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
     return .{
@@ -107,10 +97,10 @@ fn logSoftmaxQ(n_vocab: usize, logits: [*]const f32, log_prob_in: [*]u16, tok: u
     var max_logit = logits[0];
     var min_logit = logits[0];
     for (1..n_vocab) |i| {
-        max_logit = @max(max_logit, logits[i]);
-        min_logit = @min(min_logit, logits[i]);
+        max_logit = libcxx.max(f32, max_logit, logits[i]);
+        min_logit = libcxx.min(f32, min_logit, logits[i]);
     }
-    min_logit = @max(min_logit, max_logit - 16);
+    min_logit = libcxx.max(f32, min_logit, max_logit - 16);
     var sum_exp: f64 = 0.0;
     for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
     const log_sum_exp: f32 = @floatCast(libm.log(sum_exp));
@@ -256,7 +246,7 @@ fn logSoftmaxKld(n_vocab: usize, logits: [*]const f32, base_log_prob_in: [*]cons
     const p_diff2: f64 = p_diff * p_diff;
     kld.sum_p_diff2 += p_diff2;
     kld.sum_p_diff4 = @mulAdd(f64, p_diff2, p_diff2, kld.sum_p_diff4);
-    kld.max_p_diff = @max(kld.max_p_diff, @abs(p_diff));
+    kld.max_p_diff = libcxx.max(f32, kld.max_p_diff, @abs(p_diff));
 
     return .{ sum, p_diff };
 }
@@ -304,19 +294,15 @@ const KldWork = struct {
             kld.sum_p_diff2 += l.sum_p_diff2;
             kld.sum_p_diff4 += l.sum_p_diff4;
             kld.n_same_top += l.n_same_top;
-            kld.max_p_diff = @max(kld.max_p_diff, l.max_p_diff);
+            kld.max_p_diff = libcxx.max(f32, kld.max_p_diff, l.max_p_diff);
             kld.count += l.count;
         }
     }
 };
 
-fn nowNs() i128 {
-    return @import("tools_common").clock.monotonicNs();
-}
-
 /// The ETA line every pass-timed loop prints after its first pass.
-fn printEta(func: [*:0]const u8, t_start: i128, scale: f32) void {
-    const t_end = nowNs();
+fn printEta(func: [*:0]const u8, t_start: i64, scale: f32) void {
+    const t_end = stdlib.clock.steadyNs();
     const t_total: f32 = @floatCast(@as(f64, @floatFromInt(t_end - t_start)) / 1e9);
     log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
     var total_seconds: c_int = @intFromFloat(t_total * scale);
@@ -392,7 +378,7 @@ fn perplexityV2(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Par
 
         logits.clearRetainingCapacity();
 
-        const t_start = nowNs();
+        const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
         c.llama_memory_clear(c.llama_get_memory(ctx), true);
@@ -466,16 +452,16 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
     const add_bos = c.llama_vocab_get_add_bos(vocab);
     ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 456, "!llama_vocab_get_add_eos(vocab)");
 
-    var logits_stream: ?tc.file.Out = null;
+    var logits_stream: ?stdlib.file.Out = null;
     defer if (logits_stream) |*f| f.close(std_io);
     const W = struct {
-        fn bytes(f: *?tc.file.Out, b: []const u8) void {
+        fn bytes(f: *?stdlib.file.Out, b: []const u8) void {
             if (f.*) |*o| o.write(b) catch {};
         }
     };
     if (params.logits_file.len != 0) {
         const z = try a.dupeSentinel(u8, params.logits_file, 0);
-        logits_stream = tc.file.Out.create(std_io, z) catch null;
+        logits_stream = stdlib.file.Out.create(std_io, z) catch null;
         if (logits_stream == null) {
             log.err("%s: failed to open %s for writing\n", .{ func, z.ptr });
             return;
@@ -485,12 +471,12 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
         W.bytes(&logits_stream, std.mem.asBytes(&n_ctx));
     }
 
-    const tim1 = nowNs();
+    const tim1 = stdlib.clock.steadyNs();
     log.inf("%s: tokenizing the input ..\n", .{func});
 
     const tokens = try tc.common.tokenize(a, vocab, params.prompt, true, false);
 
-    const tim2 = nowNs();
+    const tim2 = stdlib.clock.steadyNs();
     log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
 
     if (cint(tokens.len) < 2 * n_ctx) {
@@ -531,7 +517,7 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
 
     log.inf("%s: calculating perplexity over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
-    const n_workers = hardwareConcurrency() - 1;
+    const n_workers = @as(usize, stdlib.thread.hardwareConcurrency()) - 1;
 
     var log_probs: []u16 = &.{};
     const nv: usize = @intCast(2 * @divTrunc(n_vocab + 1, 2) + 4);
@@ -555,7 +541,7 @@ fn perplexity(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, para
 
         const n_seq_batch = @min(n_seq, n_chunk - i);
 
-        const t_start = nowNs();
+        const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
         c.llama_memory_clear(c.llama_get_memory(ctx), true);
@@ -697,7 +683,7 @@ const LogprobWork = struct {
             for (first..last) |i| {
                 const logits = self.batch_logits + self.eval_pairs[i].i_logits * self.n_vocab;
                 var max_logit = logits[0];
-                for (1..self.n_vocab) |j| max_logit = @max(max_logit, logits[j]);
+                for (1..self.n_vocab) |j| max_logit = libcxx.max(f32, max_logit, logits[j]);
                 var sum_p: f32 = 0.0;
                 for (0..self.n_vocab) |j| sum_p += libm.expf(logits[j] - max_logit);
                 local_logprobs[i - first] = logits[@intCast(self.eval_pairs[i].token)] - max_logit - libm.logf(sum_p);
@@ -735,7 +721,7 @@ fn getLines(a: std.mem.Allocator, s: []const u8) !std.ArrayList([]const u8) {
 
 /// The C++ throwing `std::stoi` out of `main`: libc++ reports it and aborts.
 fn stoiOrTerminate(a: std.mem.Allocator, s: []const u8) !c_int {
-    return switch (tc.num.stoi(try a.dupeSentinel(u8, s, 0))) {
+    return switch (stdlib.num.stoi(try a.dupeSentinel(u8, s, 0))) {
         .ok => |v| v,
         .no_conversion => {
             io.eprintf("libc++abi: terminating due to uncaught exception of type std::invalid_argument: stoi: no conversion\n", .{});
@@ -746,59 +732,6 @@ fn stoiOrTerminate(a: std.mem.Allocator, s: []const u8) !c_int {
             std.process.abort();
         },
     };
-}
-
-/// libc++'s `std::uniform_int_distribution<size_t>(lo, hi)(g)` over
-/// `std::mt19937`: `__independent_bits_engine` drawing `w` bits, rejecting
-/// past the range (`<__random/uniform_int_distribution.h>`).
-fn uniformIndex(g: *libcxx.Mt19937, lo: usize, hi: usize) usize {
-    const rp: u64 = @as(u64, hi) -% @as(u64, lo) +% 1;
-    if (rp == 1) return lo;
-    const dt: usize = 64;
-    var w: usize = if (rp == 0) dt else dt - @clz(rp) - 1;
-    if (rp != 0 and (rp & (@as(u64, std.math.maxInt(u64)) >> @intCast(dt - w))) != 0) w += 1;
-
-    // the engine: 32-bit draws into a 64-bit working type, R = 2^32
-    const r: u64 = 1 << 32;
-    const m: usize = 32;
-    const wdt: usize = 64;
-    const edt: usize = 32;
-    var n = w / m + @intFromBool(w % m != 0);
-    var w0 = w / n;
-    var y0: u64 = if (w0 < wdt) (r >> @intCast(w0)) << @intCast(w0) else 0;
-    if (r - y0 > y0 / n) {
-        n += 1;
-        w0 = w / n;
-        y0 = if (w0 < wdt) (r >> @intCast(w0)) << @intCast(w0) else 0;
-    }
-    const n0 = n - w % n;
-    const y1: u64 = if (w0 < wdt - 1) (r >> @intCast(w0 + 1)) << @intCast(w0 + 1) else 0;
-    const mask0: u32 = if (w0 > 0) @as(u32, 0xffffffff) >> @intCast(edt - w0) else 0;
-    const mask1: u32 = if (w0 < edt - 1) @as(u32, 0xffffffff) >> @intCast(edt - (w0 + 1)) else 0xffffffff;
-
-    while (true) {
-        var sp: u64 = 0;
-        for (0..n0) |_| {
-            var u: u32 = undefined;
-            while (true) {
-                u = g.next();
-                if (u < y0) break;
-            }
-            sp = if (w0 < 64) sp << @intCast(w0) else 0;
-            sp +%= u & mask0;
-        }
-        for (n0..n) |_| {
-            var u: u32 = undefined;
-            while (true) {
-                u = g.next();
-                if (u < y1) break;
-            }
-            sp = if (w0 < 63) sp << @intCast(w0 + 1) else 0;
-            sp +%= u & mask1;
-        }
-        if (rp == 0) return @intCast(sp);
-        if (sp < rp) return @intCast(sp + lo);
-    }
 }
 
 /// Mirrors `hellaswag_score`'s `hs_data_t` (perplexity.cpp:778 @b1b770d90).
@@ -858,7 +791,7 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
     for (hs_data) |*hs_cur| {
         hs_cur.* = .{};
         // Select a random example of those left in the prompt
-        const idx = uniformIndex(&rng, 0, prompt_lines.items.len / 6 - 1);
+        const idx = libcxx.uniformInt(usize, &rng, 0, prompt_lines.items.len / 6 - 1);
 
         hs_cur.context = prompt_lines.items[idx * 6];
         hs_cur.gold_ending_idx = @bitCast(@as(isize, try stoiOrTerminate(a, prompt_lines.items[idx * 6 + 1])));
@@ -910,7 +843,7 @@ fn hellaswagScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
     var eval_pairs: std.ArrayList(EvalPair) = .empty;
     var eval_results: std.ArrayList(f32) = .empty;
-    const n_workers = hardwareConcurrency();
+    const n_workers: usize = stdlib.thread.hardwareConcurrency();
 
     var j0: usize = 0;
     while (j0 < hs_task_count) : (j0 += 1) {
@@ -1206,7 +1139,7 @@ fn winograndeScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const 
 
     var eval_pairs: std.ArrayList(EvalPair) = .empty;
     var eval_results: std.ArrayList(f32) = .empty;
-    const n_workers = hardwareConcurrency();
+    const n_workers: usize = stdlib.thread.hardwareConcurrency();
 
     var n_correct: c_int = 0;
     var n_done: c_int = 0;
@@ -1544,7 +1477,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
     if (n_task > 500) {
         log.out("...", .{});
         var work: PrepareWork = .{ .vocab = vocab, .tasks = tasks };
-        var max_thread = hardwareConcurrency();
+        var max_thread: usize = stdlib.thread.hardwareConcurrency();
         max_thread = @min(max_thread, (tasks.len + k_token_chunk - 1) / k_token_chunk);
         const threads = try gpa.alloc(std.Thread, max_thread - 1);
         defer gpa.free(threads);
@@ -1590,7 +1523,7 @@ fn multipleChoiceScore(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *co
 
     var eval_pairs: std.ArrayList(EvalPair) = .empty;
     var eval_results: std.ArrayList(f32) = .empty;
-    const n_workers = hardwareConcurrency();
+    const n_workers: usize = stdlib.thread.hardwareConcurrency();
     var batch_indeces: std.ArrayList(c.llama_seq_id) = .empty;
 
     var n_done: c_int = 0;
@@ -1788,7 +1721,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
         return;
     }
     const fname = try a.dupeSentinel(u8, params.logits_file, 0);
-    const f = tc.file.openIn(std_io, fname) catch {
+    const f = stdlib.file.openIn(std_io, fname) catch {
         log.err("%s: failed to open %s\n", .{ func, fname.ptr });
         return;
     };
@@ -1877,7 +1810,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
 
     log.inf("%s: computing over %d chunks, n_ctx=%u, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
-    const n_workers = hardwareConcurrency() - 1;
+    const n_workers = @as(usize, stdlib.thread.hardwareConcurrency()) - 1;
 
     var kld: KldResult = .{};
     var kld_off: usize = 0;
@@ -1891,7 +1824,7 @@ fn klDivergence(a: std.mem.Allocator, std_io: std.Io, ctx: ?*c.llama_context, pa
 
         const n_seq_batch = @min(n_seq, n_chunk - i);
 
-        const t_start = nowNs();
+        const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
         c.llama_memory_clear(c.llama_get_memory(ctx), true);
@@ -2098,7 +2031,7 @@ fn systemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 {
     var os: std.ArrayList(u8) = .empty;
     try os.print(a, "system_info: n_threads = {d}", .{params.cpuparams.n_threads});
     if (params.cpuparams_batch.n_threads != -1) try os.print(a, " (n_threads_batch = {d})", .{params.cpuparams_batch.n_threads});
-    try os.print(a, " / {d} | {s}", .{ hardwareConcurrency(), c.llama_print_system_info() });
+    try os.print(a, " / {d} | {s}", .{ @as(usize, stdlib.thread.hardwareConcurrency()), c.llama_print_system_info() });
     return a.dupeSentinel(u8, os.items, 0);
 }
 
@@ -2189,9 +2122,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
 /// Ports `main` (tools/perplexity/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

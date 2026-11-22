@@ -20,6 +20,7 @@
 //! `llama_model_vllm_decision2`'s members.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -285,7 +286,7 @@ fn buildHead(model: *const Model, b: *const graph.Builder, hidden: *Tensor, inp:
     const k: *Tensor = c.ggml_mul_mat(ctx, st.key, options); // [n_embd_h, n_options]
     const q: *Tensor = c.ggml_mul_mat(ctx, st.query, query); // [n_embd_h, 1]
     var bilinear: *Tensor = c.ggml_sum_rows(ctx, c.ggml_mul(ctx, k, q));
-    bilinear = c.ggml_scale(ctx, bilinear, 1.0 / impl.sqrtf(@floatFromInt(k.ne[0]))); // [1, n_options]
+    bilinear = c.ggml_scale(ctx, bilinear, 1.0 / libm.sqrtfInt(k.ne[0])); // [1, n_options]
 
     var mlp: *Tensor = c.ggml_add(ctx, c.ggml_mul_mat(ctx, st.option_mlp, options), st.option_mlp_b);
     mlp = c.ggml_add(ctx, mlp, c.ggml_mul_mat(ctx, st.query_mlp, query));

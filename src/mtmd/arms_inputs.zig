@@ -23,44 +23,17 @@
 //!   headers (`uniformRealF32`, `NormalF32`).
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const clip = @import("clip.zig");
 const graph = @import("graph.zig");
 const model_mod = @import("model.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const models = @import("models/module.zig");
 const c = impl.c;
 const gpa = impl.gpa;
-
-extern fn expf(x: f32) f32;
-extern fn logf(x: f32) f32;
-extern fn powf(x: f32, y: f32) f32;
-extern fn sinf(x: f32) f32;
-extern fn cosf(x: f32) f32;
-extern fn sqrtf(x: f32) f32;
-extern fn exp(x: f64) f64;
-extern fn log(x: f64) f64;
-extern fn sqrt(x: f64) f64;
-extern fn lround(x: f64) c_long;
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-
-const Float2 = extern struct { sin: f32, cos: f32 };
-extern fn __sincosf_stret(x: f32) Float2;
-
-/// `sinf(x)` and `cosf(x)` as clang emits the pair on one argument: one
-/// `__sincosf_stret` on Darwin, two calls elsewhere (see the file header).
-fn sinCos(x: f32) Float2 {
-    if (comptime builtin.os.tag.isDarwin()) return __sincosf_stret(x);
-    return .{ .sin = sinf(x), .cos = cosf(x) };
-}
-
-/// libc++'s `uniform_real_distribution<float>(a, b)(g)`
-/// (`<__random/uniform_real_distribution.h>`): `(b - a) * canonical + a`,
-/// contracted.
-fn uniformRealF32(g: *libcxx.Mt19937, a: f32, b: f32) f32 {
-    return @mulAdd(f32, b - a, libcxx.canonicalF32(g), a);
-}
 
 /// libc++'s `normal_distribution<float>` (`<__random/normal_distribution.h>`):
 /// Marsaglia's polar method, keeping the second value for the next draw.
@@ -80,12 +53,12 @@ pub const NormalF32 = struct {
             var v: f32 = undefined;
             var s: f32 = undefined;
             while (true) {
-                u = uniformRealF32(g, -1, 1);
-                v = uniformRealF32(g, -1, 1);
+                u = libcxx.uniformReal(f32, g, -1, 1);
+                v = libcxx.uniformReal(f32, g, -1, 1);
                 s = @mulAdd(f32, u, u, v * v);
                 if (!(s > 1 or s == 0)) break;
             }
-            const fp = sqrtf(-2 * logf(s) / s);
+            const fp = libm.sqrtf(-2 * libm.logf(s) / s);
             self.v = v * fp;
             self.v_hot = true;
             up = u * fp;
@@ -184,7 +157,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             const grid_w = pos_w; // image_size_width  / patch_size
             const grid_h = pos_h; // image_size_height / patch_size
             const n_tok = grid_w * grid_h;
-            const pgrid: c_int = @intFromFloat(sqrt(@floatFromInt(graph.ne(model.position_embeddings, 1)))); // 32
+            const pgrid: c_int = @intFromFloat(libm.sqrt(@floatFromInt(graph.ne(model.position_embeddings, 1)))); // 32
             const f = hparams.n_merge; // downsample 2
 
             // --- sparse window grouping (pgrid x pgrid windows) ---
@@ -288,7 +261,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             const q = @divTrunc(n_embd_proj, 4);
             const omega = try allocF32(usz(q), 0);
             defer gpa.free(omega);
-            for (omega, 0..) |*o, i| o.* = 1.0 / powf(base_freq, @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(q)));
+            for (omega, 0..) |*o, i| o.* = 1.0 / libm.powf(base_freq, @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(q)));
             st.setInputF32("omega", omega);
         },
         .minicpmv4_6, .minicpmv4_7, .minicpm_ocr_1_0 => {
@@ -855,12 +828,12 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                 // positions and mask are derived in-graph from the persisted counter
                 try st.setGenStateIn();
             } else {
-                // flow matching starts from gaussian noise, std = sqrt(temp), no noise at temp 0
+                // flow matching starts from gaussian noise, std = libm.sqrt(temp), no noise at temp 0
                 const t = st.getInpTensor("inp_noise");
                 const noise = try allocF32(usz(c.ggml_nelements(t)), 0);
                 defer gpa.free(noise);
                 if (params.temp > 0.0) {
-                    var dist: NormalF32 = .{ .mean = 0.0, .stddev = sqrtf(params.temp) };
+                    var dist: NormalF32 = .{ .mean = 0.0, .stddev = libm.sqrtf(params.temp) };
                     for (noise) |*v| v.* = dist.next(&params.gen_state.?.rng);
                 }
                 st.setInputF32("inp_noise", noise);
@@ -1025,7 +998,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
 
                 const r = try allocF32(usz(graph.ne(model.gen_code_head_w, 2)), 0);
                 defer gpa.free(r);
-                for (r) |*v| v.* = uniformRealF32(&params.gen_state.?.rng, 0.0, 1.0);
+                for (r) |*v| v.* = libcxx.uniformReal(f32, &params.gen_state.?.rng, 0.0, 1.0);
                 st.setInputF32("inp_rand", r);
             }
         },
@@ -1079,9 +1052,9 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                 const n_acoustic = graph.ne(model.gen_code_head_w, 2);
                 var g: i64 = 0;
                 while (g < n_acoustic) : (g += 1) {
-                    const r = [_]f32{uniformRealF32(&params.gen_state.?.rng, 0.0, 1.0)};
+                    const r = [_]f32{libcxx.uniformReal(f32, &params.gen_state.?.rng, 0.0, 1.0)};
                     var nb: [64]u8 = undefined;
-                    _ = snprintf(&nb, nb.len, "inp_rand_%lld", @as(c_longlong, g));
+                    _ = libc.snprintf(&nb, nb.len, "inp_rand_%lld", @as(c_longlong, g));
                     st.setInputF32(@ptrCast(&nb), &r);
                 }
             }
@@ -1093,7 +1066,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             const src_t = model.position_embeddings;
             const n_embd: i64 = graph.ne(src_t, 0);
             const n_pos_e: i64 = graph.ne(src_t, 1); // = n_grid * n_grid
-            const n_grid: c_int = @intCast(lround(sqrt(@floatFromInt(n_pos_e))));
+            const n_grid: c_int = @intCast(libm.lround(libm.sqrt(@floatFromInt(n_pos_e))));
             impl.ggmlAssert(@as(i64, n_grid) * n_grid == n_pos_e, "mtmd-subcontext.cpp", 1842, "(int64_t)n_grid * n_grid == n_pos");
             const out_w = pos_w; // pw
             const out_h = pos_h; // ph
@@ -1215,7 +1188,7 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             {
                 const n_embd = ctx.model.hparams.n_embd;
                 const num_timescales = @divTrunc(n_embd, 2);
-                const log_timescale_increment = logf(10000.0) / @as(f32, @floatFromInt(@max(num_timescales - 1, 1)));
+                const log_timescale_increment = libm.logf(10000.0) / @as(f32, @floatFromInt(@max(num_timescales - 1, 1)));
                 const rpe_len = max_past + 1;
                 const pos_emb = try allocF32(usz(n_embd * rpe_len), 0.0);
                 defer gpa.free(pos_emb);
@@ -1224,9 +1197,9 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
                     const position: f32 = @floatFromInt(max_past - p);
                     var i: c_int = 0;
                     while (i < num_timescales) : (i += 1) {
-                        const inv_ts = expf(-@as(f32, @floatFromInt(i)) * log_timescale_increment);
+                        const inv_ts = libm.expf(-@as(f32, @floatFromInt(i)) * log_timescale_increment);
                         const scaled = position * inv_ts;
-                        const sc = sinCos(scaled);
+                        const sc = libm.sinCos(scaled);
                         pos_emb[usz(p * n_embd + i)] = sc.sin;
                         pos_emb[usz(p * n_embd + i + num_timescales)] = sc.cos;
                     }
@@ -1303,15 +1276,15 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             const inv_freq = try gpa.alloc(f64, usz(@divTrunc(d_model, 2)));
             defer gpa.free(inv_freq);
             for (inv_freq, 0..) |*v, i| {
-                // `(float)d_model` and `2.0f * (float)i` widen to double against `std::log(10000.0)`
+                // `(float)d_model` and `2.0f * (float)i` widen to double against `std::libm.log(10000.0)`
                 const two_i: f32 = 2.0 * @as(f32, @floatFromInt(i));
-                v.* = exp(-(log(10000.0) / @as(f64, @floatFromInt(d_model))) * @as(f64, two_i));
+                v.* = libm.exp(-(libm.log(10000.0) / @as(f64, @floatFromInt(d_model))) * @as(f64, two_i));
             }
             var pos: i64 = 0;
             while (pos < seq_len) : (pos += 1) {
                 for (inv_freq, 0..) |fq, i| {
                     const ang: f32 = @floatCast(@as(f64, @floatFromInt(@as(i64, n_frames) - pos - 1)) * fq);
-                    const sc = sinCos(ang);
+                    const sc = libm.sinCos(ang);
                     pos_emb[usz(pos * d_model) + 2 * i + 0] = sc.sin; // even
                     pos_emb[usz(pos * d_model) + 2 * i + 1] = sc.cos; // odd
                 }
@@ -1394,11 +1367,11 @@ pub fn setInputsChecked(st: *clip.EncodeState) clip.Error!bool {
             {
                 const n_state = hparams.n_embd;
                 const d_half = @divTrunc(n_state, 2);
-                const log_10000 = logf(10000.0);
+                const log_10000 = libm.logf(10000.0);
                 const freqs = try allocF32(usz(d_half), 0);
                 defer gpa.free(freqs);
                 for (freqs, 0..) |*fr, k| {
-                    fr.* = expf(-(@as(f32, @floatFromInt(@as(c_int, @intCast(k)) * 2)) * log_10000 / @as(f32, @floatFromInt(n_state))));
+                    fr.* = libm.expf(-(@as(f32, @floatFromInt(@as(c_int, @intCast(k)) * 2)) * log_10000 / @as(f32, @floatFromInt(n_state))));
                 }
                 st.setInputF32("pos_freqs", freqs);
             }
@@ -1596,7 +1569,7 @@ fn makeSpatialIdx(side: c_int, offset: i32) clip.Error![]i32 {
 
 /// `"g4v_blk" + std::to_string(bid) + "_" + suffix`.
 fn g4vName(buf: *[96]u8, bid: usize, comptime suffix: [*:0]const u8) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, "g4v_blk%zu_%s", bid, suffix);
+    _ = libc.snprintf(buf, buf.len, "g4v_blk%zu_%s", bid, suffix);
     return @ptrCast(buf);
 }
 
@@ -1760,7 +1733,7 @@ pub fn nOutputTokens(model: *const model_mod.Model, img: *const impl.ImageF32) c
 
             if (img.add_viewsep) {
                 // global view: one image-newline per token-row + trailing view separator
-                const h: c_int = @intFromFloat(sqrtf(@floatFromInt(n_patches)));
+                const h: c_int = @intFromFloat(libm.sqrtfInt(n_patches));
                 n_patches = h * (h + 1) + 1;
             } else if (img.ny() >= img.nx() and @rem(img.ny(), img.nx()) == 0) {
                 // tile row: one image-newline per token-row

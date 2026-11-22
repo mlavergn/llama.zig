@@ -51,8 +51,8 @@ zig build-exe -mcpu baseline -femit-bin="$tmp/mtmd_diff" "$OPT" -lc \
     -I llama.cpp/include -I llama.cpp/ggml/include -I llama.cpp/tools/mtmd \
     -cflags -std=c++17 -- harness/mtmd_mem_ref.cpp \
     --dep harness_root --dep mtmd_port --dep llama_c --dep mtmd_c -Mroot=harness/mtmd_diff.zig \
-    --dep llama_c --dep sync -Mharness_root=src/llama/harness_root.zig -Msync=src/sync/module.zig \
-    --dep llama=harness_root -Mmtmd_port=src/mtmd/harness_root.zig \
+    --dep llama_c --dep stdlib -Mharness_root=src/llama/harness_root.zig -Mstdlib=stdlib/module.zig \
+    --dep llama=harness_root --dep stdlib -Mmtmd_port=src/mtmd/harness_root.zig \
     -Mllama_c="$tmp/llama_c.zig" -Mmtmd_c="$tmp/mtmd_c.zig" \
     "$ZOUT/lib/libmtmd-ref.a" "$ZOUT/lib/libllama-ref.a" "$ZOUT/lib/libggml.a" -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \

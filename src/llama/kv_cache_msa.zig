@@ -18,6 +18,7 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const hparams_mod = @import("hparams.zig");
 const batch = @import("batch.zig");
@@ -381,11 +382,6 @@ pub const KvCacheMsa = struct {
     }
 };
 
-/// `GGML_PAD` (ggml.h:94 @b1b770d90) over `uint32_t`.
-fn padU32(x: u32, n: u32) u32 {
-    return (x +% n -% 1) & ~(n -% 1);
-}
-
 fn releaseAll(list: *std.ArrayList(Ubatch)) void {
     for (list.items) |*u| u.release();
     list.deinit(allocator);
@@ -522,7 +518,7 @@ pub const MsaContext = struct {
             pos_max = @max(pos_max, kv.seqPosMax(seq_id));
         }
 
-        return @max(n_pad, padU32(@bitCast(pos_max +% 1), n_pad));
+        return @max(n_pad, stdlib.num.pad(u32, @bitCast(pos_max +% 1), n_pad));
     }
 
     /// Ports `llama_kv_cache_msa_context`'s `set_input_cell_pos`
@@ -706,7 +702,7 @@ test {
 }
 
 test "the position axis pads to 256" {
-    try std.testing.expectEqual(@as(u32, 0), padU32(0, 256));
-    try std.testing.expectEqual(@as(u32, 256), padU32(1, 256));
-    try std.testing.expectEqual(@as(u32, 512), padU32(257, 256));
+    try std.testing.expectEqual(@as(u32, 0), stdlib.num.pad(u32, 0, 256));
+    try std.testing.expectEqual(@as(u32, 256), stdlib.num.pad(u32, 1, 256));
+    try std.testing.expectEqual(@as(u32, 512), stdlib.num.pad(u32, 257, 256));
 }

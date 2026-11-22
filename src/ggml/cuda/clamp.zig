@@ -22,11 +22,6 @@ const half = kernels.half;
 /// Ports `CUDA_CLAMP_BLOCK_SIZE` (clamp.cuh:3 @b1b770d90).
 const block_size = 256;
 
-/// `(half) x`.
-fn toHalf(x: f32) half {
-    return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
-}
-
 /// `size_t` into a `uint32_t` parameter.
 fn u32Of(x: usize) u32 {
     return @truncate(x);
@@ -72,7 +67,7 @@ pub fn opClamp(ctx: *common.Context, dst: *Tensor) void {
     const max: f32 = @bitCast(dst.op_params[1]);
 
     if (src0.type == c.GGML_TYPE_F16) {
-        clampCuda(half, src0_d, dst_d, toHalf(min), toHalf(max), src0, dst, stream);
+        clampCuda(half, src0_d, dst_d, kernels.toHalf(min), kernels.toHalf(max), src0, dst, stream);
     } else {
         clampCuda(f32, src0_d, dst_d, min, max, src0, dst, stream);
     }

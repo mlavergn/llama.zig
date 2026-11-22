@@ -11,6 +11,7 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -196,7 +197,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
                 var kq: *Tensor = c.ggml_mul_mat(ctx, k, q);
 
-                kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / impl.sqrtf(@floatFromInt(hp.posnet.n_embd)), 0.0);
+                kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / libm.sqrtfInt(hp.posnet.n_embd), 0.0);
 
                 cur = c.ggml_mul_mat(ctx, kq, v);
 

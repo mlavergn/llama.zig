@@ -38,11 +38,13 @@
 //! `chatLogSink`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const json = @import("json");
 const chat = @import("common_chat");
 const mtmd_mod = @import("mtmd");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 const common = @import("common.zig");
 const tokens_mod = @import("tokens.zig");
@@ -89,7 +91,7 @@ pub const http_polling_seconds: c_int = 1;
 
 /// `GGML_ASSERT` with this file's name.
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    common.ggmlAssert(ok, "server-context.cpp", line, cond);
+    tc.ggml.ggmlAssert(ok, "server-context.cpp", line, cond);
 }
 
 /// `GGML_ABORT(msg)`.
@@ -1080,7 +1082,7 @@ pub const Slot = struct {
                 for (self.n_accepted_per_pos.items, 0..) |n, i| {
                     if (i > 0) try rates.appendSlice(gpa, ", ");
                     var buf: [64]u8 = undefined;
-                    const len = snprintf(&buf, buf.len, "%.3f", @as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(n_draft_verif_steps)));
+                    const len = libc.snprintf(&buf, buf.len, "%.3f", @as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(n_draft_verif_steps)));
                     try rates.appendSlice(gpa, buf[0..@intCast(@min(len, buf.len - 1))]);
                 }
             }
@@ -1164,8 +1166,6 @@ pub const Slot = struct {
         other.initSampler();
     }
 };
-
-extern fn snprintf(buf: [*]u8, n: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `string_find_partial_stop` (common/common.h:895 @b1b770d90): where
 /// a prefix of `stop` ends `str`.
@@ -2113,8 +2113,8 @@ pub const Impl = struct {
     }
 
     fn envInt(name: [:0]const u8) c_int {
-        const v = tc.env.get(name) orelse return 0;
-        return tc.num.atoi(v);
+        const v = stdlib.env.get(name) orelse return 0;
+        return stdlib.num.atoi(v);
     }
 
     /// Ports `server_context_impl`'s `init` (server-context.cpp:1647
@@ -2643,7 +2643,7 @@ pub const Impl = struct {
 
             if (self.spec != null and spec_mod.getSynthProbs(self.spec).len != 0) {
                 const seed: u32 = if (task.params.sampling.seed == c.LLAMA_DEFAULT_SEED)
-                    common.randomDevice()
+                    libcxx.randomDevice()
                 else
                     task.params.sampling.seed;
                 slot.spec_synth_rng.seed(seed);
@@ -3485,42 +3485,38 @@ pub const Impl = struct {
     const slot_ckpt_magic: u32 = 0x504b4353; // "SCKP"
     const slot_ckpt_version: u32 = 1;
 
-    /// The `std::ifstream` / `std::ofstream` of the slot file's appendices,
-    /// over C stdio: `ab` for `std::ios::binary | std::ios::app`, `rb` for
-    /// reading.
-    const CFile = opaque {};
-    extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*CFile;
-    extern fn fclose(f: *CFile) c_int;
-    extern fn fread(ptr: [*]u8, size: usize, n: usize, f: *CFile) usize;
-    extern fn fwrite(ptr: [*]const u8, size: usize, n: usize, f: *CFile) usize;
-    extern fn fflush(f: *CFile) c_int;
-    extern fn ferror(f: *CFile) c_int;
-    extern fn fseeko(f: *CFile, off: i64, whence: c_int) c_int;
-    extern fn ftello(f: *CFile) i64;
-
-    /// A write stream: once a write fails, the stream stays failed, as
-    /// `std::ofstream`'s badbit does.
+    /// The `std::ofstream` of the slot file's appendices, opened
+    /// `std::ios::binary | std::ios::app`: once a write fails, the stream
+    /// stays failed, as its badbit does.
     const OutFile = struct {
-        f: *CFile,
+        out: stdlib.file.Out,
         ok: bool = true,
     };
 
+    /// The `std::ifstream` the appendices are read through: the file and
+    /// the offset its next read starts at.
+    const InFile = struct {
+        f: std.Io.File,
+        pos: u64,
+    };
+
     /// Ports `ckpt_read` (server-context.cpp:2802 @b1b770d90).
-    fn ckptRead(f: *CFile, dst: []u8, n_read: *usize) bool {
-        if (dst.len != 0 and fread(dst.ptr, 1, dst.len, f) != dst.len) {
-            return false;
+    fn ckptRead(f: *InFile, dst: []u8, n_read: *usize) bool {
+        if (dst.len != 0) {
+            if (!stdlib.file.readAt(stdlib.file.defaultIo(), f.f, dst, f.pos)) return false;
+            f.pos += dst.len;
         }
         n_read.* += dst.len;
         return true;
     }
 
-    fn ckptReadVal(comptime T: type, f: *CFile, dst: *T, n_read: *usize) bool {
+    fn ckptReadVal(comptime T: type, f: *InFile, dst: *T, n_read: *usize) bool {
         return ckptRead(f, std.mem.asBytes(dst), n_read);
     }
 
     /// Ports `ckpt_read_buf` (server-context.cpp:2811 @b1b770d90). `buf` is
     /// replaced by a `gpa` allocation the caller owns.
-    fn ckptReadBuf(f: *CFile, buf: *[]u8, n_avail: usize, n_read: *usize) !bool {
+    fn ckptReadBuf(f: *InFile, buf: *[]u8, n_avail: usize, n_read: *usize) !bool {
         var n: u64 = 0;
         // check the size against the bytes left in the file before allocating, the size field may be corrupted
         if (!ckptReadVal(u64, f, &n, n_read) or n > n_avail - n_read.*) {
@@ -3533,8 +3529,10 @@ pub const Impl = struct {
 
     /// Ports `ckpt_write` (server-context.cpp:2821 @b1b770d90).
     fn ckptWrite(out: *OutFile, src: []const u8, n_written: *usize) void {
-        if (out.ok and src.len != 0 and fwrite(src.ptr, 1, src.len, out.f) != src.len) {
-            out.ok = false;
+        if (out.ok and src.len != 0) {
+            out.out.write(src) catch {
+                out.ok = false;
+            };
         }
         n_written.* += src.len;
     }
@@ -3552,30 +3550,39 @@ pub const Impl = struct {
         }
     }
 
-    /// `ofs.flush(); if (!ofs)`: false if the stream failed.
+    /// `ofs.flush(); if (!ofs)`, then its destructor's close: false if
+    /// the stream failed. Nothing is buffered, so there is nothing to
+    /// flush.
     fn ckptClose(out: *OutFile) bool {
-        if (fflush(out.f) != 0 or ferror(out.f) != 0) out.ok = false;
-        if (fclose(out.f) != 0) out.ok = false;
+        if (!out.out.closeChecked(stdlib.file.defaultIo())) out.ok = false;
         return out.ok;
+    }
+
+    /// Opens `filepath` for appending, as `std::ofstream(filepath,
+    /// std::ios::binary | std::ios::app)`.
+    ///
+    /// Return: the stream; null when it does not open.
+    fn ckptAppend(filepath: []const u8) ?OutFile {
+        const out = stdlib.file.Out.append(stdlib.file.defaultIo(), filepath) catch return null;
+        return .{ .out = out };
     }
 
     /// Opens `filepath` for reading at `offset`, as `std::ifstream(...,
     /// std::ios::ate)` then `seekg(offset)`; null where the C++ returns 0.
     ///
     /// Return: the file and the bytes after `offset`.
-    fn ckptOpenAt(path_z: [*:0]const u8, offset: usize) ?struct { f: *CFile, n_avail: usize } {
-        const f = fopen(path_z, "rb") orelse return null;
-        if (fseeko(f, 0, 2) != 0) {
-            _ = fclose(f);
+    fn ckptOpenAt(filepath: []const u8, offset: usize) ?struct { f: InFile, n_avail: usize } {
+        const io = stdlib.file.defaultIo();
+        const f = stdlib.file.openIn(io, filepath) catch return null;
+        const file_size = f.length(io) catch {
+            f.close(io);
+            return null;
+        };
+        if (file_size < offset) {
+            f.close(io);
             return null;
         }
-        const end = ftello(f);
-        const file_size: usize = if (end < 0) 0 else @intCast(end);
-        if (file_size < offset or fseeko(f, @intCast(offset), 0) != 0) {
-            _ = fclose(f);
-            return null;
-        }
-        return .{ .f = f, .n_avail = file_size - offset }; // bytes after the llama state payload
+        return .{ .f = .{ .f = f, .pos = offset }, .n_avail = @intCast(file_size - offset) }; // bytes after the llama state payload
     }
 
     /// Ports `server_context_impl`'s `save_slot_checkpoints` (server-context.cpp:2836
@@ -3589,10 +3596,10 @@ pub const Impl = struct {
         }
         const path_z = try gpa.dupeSentinel(u8, filepath, 0);
         defer gpa.free(path_z);
-        var out: OutFile = .{ .f = fopen(path_z.ptr, "ab") orelse {
+        var out = ckptAppend(filepath) orelse {
             slt(.wrn, func, slot, "failed to append context checkpoints to '%s'\n", .{path_z.ptr});
             return false;
-        } };
+        };
         const magic: u32 = slot_ckpt_magic;
         const version: u32 = slot_ckpt_version;
         const count: u32 = @truncate(slot.prompt.checkpoints.items.len);
@@ -3626,9 +3633,9 @@ pub const Impl = struct {
         const func = "load_slot_checkpoints";
         const path_z = try gpa.dupeSentinel(u8, filepath, 0);
         defer gpa.free(path_z);
-        const opened = ckptOpenAt(path_z.ptr, offset) orelse return 0;
-        const f = opened.f;
-        defer _ = fclose(f);
+        var opened = ckptOpenAt(filepath, offset) orelse return 0;
+        const f = &opened.f;
+        defer f.f.close(stdlib.file.defaultIo());
         const n_avail = opened.n_avail;
         var n_read: usize = 0;
         var magic: u32 = 0;
@@ -3731,10 +3738,10 @@ pub const Impl = struct {
         }
         const path_z = try gpa.dupeSentinel(u8, filepath, 0);
         defer gpa.free(path_z);
-        var out: OutFile = .{ .f = fopen(path_z.ptr, "ab") orelse {
+        var out = ckptAppend(filepath) orelse {
             slt(.wrn, func, slot, "failed to append the draft state to '%s'\n", .{path_z.ptr});
             return false;
-        } };
+        };
         const magic: u32 = slot_draft_magic;
         const version: u32 = slot_draft_version;
         ckptWriteVal(u32, &out, &magic, n_written);
@@ -3761,9 +3768,9 @@ pub const Impl = struct {
         }
         const path_z = try gpa.dupeSentinel(u8, filepath, 0);
         defer gpa.free(path_z);
-        const opened = ckptOpenAt(path_z.ptr, offset) orelse return 0;
-        const f = opened.f;
-        defer _ = fclose(f);
+        var opened = ckptOpenAt(filepath, offset) orelse return 0;
+        const f = &opened.f;
+        defer f.f.close(stdlib.file.defaultIo());
         const n_avail = opened.n_avail;
         var n_read: usize = 0;
         var magic: u32 = 0;

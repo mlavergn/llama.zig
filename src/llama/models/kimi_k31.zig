@@ -16,6 +16,7 @@
 //! `build_latent_moe`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -383,7 +384,7 @@ const Graph = struct {
             .kv_lora_rank = hp.n_lora_kv,
             .n_embd_head_qk_rope = hp.nRot(0),
             .n_embd_head_qk_nope = @as(i64, hp.nEmbdHeadKMla()) - hp.nRot(0),
-            .kq_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadKMla())),
+            .kq_scale = 1.0 / libm.sqrtfInt(hp.nEmbdHeadKMla()),
         };
 
         const res_bs: u32 = hp.attn_res_block_size;
@@ -649,7 +650,7 @@ const Graph = struct {
 
             var iw: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_proj, cur);
             // Pre-scaled, so the huge score tensor is not scaled afterwards.
-            iw = c.ggml_scale(ctx, iw, 1.0 / impl.sqrtf(@floatFromInt(n_idx_dim * n_idx_head)));
+            iw = c.ggml_scale(ctx, iw, 1.0 / libm.sqrtfInt(n_idx_dim * n_idx_head));
 
             ik = idx.getK(ctx, il);
 

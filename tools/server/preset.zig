@@ -26,6 +26,7 @@
 //! C++'s copy and destructor.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const peg = @import("peg");
 const regex = @import("llama").regex;
@@ -488,66 +489,17 @@ const IniVisitor = struct {
     }
 };
 
-/// Reads a whole file as `std::ifstream` and `istreambuf_iterator` do: a
-/// directory opens and reads as nothing.
-///
-/// Return: the contents owned by `a`, or null when the file cannot be
-/// opened.
-fn readWhole(a: Allocator, path: []const u8) Error!?[]u8 {
-    const z = try a.dupeSentinel(u8, path, 0);
-    const fd = std.c.open(z.ptr, .{ .ACCMODE = .RDONLY });
-    if (fd < 0) return null;
-    defer _ = std.c.close(fd);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = std.c.read(fd, &buf, buf.len);
-        if (n <= 0) break;
-        try out.appendSlice(a, buf[0..@intCast(n)]);
-    }
-    return out.items;
-}
-
-/// `std::filesystem::exists(path)`: `stat` succeeds.
-pub fn fsExists(path: []const u8) bool {
-    var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-    if (path.len >= buf.len) return false;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    return tc.fs_stat.stat(@ptrCast(&buf), true) != null;
-}
-
-/// `std::filesystem::is_directory(path)`: `stat` says a directory.
-pub fn fsIsDirectory(path: []const u8) bool {
-    var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-    if (path.len >= buf.len) return false;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    const st = tc.fs_stat.stat(@ptrCast(&buf), true) orelse return false;
-    return st.mode & tc.fs_stat.IFMT == tc.fs_stat.IFDIR;
-}
-
-/// `std::filesystem::is_regular_file(path)`: `stat` says a regular file.
-pub fn fsIsRegularFile(path: []const u8) bool {
-    var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-    if (path.len >= buf.len) return false;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    const st = tc.fs_stat.stat(@ptrCast(&buf), true) orelse return false;
-    return st.mode & tc.fs_stat.IFMT == tc.fs_stat.IFREG;
-}
-
 /// Ports `parse_ini_from_file` (preset.cpp:170 @b1b770d90): sections in
 /// name order, each its keys in key order. A section named twice keeps
 /// only what follows its last header.
 fn parseIniFromFile(a: Allocator, path: []const u8) Error!Ini {
     var parsed: Ini = .{};
 
-    if (!fsExists(path)) {
+    if (!stdlib.fs.exists(path)) {
         return throwConcat(a, "preset file does not exist: ", path);
     }
 
-    const contents = (try readWhole(a, path)) orelse {
+    const contents = (try stdlib.file.readStream(stdlib.file.defaultIo(), a, path)) orelse {
         return throwConcat(a, "failed to open server preset file: ", path);
     };
 
@@ -598,18 +550,22 @@ const DirEntry = struct {
 /// Return: the entries; strings owned by `a`.
 fn directoryEntries(a: Allocator, dir_path: []const u8) Error![]DirEntry {
     var out: std.ArrayList(DirEntry) = .empty;
-    const z = try a.dupeSentinel(u8, dir_path, 0);
-    const dir = std.c.opendir(z.ptr) orelse return out.items;
-    defer _ = std.c.closedir(dir);
-    while (std.c.readdir(dir)) |ent| {
-        const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&ent.name)), 0);
-        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+    var dir = switch (stdlib.fs.Dir.open(dir_path)) {
+        .ok => |d| d,
+        .err => return out.items,
+    };
+    defer dir.close();
+    while (true) {
+        const name = switch (dir.next()) {
+            .name => |n| n,
+            .end, .err => break,
+        };
         // `path / name`: a separator is added unless `path` ends in one
         const p = if (std.mem.endsWith(u8, dir_path, "/"))
             try std.mem.concat(a, u8, &.{ dir_path, name })
         else
             try std.mem.concat(a, u8, &.{ dir_path, "/", name });
-        try out.append(a, .{ .path = p, .name = try a.dupe(u8, name), .is_dir = fsIsDirectory(p), .is_regular = fsIsRegularFile(p) });
+        try out.append(a, .{ .path = p, .name = try a.dupe(u8, name), .is_dir = stdlib.fs.isDirectory(p), .is_regular = stdlib.fs.isRegularFile(p) });
     }
     return out.items;
 }
@@ -788,7 +744,7 @@ pub const Context = struct {
         defer scratch.deinit();
         const sa = scratch.allocator();
 
-        if (!fsExists(models_dir) or !fsIsDirectory(models_dir)) {
+        if (!stdlib.fs.exists(models_dir) or !stdlib.fs.isDirectory(models_dir)) {
             const z = try sa.dupeSentinel(u8, models_dir, 0);
             return arg.throw("error: '%s' does not exist or is not a directory\n", .{z.ptr});
         }

@@ -141,10 +141,3 @@ pub extern "kernel32" fn GetCurrentDirectoryW(size: DWORD, buf: ?[*]u16) callcon
 pub extern "advapi32" fn RegOpenKeyExA(key: HKEY, sub_key: [*:0]const u8, options: DWORD, sam: DWORD, result: *HKEY) callconv(.winapi) c_long;
 pub extern "advapi32" fn RegQueryValueExA(key: HKEY, name: [*:0]const u8, reserved: ?*DWORD, kind: ?*DWORD, data: ?[*]u8, size: ?*DWORD) callconv(.winapi) c_long;
 pub extern "advapi32" fn RegCloseKey(key: HKEY) callconv(.winapi) c_long;
-
-// The UCRT.
-pub extern "c" fn _aligned_malloc(size: usize, alignment: usize) ?*anyopaque;
-pub extern "c" fn _aligned_free(ptr: ?*anyopaque) void;
-pub extern "c" fn _wfopen(path: [*:0]const u16, mode: [*:0]const u16) ?*std.c.FILE;
-/// What the `stdin`, `stdout` and `stderr` macros expand to (MinGW's `stdio.h`, line 124).
-pub extern "c" fn __acrt_iob_func(index: c_uint) *anyopaque;

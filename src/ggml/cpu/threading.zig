@@ -14,7 +14,7 @@
 //! drive pthreads on Unix and SRW locks on Windows, plus its own atomic
 //! wrappers for MSVC. The shims are ported as the inline functions `lock`,
 //! `lockShared`, `condWait` and the rest, over the port's futex `Mutex` and
-//! `Condition` (`src/sync/`) on every target; `std.atomic.Value` replaces the
+//! `Condition` (`stdlib/sync/`) on every target; `std.atomic.Value` replaces the
 //! atomic wrappers. The `_shared` variants are the plain ones, as on the C's
 //! pthread arm, and stay distinct so each call site reads against the C's.
 //!
@@ -31,6 +31,8 @@
 //! and `pending`: under OpenMP the C drops those three fields.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
@@ -169,21 +171,6 @@ const CpuSet = extern struct {
     }
 };
 
-/// The libc calls only the Linux arms make.
-const linux_c = if (is_linux) struct {
-    extern "c" fn pthread_setaffinity_np(thread: std.c.pthread_t, size: usize, set: *const CpuSet) c_int;
-    extern "c" fn pthread_getaffinity_np(thread: std.c.pthread_t, size: usize, set: *CpuSet) c_int;
-    extern "c" fn getcpu(cpu: *c_uint, node: *c_uint) c_int;
-    extern "c" fn statx(dirfd: c_int, path: [*:0]const u8, flags: c_int, mask: std.os.linux.STATX, buf: *std.os.linux.Statx) c_int;
-    extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
-    extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-    extern "c" fn fgets(buf: [*]u8, size: c_int, f: *anyopaque) ?[*]u8;
-    extern "c" fn fclose(f: *anyopaque) c_int;
-    extern "c" fn strncmp(a: [*]const u8, b: [*:0]const u8, n: usize) c_int;
-} else struct {};
-
-extern fn strerror(err: c_int) [*:0]const u8;
-
 /// Ports `struct ggml_numa_node` (ggml-cpu.c:557 @b1b770d90).
 const NumaNode = struct {
     cpus: [numa_max_cpus]u32 = @splat(0),
@@ -211,7 +198,7 @@ const glibc_has_getcpu = is_gnu_linux and
 /// no `struct stat` for Linux -- the move `llama/mmap.zig` makes too.
 fn pathExists(path: [*:0]const u8) bool {
     var st: std.os.linux.Statx = undefined;
-    return linux_c.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st) == 0;
+    return libc.statx(std.os.linux.AT.FDCWD, path, 0, std.os.linux.STATX.BASIC_STATS, &st) == 0;
 }
 
 /// Ports `ggml_get_numa_affinity` (ggml-cpu.c:632 @b1b770d90), the
@@ -219,7 +206,7 @@ fn pathExists(path: [*:0]const u8) bool {
 /// `numactl` is the set it was started with.
 fn getNumaAffinity() CpuSet {
     var cpuset: CpuSet = .{};
-    _ = linux_c.pthread_getaffinity_np(pthread_self(), @sizeOf(CpuSet), &cpuset);
+    _ = libc.pthread_getaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &cpuset);
     return cpuset;
 }
 
@@ -247,7 +234,7 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
 
     // enumerate nodes
     while (numa.n_nodes < numa_max_nodes) {
-        const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/node/node%u", numa.n_nodes);
+        const rv = libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u", numa.n_nodes);
         impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
         if (!pathExists(@ptrCast(&path))) break;
         numa.n_nodes += 1;
@@ -255,7 +242,7 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
 
     // enumerate CPUs
     while (numa.total_cpus < numa_max_cpus) {
-        const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/cpu/cpu%u", numa.total_cpus);
+        const rv = libc.snprintf(&path, path.len, "/sys/devices/system/cpu/cpu%u", numa.total_cpus);
         impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
         if (!pathExists(@ptrCast(&path))) break;
         numa.total_cpus += 1;
@@ -265,7 +252,7 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
     // and the raw syscall before it; both fill the same two words.
     var current_cpu: c_uint = 0;
     const getcpu_ret: c_int = if (comptime glibc_has_getcpu)
-        linux_c.getcpu(&current_cpu, &numa.current_node)
+        libc.getcpu(&current_cpu, &numa.current_node)
     else getcpu: {
         var cpu: usize = 0;
         var node: usize = 0;
@@ -284,7 +271,7 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
         node.n_cpus = 0;
         var cpu: c_uint = 0;
         while (cpu < numa.total_cpus) : (cpu += 1) {
-            const rv = linux_c.snprintf(&path, path.len, "/sys/devices/system/node/node%u/cpu%u", @as(c_uint, @intCast(n)), cpu);
+            const rv = libc.snprintf(&path, path.len, "/sys/devices/system/node/node%u/cpu%u", @as(c_uint, @intCast(n)), cpu);
             impl.assert(rv > 0 and @as(c_uint, @intCast(rv)) < path.len, "rv > 0 && (unsigned)rv < sizeof(path)");
             if (pathExists(@ptrCast(&path))) {
                 node.cpus[node.n_cpus] = cpu;
@@ -294,12 +281,12 @@ pub export fn ggml_numa_init(numa_flag: c.enum_ggml_numa_strategy) void {
     }
 
     if (ggml_is_numa()) {
-        if (linux_c.fopen("/proc/sys/kernel/numa_balancing", "r")) |fptr| {
+        if (libc.fopen("/proc/sys/kernel/numa_balancing", "r")) |fptr| {
             var buf: [42]u8 = undefined;
-            if (linux_c.fgets(&buf, buf.len, fptr) != null and linux_c.strncmp(&buf, "0\n", buf.len) != 0) {
+            if (libc.fgets(&buf, buf.len, fptr) != null and libc.strncmp(&buf, "0\n", buf.len) != 0) {
                 impl.logWarn("/proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n", .{});
             }
-            _ = linux_c.fclose(fptr);
+            _ = libc.fclose(fptr);
         }
     }
 }
@@ -331,8 +318,8 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
         c.GGML_NUMA_STRATEGY_ISOLATE => numa.current_node,
         // use the cpuset that numactl gave us
         c.GGML_NUMA_STRATEGY_NUMACTL => {
-            const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &numa.cpuset);
-            if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+            const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &numa.cpuset);
+            if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
             return;
         },
         else => return,
@@ -342,8 +329,8 @@ fn setNumaThreadAffinity(thread_n: c_int) void {
     var cpus: CpuSet = .{};
     for (node.cpus[0..node.n_cpus]) |cpu| cpus.set(cpu, setsize);
 
-    const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+    const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &cpus);
+    if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
 }
 
 /// Ports `clear_numa_thread_affinity`, `clear_numa_thread_affinity`
@@ -358,8 +345,8 @@ fn clearNumaThreadAffinity() void {
     var i: usize = 0;
     while (i < numa.total_cpus) : (i += 1) cpus.set(i, setsize);
 
-    const rv = linux_c.pthread_setaffinity_np(pthread_self(), setsize, &cpus);
-    if (rv != 0) impl.fprintfStderr("warning: pthread_setaffinity_np() failed: %s\n", .{strerror(rv)});
+    const rv = libc.pthread_setaffinity_np(libc.pthread_self(), setsize, &cpus);
+    if (rv != 0) impl.fprintfStderr("warning: libc.pthread_setaffinity_np() failed: %s\n", .{stdlib.errno.strerror(rv)});
 }
 
 // -----------------------------------------------------------------------------
@@ -380,7 +367,6 @@ const SchedParam = if (is_linux) extern struct {
     __opaque: [4]u8 = @splat(0),
 };
 
-extern fn pthread_self() std.c.pthread_t;
 extern fn pthread_setschedparam(thread: std.c.pthread_t, policy: c_int, param: *const SchedParam) c_int;
 
 /// `_WIN32`, which selects the C's SRW-lock threading defs and the Windows
@@ -406,9 +392,9 @@ fn threadApplyAffinity(mask: []const bool) bool {
         if (bit) cpuset.set(i, @sizeOf(CpuSet));
     }
 
-    const err = linux_c.pthread_setaffinity_np(pthread_self(), @sizeOf(CpuSet), &cpuset);
+    const err = libc.pthread_setaffinity_np(libc.pthread_self(), @sizeOf(CpuSet), &cpuset);
     if (err != 0) {
-        impl.fprintfStderr("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), strerror(err), err });
+        impl.fprintfStderr("warn: failed to set affinity mask 0x%llx : %s (%d)\n", .{ @as(c_ulonglong, @intFromPtr(mask.ptr)), stdlib.errno.strerror(err), err });
         return false;
     }
     return true;
@@ -524,9 +510,9 @@ fn threadApplyPriority(prio: i32) bool {
     // Keep the inherited policy and priority.
     if (prio == c.GGML_SCHED_PRIO_NORMAL) return true;
 
-    const err = pthread_setschedparam(pthread_self(), policy, &p);
+    const err = pthread_setschedparam(libc.pthread_self(), policy, &p);
     if (err != 0) {
-        impl.fprintfStderr("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, strerror(err), err });
+        impl.fprintfStderr("warn: failed to set thread priority %d : %s (%d)\n", .{ prio, stdlib.errno.strerror(err), err });
         return false;
     }
 

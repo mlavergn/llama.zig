@@ -20,6 +20,7 @@
 //! Usage: mtmd-image-diff [kind-name-substring | sweep | vectors | death] [-v]
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const mtmd = @import("mtmd");
 const image = mtmd.image;
 const impl = mtmd.impl;
@@ -943,41 +944,32 @@ fn runVectors() !void {
 // -----------------------------------------------------------------------------
 // death
 
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn dup2(old: c_int, new: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-
 const DeathResult = struct { status: c_int, msg: []u8 };
 
 /// Runs `body` in a forked child with its stderr captured, the backtrace off.
 fn inChild(comptime body: anytype, args: anytype) !DeathResult {
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) return error.PipeFailed;
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) return error.PipeFailed;
+    const pid = libc.fork();
     if (pid < 0) return error.ForkFailed;
     if (pid == 0) {
-        _ = setenv("GGML_NO_BACKTRACE", "1", 1);
-        _ = dup2(fds[1], 2);
-        _ = close(fds[0]);
+        _ = libc.setenv("GGML_NO_BACKTRACE", "1", 1);
+        _ = libc.dup2(fds[1], 2);
+        _ = libc.close(fds[0]);
         @call(.auto, body, args) catch {};
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var msg: std.ArrayList(u8) = .empty;
     var chunk: [4096]u8 = undefined;
     while (true) {
-        const n = read(fds[0], &chunk, chunk.len);
+        const n = libc.read(fds[0], &chunk, chunk.len);
         if (n <= 0) break;
         try msg.appendSlice(gpa, chunk[0..@intCast(n)]);
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     return .{ .status = status, .msg = try msg.toOwnedSlice(gpa) };
 }
 

@@ -20,6 +20,8 @@
 //!   and s390x variants of most of this, which are not.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const win32 = @import("win32.zig");
@@ -31,35 +33,9 @@ const c = impl.c;
 // Declared rather than imported: these come from headers `@cImport` does not
 // see, and the variadic signatures need the by-value `va_list` noted above.
 
-extern fn vsnprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ap: impl.CVaList) c_int;
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
-extern fn fputs(s: [*:0]const u8, stream: *anyopaque) c_int;
-extern fn fflush(stream: ?*anyopaque) c_int;
-extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
-extern fn getenv(name: [*:0]const u8) ?[*:0]const u8;
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;
-extern fn abort() noreturn;
-extern fn clock() c_long;
-extern fn backtrace(buffer: [*]?*anyopaque, size: c_int) c_int;
-extern fn backtrace_symbols_fd(buffer: [*]const ?*anyopaque, size: c_int, fd: c_int) void;
-
-/// libc's `stdout` and `stderr`, which Darwin names `__stdoutp` and
-/// `__stderrp` behind a macro, glibc exports as themselves, and MinGW's UCRT
-/// hands out through `__acrt_iob_func`.
-fn cStdout() *anyopaque {
-    if (comptime is_windows) return win32.__acrt_iob_func(1);
-    return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stdoutp" else "stdout" }).*;
-}
-fn cStderr() *anyopaque {
-    if (comptime is_windows) return win32.__acrt_iob_func(2);
-    return @extern(*const *anyopaque, .{ .name = if (builtin.os.tag.isDarwin()) "__stderrp" else "stderr" }).*;
-}
-
 /// `_WIN32`, and with this target's toolchain also `__MINGW32__`: the C
 /// tests one or the other, and they coincide here.
 const is_windows = builtin.os.tag == .windows;
-
-extern fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
 
 /// `CLOCKS_PER_SEC` on macOS, and on glibc.
 const clocks_per_sec: i64 = 1_000_000;
@@ -110,8 +86,8 @@ var abort_callback: c.ggml_abort_callback_t = null;
 /// and lldb attaching to its own parent crashes Terminal.
 fn printBacktraceSymbols() void {
     var trace: [100]?*anyopaque = undefined;
-    const nptrs = backtrace(&trace, trace.len);
-    backtrace_symbols_fd(&trace, nptrs, std.posix.STDERR_FILENO);
+    const nptrs = libc.backtrace(&trace, trace.len);
+    libc.backtrace_symbols_fd(&trace, nptrs, std.posix.STDERR_FILENO);
 }
 
 /// Ports `ggml_print_backtrace`, `ggml_print_backtrace` (ggml.c:158, 239
@@ -123,13 +99,11 @@ fn printBacktraceSymbols() void {
 /// the `#else`, which does not read the variable either.
 export fn ggml_print_backtrace() void {
     if (comptime is_windows) return;
-    if (getenv("GGML_NO_BACKTRACE") != null) return;
+    if (stdlib.env.getenv("GGML_NO_BACKTRACE") != null) return;
     if (comptime builtin.os.tag == .linux) return printBacktraceLinux();
     printBacktraceSymbols();
 }
 
-extern fn getline(line: *?[*]u8, n: *usize, f: *std.c.FILE) isize;
-extern fn fclose(f: *std.c.FILE) c_int;
 extern fn execlp(file: [*:0]const u8, arg0: [*:0]const u8, ...) c_int;
 extern fn prctl(option: c_int, ...) c_int;
 extern fn _Exit(status: c_int) noreturn;
@@ -143,11 +117,11 @@ const pr_set_ptracer: c_int = 0x59616d61;
 /// runs. The pipe holds the child back until the parent has allowed it to
 /// ptrace, which Yama's `ptrace_scope = 1` requires.
 fn printBacktraceLinux() void {
-    const f = fopen("/proc/self/status", "r") orelse return;
+    const f = libc.fopen("/proc/self/status", "r") orelse return;
     var size: usize = 0;
     var line: ?[*]u8 = null;
     while (true) {
-        const length = getline(&line, &size, f);
+        const length = libc.getline(&line, &size, f);
         if (length <= 0) break;
         const l = line.?[0..@intCast(length)];
         if (std.mem.startsWith(u8, l, "TracerPid:") and
@@ -155,12 +129,12 @@ fn printBacktraceLinux() void {
         {
             // Already being debugged, and the breakpoint is the later abort()
             std.c.free(line);
-            _ = fclose(f);
+            _ = libc.fclose(f);
             return;
         }
     }
     std.c.free(line);
-    _ = fclose(f);
+    _ = libc.fclose(f);
 
     var lock: [2]std.c.fd_t = .{ -1, -1 };
     _ = std.c.pipe(&lock); // Don't start gdb until after PR_SET_PTRACER
@@ -173,7 +147,7 @@ fn printBacktraceLinux() void {
         return;
     } else if (child_pid == 0) {
         var attach: [32]u8 = undefined;
-        _ = snprintf(&attach, attach.len, "attach %d", parent_pid);
+        _ = libc.snprintf(&attach, attach.len, "attach %d", parent_pid);
         const attach_z: [*:0]const u8 = @ptrCast(&attach);
         _ = std.c.close(lock[1]);
         _ = std.c.read(lock[0], @ptrCast(&lock), 1);
@@ -208,16 +182,16 @@ export fn ggml_set_abort_callback(callback: c.ggml_abort_callback_t) c.ggml_abor
 /// Formats `file:line: ` followed by the message, hands it to the callback if
 /// one is set, and otherwise prints it with a backtrace. Never returns.
 fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv(.c) noreturn {
-    _ = fflush(cStdout());
+    _ = libc.fflush(stdlib.stdio.cStream(.stdout));
 
     var message: [2048]u8 = undefined;
-    const offset = snprintf(&message, message.len, "%s:%d: ", file, line);
+    const offset = libc.snprintf(&message, message.len, "%s:%d: ", file, line);
 
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
     if (offset > 0 and @as(usize, @intCast(offset)) < message.len) {
         const used: usize = @intCast(offset);
-        _ = vsnprintf(message[used..].ptr, message.len - used, fmt, impl.cVaList(&ap));
+        _ = libc.vsnprintf(message[used..].ptr, message.len - used, fmt, impl.cVaList(&ap));
     }
 
     // `snprintf` and `vsnprintf` both terminate what they write.
@@ -228,17 +202,17 @@ fn ggmlAbort(file: [*:0]const u8, line: c_int, fmt: [*:0]const u8, ...) callconv
 /// is formatted: exported as `ggml_zig_abort_message` for `varargs.c` where
 /// that file defines `ggml_abort`.
 fn abortWith(message: [*:0]const u8) callconv(.c) noreturn {
-    // `fflush(stdout)`, for what a tool wrote through `sync.stdio`; the C
+    // `fflush(stdout)`, for what a tool wrote through `stdlib.stdio`; the C
     // library's own stdout was flushed before the message was formatted
-    @import("sync").stdio.stdout().flush();
+    @import("stdlib").stdio.stdout().flush();
     if (abort_callback) |callback| {
         callback(message);
     } else {
-        _ = fprintf(cStderr(), "%s\n", message);
+        _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "%s\n", message);
         ggml_print_backtrace();
     }
 
-    abort();
+    libc.abort();
 }
 
 // -----------------------------------------------------------------------------
@@ -268,7 +242,7 @@ fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.la
     defer @cVaEnd(&ap_copy);
 
     var buffer: [128]u8 = undefined;
-    const len = vsnprintf(&buffer, buffer.len, fmt, impl.cVaList(&ap_first));
+    const len = libc.vsnprintf(&buffer, buffer.len, fmt, impl.cVaList(&ap_first));
     if (len < buffer.len) {
         logger_state.log_callback.?(level, &buffer, logger_state.log_callback_user_data);
         return;
@@ -277,7 +251,7 @@ fn logInternalV(level: c.enum_ggml_log_level, format: ?[*:0]const u8, ap: std.la
     const size: usize = @intCast(len + 1);
     const buffer2: [*]u8 = @ptrCast(std.c.calloc(size, 1) orelse return);
     defer std.c.free(buffer2);
-    _ = vsnprintf(buffer2, size, fmt, impl.cVaList(&ap_copy));
+    _ = libc.vsnprintf(buffer2, size, fmt, impl.cVaList(&ap_copy));
     buffer2[size - 1] = 0;
     logger_state.log_callback.?(level, @ptrCast(buffer2), logger_state.log_callback_user_data);
 }
@@ -314,8 +288,8 @@ export fn ggml_log_callback_default(
 ) callconv(.c) void {
     _ = level;
     _ = user_data;
-    _ = fputs(@ptrCast(text), cStderr());
-    _ = fflush(cStderr());
+    _ = libc.fputs(@ptrCast(text), stdlib.stdio.cStream(.stderr));
+    _ = libc.fflush(stdlib.stdio.cStream(.stderr));
 }
 
 /// Ports `ggml_log_get` (ggml.c:8084 @b1b770d90).
@@ -361,7 +335,7 @@ const use_vm_allocate = builtin.os.tag.isDarwin() and !tsan_enabled;
 ///
 /// Return: the allocation, or null on failure after logging why.
 export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
-    if (comptime is_windows) return win32._aligned_malloc(size, 64);
+    if (comptime is_windows) return libc._aligned_malloc(size, 64);
 
     if (size == 0) {
         impl.logWarn("Behavior may be unexpected when allocating 0 bytes for ggml_aligned_malloc!\n", .{});
@@ -370,7 +344,7 @@ export fn ggml_aligned_malloc(size: usize) ?*anyopaque {
 
     if (comptime !use_vm_allocate) {
         var aligned_memory: ?*anyopaque = null;
-        const result = posix_memalign(&aligned_memory, 64, size);
+        const result = libc.posix_memalign(&aligned_memory, 64, size);
         if (result != 0) {
             logAllocFailure(result, size);
             return null;
@@ -417,7 +391,7 @@ fn logAllocFailure(result: c_int, size: usize) void {
 /// length that was allocated, so this cannot be a plain `free`. Elsewhere it
 /// is the C's plain `free`, or on MinGW `_aligned_free`, and `size` is unused.
 export fn ggml_aligned_free(ptr: ?*anyopaque, size: usize) void {
-    if (comptime is_windows) return win32._aligned_free(ptr);
+    if (comptime is_windows) return libc._aligned_free(ptr);
     if (comptime !use_vm_allocate) return std.c.free(ptr);
     const p = ptr orelse return;
     _ = vm_deallocate(mach_task_self_, @intFromPtr(p), size);
@@ -587,7 +561,7 @@ export fn ggml_time_us() i64 {
 
 /// Ports `ggml_cycles` (ggml.c:582 @b1b770d90).
 export fn ggml_cycles() i64 {
-    return @intCast(clock());
+    return @intCast(libc.clock());
 }
 
 /// Ports `ggml_cycles_per_ms` (ggml.c:586 @b1b770d90).
@@ -672,12 +646,12 @@ test "aligned malloc returns aligned memory and frees it" {
 /// UTF-8 to wide characters and the file is opened with `_wfopen`, so a path
 /// outside the ANSI code page still opens.
 pub export fn ggml_fopen(fname: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE {
-    if (comptime !is_windows) return fopen(fname, mode);
+    if (comptime !is_windows) return @ptrCast(libc.fopen(fname, mode));
 
     var file: ?*std.c.FILE = null;
     if (mbstowcs(fname)) |wfname| {
         if (mbstowcs(mode)) |wmode| {
-            file = win32._wfopen(wfname, wmode);
+            file = @ptrCast(@alignCast(libc._wfopen(wfname, wmode)));
             std.c.free(wmode);
         }
         std.c.free(wfname);

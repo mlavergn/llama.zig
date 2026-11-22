@@ -19,13 +19,14 @@
 //! `llm_graph_input_switch`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
 const batch = @import("../batch.zig");
 const hparams_mod = @import("../hparams.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 
 const c = impl.c;
 const Exception = impl.Exception;
@@ -445,7 +446,7 @@ fn buildAttentionLayer(
     b.cb(Kcur, "Kcur", il);
     b.cb(Vcur, "Vcur", il);
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     // wo is null, so build_attn returns the heads concatenated; the output
     // projection is switched below.

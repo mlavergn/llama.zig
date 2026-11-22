@@ -1,9 +1,9 @@
 //! The process's standard output and error as C's stdio buffers them, on
 //! `std.Io`, shared by every module that writes to them.
 //!
-//! **Not a port.** It lives in `sync` because every module already shares
-//! that one instance: libggml's `ggml_abort` flushes the same stdout buffer
-//! a tool writes to, as upstream's `fflush(stdout)` flushes the tool's.
+//! **Not a port.** It lives in `stdlib` because every module shares that
+//! one instance: libggml's `ggml_abort` flushes the same stdout buffer a
+//! tool writes to, as upstream's `fflush(stdout)` flushes the tool's.
 //!
 //! # Buffering
 //!
@@ -22,7 +22,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const Mutex = @import("mutex.zig").Mutex;
+const Mutex = @import("sync/mutex.zig").Mutex;
 
 /// How a stream holds what is written to it: `_IONBF`, `_IOLBF`, `_IOFBF`.
 pub const Buffering = enum { none, line, full };
@@ -149,6 +149,32 @@ pub fn flushAll() void {
     err_stream.flush();
 }
 
+/// C's `exit(code)`: what is buffered for stdout and stderr is written
+/// first, as C's `exit` flushes stdio, then the C library's `exit`, which
+/// still flushes the C streams the libraries and the console write through.
+pub fn exit(code: c_int) noreturn {
+    flushAll();
+    @import("libc.zig").exit(code);
+}
+
+/// One of the C library's three standard streams.
+pub const CStream = enum(c_uint) { stdin = 0, stdout = 1, stderr = 2 };
+
+/// The C library's `FILE *` for `which`, for code that still writes
+/// through C's stdio: Darwin names them `__stdinp`, `__stdoutp` and
+/// `__stderrp` behind a macro, glibc exports them as themselves, and
+/// MinGW's UCRT hands them out through `__acrt_iob_func`.
+///
+/// Return: the stream, the C library's for the process's life.
+pub fn cStream(which: CStream) *anyopaque {
+    if (comptime builtin.os.tag == .windows) return @import("libc.zig").__acrt_iob_func(@backingInt(which));
+    return switch (which) {
+        inline else => |w| @extern(*const *anyopaque, .{
+            .name = if (builtin.os.tag.isDarwin()) "__" ++ @tagName(w) ++ "p" else @tagName(w),
+        }).*,
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Unit Tests
 
@@ -163,4 +189,9 @@ test "the buffer holds bytes as written, with CR LF for LF in text mode" {
     var t: Stream = .{ .target = .out, .buffering = .full, .text = true };
     t.put("a\nb\r\n");
     try std.testing.expectEqualStrings("a\r\nb\r\r\n", t.buf[0..t.len]);
+}
+
+test "cStream names the C library's three streams" {
+    try std.testing.expect(cStream(.stdin) != cStream(.stdout));
+    try std.testing.expect(cStream(.stdout) != cStream(.stderr));
 }

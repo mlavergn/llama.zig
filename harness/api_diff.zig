@@ -36,6 +36,7 @@
 //! Usage: api_diff <tmpdir> <file.gguf | corpus.inp>...
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const input_tensor_order = @import("input_tensor_order.zig");
 const harness_root = @import("harness_root");
 
@@ -48,19 +49,6 @@ const gpa = std.heap.c_allocator;
 
 extern fn _Z18llama_log_internal14ggml_log_levelPKcz(level: c.enum_ggml_log_level, format: [*:0]const u8, ...) void;
 
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn dup2(old: c_int, new: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*c.FILE;
-extern "c" fn fclose(f: *c.FILE) c_int;
-extern "c" fn fseek(f: *c.FILE, off: c_long, whence: c_int) c_int;
-extern "c" fn fread(p: [*]u8, size: usize, n: usize, f: *c.FILE) usize;
-extern "c" fn fwrite(p: [*]const u8, size: usize, n: usize, f: *c.FILE) usize;
-
 /// The scratch directory `main` was given.
 var tmp_dir: []const u8 = "";
 
@@ -71,17 +59,17 @@ var tmp_dir: []const u8 = "";
 /// Return: the copy's path.
 fn embedCopy(path: [:0]const u8, offset: usize) [:0]const u8 {
     const out = gpa.printSentinel("{s}/embedded-{d}.gguf", .{ tmp_dir, offset }, 0) catch unreachable;
-    const in = fopen(path.ptr, "rb").?;
-    defer _ = fclose(in);
-    const o = fopen(out.ptr, "wb").?;
-    defer _ = fclose(o);
+    const in = libc.fopen(path.ptr, "rb").?;
+    defer _ = libc.fclose(in);
+    const o = libc.fopen(out.ptr, "wb").?;
+    defer _ = libc.fclose(o);
     var buf: [65536]u8 = undefined;
     @memset(&buf, 'x');
-    _ = fwrite(&buf, 1, offset, o);
+    _ = libc.fwrite(&buf, 1, offset, o);
     while (true) {
-        const n = fread(&buf, 1, buf.len, in);
+        const n = libc.fread(&buf, 1, buf.len, in);
         if (n == 0) break;
-        _ = fwrite(&buf, 1, n, o);
+        _ = libc.fwrite(&buf, 1, n, o);
     }
     return out;
 }
@@ -93,16 +81,16 @@ fn filePtrLoad(label: []const u8, path: [:0]const u8, offset: c_long, mp: c.stru
     defer la.deinit(gpa);
     var lb: std.ArrayList(u8) = .empty;
     defer lb.deinit(gpa);
-    const fa = fopen(path.ptr, "rb").?;
-    defer _ = fclose(fa);
-    const fb = fopen(path.ptr, "rb").?;
-    defer _ = fclose(fb);
-    _ = fseek(fa, offset, 0);
-    _ = fseek(fb, offset, 0);
+    const fa = libc.fopen(path.ptr, "rb").?;
+    defer _ = libc.fclose(fa);
+    const fb = libc.fopen(path.ptr, "rb").?;
+    defer _ = libc.fclose(fb);
+    _ = libc.fseek(fa, offset, 0);
+    _ = libc.fseek(fb, offset, 0);
     rec = &la;
-    const rm = c.llama_model_load_from_file_ptr(@ptrCast(fa), mp);
+    const rm = c.llama_model_load_from_file_ptr(@ptrCast(@alignCast(fa)), mp);
     rec = &lb;
-    const pm = F(.port, "llama_model_load_from_file_ptr")(@ptrCast(fb), mp);
+    const pm = F(.port, "llama_model_load_from_file_ptr")(@ptrCast(@alignCast(fb)), mp);
     rec = null;
     checks += 1;
     if ((rm == null) != (pm == null)) fail("{s}: C++ {} port {}", .{ label, rm != null, pm != null });
@@ -267,24 +255,24 @@ fn dumpBuf(out: *std.ArrayList(u8), b: []const u8) void {
 /// other. Null when it did not die of SIGABRT.
 fn dies(body: *const fn (ctx: usize) void, ctx: usize, out: []u8) ?[]const u8 {
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) return null;
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) return null;
+    const pid = libc.fork();
     if (pid == 0) {
-        _ = dup2(fds[1], 2);
-        _ = close(fds[0]);
+        _ = libc.dup2(fds[1], 2);
+        _ = libc.close(fds[0]);
         body(ctx);
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var len: usize = 0;
     while (len < out.len) {
-        const got = read(fds[0], out[len..].ptr, out.len - len);
+        const got = libc.read(fds[0], out[len..].ptr, out.len - len);
         if (got <= 0) break;
         len += @intCast(got);
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     if (status & 0x7f != 6) return null;
     var lines = std.mem.splitScalar(u8, out[0..len], '\n');
     while (lines.next()) |line| {

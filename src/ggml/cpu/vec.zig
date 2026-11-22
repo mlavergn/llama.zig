@@ -60,6 +60,8 @@
 //! `vec_golden.zig` captures a second length that leaves a remainder.
 
 const std = @import("std");
+const vecinline = @import("ops/vecinline.zig");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const simd = @import("simd.zig");
@@ -598,36 +600,14 @@ inline fn vSilu(x: VF) VF {
     return div_f32(x, one_plus_exp_neg_x);
 }
 
-/// Ports `ggml_silu_f32` (vec.h:1096 @b1b770d90), the scalar tail's version.
-///
-/// Note this is **not** the same computation as `vSilu`: it divides by
-/// `1 + expf(-x)` using libm's `expf`, where the vector path uses ARM's
-/// polynomial. The two differ in the last bit, and the C uses each where it
-/// uses it.
-inline fn siluF32(x: f32) f32 {
-    return x / (1.0 + expf(-x));
-}
-
-/// Ports `GELU_QUICK_COEF` (vec.h:999 @b1b770d90).
-const gelu_quick_coef: f32 = -1.702;
-
 /// Ports `ggml_v_gelu_quick`, `ggml_v_gelu_quick`, `ggml_v_gelu_quick`
 /// (vec.h:1224, 1274, 1336 @b1b770d90), the NEON, AVX-512 and AVX2 arms:
 /// `x / (1 + exp(-1.702 x))`, with `x` the numerator so it cannot overflow.
 inline fn vGeluQuick(x: VF) VF {
     const one = dup_n_f32(1.0);
-    const exp_cx = vExpf(mul_f32(x, dup_n_f32(gelu_quick_coef)));
+    const exp_cx = vExpf(mul_f32(x, dup_n_f32(vecinline.gelu_quick_coef)));
     return div_f32(x, add_f32(one, exp_cx));
 }
-
-/// Ports `ggml_gelu_quick_f32` (vec.h:1065 @b1b770d90), the scalar tail's
-/// version, with `x` multiplying a reciprocal where `vGeluQuick` divides.
-inline fn geluQuickF32(x: f32) f32 {
-    return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
-}
-
-extern fn expf(x: f32) f32;
-extern fn logf(x: f32) f32;
 
 /// `lanes` floats from `p`.
 inline fn loadVF(p: [*]const f32) VF {
@@ -649,7 +629,7 @@ pub export fn ggml_vec_silu_f32(n: c_int, y: [*]f32, x: [*]const f32) callconv(.
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = siluF32(x[off]);
+        y[off] = vecinline.siluScalarF32(x[off]);
     }
 }
 
@@ -664,7 +644,7 @@ pub export fn ggml_vec_swiglu_f32(n: c_int, y: [*]f32, x: [*]const f32, g: [*]co
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = siluF32(x[off]) * g[off];
+        y[off] = vecinline.siluScalarF32(x[off]) * g[off];
     }
 }
 
@@ -680,7 +660,7 @@ pub export fn ggml_vec_gelu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32) call
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = geluQuickF32(x[off]);
+        y[off] = vecinline.geluQuickScalarF32(x[off]);
     }
 }
 
@@ -694,7 +674,7 @@ pub export fn ggml_vec_geglu_quick_f32(n: c_int, y: [*]f32, x: [*]const f32, g: 
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        y[off] = geluQuickF32(x[off]) * g[off];
+        y[off] = vecinline.geluQuickScalarF32(x[off]) * g[off];
     }
 }
 
@@ -749,7 +729,7 @@ pub export fn ggml_vec_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, max: f
     }
     while (i < n) : (i += 1) {
         const off: usize = @intCast(i);
-        const val = expf(x[off] - max);
+        const val = libm.expf(x[off] - max);
         sum += @as(GgmlFloat, val);
         y[off] = val;
     }
@@ -766,7 +746,7 @@ pub export fn ggml_vec_log_soft_max_f32(n: c_int, y: [*]f32, x: [*]const f32, ma
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const val = x[i] - max;
         y[i] = val;
-        sum += @as(GgmlFloat, expf(val));
+        sum += @as(GgmlFloat, libm.expf(val));
     }
-    return @floatCast(logf(@floatCast(sum)));
+    return @floatCast(libm.logf(@floatCast(sum)));
 }

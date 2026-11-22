@@ -9,6 +9,7 @@
 //! count in `template-instances/mmf-instance-ncols_<n>.cu`.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -218,9 +219,9 @@ fn mulMatFCuda(
     const nwb: c_int = @intCast(nwarps_best);
     const nbytes_shared_iter: c_int = nwb * (if (common.voltaMmaAvailable(x_cc)) @as(c_int, tile_a_32_i) else tile_a_16_i) * (ws + getPadding(x_cc)) * 4;
     const nbytes_cols_per_block_pad: c_int = tile_b_8_i;
-    const nbytes_shared_combine: c_int = @as(c_int, @intCast(impl.pad(cpb, @intCast(nbytes_cols_per_block_pad)))) * (nwb * rpb + getPadding(x_cc)) * 4;
+    const nbytes_shared_combine: c_int = @as(c_int, @intCast(stdlib.num.pad(usize, cpb, @intCast(nbytes_cols_per_block_pad)))) * (nwb * rpb + getPadding(x_cc)) * 4;
     const nbytes_shared = @max(nbytes_shared_iter, nbytes_shared_combine);
-    const nbytes_slotmap: c_int = if (ids != null) @as(c_int, @intCast(impl.pad(cpb, 16))) * @sizeOf(c_int) else 0;
+    const nbytes_slotmap: c_int = if (ids != null) @as(c_int, @intCast(stdlib.num.pad(usize, cpb, 16))) * @sizeOf(c_int) else 0;
     const nbytes_shared_total = nbytes_shared + nbytes_slotmap;
     const grid_y: i64 = if (ids != null) nchannels_x else nchannels_dst;
 

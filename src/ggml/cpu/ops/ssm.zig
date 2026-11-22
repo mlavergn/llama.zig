@@ -30,6 +30,7 @@
 //! digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -39,9 +40,6 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 const F32 = simd.F32;
-
-extern fn expf(x: f32) f32;
-extern fn logf(x: f32) f32;
 
 /// Byte offset `i*nb`; see `common.byteOff`.
 const off = common.byteOff;
@@ -53,7 +51,7 @@ const off = common.byteOff;
 /// lower to LLVM intrinsics and need not match libm in the last bit. A private
 /// copy keeps this file on the functions the C calls.
 inline fn softplus(input: f32) f32 {
-    return if (input > 20.0) input else logf(1 + expf(input));
+    return if (input > 20.0) input else libm.logf(1 + libm.expf(input));
 }
 
 // -----------------------------------------------------------------------------
@@ -209,7 +207,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                 while (h < ih1) : (h += 1) {
                     const hu: usize = @intCast(h);
                     const dt_soft_plus = softplus(dt[hu]);
-                    const dA = expf(dt_soft_plus * A[hu]);
+                    const dA = libm.expf(dt_soft_plus * A[hu]);
                     const g = @divTrunc(h, @divTrunc(nh, ng)); // repeat_interleave
 
                     // dim
@@ -305,12 +303,12 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                         // groups of `simd.strict_loop.group` and only the
                         // remainder fused. Measured on the reference `ops.o`;
                         // see `simd.strictLoopVectorized`. Under
-                        // `simd.math_errno` the `expf` may write `errno` and
+                        // `libm.math_errno` the `expf` may write `errno` and
                         // the loop stays scalar, all fused: the Linux
                         // reference has no per-lane `expf` calls here.
                         const r0: usize = @intCast(ii * nc);
                         const rg: usize = @intCast(g * nc);
-                        const split: i64 = if (!simd.math_errno and
+                        const split: i64 = if (!libm.math_errno and
                             simd.strictLoopVectorized(nc, s + r0, &.{ s0 + r0, A + @as(usize, @intCast(h * nc)), B + rg, C + rg }))
                             simd.strictSplit(0, nc)
                         else
@@ -322,7 +320,7 @@ fn ssmScanF32(params: *const ComputeParams, dst: *Tensor) void {
                             // state = prev_state * dA + dB * x
                             // One expression: clang fuses the left product,
                             // whose right operand is the `expf` call.
-                            const state = @mulAdd(f32, s0[iu], expf(dt_soft_plus * A[@intCast(j0 + h * nc)]), B[ig] * x_dt);
+                            const state = @mulAdd(f32, s0[iu], libm.expf(dt_soft_plus * A[@intCast(j0 + h * nc)]), B[ig] * x_dt);
                             // y = rowwise_dotprod(state, C)
                             if (j0 < split) sumf += state * C[ig] else sumf = @mulAdd(f32, state, C[ig], sumf);
                             s[iu] = state;

@@ -29,6 +29,9 @@
 //! message in `what_buf` and returns `error.Runtime`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const names = @import("names.zig");
@@ -38,7 +41,7 @@ const arms_hparams = @import("arms_hparams.zig");
 const arms_tensors = @import("arms_tensors.zig");
 const arms_inputs = @import("arms_inputs.zig");
 const models = @import("models/module.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const c = impl.c;
 const gpa = impl.gpa;
 const T = graph_mod.T;
@@ -49,11 +52,9 @@ pub const Error = error{ Runtime, OutOfMemory };
 pub var what_buf: [2048]u8 = undefined;
 pub var what_len: usize = 0;
 
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-
 /// `throw std::runtime_error(mtmd_format(fmt, args...))`.
 pub fn throwErr(comptime fmt: [*:0]const u8, args: anytype) Error {
-    const n = @call(.auto, snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
     return error.Runtime;
 }
@@ -363,7 +364,7 @@ pub const Ctx = struct {
             self.flash_attn_type = .disabled;
         }
 
-        self.debug_output_embeddings = std.c.getenv("MTMD_DEBUG_EMBEDDINGS") != null;
+        self.debug_output_embeddings = stdlib.env.getenv("MTMD_DEBUG_EMBEDDINGS") != null;
 
         try self.buf_compute_meta.resize(gpa, @as(usize, @intCast(self.max_nodes)) * c.ggml_tensor_overhead() + c.ggml_graph_overhead_custom(@intCast(self.max_nodes), false));
 
@@ -587,27 +588,6 @@ pub const Ctx = struct {
         return encode(self, &params);
     }
 };
-
-/// `std::random_device{}()`: libc++ reads `arc4random` on Apple platforms,
-/// `rand_s` on Windows and `getentropy` elsewhere; either way the seed is not
-/// reproducible.
-pub fn randomDevice() u32 {
-    var v: u32 = 0;
-    switch (comptime builtin.os.tag) {
-        .macos, .ios, .tvos, .watchos, .visionos => std.c.arc4random_buf(@ptrCast(&v), @sizeOf(u32)),
-        .windows => {
-            const rand_s = @extern(*const fn (*c_uint) callconv(.c) c_int, .{ .name = "rand_s" });
-            var r: c_uint = 0;
-            _ = rand_s(&r);
-            v = r;
-        },
-        else => {
-            const getentropy = @extern(*const fn (*anyopaque, usize) callconv(.c) c_int, .{ .name = "getentropy" });
-            _ = getentropy(@ptrCast(&v), @sizeOf(u32));
-        },
-    }
-    return v;
-}
 
 // -----------------------------------------------------------------------------
 // mtmd_model_loader
@@ -1250,7 +1230,7 @@ pub const Loader = struct {
                     impl.ggmlAssert(cur != null, "mtmd-model.cpp", 3537, "cur && \"tensor not found in ctx_data\"");
                     const off = tl.tensor_offset.get(std.mem.span(tname));
                     impl.ggmlAssert(off != null, "mtmd-model.cpp", 3539, "it_off != tensor_offset.end() && \"no offset for tensor\"");
-                    if (fseeko(tl.fin, @intCast(off.?), 0) != 0) {
+                    if (libc.fseeko(tl.fin, @intCast(off.?), 0) != 0) {
                         return throwErr("%s: failed to seek for tensor %s\n", .{ func, tname });
                     }
                     const num_bytes = c.ggml_nbytes(cur);
@@ -1280,8 +1260,6 @@ pub const Loader = struct {
         }
     }
 };
-
-extern fn fseeko(f: ?*std.c.FILE, off: i64, whence: c_int) c_int;
 
 /// `load_tensors`'s locals and lambdas, handed to `arms_tensors.load`.
 pub const TensorLoader = struct {
@@ -1342,7 +1320,7 @@ pub const TensorLoader = struct {
 
         const n_elems = n_bytes / @sizeOf(f32);
         try result.resize(gpa, n_elems);
-        _ = fseeko(self.fin, @intCast(off), 0);
+        _ = libc.fseeko(self.fin, @intCast(off), 0);
         _ = std.c.fread(@ptrCast(result.items.ptr), 1, n_bytes, self.fin.?);
         return result;
     }
@@ -1352,7 +1330,7 @@ pub const TensorLoader = struct {
     /// `std::out_of_range` cannot happen for a tensor the file lists.
     pub fn readTensorBytes(self: *TensorLoader, name: []const u8, dst: []u8) bool {
         const off = self.tensor_offset.get(name) orelse impl.abortUncaught("std::out_of_range", "unordered_map::at: key not found");
-        if (fseeko(self.fin, @intCast(off), 0) != 0) return false;
+        if (libc.fseeko(self.fin, @intCast(off), 0) != 0) return false;
         return std.c.fread(dst.ptr, 1, dst.len, self.fin.?) == dst.len;
     }
 
@@ -1399,37 +1377,37 @@ pub const TensorLoader = struct {
 
 /// `mtmd_format(fmt, s)`.
 pub fn fmtKey(buf: *[256]u8, comptime fmt: [*:0]const u8, s: [*:0]const u8) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, fmt, s);
+    _ = libc.snprintf(buf, buf.len, fmt, s);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, s1, s2)`.
 pub fn fmtKey2(buf: *[256]u8, comptime fmt: [*:0]const u8, s1: [*:0]const u8, s2: [*:0]const u8) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, fmt, s1, s2);
+    _ = libc.snprintf(buf, buf.len, fmt, s1, s2);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, prefix, il, suffix)`: a layer tensor.
 pub fn fmtL(buf: *[256]u8, comptime fmt: [*:0]const u8, prefix: [*:0]const u8, il: c_int, suffix: [*:0]const u8) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, fmt, prefix, il, suffix);
+    _ = libc.snprintf(buf, buf.len, fmt, prefix, il, suffix);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, prefix, il)`.
 pub fn fmtPI(buf: *[256]u8, comptime fmt: [*:0]const u8, prefix: [*:0]const u8, il: c_int) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, fmt, prefix, il);
+    _ = libc.snprintf(buf, buf.len, fmt, prefix, il);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format(fmt, il, suffix)`.
 pub fn fmtIS(buf: *[256]u8, comptime fmt: [*:0]const u8, il: c_int, suffix: [*:0]const u8) [*:0]const u8 {
-    _ = snprintf(buf, buf.len, fmt, il, suffix);
+    _ = libc.snprintf(buf, buf.len, fmt, il, suffix);
     return @ptrCast(buf);
 }
 
 /// `mtmd_format` with a format known only at run time.
 pub fn fmtRt(buf: *[256]u8, fmt: [*:0]const u8, args: anytype) [*:0]const u8 {
-    _ = @call(.auto, snprintf, .{ buf, buf.len, fmt } ++ args);
+    _ = @call(.auto, libc.snprintf, .{ buf, buf.len, fmt } ++ args);
     return @ptrCast(buf);
 }
 
@@ -1674,7 +1652,7 @@ pub const EncodeState = struct {
                 continue;
             }
             var nb: [256]u8 = undefined;
-            _ = snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+            _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
             c.ggml_backend_tensor_copy(state_slots[i], self.getInpTensor(@ptrCast(&nb)));
             i += 1;
         }
@@ -1690,7 +1668,7 @@ pub const EncodeState = struct {
         var nb: [256]u8 = undefined;
         if (self.params.enc_state == null) {
             for (state_slots) |slot| {
-                _ = snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+                _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
                 const t = self.getInpTensor(@ptrCast(&nb));
                 c.ggml_backend_tensor_memset(t, 0, 0, c.ggml_nbytes(t));
             }
@@ -1701,7 +1679,7 @@ pub const EncodeState = struct {
         var base_f: f32 = 0.0;
         c.ggml_backend_tensor_get(slots[0], &base_f, 0, @sizeOf(f32));
         for (state_slots, 0..) |slot, i| {
-            _ = snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
+            _ = libc.snprintf(&nb, nb.len, "state_in_%s", slot.name.ptr);
             c.ggml_backend_tensor_copy(slots[i], self.getInpTensor(@ptrCast(&nb)));
         }
         return @intFromFloat(base_f);
@@ -1806,7 +1784,7 @@ pub fn genStateInit(ctx: *Ctx, seed: u32) Error!?*GenState {
     const st = try gpa.create(GenState);
     st.* = .{};
     errdefer st.destroy();
-    st.rng = libcxx.Mt19937.init(if (seed == std.math.maxInt(u32)) randomDevice() else seed);
+    st.rng = libcxx.Mt19937.init(if (seed == std.math.maxInt(u32)) libcxx.randomDevice() else seed);
 
     const slots = try models.genStateSlots(&ctx.model.hparams, ctx.model);
     defer models.freeSlots(slots);
@@ -2110,7 +2088,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         defer models.freeSlots(slots);
         for (slots, 0..) |slot, i| {
             var nb: [256]u8 = undefined;
-            _ = snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
+            _ = libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
             const t = c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
             impl.ggmlAssert(t != null, "mtmd-subcontext.cpp", 2572, "t != nullptr");
             try copyGenStateOut(t, state_slots[i]);
@@ -2147,7 +2125,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
                 continue;
             }
             var nb: [256]u8 = undefined;
-            _ = snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
+            _ = libc.snprintf(&nb, nb.len, "state_out_%s", slot.name.ptr);
             const t = c.ggml_graph_get_tensor(gf, @ptrCast(&nb));
             if (t == null) _ = c.ggml_abort("mtmd-subcontext.cpp", 2608, "graph has no \"state_out_%s\" tensor", slot.name.ptr);
             impl.ggmlAssert(i < state_slots.len, "mtmd-subcontext.cpp", 2610, "i < slots.size()");
@@ -2172,7 +2150,7 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
 
         // TEMP debugging (parity validation), will be removed before merge
         // when the env var holds a path, dump the raw data: [int32 n_tokens][int32 n_embd][f32 data]
-        if (std.c.getenv("MTMD_DEBUG_EMBEDDINGS")) |dump_path| {
+        if (stdlib.env.getenv("MTMD_DEBUG_EMBEDDINGS")) |dump_path| {
             if (!std.mem.eql(u8, std.mem.span(dump_path), "1")) {
                 if (std.c.fopen(dump_path, "wb")) |f| {
                     const hdr = [2]i32{ @truncate(n_tokens), @truncate(n_embd) };
@@ -2211,14 +2189,12 @@ pub fn encode(ctx: *Ctx, params: *EncodeParams) Error!bool {
         const nf: f32 = @floatFromInt(emb_data.len);
         const mean = sum / nf;
         const variance = @mulAdd(f32, -mean, mean, sum_sq / nf);
-        impl.logInf("Stats: mean=%.6f, std=%.6f, min=%.6f, max=%.6f, sum=%.6f\n", .{ @as(f64, mean), @as(f64, sqrtf(variance)), @as(f64, min_val), @as(f64, max_val), @as(f64, sum) });
+        impl.logInf("Stats: mean=%.6f, std=%.6f, min=%.6f, max=%.6f, sum=%.6f\n", .{ @as(f64, mean), @as(f64, libm.sqrtf(variance)), @as(f64, min_val), @as(f64, max_val), @as(f64, sum) });
         impl.logInf("=== END MTMD_DEBUG_EMBEDDINGS ===\n\n", .{});
     }
 
     return true;
 }
-
-extern fn sqrtf(x: f32) f32;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

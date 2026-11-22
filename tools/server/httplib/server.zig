@@ -36,6 +36,7 @@
 //! connection closes.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
 const message = @import("message.zig");
@@ -403,7 +404,7 @@ pub const Server = struct {
     /// Ports `wait_until_ready` (httplib.cpp:9137 @b1b770d90), a member of
     /// `Server`: polls every millisecond.
     pub fn waitUntilReady(self: *const Server) void {
-        while (!self.is_running.load(.seq_cst) and !self.is_decommissioned.load(.seq_cst)) socket.sleepUs(1000);
+        while (!self.is_running.load(.seq_cst) and !self.is_decommissioned.load(.seq_cst)) stdlib.clock.sleepUs(1000);
     }
 
     /// Ports `stop` (httplib.cpp:9143 @b1b770d90), a member of `Server`:
@@ -468,7 +469,7 @@ pub const Server = struct {
                 const sock = socket.acceptSocket(self.svr_sock.load(.seq_cst));
                 if (sock == socket.invalid_socket) {
                     if (socket.isAcceptResourceError()) {
-                        socket.sleepUs(1);
+                        stdlib.clock.sleepUs(1);
                         continue;
                     } else if (socket.isAcceptTransientError()) {
                         continue;
@@ -498,7 +499,7 @@ pub const Server = struct {
     /// `CPPHTTPLIB_THREAD_POOL_COUNT` threads, four times that at most.
     fn makeTaskQueue(self: *Server) !TaskQueue {
         if (self.new_task_queue) |f| return f.func(f.ctx, self.allocator);
-        const hw = socket.hardwareConcurrency();
+        const hw = stdlib.thread.hardwareConcurrency();
         const n: usize = @max(8, if (hw > 0) hw - 1 else 0);
         return (try ThreadPool.create(self.allocator, n, n * 4)).taskQueue();
     }

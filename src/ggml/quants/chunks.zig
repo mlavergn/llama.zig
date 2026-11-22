@@ -768,7 +768,7 @@ fn checkChunk(comptime name: []const u8, chunk: ChunkFn) !void {
         if (g.chunk) |want| {
             @memset(&buf, 0);
             const n = chunk(&src, &buf, t.n_rows, t.n_per_row, null);
-            std.testing.expectEqual(want, t.fnv(buf[0..n])) catch |e| {
+            std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                 std.debug.print("{s}: quantize_* differs on '{s}'\n", .{ name, pattern.name() });
                 return e;
             };
@@ -777,7 +777,7 @@ fn checkChunk(comptime name: []const u8, chunk: ChunkFn) !void {
         if (g.chunk_imatrix) |want| {
             @memset(&buf, 0);
             const n = chunk(&src, &buf, t.n_rows, t.n_per_row, &imatrix);
-            std.testing.expectEqual(want, t.fnv(buf[0..n])) catch |e| {
+            std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                 std.debug.print("{s}: quantize_* with imatrix differs on '{s}'\n", .{ name, pattern.name() });
                 return e;
             };

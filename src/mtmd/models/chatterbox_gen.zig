@@ -16,6 +16,7 @@
 //! it ports and the line it began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -26,8 +27,6 @@ const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
 const Cbx = model_mod.Chatterbox;
-
-extern fn cosf(f32) f32;
 
 /// `M_PI`.
 const m_pi: f64 = 3.14159265358979323846;
@@ -505,7 +504,7 @@ const Gen = struct {
             var i: c_int = 0;
             while (i <= n_steps) : (i += 1) {
                 const u = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n_steps));
-                span[@intCast(i)] = if (meanflow) u else 1.0 - cosf(u * @as(f32, @floatCast(m_pi)) / 2.0);
+                span[@intCast(i)] = if (meanflow) u else 1.0 - libm.cosf(u * @as(f32, @floatCast(m_pi)) / 2.0);
             }
         }
 
@@ -628,32 +627,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
 // and in `a*b - c*d` only the left product fuses. On Darwin clang folds a
 // `sin`/`cos` pair on one argument into `__sincos_stret` (`sinCosF64`).
 
-extern fn sin(f64) f64;
-extern fn cos(f64) f64;
-extern fn exp(f64) f64;
-extern fn log(f64) f64;
-extern fn fmin(f64, f64) f64;
-extern fn fmax(f64, f64) f64;
-extern fn tanhf(f32) f32;
-
-const Double2 = extern struct { sin: f64, cos: f64 };
-extern fn __sincos_stret(x: f64) Double2;
-
-/// `sin(x)` and `cos(x)` as clang emits the pair on one argument: one
-/// `__sincos_stret` on Darwin, two calls elsewhere (`-fmath-errno`).
-fn sinCosF64(x: f64) Double2 {
-    if (comptime @import("builtin").os.tag.isDarwin()) return __sincos_stret(x);
-    return .{ .sin = sin(x), .cos = cos(x) };
-}
-
-/// libc++'s `uniform_real_distribution<double>(a, b)(g)`
-/// (`<__random/uniform_real_distribution.h>`): `(b - a) * canonical + a`,
-/// contracted.
-fn uniformRealF64(g: *libcxx.Mt19937, a: f64, b: f64) f64 {
-    return @mulAdd(f64, b - a, libcxx.canonicalF64(g), a);
-}
-
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const arms_inputs = @import("../arms_inputs.zig");
 const gpa = impl.gpa;
 
@@ -673,8 +647,8 @@ fn fillPos(st: *const clip.EncodeState, name: [*:0]const u8, t_len: c_int) clip.
         const rel: f64 = @floatFromInt(t_len - 1 - k);
         var i: usize = 0;
         while (i < d / 2) : (i += 1) {
-            const div = exp(-@as(f64, @floatFromInt(2 * i)) * log(10000.0) / @as(f64, d));
-            const sc = sinCosF64(rel * div);
+            const div = libm.exp(-@as(f64, @floatFromInt(2 * i)) * libm.log(10000.0) / @as(f64, d));
+            const sc = libm.sinCos64(rel * div);
             pos[usz(k) * d + 2 * i] = @floatCast(sc.sin);
             pos[usz(k) * d + 2 * i + 1] = @floatCast(sc.cos);
         }
@@ -749,11 +723,11 @@ pub fn setInputs(st: *clip.EncodeState) clip.Error!bool {
     var s_: c_int = 0;
     while (s_ <= n_steps) : (s_ += 1) {
         const u = @as(f64, @floatFromInt(s_)) / @as(f64, @floatFromInt(n_steps));
-        const t = if (meanflow) u else 1.0 - cos(u * m_pi / 2.0);
+        const t = if (meanflow) u else 1.0 - libm.cos(u * m_pi / 2.0);
         var i: usize = 0;
         while (i < 160) : (i += 1) {
-            const div = exp(-@as(f64, @floatFromInt(i)) * log(10000.0) / 159.0);
-            const sc = sinCosF64(1000.0 * t * div);
+            const div = libm.exp(-@as(f64, @floatFromInt(i)) * libm.log(10000.0) / 159.0);
+            const sc = libm.sinCos64(1000.0 * t * div);
             temb[usz(s_) * 320 + i] = @floatCast(sc.sin);
             temb[usz(s_) * 320 + i + 160] = @floatCast(sc.cos);
         }
@@ -879,7 +853,7 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
     const srng = &params.gen_state.?.rng;
     var snd: arms_inputs.NormalF32 = .{ .mean = 0.0, .stddev = 1.0 };
     var phase: [9]f64 = undefined;
-    for (&phase, 0..) |*p, hh| p.* = if (hh == 0) 0.0 else uniformRealF64(srng, -m_pi, m_pi);
+    for (&phase, 0..) |*p, hh| p.* = if (hh == 0) 0.0 else libcxx.uniformReal(f64, srng, -m_pi, m_pi);
     const src = try gpa.alloc(f32, usz(n_wav));
     defer gpa.free(src);
     var cum: [9]f64 = @splat(0.0);
@@ -892,11 +866,11 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
         for (0..9) |hh| {
             cum[hh] += @as(f64, f) * @as(f64, @floatFromInt(hh + 1)) / sr;
             cum[hh] -= @floor(cum[hh]);
-            var sine: f32 = 0.1 * @as(f32, @floatCast(sin(@mulAdd(f64, 2.0 * m_pi, cum[hh], phase[hh]))));
+            var sine: f32 = 0.1 * @as(f32, @floatCast(libm.sin(@mulAdd(f64, 2.0 * m_pi, cum[hh], phase[hh]))));
             sine = @mulAdd(f32, sine, uv, namp * snd.next(srng));
             merged = @mulAdd(f32, lw[hh], sine, merged);
         }
-        src[usz(t)] = tanhf(merged);
+        src[usz(t)] = libm.tanhf(merged);
     }
 
     // stft of the source: n_fft 16, hop 4, hann window, centered
@@ -904,7 +878,7 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
     const hop = 4;
     const n_bins = 9;
     var win: [n_fft]f32 = undefined;
-    for (&win, 0..) |*w, i| w.* = @mulAdd(f32, -0.5, cosf(2.0 * @as(f32, @floatCast(m_pi)) * @as(f32, @floatFromInt(i)) / @as(f32, n_fft)), 0.5);
+    for (&win, 0..) |*w, i| w.* = @mulAdd(f32, -0.5, libm.cosf(2.0 * @as(f32, @floatCast(m_pi)) * @as(f32, @floatFromInt(i)) / @as(f32, n_fft)), 0.5);
     const n_stft: c_int = @intCast(@divTrunc(n_wav, hop) + 1);
     var sstft: std.ArrayList(f32) = .empty;
     defer sstft.deinit(gpa);
@@ -921,7 +895,7 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
                 if (idx >= n_wav) idx = 2 * (n_wav - 1) - idx;
                 const v = @as(f64, src[usz(idx)]) * win[i];
                 const a = 2.0 * m_pi * @as(f64, @floatFromInt(k)) * @as(f64, @floatFromInt(i)) / @as(f64, n_fft);
-                const sc = sinCosF64(a);
+                const sc = libm.sinCos64(a);
                 re = @mulAdd(f64, v, sc.cos, re);
                 im = @mulAdd(f64, -v, sc.sin, im);
             }
@@ -963,14 +937,14 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
         for (0..n_fft) |i| {
             var v: f64 = 0.0;
             for (0..n_bins) |k| {
-                const mag = fmin(exp(@as(f64, spec.items[usz(fr) * 18 + k])), 1e2);
-                const ph = sin(@as(f64, spec.items[usz(fr) * 18 + 9 + k]));
-                const pc = sinCosF64(ph);
+                const mag = libm.fmin(libm.exp(@as(f64, spec.items[usz(fr) * 18 + k])), 1e2);
+                const ph = libm.sin(@as(f64, spec.items[usz(fr) * 18 + 9 + k]));
+                const pc = libm.sinCos64(ph);
                 const re = mag * pc.cos;
                 const im = mag * pc.sin;
                 const a = 2.0 * m_pi * @as(f64, @floatFromInt(k)) * @as(f64, @floatFromInt(i)) / @as(f64, n_fft);
                 const w: f64 = if (k == 0 or k == n_fft / 2) 1.0 else 2.0;
-                const sc = sinCosF64(a);
+                const sc = libm.sinCos64(a);
                 v = @mulAdd(f64, w, @mulAdd(f64, re, sc.cos, -(im * sc.sin)), v);
             }
             frame[i] = v / n_fft;
@@ -987,14 +961,14 @@ pub fn encodeTtsOut(ctx: *clip.Ctx, params: *clip.EncodeParams, gf: ?*c.ggml_cgr
     for (out_audio.items, 0..) |*o, i| {
         const j = i + n_fft / 2; // drop the centering pad
         const v = if (wsum[j] > 1e-11) acc[j] / wsum[j] else 0.0;
-        o.* = @floatCast(fmax(-0.99, fmin(0.99, v)));
+        o.* = @floatCast(libm.fmax(-0.99, libm.fmin(0.99, v)));
     }
 
     // trim_fade of the reference: silence 20 ms then fade in 20 ms, hides the artifact of the prompt boundary
     const n_trim: usize = 24000 / 50;
     var i: usize = 0;
     while (i < 2 * n_trim and i < out_audio.items.len) : (i += 1) {
-        const g: f64 = if (i < n_trim) 0.0 else (cos(m_pi * (1.0 - @as(f64, @floatFromInt(i - n_trim)) / @as(f64, @floatFromInt(n_trim)))) + 1.0) / 2.0;
+        const g: f64 = if (i < n_trim) 0.0 else (libm.cos(m_pi * (1.0 - @as(f64, @floatFromInt(i - n_trim)) / @as(f64, @floatFromInt(n_trim)))) + 1.0) / 2.0;
         out_audio.items[i] *= @as(f32, @floatCast(g));
     }
     return true;

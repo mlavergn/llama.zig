@@ -17,6 +17,8 @@
 //! `vendor/` and `std.crypto`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const mtmd = @import("mtmd.zig");
@@ -28,21 +30,11 @@ const gpa = impl.gpa;
 const Context = mtmd.Context;
 const Token = c.llama_token;
 
-extern fn vsnprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, args: *anyopaque) c_int;
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-extern fn fputs(s: [*c]const u8, f: ?*anyopaque) c_int;
-extern fn fflush(f: ?*anyopaque) c_int;
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fseek(f: ?*anyopaque, off: c_long, whence: c_int) c_int;
 extern fn ftell(f: ?*anyopaque) c_long;
-extern fn fread(p: ?*anyopaque, size: usize, n: usize, f: ?*anyopaque) usize;
-extern fn fclose(f: ?*anyopaque) c_int;
-extern fn strerror(e: c_int) [*:0]const u8;
 
 const is_windows = builtin.os.tag == .windows;
 const win32 = struct {
     extern "kernel32" fn MultiByteToWideChar(code_page: c_uint, flags: u32, mbs: [*]const u8, mbs_len: c_int, wcs: ?[*]u16, wcs_len: c_int) callconv(.winapi) c_int;
-    extern "c" fn _wfopen(path: [*:0]const u16, mode: [*:0]const u16) ?*anyopaque;
 };
 
 const seek_set: c_int = 0;
@@ -118,9 +110,9 @@ pub const InitOpt = extern struct {
 fn defaultCallback(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
-    const f = impl.cStderr();
-    _ = fputs(text, f);
-    _ = fflush(f);
+    const f = stdlib.stdio.cStream(.stderr);
+    _ = libc.fputs(text, f);
+    _ = libc.fflush(f);
 }
 
 /// Ports `mtmd_helper_logger` (mtmd-helper-common.h:21 @b1b770d90): the
@@ -134,7 +126,7 @@ pub const Logger = struct {
     /// or a heap buffer when that is too short.
     pub fn log(self: *const Logger, level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
         var buffer: [128]u8 = undefined;
-        const len = @call(.auto, snprintf, .{ &buffer, buffer.len, fmt } ++ args);
+        const len = @call(.auto, libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
         const cb = self.log_callback orelse return;
         if (len < 128) {
             cb(level, @ptrCast(&buffer), self.log_callback_user_data);
@@ -143,7 +135,7 @@ pub const Logger = struct {
             const buffer2 = std.heap.c_allocator.alloc(u8, n + 1) catch return;
             defer std.heap.c_allocator.free(buffer2);
             @memset(buffer2, 0);
-            _ = @call(.auto, snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
+            _ = @call(.auto, libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
             buffer2[n] = 0;
             cb(level, @ptrCast(buffer2.ptr), self.log_callback_user_data);
         }
@@ -674,20 +666,20 @@ pub fn mtmd_helper_bitmap_init_from_buf(ctx: *const Context, buf_ptr: ?[*]const 
 pub fn mtmd_helper_bitmap_init_from_file(ctx: *const Context, fname: [*:0]const u8, placeholder: bool, opt: InitOpt) callconv(.c) BitmapWrapper {
     const f = openFile(fname) orelse return .{ .bitmap = null, .video_ctx = null };
 
-    _ = fseek(f, 0, seek_end);
+    _ = libc.fseek(f, 0, seek_end);
     const file_size = ftell(f);
-    _ = fseek(f, 0, seek_set);
+    _ = libc.fseek(f, 0, seek_set);
     if (file_size < 0) {
         logErr("Failed to get file size of %s\n", .{fname});
-        _ = fclose(f);
+        _ = libc.fclose(f);
         return .{ .bitmap = null, .video_ctx = null };
     }
     const buf = gpa.alloc(u8, @intCast(file_size)) catch oom();
     defer gpa.free(buf);
     @memset(buf, 0);
 
-    const n_read = fread(buf.ptr, 1, buf.len, f);
-    _ = fclose(f);
+    const n_read = libc.fread(buf.ptr, 1, buf.len, f);
+    _ = libc.fclose(f);
     if (n_read != buf.len) {
         logErr("Failed to read entire file %s", .{fname});
         return .{ .bitmap = null, .video_ctx = null };
@@ -714,12 +706,12 @@ fn openFile(fname: [*:0]const u8) ?*anyopaque {
             logErr("Unable to convert filename to UTF-16: %s\n", .{fname});
             return null;
         }
-        const f = win32._wfopen(@ptrCast(wfname.ptr), std.unicode.utf8ToUtf16LeStringLiteral("rb"));
-        if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, strerror(std.c._errno().*) });
+        const f = libc._wfopen(@ptrCast(wfname.ptr), std.unicode.utf8ToUtf16LeStringLiteral("rb"));
+        if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, stdlib.errno.strerror(std.c._errno().*) });
         return f;
     }
-    const f = fopen(fname, "rb");
-    if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, strerror(std.c._errno().*) });
+    const f = libc.fopen(fname, "rb");
+    if (f == null) logErr("Unable to open file %s: %s\n", .{ fname, stdlib.errno.strerror(std.c._errno().*) });
     return f;
 }
 

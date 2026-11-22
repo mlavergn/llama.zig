@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -74,7 +75,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    inpL = c.ggml_scale(ctx, inpL, impl.sqrtf(@floatFromInt(b.n_embd)));
+    inpL = c.ggml_scale(ctx, inpL, libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.
@@ -107,7 +108,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)));
+            Qcur = c.ggml_scale(ctx, Qcur, 1.0 / libm.sqrtfInt(n_embd_head));
             b.cb(Qcur, "Qcur_scaled", il);
 
             cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0, il);

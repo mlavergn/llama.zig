@@ -701,7 +701,7 @@ fn checkFormat(
         // so this test links without `ggml-quants.c` and can therefore run
         // before the whole translation unit is ported.
         const used = g.row_size * t.n_rows;
-        std.testing.expectEqual(g.ref.?, t.fnv(buf[0..used])) catch |e| {
+        std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
             std.debug.print("{s}: quantize differs on pattern '{s}'\n", .{ name, pattern.name() });
             return e;
         };
@@ -710,7 +710,7 @@ fn checkFormat(
             var out: [t.n_elem]f32 = undefined;
             @memset(&out, 0);
             dq(@ptrCast(@alignCast(&buf)), &out, @intCast(t.n_elem));
-            std.testing.expectEqual(g.deq.?, t.fnv(std.mem.sliceAsBytes(out[0..]))) catch |e| {
+            std.testing.expectEqual(g.deq.?, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
                 std.debug.print("{s}: dequantize differs on pattern '{s}'\n", .{ name, pattern.name() });
                 return e;
             };

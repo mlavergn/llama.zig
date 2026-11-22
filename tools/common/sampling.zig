@@ -28,6 +28,7 @@
 //! and `no_perf` are ever read back, so only those are kept.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const ggml = @import("ggml.zig");
 const c = @import("tools_h");
 const params_mod = @import("params.zig");
@@ -35,7 +36,7 @@ const log = @import("log.zig");
 const arg = @import("arg.zig");
 const common = @import("common.zig");
 const reasoning_budget = @import("reasoning_budget.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 const SamplingParams = params_mod.Sampling;
 const SamplerType = params_mod.SamplerType;
@@ -155,14 +156,12 @@ pub fn RingBuffer(comptime T: type) type {
 /// Return: the text, the allocator's.
 pub fn paramsPrint(a: std.mem.Allocator, p: *const SamplingParams) ![]u8 {
     var result: [1024]u8 = undefined;
-    const n = snprintf(&result, result.len, "\trepeat_last_n = %d, repeat_penalty = %.3f, frequency_penalty = %.3f, presence_penalty = %.3f\n" ++
+    const n = libc.snprintf(&result, result.len, "\trepeat_last_n = %d, repeat_penalty = %.3f, frequency_penalty = %.3f, presence_penalty = %.3f\n" ++
         "\tdry_multiplier = %.3f, dry_base = %.3f, dry_allowed_length = %d, dry_penalty_last_n = %d\n" ++
         "\ttop_k = %d, top_p = %.3f, min_p = %.3f, xtc_probability = %.3f, xtc_threshold = %.3f, typical_p = %.3f, top_n_sigma = %.3f, temp = %.3f\n" ++
         "\tmirostat = %d, mirostat_lr = %.3f, mirostat_ent = %.3f, adaptive_target = %.3f, adaptive_decay = %.3f", p.penalty_last_n, @as(f64, p.penalty_repeat), @as(f64, p.penalty_freq), @as(f64, p.penalty_present), @as(f64, p.dry_multiplier), @as(f64, p.dry_base), p.dry_allowed_length, p.dry_penalty_last_n, p.top_k, @as(f64, p.top_p), @as(f64, p.min_p), @as(f64, p.xtc_probability), @as(f64, p.xtc_threshold), @as(f64, p.typ_p), @as(f64, p.top_n_sigma), @as(f64, p.temp), p.mirostat, @as(f64, p.mirostat_eta), @as(f64, p.mirostat_tau), @as(f64, p.adaptive_target), @as(f64, p.adaptive_decay));
     return a.dupe(u8, result[0..@min(@as(usize, @intCast(n)), result.len - 1)]);
 }
-
-extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// Ports `regex_escape` (common/common.cpp:545 @b1b770d90): every one of
 /// `.^$|()*+?[]{}\` behind a backslash. `std::regex_replace` over that one
@@ -837,7 +836,7 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
         const tokens = try common.tokenize(arena, vocab, params.generation_prompt, false, true);
         for (tokens, 0..) |tok, i| {
             const piece = try common.tokenToPiece(arena, vocab, tok, true);
-            if (i == 0 and isspace(piece[0]) and !isspace(params.generation_prompt[0])) {
+            if (i == 0 and std.ascii.isWhitespace(piece[0]) and !std.ascii.isWhitespace(params.generation_prompt[0])) {
                 // Some tokenizers will add a space before the first special token, need to exclude
                 continue;
             }
@@ -966,10 +965,6 @@ pub fn init(model: ?*const c.llama_model, params: *SamplingParams) InitError!*Sa
         .rng = libcxx.Mt19937.init(c.llama_sampler_get_seed(chain) ^ 0x9e3779b9),
     };
     return result;
-}
-
-fn isspace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
 }
 
 /// Ports `common_sampling_add_preserved_tokens` (sampling.cpp:1055

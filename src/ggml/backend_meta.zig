@@ -60,6 +60,7 @@
 //! more nodes running on a `cgraph_main` in freed memory.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const c = impl.c;
 
@@ -84,8 +85,6 @@ fn oom() noreturn {
 fn abortFmt(comptime line: c_int, comptime fmt: [*:0]const u8, args: anytype) noreturn {
     @call(.auto, c.ggml_abort, .{ "ggml-backend-meta.cpp", line, fmt } ++ args);
 }
-
-extern fn atoi(s: [*:0]const u8) c_int;
 
 const SplitState = c.struct_ggml_backend_meta_split_state;
 const Axis = c.enum_ggml_backend_meta_split_axis;
@@ -721,8 +720,8 @@ const BufferContext = struct {
         };
         self.bufs.ensureTotalCapacity(allocator, bufs.len) catch oom();
         for (bufs) |buf| self.bufs.appendAssumeCapacity(buf);
-        const GGML_META_DEBUG = std.c.getenv("GGML_META_DEBUG");
-        self.debug = if (GGML_META_DEBUG) |s| atoi(s) else 0;
+        const GGML_META_DEBUG = stdlib.env.getenv("GGML_META_DEBUG");
+        self.debug = if (GGML_META_DEBUG) |s| stdlib.num.atoiC(s) else 0;
         return self;
     }
 

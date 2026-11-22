@@ -30,8 +30,9 @@
 //! outer multiply fused with the add, as clang contracts it.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const c = tc.c;
 const io = tc.io;
 const log = tc.log;
@@ -43,15 +44,8 @@ comptime {
     _ = @import("llama");
 }
 
-extern fn expf(x: f32) f32;
-extern fn log2f(x: f32) f32;
-extern fn sqrtf(x: f32) f32;
-extern fn exp(x: f64) f64;
-const libm = struct {
-    extern "c" fn log(x: f64) f64;
-};
+const libm = @import("stdlib").libm;
 const logD = libm.log;
-extern fn sqrt(x: f64) f64;
 
 const gpa = std.heap.c_allocator;
 
@@ -63,18 +57,13 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void
     tc.ggml.ggmlAssert(ok, "imatrix.cpp", line, expr);
 }
 
-/// `std::clamp(v, lo, hi)`: `v < lo ? lo : hi < v ? hi : v`, a NaN kept.
-fn cClamp(v: f32, lo: f32, hi: f32) f32 {
-    return if (v < lo) lo else if (hi < v) hi else v;
-}
-
 /// `std::stoi` inside `try { ... } catch (...)`: null on either throw.
 fn stoiOr(s: []const u8) ?c_int {
     var buf: [64]u8 = undefined;
     if (s.len >= buf.len) {
         const z = gpa.dupeSentinel(u8, s, 0) catch return null;
         defer gpa.free(z);
-        return switch (tc.num.stoi(z)) {
+        return switch (stdlib.num.stoi(z)) {
             .ok => |v| v,
             else => null,
         };
@@ -82,7 +71,7 @@ fn stoiOr(s: []const u8) ?c_int {
     @memcpy(buf[0..s.len], s);
     buf[s.len] = 0;
     const z: [:0]const u8 = buf[0..s.len :0];
-    return switch (tc.num.stoi(z)) {
+    return switch (stdlib.num.stoi(z)) {
         .ok => |v| v,
         else => null,
     };
@@ -258,10 +247,10 @@ const Collector = struct {
                 if (e.counts.items.len < nas) try e.counts.appendNTimes(gpa, 0, nas - e.counts.items.len) else e.counts.shrinkRetainingCapacity(nas);
             } else if (e.values.items.len != @as(usize, @intCast(src1.ne[0] * n_as))) {
                 log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_as)) });
-                tc.cExit(1);
+                stdlib.stdio.exit(1);
             } else if (e.counts.items.len != nas) {
                 log.err("%s: inconsistent expert count for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @intCast(e.counts.items.len)), @as(c_int, @truncate(n_as)) });
-                tc.cExit(1);
+                stdlib.stdio.exit(1);
             }
             log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
 
@@ -300,7 +289,7 @@ const Collector = struct {
             for (0..nas) |ex| {
                 if (touched[ex] != 0 and !allFinite(e.values.items[ex * ne0 ..][0..ne0])) {
                     log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
-                    tc.cExit(1);
+                    stdlib.stdio.exit(1);
                 }
             }
 
@@ -331,7 +320,7 @@ const Collector = struct {
                 if (e.counts.items.len == 0) try e.counts.append(gpa, 0) else e.counts.shrinkRetainingCapacity(1);
             } else if (e.values.items.len != @as(usize, @intCast(src1.ne[0] * n_mat))) {
                 log.err("%s: inconsistent size for %.*s (%d vs %d)\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr, @as(c_int, @truncate(@as(i64, @intCast(e.values.items.len)))), @as(c_int, @truncate(src1.ne[0] * n_mat)) });
-                tc.cExit(1);
+                stdlib.stdio.exit(1);
             }
             log.tmpl(.debug, 2, "%s[%d]: %32.*s, %s, %5d x %5d x %5d, %d\n", .{ func, self.last_chunk, @as(c_int, @intCast(wname.len)), wname.ptr, c.ggml_op_name(t.op), @as(c_int, @intCast(src1.ne[0])), @as(c_int, @intCast(src1.ne[1])), @as(c_int, @intCast(src1.ne[2])), @as(c_int, @intCast(src1.type)) });
 
@@ -362,7 +351,7 @@ const Collector = struct {
             // check for non-finite values
             if (!allFinite(e.values.items)) {
                 log.err("%s: non-finite values detected in %.*s\n", .{ func, @as(c_int, @intCast(wname.len)), wname.ptr });
-                tc.cExit(1);
+                stdlib.stdio.exit(1);
             }
             // only 1 count in practice, except when a tensor is used for both MUL_MAT_ID and MUL_MAT
             const n_counts = e.counts.items.len;
@@ -428,18 +417,18 @@ const Collector = struct {
         }
 
         // deterministic tensor name order
-        std.mem.sort([]const u8, to_store.items, {}, lessThan);
+        std.mem.sort([]const u8, to_store.items, {}, stdlib.strings.lessThan);
 
         const chunk_size = self.eChunkSize();
 
         // an `std::ofstream` that did not open writes nothing, unchecked
-        var out: ?tc.file.Out = tc.file.Out.create(self.io, fname.items[0 .. fname.items.len - 1]) catch null;
+        var out: ?stdlib.file.Out = stdlib.file.Out.create(self.io, fname.items[0 .. fname.items.len - 1]) catch null;
         defer if (out) |*f| f.close(self.io);
         const W = struct {
-            fn bytes(f: *?tc.file.Out, b: []const u8) void {
+            fn bytes(f: *?stdlib.file.Out, b: []const u8) void {
                 if (f.*) |*o| o.write(b) catch {};
             }
-            fn int(f: *?tc.file.Out, v: i32) void {
+            fn int(f: *?stdlib.file.Out, v: i32) void {
                 bytes(f, std.mem.asBytes(&v));
             }
         };
@@ -536,14 +525,14 @@ const Collector = struct {
             }
 
             try to_store.append(gpa, kv.key);
-            data_size += pad(overhead + @sizeOf(f32) * kv.value.activations.items.len, c.GGML_MEM_ALIGN);
-            data_size += pad(overhead + @sizeOf(f32) * kv.value.values.items.len, c.GGML_MEM_ALIGN);
-            data_size += pad(overhead + @sizeOf(f32) * kv.value.counts.items.len, c.GGML_MEM_ALIGN);
-            data_size += pad(overhead + @sizeOf(f32) * 10, c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.activations.items.len, c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.values.items.len, c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * kv.value.counts.items.len, c.GGML_MEM_ALIGN);
+            data_size += stdlib.num.pad(usize, overhead + @sizeOf(f32) * 10, c.GGML_MEM_ALIGN);
         }
 
         // deterministic tensor name order
-        std.mem.sort([]const u8, to_store.items, {}, lessThan);
+        std.mem.sort([]const u8, to_store.items, {}, stdlib.strings.lessThan);
 
         // Compute per-tensor statistics
         var tstats: std.ArrayList(TensorStatistics) = .empty;
@@ -631,7 +620,7 @@ const Collector = struct {
                     skewness = ts.skewness;
                     kurtosis = ts.kurtosis;
                     gain = ts.gain;
-                    h_norm = if (ts.elements > 1) 100.0 * (ts.entropy / log2f(@floatFromInt(ts.elements))) else fnan;
+                    h_norm = if (ts.elements > 1) 100.0 * (ts.entropy / libm.log2fInt(ts.elements)) else fnan;
                     l2_dist = ts.l2_dist;
                     cossim = ts.cossim;
                     pearson = ts.pearson;
@@ -774,14 +763,6 @@ const Collector = struct {
 fn resizeF32(v: *std.ArrayList(f32), n: usize) !void {
     v.clearRetainingCapacity();
     try v.appendNTimes(gpa, 0, n);
-}
-
-fn pad(x: usize, n: usize) usize {
-    return tc.ggml.pad(x, n);
-}
-
-fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
 }
 
 /// Ports `filter_tensor_name` (imatrix.cpp:96 @b1b770d90): remove any prefix
@@ -974,12 +955,12 @@ fn computeVectorStatistics(tstats: *std.ArrayList(TensorStatistics), name: []con
 
     const vn: f64 = @floatFromInt(valid_n);
     const variance: f64 = if (valid_n > 1) sum_sq_diff / vn else 0.0;
-    std_deviation = sqrtf(@floatCast(if (variance < 0.0) 0.0 else variance));
+    std_deviation = libm.sqrtf(@floatCast(if (variance < 0.0) 0.0 else variance));
     var skewness: f32 = 0.0;
     var kurtosis: f32 = 0.0;
     if (std_deviation > 1e-10) {
         const m2 = sum_sq_diff / vn;
-        skewness = @floatCast(sum_cu_diff / vn / (m2 * sqrt(m2)));
+        skewness = @floatCast(sum_cu_diff / vn / (m2 * libm.sqrt(m2)));
         kurtosis = @floatCast(sum_qd_diff / vn / (m2 * m2) - 3.0);
     }
 
@@ -1153,22 +1134,22 @@ fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const libcxx.Str
         ts.var_c_sum = var_c_sum;
         ts.var_p_sum = var_p_sum;
         ts.l2_dist_sq = l2_dist_sq;
-        ts.l2_dist = @floatCast(sqrt(l2_dist_sq));
+        ts.l2_dist = @floatCast(libm.sqrt(l2_dist_sq));
 
         if (valid_n > 1) {
             ts.covariance = @floatCast(cov_sum / vn);
         }
 
         if (norm1_sq > 0.0 and norm2_sq > 0.0) {
-            ts.cossim = @floatCast(dot_prod / (sqrt(norm1_sq) * sqrt(norm2_sq)));
-            ts.cossim = cClamp(ts.cossim, -1.0, 1.0);
+            ts.cossim = @floatCast(dot_prod / (libm.sqrt(norm1_sq) * libm.sqrt(norm2_sq)));
+            ts.cossim = libcxx.clamp(f32, ts.cossim, -1.0, 1.0);
         } else {
             ts.cossim = if (norm1_sq == 0.0 and norm2_sq == 0.0) fnan else 0.0;
         }
 
         if (var_c_sum > 0.0 and var_p_sum > 0.0) {
-            ts.pearson = @floatCast(cov_sum / (sqrt(var_c_sum) * sqrt(var_p_sum)));
-            ts.pearson = cClamp(ts.pearson, -1.0, 1.0);
+            ts.pearson = @floatCast(cov_sum / (libm.sqrt(var_c_sum) * libm.sqrt(var_p_sum)));
+            ts.pearson = libcxx.clamp(f32, ts.pearson, -1.0, 1.0);
         } else {
             ts.pearson = if (var_c_sum == 0.0 and var_p_sum == 0.0) fnan else 0.0;
         }
@@ -1177,7 +1158,7 @@ fn computeTensorStatistics(tstats: []TensorStatistics, mstats: *const libcxx.Str
         const eps_f32: f32 = 1e-10;
         const eps: f64 = eps_f32;
         if (prev_ts.sum > eps) {
-            ts.gain = @floatCast(sqrt(ts.sum / @as(f64, @floatFromInt(ts.elements))) / sqrt(prev_ts.sum / @as(f64, @floatFromInt(prev_ts.elements))));
+            ts.gain = @floatCast(libm.sqrt(ts.sum / @as(f64, @floatFromInt(ts.elements))) / libm.sqrt(prev_ts.sum / @as(f64, @floatFromInt(prev_ts.elements))));
             ts.sum_prev = prev_ts.sum;
             ts.elements_prev = prev_ts.elements;
         } else {
@@ -1294,21 +1275,21 @@ fn computeLayerStatistics(tstats: []const TensorStatistics, out: *LayerStatistic
 
         var cossim: f32 = 0.0;
         if (agg.sum_norm1_sq > 0.0 and agg.sum_norm2_sq > 0.0) {
-            cossim = @floatCast(agg.sum_dot_prod / (sqrt(agg.sum_norm1_sq) * sqrt(agg.sum_norm2_sq)));
-            cossim = cClamp(cossim, -1.0, 1.0);
+            cossim = @floatCast(agg.sum_dot_prod / (libm.sqrt(agg.sum_norm1_sq) * libm.sqrt(agg.sum_norm2_sq)));
+            cossim = libcxx.clamp(f32, cossim, -1.0, 1.0);
         } else if (agg.sum_norm1_sq == 0.0 and agg.sum_norm2_sq == 0.0) {
             cossim = fnan;
         }
 
         var gain: f32 = fnan;
         if (agg.sum_elements_curr > 0 and agg.sum_elements_prev > 0 and agg.sum_energy_prev > 0.0) {
-            const rms_curr = sqrt(agg.sum_energy_curr / @as(f64, @floatFromInt(agg.sum_elements_curr)));
-            const rms_prev = sqrt(agg.sum_energy_prev / @as(f64, @floatFromInt(agg.sum_elements_prev)));
+            const rms_curr = libm.sqrt(agg.sum_energy_curr / @as(f64, @floatFromInt(agg.sum_elements_curr)));
+            const rms_prev = libm.sqrt(agg.sum_energy_prev / @as(f64, @floatFromInt(agg.sum_elements_prev)));
             gain = @floatCast(rms_curr / rms_prev);
         }
 
         try out.cossim.put(layer, cossim);
-        try out.l2_dist.put(layer, @floatCast(sqrt(agg.sum_l2_dist_sq)));
+        try out.l2_dist.put(layer, @floatCast(libm.sqrt(agg.sum_l2_dist_sq)));
         try out.gain.put(layer, gain);
 
         if (agg.sum_n_features > 0) {
@@ -1318,8 +1299,8 @@ fn computeLayerStatistics(tstats: []const TensorStatistics, out: *LayerStatistic
         }
 
         if (agg.sum_var_c > 0.0 and agg.sum_var_p > 0.0) {
-            const pearson: f32 = @floatCast(agg.sum_cov / (sqrt(agg.sum_var_c) * sqrt(agg.sum_var_p)));
-            try out.pearson.put(layer, cClamp(pearson, -1.0, 1.0));
+            const pearson: f32 = @floatCast(agg.sum_cov / (libm.sqrt(agg.sum_var_c) * libm.sqrt(agg.sum_var_p)));
+            try out.pearson.put(layer, libcxx.clamp(f32, pearson, -1.0, 1.0));
         } else if (agg.sum_var_c == 0.0 and agg.sum_var_p == 0.0) {
             try out.pearson.put(layer, fnan);
         } else {
@@ -1354,13 +1335,13 @@ const LogSoftmax = struct { log_softmax: f64, logit: f32, prob: f32 };
 
 fn logSoftmax(n_vocab: usize, logits: [*]const f32, tok: usize) LogSoftmax {
     var max_logit = logits[0];
-    for (1..n_vocab) |i| max_logit = @max(max_logit, logits[i]);
+    for (1..n_vocab) |i| max_logit = libcxx.max(f32, max_logit, logits[i]);
     var sum_exp: f64 = 0.0;
-    for (0..n_vocab) |i| sum_exp += expf(logits[i] - max_logit);
+    for (0..n_vocab) |i| sum_exp += libm.expf(logits[i] - max_logit);
     return .{
         .log_softmax = @as(f64, logits[tok] - max_logit) - logD(sum_exp),
         .logit = logits[tok],
-        .prob = expf(logits[tok] - max_logit) / @as(f32, @floatCast(sum_exp)),
+        .prob = libm.expf(logits[tok] - max_logit) / @as(f32, @floatCast(sum_exp)),
     };
 }
 
@@ -1636,10 +1617,6 @@ fn nextnCollectorInit(model: ?*c.llama_model, params: *const Params, own_lm_head
     };
 }
 
-fn nowNs() i128 {
-    return @import("tools_common").clock.monotonicNs();
-}
-
 /// Ports `compute_imatrix` (imatrix.cpp:1422 @b1b770d90).
 fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const Params, n_ctx: i32, nextn: ?*NextnCollector) !bool {
     const func = "compute_imatrix";
@@ -1652,12 +1629,12 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
         ggmlAssert(!c.llama_vocab_get_add_eos(vocab), 1429, "!llama_vocab_get_add_eos(vocab)");
     }
 
-    const tim1 = nowNs();
+    const tim1 = stdlib.clock.steadyNs();
     log.inf("%s: tokenizing the input ..\n", .{func});
 
     var tokens = try tc.common.tokenize(a, vocab, params.prompt, true, params.parse_special);
 
-    const tim2 = nowNs();
+    const tim2 = stdlib.clock.steadyNs();
     log.inf("%s: tokenization took %g ms\n", .{ func, 1e-3 * @as(f64, @floatFromInt(@divTrunc(tim2 - tim1, 1000))) });
 
     if (params.i_chunk > 0) {
@@ -1710,7 +1687,9 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
     log.inf("%s: computing over %d chunks, n_ctx=%d, batch_size=%d, n_seq=%d\n", .{ func, n_chunk, n_ctx, n_batch, n_seq });
 
-    const n_workers: usize = @as(usize, @intCast(std.Thread.getCpuCount() catch 1)) - 1;
+    // `hardware_concurrency() - 1`, which wraps where the count is unknown;
+    // none then, rather than a vector the size of memory
+    const n_workers: usize = @as(usize, stdlib.thread.hardwareConcurrency()) -| 1;
 
     const nv: usize = @intCast(n_vocab);
     var i: c_int = 0;
@@ -1720,7 +1699,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
         const n_seq_batch = @min(n_seq, n_chunk - i);
 
-        const t_start = nowNs();
+        const t_start = stdlib.clock.steadyNs();
 
         // clear the KV cache
         c.llama_memory_clear(c.llama_get_memory(ctx), true);
@@ -1772,7 +1751,7 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
         if (i == 0) {
             c.llama_synchronize(ctx);
-            const t_end = nowNs();
+            const t_end = stdlib.clock.steadyNs();
             const t_total: f32 = @floatCast(@as(f64, @floatFromInt(t_end - t_start)) / 1e9);
             log.inf("%s: %.2f seconds per pass - ETA ", .{ func, @as(f64, t_total) });
             var total_seconds: c_int = @intFromFloat(t_total * @as(f32, @floatFromInt(n_chunk)) / @as(f32, @floatFromInt(n_seq)));
@@ -1794,9 +1773,9 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
 
                 count += n_ctx - first - 1;
 
-                log.out("[%d]%.4lf,", .{ i + seq + 1, exp(nll / @as(f64, @floatFromInt(count))) });
+                log.out("[%d]%.4lf,", .{ i + seq + 1, libm.exp(nll / @as(f64, @floatFromInt(count))) });
             }
-            io.flushStdout();
+            stdlib.stdio.stdout().flush();
 
             logits.clearRetainingCapacity();
         }
@@ -1807,10 +1786,10 @@ fn computeImatrix(a: std.mem.Allocator, ctx: ?*c.llama_context, params: *const P
     if (params.compute_ppl) {
         nll2 /= @floatFromInt(count);
         nll /= @floatFromInt(count);
-        const ppl = exp(nll);
+        const ppl = libm.exp(nll);
         nll2 = @mulAdd(f64, -nll, nll, nll2);
         if (nll2 > 0) {
-            nll2 = sqrt(nll2 / @as(f64, @floatFromInt(count - 1)));
+            nll2 = libm.sqrt(nll2 / @as(f64, @floatFromInt(count - 1)));
             log.out("Final estimate: PPL = %.4lf +/- %.5lf\n", .{ ppl, nll2 * ppl });
         } else {
             log.out("Unexpected negative standard deviation of log(prob)\n", .{});
@@ -1930,7 +1909,7 @@ fn showStatistics(a: std.mem.Allocator, params: *const Params) !bool {
         var name: []const u8 = "";
 
         processTensorName(tstat.tensor, &layer, &name, &buf);
-        const h_norm: f32 = if (tstat.elements > 1) 100.0 * (tstat.entropy / log2f(@floatFromInt(tstat.elements))) else fnan;
+        const h_norm: f32 = if (tstat.elements > 1) 100.0 * (tstat.entropy / libm.log2fInt(tstat.elements)) else fnan;
 
         const blk: c_int = stoiOr(layer) orelse if (std.mem.indexOf(u8, tstat.tensor, "output") != null) int_max else -1;
 
@@ -2270,9 +2249,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

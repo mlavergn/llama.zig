@@ -202,6 +202,7 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
             .link_libc = true,
         });
         mod.addImport("tools_common", common_module);
+        mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
         mod.addImport("tools_h", tools_h_module);
         mod.addImport("cli_fit", fit_module);
         mod.addOptions("config", opts.config);
@@ -314,6 +315,7 @@ pub fn add(b: *std.Build, opts: Options) !Exports {
         port.addImport("tools_h", tools_h_module);
         port.addImport("cli_fit", fit_module);
         port.addImport("llama", opts.reference.llama.root_module);
+        port.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
         llamacpp.addSdkPaths(b, port, opts.sdk);
         llamacpp.addLibgcc(b, port);
         const port_exe = b.addExecutable(.{ .name = "spec_diff", .root_module = port });

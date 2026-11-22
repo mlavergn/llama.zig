@@ -16,6 +16,7 @@
 //! Fusion, `ggml_cuda_try_fuse`, is in `fusion.zig`.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const backend = @import("backend.zig");
@@ -411,7 +412,7 @@ fn graphUpdateExecutable(instance: *common.GraphInstance, cuda_graph: cu.cudaGra
 const GraphChunk = struct {
     var size: c_int = 512;
     fn init() void {
-        if (std.c.getenv("GGML_CUDA_GRAPH_CHUNK_SIZE")) |env| size = common.atoi(env);
+        if (stdlib.env.getenv("GGML_CUDA_GRAPH_CHUNK_SIZE")) |env| size = stdlib.num.atoiC(env);
     }
     const once = common.Once(init);
 };
@@ -772,8 +773,8 @@ fn addAllocDeps(
 const GraphOpt = struct {
     var enabled: bool = false;
     fn init() void {
-        const env = std.c.getenv("GGML_CUDA_GRAPH_OPT");
-        enabled = env != null and common.atoi(env.?) == 1;
+        const env = stdlib.env.getenv("GGML_CUDA_GRAPH_OPT");
+        enabled = env != null and stdlib.num.atoiC(env.?) == 1;
     }
     const once = common.Once(init);
 };

@@ -33,6 +33,8 @@
 //! for their type checks.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -101,7 +103,7 @@ pub const Field = struct {
 fn toString(buf: *[512]u8, x: anytype) []const u8 {
     switch (@typeInfo(@TypeOf(x))) {
         .float => {
-            const n = snprintf(buf, buf.len, "%f", @as(f64, @floatCast(x)));
+            const n = libc.snprintf(buf, buf.len, "%f", @as(f64, @floatCast(x)));
             return buf[0..@intCast(n)];
         },
         else => return std.fmt.bufPrint(buf, "{d}", .{x}) catch |err| switch (err) {
@@ -109,8 +111,6 @@ fn toString(buf: *[512]u8, x: anytype) []const u8 {
         },
     }
 }
-
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 // -----------------------------------------------------------------------------
 // eval() implementations
@@ -181,7 +181,7 @@ fn evalNum(comptime T: type, f: *const Field, num: Num(T), ctx: *EvalContext, da
 /// Ports `field_str`'s `eval` (server-schema.cpp:629 @b1b770d90) and
 /// `field_json`'s `eval` (server-schema.cpp:656 @b1b770d90), which are the same.
 fn evalHandled(f: *const Field, ctx: *EvalContext, data: *const Value, comptime line: c_int) Error!void {
-    common.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
+    tools.ggml.ggmlAssert(f.custom_handler != null, "server-schema.cpp", line, "custom_handler");
     for (f.name) |n| {
         if (hasValue(data, n)) {
             try handleWithCatch(n, f.custom_handler.?(ctx, data));
@@ -247,7 +247,7 @@ pub fn eval(f: *const Field, ctx: *EvalContext, data: *const Value) Error!void {
 /// `common_tokenize(ctx.vocab, text, add_special, parse_special)` after
 /// `GGML_ASSERT(ctx.vocab != nullptr)`.
 fn tokenizeIn(ctx: *EvalContext, comptime line: c_int, text: []const u8, add_special: bool, parse_special: bool) Error![]Token {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", line, "ctx.vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", line, "ctx.vocab != nullptr");
     return common.tokenize(ctx.a, ctx.vocab, text, add_special, parse_special);
 }
 
@@ -369,7 +369,7 @@ fn hEcho(_: *EvalContext, data: *const Value) Error!void {
 fn hPreservedTokens(ctx: *EvalContext, data: *const Value) Error!void {
     const tokens = try (try data.at("preserved_tokens")).getSlice(ctx.a, []const u8);
     // `common_sampling_add_preserved_tokens` (sampling.cpp:1055 @b1b770d90)
-    common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1056, "vocab != nullptr");
     try chat.session.addPreservedTokens(ctx.a, &ctx.params.sampling.preserved_tokens, ctx.vocab.?, tokens);
 }
 
@@ -389,7 +389,7 @@ fn hGrammarTriggers(ctx: *EvalContext, data: *const Value) Error!void {
 /// `cli/common_chat/session.zig`'s `addGrammarTriggers` is the same
 /// function over that module's types.
 fn addGrammarTriggers(ctx: *EvalContext, triggers: []const tools.params.GrammarTrigger) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1066, "vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "sampling.cpp", 1066, "vocab != nullptr");
     const s = &ctx.params.sampling;
     for (triggers) |trigger| {
         if (trigger.type == .word) {
@@ -431,7 +431,7 @@ fn hReasoningBudgetStartTag(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 361, "ctx.vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 361, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.reasoning_budget_end = .empty;
     if (data.contains("reasoning_budget_end_tags")) {
@@ -451,7 +451,7 @@ fn hReasoningBudgetEndTags(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 fn hReasoningBudgetMessage(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 389, "ctx.vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 389, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     if (s.reasoning_budget_end.items.len != 0) {
         var end_tag: std.ArrayList(Token) = .fromOwnedSlice(try ctx.a.dupe(Token, s.reasoning_budget_end.items[0].items));
@@ -478,7 +478,7 @@ fn parseBias(v: *const Value, bias: *f32) Error!bool {
 }
 
 fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 404, "ctx.vocab != nullptr");
+    tools.ggml.ggmlAssert(ctx.vocab != null, "server-schema.cpp", 404, "ctx.vocab != nullptr");
     const s = &ctx.params.sampling;
     s.logit_bias = .empty;
     const logit_bias = try data.at("logit_bias");
@@ -504,7 +504,7 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
             if (!try parseBias(el.value, &bias)) continue;
             // `std::stoi`-free `strtol` over the key's `c_str()`: whole up to its NUL
             const key = std.mem.sliceTo(el.key, 0);
-            const parsed = tools.num.strtol(key, 10);
+            const parsed = stdlib.num.strtol(key, 10);
             const tok: Token = @truncate(parsed.value);
             if (parsed.end == key.len) {
                 if (tok >= 0 and tok < n_vocab) try s.logit_bias.append(ctx.a, .{ .token = tok, .bias = bias });
@@ -517,7 +517,7 @@ fn hLogitBias(ctx: *EvalContext, data: *const Value) Error!void {
 }
 
 fn hIgnoreEos(ctx: *EvalContext, data: *const Value) Error!void {
-    common.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 445, "ctx.logit_bias_eog != nullptr");
+    tools.ggml.ggmlAssert(ctx.logit_bias_eog != null, "server-schema.cpp", 445, "ctx.logit_bias_eog != nullptr");
     const s = &ctx.params.sampling;
     s.ignore_eos = try (try data.at("ignore_eos")).get(bool);
     if (s.ignore_eos) {

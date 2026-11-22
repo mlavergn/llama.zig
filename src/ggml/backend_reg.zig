@@ -41,6 +41,8 @@
 //! than one that looks for files that are not there.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const config = @import("config");
 const impl = @import("impl.zig");
@@ -86,8 +88,6 @@ const allocator = std.heap.c_allocator;
 /// substitution. `std.fs` still supplies `max_path_bytes`, which is only a
 /// constant.
 const Libc = struct {
-    extern fn access(path: [*:0]const u8, mode: c_int) c_int;
-    extern fn strerror(errnum: c_int) [*:0]const u8;
     const F_OK: c_int = 0;
 };
 
@@ -220,7 +220,7 @@ const Registry = struct {
         if (use_vulkan) {
             // The C++'s runtime check of `GGML_DISABLE_VULKAN`
             // (src/ggml-backend-reg.cpp:131 @b1b770d90).
-            if (std.c.getenv("GGML_DISABLE_VULKAN") == null) {
+            if (stdlib.env.getenv("GGML_DISABLE_VULKAN") == null) {
                 self.registerBackend(ggml_backend_vk_reg(), null);
             } else {
                 impl.logDebug("Vulkan backend disabled by GGML_DISABLE_VULKAN environment variable\n", .{});
@@ -732,7 +732,7 @@ fn joinPath(buf: []u8, dir: []const u8, name: []const u8) ?[:0]const u8 {
 /// through `FormatMessage`; the CRT's `errno` is what is to hand here, so the
 /// text of these two debug lines can differ there.
 fn lastErrorMessage() [*:0]const u8 {
-    return Libc.strerror(std.c._errno().*);
+    return stdlib.errno.strerror(std.c._errno().*);
 }
 
 fn pathExists(path: [:0]const u8) bool {
@@ -741,7 +741,7 @@ fn pathExists(path: [:0]const u8) bool {
         defer allocator.free(wpath);
         return win32.GetFileAttributesW(wpath.ptr) != win32.INVALID_FILE_ATTRIBUTES;
     }
-    return Libc.access(path.ptr, Libc.F_OK) == 0;
+    return libc.access(path.ptr, Libc.F_OK) == 0;
 }
 
 /// libc's `readdir`. Zig 0.17's `std.c.readdir` binds `readdir$INODE64` on
@@ -986,7 +986,7 @@ export fn ggml_backend_load_all_from_path(dir_path: ?[*:0]const u8) callconv(.c)
     }
 
     // An out-of-tree backend named outright by the environment.
-    if (std.c.getenv("GGML_BACKEND_PATH")) |backend_path| {
+    if (stdlib.env.getenv("GGML_BACKEND_PATH")) |backend_path| {
         _ = ggml_backend_load(backend_path);
     }
 }
@@ -1013,7 +1013,7 @@ test "the registry reports the two backends this build compiles" {
     // and what `ggml_backend_init_best` depends on. The ported test root
     // compiles without Metal, so it sees one.
     const gpu_regs: usize = @as(usize, @intFromBool(use_metal)) + @intFromBool(use_cuda) +
-        @intFromBool(use_vulkan and std.c.getenv("GGML_DISABLE_VULKAN") == null) + @intFromBool(use_blas);
+        @intFromBool(use_vulkan and stdlib.env.getenv("GGML_DISABLE_VULKAN") == null) + @intFromBool(use_blas);
     try std.testing.expectEqual(gpu_regs + 1, ggml_backend_reg_count());
 
     if (use_cuda) {

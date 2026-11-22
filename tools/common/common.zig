@@ -10,8 +10,9 @@
 //! ports and the line it began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const ggml = @import("ggml.zig");
-const cpu = @import("cpu.zig");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const log = @import("log.zig");
@@ -616,11 +617,6 @@ fn comLog(comptime level: enum { trc, inf, err }, comptime func: [*:0]const u8, 
     }
 }
 
-/// `std::thread::hardware_concurrency()`.
-fn hardwareConcurrency() usize {
-    return cpu.hardwareConcurrency();
-}
-
 /// Ports `common_params_get_system_info` (common/common.cpp:442 @b1b770d90).
 ///
 /// Return: owned by `a`.
@@ -630,7 +626,7 @@ pub fn paramsGetSystemInfo(a: std.mem.Allocator, params: *const Params) ![:0]u8 
     if (params.cpuparams_batch.n_threads != -1) {
         try os.print(a, " (n_threads_batch = {d})", .{params.cpuparams_batch.n_threads});
     }
-    try os.print(a, " / {d} | {s}", .{ hardwareConcurrency(), c.llama_print_system_info() });
+    try os.print(a, " / {d} | {s}", .{ stdlib.thread.hardwareConcurrency(), c.llama_print_system_info() });
     return a.dupeSentinel(u8, os.items, 0);
 }
 
@@ -790,8 +786,6 @@ pub fn setAdapterLora(a: std.mem.Allocator, ctx: ?*c.llama_context, lora: []cons
     _ = c.llama_set_adapters_lora(ctx, if (lora.len == 0) null else loras.ptr, lora.len, if (lora.len == 0) null else scales.ptr);
 }
 
-extern fn pow(x: f64, y: f64) f64;
-
 /// Ports `common_embd_normalize` (common/common.cpp:1936 @b1b770d90).
 pub fn embdNormalize(inp: [*]const f32, out: [*]f32, n: c_int, embd_norm: c_int) void {
     var sum: f64 = 0.0;
@@ -816,9 +810,9 @@ pub fn embdNormalize(inp: [*]const f32, out: [*]f32, n: c_int, embd_norm: c_int)
         },
         else => { // p-norm (euclidean is p-norm p=2)
             for (0..len) |i| {
-                sum += pow(@abs(@as(f64, inp[i])), @floatFromInt(embd_norm));
+                sum += libm.pow(@abs(@as(f64, inp[i])), @floatFromInt(embd_norm));
             }
-            sum = pow(sum, 1.0 / @as(f64, @floatFromInt(embd_norm)));
+            sum = libm.pow(sum, 1.0 / @as(f64, @floatFromInt(embd_norm)));
         },
     }
 

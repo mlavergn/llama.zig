@@ -38,7 +38,7 @@ const impl = @import("impl.zig");
 const model = @import("model.zig");
 const names = @import("names.zig");
 const clip = @import("clip.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 const c = impl.c;
 const gpa = impl.gpa;
@@ -49,13 +49,7 @@ const Hparams = model.Hparams;
 const ResizeAlgo = model.ResizeAlgo;
 const PadStyle = model.PadStyle;
 
-const libm = struct {
-    extern "c" fn sin(x: f64) f64;
-    extern "c" fn log(x: f64) f64;
-    extern "c" fn logf(x: f32) f32;
-    extern "c" fn nearbyint(x: f64) f64;
-    extern "c" fn nearbyintf(x: f32) f32;
-};
+const libm = @import("stdlib").libm;
 
 fn assert_(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
     impl.ggmlAssert(ok, "mtmd-image.cpp", line, expr);
@@ -73,16 +67,6 @@ fn toD(x: anytype) f64 {
 /// `MTMD_ALIGN` (mtmd-impl.h:493 @b1b770d90).
 fn clipAlign(x: c_int, n: c_int) c_int {
     return @divTrunc(x + n - 1, n) * n;
-}
-
-/// `std::min` over two doubles: `(b < a) ? b : a`.
-fn cMin(a: f64, b: f64) f64 {
-    return if (b < a) b else a;
-}
-
-/// `std::max` over two doubles: `(a < b) ? b : a`.
-fn cMax(a: f64, b: f64) f64 {
-    return if (a < b) b else a;
 }
 
 fn toI(x: anytype) c_int {
@@ -1177,11 +1161,11 @@ pub const Preprocessor = struct {
         const width = img.getSize().width;
         const height = img.getSize().height;
 
-        const s1 = @sqrt(toD(in_patch_limit) / (cMax(1.0, toD(@divTrunc(width, ps))) * cMax(1.0, toD(@divTrunc(height, ps)))));
+        const s1 = @sqrt(toD(in_patch_limit) / (libcxx.max(f64, 1.0, toD(@divTrunc(width, ps))) * libcxx.max(f64, 1.0, toD(@divTrunc(height, ps)))));
         const s2 = toD(side_limit) * toD(ps) / toD(width);
         const s3 = toD(side_limit) * toD(ps) / toD(height);
         // std::min({1.0, s1, s2, s3}): the first smallest
-        const scale = cMin(cMin(cMin(1.0, s1), s2), s3);
+        const scale = libcxx.min(f64, libcxx.min(f64, libcxx.min(f64, 1.0, s1), s2), s3);
         const new_w = @min(@max(1, toI(toD(width) * scale)), side_limit * ps);
         const new_h = @min(@max(1, toI(toD(height) * scale)), side_limit * ps);
 
@@ -1218,7 +1202,7 @@ pub const Preprocessor = struct {
         const fac = toD(factor);
         // the video variant first upscales edges below factor
         if (temporal_factor > 1 and (h < fac or w < fac)) {
-            const scale = cMax(fac / h, fac / w);
+            const scale = libcxx.max(f64, fac / h, fac / w);
             h = toD(toI(h * scale));
             w = toD(toI(w * scale));
         }
@@ -1333,9 +1317,9 @@ pub const Preprocessor = struct {
         }
 
         // Scaled to fit the canvas, and never upscaled, unless below the min budget
-        var scale = cMin(toD(canvas_h) / toD(height), toD(canvas_w) / toD(width));
+        var scale = libcxx.min(f64, toD(canvas_h) / toD(height), toD(canvas_w) / toD(width));
         if (height * width >= min_px) {
-            scale = cMin(1.0, scale);
+            scale = libcxx.min(f64, 1.0, scale);
         }
         const content_h: c_int = @intCast(@max(1, @min(canvas_h, @as(i64, @intFromFloat(@floor(toD(height) * scale))))));
         const content_w: c_int = @intCast(@max(1, @min(canvas_w, @as(i64, @intFromFloat(@floor(toD(width) * scale))))));
@@ -1999,7 +1983,7 @@ pub const Preprocessor = struct {
                 best_height.* = cell;
                 best_width.* = (max_n_token - 3) * cell;
             } else {
-                const beta = cMin(@floor(max_w_f) * toD(cell) / toD(width), @floor(max_h_f) * toD(cell) / toD(height));
+                const beta = libcxx.min(f64, @floor(max_w_f) * toD(cell) / toD(width), @floor(max_h_f) * toD(cell) / toD(height));
                 best_height.* = toI(@floor(toD(height) * beta / toD(p))) * p;
                 best_width.* = toI(@floor(toD(width) * beta / toD(p))) * p;
             }

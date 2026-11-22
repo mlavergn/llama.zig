@@ -27,6 +27,7 @@
 //! shape as `repack.dispatch_implemented`.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 
 const impl = @import("../impl.zig");
 const c = impl.c;
@@ -1332,7 +1333,7 @@ pub export fn ggml_metal_op_sum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     setBuffer(enc, s0, 1);
     setBuffer(enc, op, 2);
 
-    mc.ggml_metal_encoder_set_threadgroup_memory_size(enc, impl.pad(@as(usize, @intCast(nsg)) * @sizeOf(f32), 16), 0);
+    mc.ggml_metal_encoder_set_threadgroup_memory_size(enc, stdlib.num.pad(usize, @as(usize, @intCast(nsg)) * @sizeOf(f32), 16), 0);
 
     mc.ggml_metal_encoder_dispatch_threadgroups(enc, 1, 1, 1, nth, 1, 1);
 
@@ -1454,7 +1455,7 @@ pub export fn ggml_metal_op_cumsum(ctx: *Op, idx: c_int) callconv(.c) c_int {
     const nbt2: u64 = @as(u64, @intCast(net1)) * nbt1;
     const nbt3: u64 = @as(u64, @intCast(net2)) * nbt2;
 
-    const smem = impl.pad(32 * @sizeOf(f32), 16);
+    const smem = stdlib.num.pad(usize, 32 * @sizeOf(f32), 16);
 
     const bid_src0 = getBufferId(s0);
     const bid_dst = getBufferId(op);
@@ -4086,7 +4087,7 @@ pub export fn ggml_metal_op_conv_transpose_2d(ctx: *Op, idx: c_int) callconv(.c)
     setBuffer(enc, op, 3);
 
     // Metal requires buffer size to be multiple of 16 bytes
-    const smem = impl.pad(@as(usize, @intCast(KW)) * @as(usize, @intCast(KH)) * @sizeOf(f32), 16);
+    const smem = stdlib.num.pad(usize, @as(usize, @intCast(KW)) * @as(usize, @intCast(KH)) * @sizeOf(f32), 16);
     mc.ggml_metal_encoder_set_threadgroup_memory_size(enc, smem, 0);
 
     mc.ggml_metal_encoder_dispatch_threadgroups(enc, OW, OH, OC * N, KW, KH, 1);
@@ -4585,7 +4586,7 @@ pub export fn ggml_metal_op_argsort(ctx: *Op, idx: c_int) callconv(.c) c_int {
 
     // Metal kernels require the buffer size to be multiple of 16 bytes
     // https://developer.apple.com/documentation/metal/mtlcomputecommandencoder/1443142-setthreadgroupmemorylength
-    const smem = impl.pad(@as(usize, @intCast(nth)) * @sizeOf(i32), 16);
+    const smem = stdlib.num.pad(usize, @as(usize, @intCast(nth)) * @sizeOf(i32), 16);
 
     const bid_src0 = getBufferId(s0);
     var bid_dst = getBufferId(op);
@@ -4878,9 +4879,9 @@ fn topKRadix(ctx: *Op, idx: c_int) void {
     };
 
     // shared memory: 256-entry histogram + bucket/above scalars
-    const smem_histo = impl.pad(256 * @sizeOf(u32), 16);
-    const smem_bucket = impl.pad(@sizeOf(u32), 16);
-    const smem_above = impl.pad(@sizeOf(u32), 16);
+    const smem_histo = stdlib.num.pad(usize, 256 * @sizeOf(u32), 16);
+    const smem_bucket = stdlib.num.pad(usize, @sizeOf(u32), 16);
+    const smem_above = stdlib.num.pad(usize, @sizeOf(u32), 16);
 
     mc.ggml_metal_encoder_set_pipeline(enc, pipeline);
     setBytes(enc, &args, 0);
@@ -4931,7 +4932,7 @@ fn topKBitonic(ctx: *Op, idx: c_int) void {
     // blocks per row
     const npr = @divTrunc(ne00 + nth - 1, nth);
 
-    const smem = impl.pad(@as(usize, @intCast(nth)) * @sizeOf(i32), 16);
+    const smem = stdlib.num.pad(usize, @as(usize, @intCast(nth)) * @sizeOf(i32), 16);
 
     const bid_src0 = getBufferId(s0);
     var bid_dst = getBufferId(op);
@@ -5216,7 +5217,7 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
     // sparse path: gather the finite mask entries into index lists and run the vec kernels over them
     const n_kv_max_sparse = nKvMaxSparse(op);
     const use_sparse = n_kv_max_sparse > 0;
-    const n_kv_max_padded: c_int = if (use_sparse) @intCast(impl.pad(@intCast(n_kv_max_sparse), fc.OP_FLASH_ATTN_EXT_VEC_NCPSG)) else 0;
+    const n_kv_max_padded: c_int = if (use_sparse) @intCast(stdlib.num.pad(usize, @intCast(n_kv_max_sparse), fc.OP_FLASH_ATTN_EXT_VEC_NCPSG)) else 0;
 
     const use_vec = ggml_metal_op_flash_attn_ext_use_vec(op);
 
@@ -5349,7 +5350,7 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
 
         impl.assert(@rem(ne20, 4) == 0, "ne20 % 4 == 0");
 
-        const k_size: usize = impl.pad(@sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne10)) * @as(usize, @intCast(ne11_attn)) * @as(usize, @intCast(ne12)) * @as(usize, @intCast(ne03)), 16);
+        const k_size: usize = stdlib.num.pad(usize, @sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne10)) * @as(usize, @intCast(ne11_attn)) * @as(usize, @intCast(ne12)) * @as(usize, @intCast(ne03)), 16);
 
         var args0: kargs.flash_attn_ext_rows = .{
             .ne11 = @intCast(ne11_attn),
@@ -5479,7 +5480,8 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
 
         // shared memory layout: queries (16-bit), scores (float), probabilities (16-bit), row scale (float), rescale flag (int)
         const q: usize = @intCast(nqptg);
-        const smem = impl.pad(
+        const smem = stdlib.num.pad(
+            usize,
             q * @as(usize, @intCast(ne00)) * @sizeOf(c.ggml_fp16_t) +
                 q * @as(usize, @intCast(ncpsg)) * (@sizeOf(f32) + @sizeOf(c.ggml_fp16_t)) +
                 q * @sizeOf(f32) + @sizeOf(i32),
@@ -5600,12 +5602,12 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
         //   quantized KV scratch: 16*32*NSG (only when is_q)
         //
         // the C's `fa_smem` lambda
-        const dv_pad: i64 = @intCast(impl.pad(@intCast(ne20), 64));
+        const dv_pad: i64 = @intCast(stdlib.num.pad(usize, @intCast(ne20), 64));
 
         const faSmem = struct {
             fn f(ne00_: c_int, dv_pad_: i64, ncpsg_: c_int, nqptg_: c_int, is_q_: c_int, nsg_: i32) usize {
                 const smem_half: usize = @intCast(nqptg_ * (ne00_ + 2 * dv_pad_ + 4 * ncpsg_) + is_q_ * (16 * 32 * nsg_));
-                return impl.pad(smem_half * @sizeOf(c.ggml_fp16_t), 16);
+                return stdlib.num.pad(usize, smem_half * @sizeOf(c.ggml_fp16_t), 16);
             }
         }.f;
 
@@ -5805,14 +5807,14 @@ pub export fn ggml_metal_op_flash_attn_ext(ctx: *Op, idx: c_int) callconv(.c) c_
         //   sparse idx:   NSG*C ints (when use_sparse, or when gathering K/V rows)
         //
         // the C's `fa_vec_smem` lambda
-        const dk_pad: usize = impl.pad(@intCast(ne00), 128);
-        const dv_pad: usize = impl.pad(@intCast(ne20), 128);
+        const dk_pad: usize = stdlib.num.pad(usize, @intCast(ne00), 128);
+        const dv_pad: usize = stdlib.num.pad(usize, @intCast(ne20), 128);
 
         const faVecSmem = struct {
             fn f(dk_pad_: usize, dv_pad_: usize, ncpsg_: c_int, use_sparse_: bool, nsg_: i64, nqptg_: i32) usize {
                 const smem_half: usize = (dk_pad_ + @as(usize, @intCast(4 * ncpsg_)) + 2 * dv_pad_) * @as(usize, @intCast(nqptg_)) * @as(usize, @intCast(nsg_));
                 const smem_idx: usize = if (use_sparse_) @as(usize, @intCast(nsg_)) * @as(usize, @intCast(ncpsg_)) * @sizeOf(c_int) else 0;
-                return impl.pad(smem_half * @sizeOf(c.ggml_fp16_t) + smem_idx, 16);
+                return stdlib.num.pad(usize, smem_half * @sizeOf(c.ggml_fp16_t) + smem_idx, 16);
             }
         }.f;
 
@@ -6950,7 +6952,7 @@ fn kvF16KSize(op: *const Tensor) usize {
 
     const s1 = src(op, 1);
 
-    return impl.pad(@sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(s1.ne[0] * s1.ne[1] * s1.ne[2] * s1.ne[3])), 16);
+    return stdlib.num.pad(usize, @sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(s1.ne[0] * s1.ne[1] * s1.ne[2] * s1.ne[3])), 16);
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_pad`
@@ -7037,7 +7039,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_blk(op: *const Tensor) callconv
     const ne1: i64 = @divTrunc(s0.ne[1] + nqptg - 1, nqptg);
     const ne0: i64 = @divTrunc(s3.ne[0] + ncpsg - 1, ncpsg);
 
-    res += impl.pad(@as(usize, @intCast(c.ggml_type_size(c.GGML_TYPE_I8))) *
+    res += stdlib.num.pad(usize, @as(usize, @intCast(c.ggml_type_size(c.GGML_TYPE_I8))) *
         @as(usize, @intCast(ne0 * ne1 * s3.ne[2] * s3.ne[3])), 32);
 
     return res;
@@ -7087,7 +7089,7 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_kv_f16(op: *const Tensor) callc
         return k_size;
     }
 
-    const v_size = impl.pad(@sizeOf(c.ggml_fp16_t) *
+    const v_size = stdlib.num.pad(usize, @sizeOf(c.ggml_fp16_t) *
         @as(usize, @intCast(s2.ne[0] * s2.ne[1] * s2.ne[2] * s2.ne[3])), 16);
 
     return k_size + v_size;
@@ -7114,9 +7116,9 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_idx(op: *const Tensor) callconv
     const ne32: usize = @intCast(s3.ne[2]);
     const ne33: usize = @intCast(s3.ne[3]);
 
-    const n_kv_max_padded = impl.pad(@intCast(n_kv_max), fc.OP_FLASH_ATTN_EXT_VEC_NCPSG);
+    const n_kv_max_padded = stdlib.num.pad(usize, @intCast(n_kv_max), fc.OP_FLASH_ATTN_EXT_VEC_NCPSG);
 
-    return impl.pad(@sizeOf(i32) * n_kv_max_padded * ne31 * ne32 * ne33, 16);
+    return stdlib.num.pad(usize, @sizeOf(i32) * n_kv_max_padded * ne31 * ne32 * ne33, 16);
 }
 
 /// Ports `ggml_metal_op_flash_attn_ext_extra_rows`
@@ -7146,8 +7148,8 @@ pub export fn ggml_metal_op_flash_attn_ext_extra_rows(op: *const Tensor) callcon
     // note: when V is a view of K, the gathered V is read from the gathered K, so only K is gathered
     const v_is_view_of_k = vIsViewOfK(op);
 
-    const k_size: usize = impl.pad(@sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne10)) * @as(usize, @intCast(n_rows)) * @as(usize, @intCast(ne12)) * @as(usize, @intCast(n_slices)), 16);
-    const v_size: usize = if (v_is_view_of_k) 0 else impl.pad(@sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne20)) * @as(usize, @intCast(n_rows)) * @as(usize, @intCast(ne22)) * @as(usize, @intCast(n_slices)), 16);
+    const k_size: usize = stdlib.num.pad(usize, @sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne10)) * @as(usize, @intCast(n_rows)) * @as(usize, @intCast(ne12)) * @as(usize, @intCast(n_slices)), 16);
+    const v_size: usize = if (v_is_view_of_k) 0 else stdlib.num.pad(usize, @sizeOf(c.ggml_fp16_t) * @as(usize, @intCast(ne20)) * @as(usize, @intCast(n_rows)) * @as(usize, @intCast(ne22)) * @as(usize, @intCast(n_slices)), 16);
 
     return k_size + v_size;
 }

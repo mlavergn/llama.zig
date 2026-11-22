@@ -22,8 +22,8 @@
 //! # Floating point
 //!
 //! `format_answer`'s softmax calls the C library's `exp`, and the entropy
-//! confidence its `log`, as the C++'s `std::exp(double)` and
-//! `std::log(double)` do: Zig's own differ in the last bit. Three sums are
+//! confidence its `log`, as the C++'s `std::libm.exp(double)` and
+//! `std::libm.log(double)` do: Zig's own differ in the last bit. Three sums are
 //! fused as clang compiles them, read from the reference's disassembly and
 //! held by `server-diff decision`: a score's expected value (scalar,
 //! fused), `decision_confidence_score`'s distance (vectorized in groups of
@@ -31,6 +31,9 @@
 //! `decision_confidence_entropy`'s sum (scalar, fused).
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const json = @import("json");
 const chat = @import("common_chat");
@@ -62,10 +65,6 @@ const DecisionOrder = @import("llama").api.batch.llama_decision_order;
 fn orderValue(o: DecisionOrder) i32 {
     return @intCast(@backingInt(o));
 }
-
-extern "c" fn exp(x: f64) f64;
-extern "c" fn log(x: f64) f64;
-extern "c" fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `server_decision_question_type` (server-decision.h:15 @b1b770d90).
 pub const QuestionType = enum(c_int) {
@@ -222,7 +221,7 @@ pub const DecisionContext = struct {
             if (c.llama_model_meta_val_str_by_index(model, i, &val, val.len) < 0) {
                 continue;
             }
-            const temp = tc.num.strtof(std.mem.sliceTo(&val, 0)).value;
+            const temp = stdlib.num.strtof(std.mem.sliceTo(&val, 0)).value;
             const key_s = std.mem.sliceTo(&key, 0);
             if (temp <= 0.0) {
                 return throw(error.RuntimeError, "invalid decision temperature: {s} = {s}", .{ key_s, std.mem.sliceTo(&val, 0) });
@@ -259,8 +258,8 @@ pub const DecisionContext = struct {
             var level: usize = 0;
             if (n_parts == 2) {
                 const dot = std.mem.indexOfScalar(u8, rest, '.').?;
-                n = tc.num.strtoul(rest[0..dot], 10).value;
-                level = tc.num.strtoul(rest[dot + 1 ..], 10).value;
+                n = stdlib.num.strtoul(rest[0..dot], 10).value;
+                level = stdlib.num.strtoul(rest[dot + 1 ..], 10).value;
             }
             if (n < 2 or n > 255 or level >= n) {
                 return throw(error.RuntimeError, "invalid decision score bias: {s}", .{key_s});
@@ -274,7 +273,7 @@ pub const DecisionContext = struct {
                 };
                 @memset(gop.value_ptr.*, 0.0);
             }
-            gop.value_ptr.*[level] = tc.num.strtof(std.mem.sliceTo(&val, 0)).value;
+            gop.value_ptr.*[level] = stdlib.num.strtof(std.mem.sliceTo(&val, 0)).value;
         }
 
         switch (model_type) {
@@ -338,7 +337,7 @@ pub const DecisionContext = struct {
                 self.text_marker = try gpa.dupe(u8, try tc.common.tokenToPiece(ar, self.vocab, self.token_marker, true));
 
                 const val = try metaStr(ar, model, try std.mem.concat(ar, u8, &.{ prefix, "max_head_tokens" }));
-                self.max_head_tokens = tc.num.strtoul(std.mem.sliceTo(val, 0), 10).value;
+                self.max_head_tokens = stdlib.num.strtoul(std.mem.sliceTo(val, 0), 10).value;
                 if (self.max_head_tokens == 0) {
                     return throw(error.RuntimeError, "decision model has no valid max_head_tokens", .{});
                 }
@@ -1759,7 +1758,7 @@ pub const DecisionContext = struct {
             }
             var sum: f64 = 0.0;
             for (0..n) |i| {
-                p[i] = exp((logits[i] - logit_max) / @as(f64, temperature));
+                p[i] = libm.exp((logits[i] - logit_max) / @as(f64, temperature));
                 sum += p[i];
             }
             for (0..n) |i| {
@@ -1904,12 +1903,12 @@ fn confidenceEntropy(probs: []const f64) f64 {
     var entropy: f64 = 0.0;
     for (probs) |p| {
         if (p > 0.0) {
-            // clang contracts `entropy -= p * log(p)`; the call keeps the loop scalar
-            entropy = @mulAdd(f64, -p, log(p), entropy);
+            // clang contracts `entropy -= p * libm.log(p)`; the call keeps the loop scalar
+            entropy = @mulAdd(f64, -p, libm.log(p), entropy);
         }
     }
     // std::min(1.0, x), then std::max(0.0, y)
-    const x = 1.0 - entropy / log(@floatFromInt(probs.len));
+    const x = 1.0 - entropy / libm.log(@floatFromInt(probs.len));
     const y = if (x < 1.0) x else 1.0;
     return if (0.0 < y) y else 0.0;
 }
@@ -2187,8 +2186,8 @@ fn pyFloat(a: Allocator, out: *std.ArrayList(u8), v: f64) Error!void {
     var n_written: usize = 0;
     var prec: c_int = 0;
     while (prec < 17) : (prec += 1) {
-        n_written = @intCast(snprintf(&buf, buf.len, "%.*e", prec, v));
-        if (tc.num.strtod(std.mem.sliceTo(&buf, 0)).value == v) {
+        n_written = @intCast(libc.snprintf(&buf, buf.len, "%.*e", prec, v));
+        if (stdlib.num.strtod(std.mem.sliceTo(&buf, 0)).value == v) {
             break;
         }
     }

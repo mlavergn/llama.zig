@@ -27,13 +27,11 @@
 //! ported. Revisit if load times ever make it worth measuring.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const blocks = @import("blocks.zig");
 const c = impl.c;
-
-extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
-/// libc's `stderr`; see `impl.cStderr`.
-const cStderr = impl.cStderr;
 
 const types = @import("../types.zig");
 
@@ -41,7 +39,7 @@ const types = @import("../types.zig");
 /// so this does too -- a caller that has redirected ggml logging still wants
 /// to know its model file is corrupt.
 fn warn(comptime fmt: [*:0]const u8, args: anytype) void {
-    _ = @call(.auto, fprintf, .{ cStderr(), fmt } ++ args);
+    _ = @call(.auto, libc.fprintf, .{ stdlib.stdio.cStream(.stderr), fmt } ++ args);
 }
 
 /// Ports `validate_float` (ggml-quants.c:5318 @b1b770d90).

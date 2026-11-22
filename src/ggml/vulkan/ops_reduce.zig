@@ -9,6 +9,7 @@
 //! (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
 
@@ -21,11 +22,6 @@ const Subbuffer = m.buffer.Subbuffer;
 const push = m.push;
 const ops = m.ops;
 const u32Of = ops.u32Of;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn log2f(x: f32) f32;
-extern fn floorf(x: f32) f32;
-extern fn ceilf(x: f32) f32;
 
 fn at(cg: *const CGraph, i: c_int) *Tensor {
     return cg.nodes[@intCast(i)].?;
@@ -62,10 +58,10 @@ pub fn softMax(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, src1: ?*
     const nb13: u32 = if (src1) |s| @truncate(s.nb[3] / s.nb[0]) else 0;
 
     const n_head_kv = u32Of(src0.ne[2]);
-    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(floorf(log2f(@floatFromInt(n_head_kv))));
+    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(libm.floorf(libm.log2fInt(n_head_kv)));
     const nhl: f32 = @floatFromInt(n_head_log2);
-    const m0 = powf(2.0, -max_bias / nhl);
-    const m1 = powf(2.0, -(max_bias / 2.0) / nhl);
+    const m0 = libm.powf(2.0, -max_bias / nhl);
+    const m1 = libm.powf(2.0, -(max_bias / 2.0) / nhl);
 
     const pc: push.SoftMax = .{
         .KX = ncols,
@@ -255,7 +251,7 @@ pub fn argsort(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Te
     const op: [*]const u32 = @ptrCast(&dst.op_params);
     const ncols = u32Of(src0.ne[0]);
     const nrows = u32Of(c.ggml_nrows(src0));
-    const ncols_pad_log2: u32 = @intFromFloat(ceilf(log2f(@floatFromInt(ncols))));
+    const ncols_pad_log2: u32 = @intFromFloat(libm.ceilf(libm.log2fInt(ncols)));
     const ncolsp2: u32 = @as(u32, 1) << @intCast(ncols_pad_log2);
 
     const pc: push.Argsort = .{ .ncols = ncols, .ncols_padded = ncolsp2, .ncols_padded_log2 = ncols_pad_log2, .nrows = nrows, .order = op[0], .outer_start = 0, .outer_end = 0, .inner_start = 0, .inner_end = 0 };
@@ -332,7 +328,7 @@ pub fn argsort(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Te
 /// this test out in `ggml_vk_topk`, `ggml_vk_can_fuse_topk_qsa` and
 /// `supports_op`; past it, top-k falls back to radix-select.
 pub fn topkTournamentFits(dev: *const m.device.Device, k: u32) bool {
-    const k_min_pipeline = @max(@as(u32, @intFromFloat(log2f(@floatFromInt(k)))) + 1, dev.subgroup_size_log2);
+    const k_min_pipeline = @max(@as(u32, @intFromFloat(libm.log2fInt(k))) + 1, dev.subgroup_size_log2);
     return k_min_pipeline < m.device.num_topk_pipelines and dev.pipeline_topk_f32[k_min_pipeline] != null;
 }
 
@@ -381,14 +377,14 @@ pub fn topk(ctx: *BackendCtx, subctx: *Context, src0: *const Tensor, dst: *Tenso
         // Prefer going as small as num_topk_pipelines - 3 for perf reasons,
         // but a larger K needs a larger workgroup.
         var max_pipeline: u32 = ntp - 1;
-        const log2k: u32 = @intFromFloat(log2f(@floatFromInt(k)));
+        const log2k: u32 = @intFromFloat(libm.log2fInt(k));
         const preferred_pipeline = @max(ntp - 3, log2k + 2);
         max_pipeline = @min(preferred_pipeline, max_pipeline);
         var min_pipeline: u32 = log2k + 1;
         // require full subgroup
         min_pipeline = @max(min_pipeline, dev.subgroup_size_log2);
 
-        var pipeline_idx: u32 = @intFromFloat(ceilf(log2f(@floatFromInt(num_elements))));
+        var pipeline_idx: u32 = @intFromFloat(libm.ceilf(libm.log2fInt(num_elements)));
         pipeline_idx = @min(pipeline_idx, max_pipeline);
         pipeline_idx = @max(pipeline_idx, min_pipeline);
 

@@ -24,6 +24,7 @@
 //! All at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const hparams_mod = @import("hparams.zig");
 const cparams_mod = @import("cparams.zig");
@@ -77,11 +78,6 @@ const comp_state_ver: u32 = 1;
 /// compressed rows `kv_size` tokens make, at least one.
 fn compSize(kv_size: u32, ratio: u32) u32 {
     return @max(1, (kv_size +% ratio -% 1) / ratio);
-}
-
-/// `GGML_PAD` (ggml.h:94 @b1b770d90) for a power-of-two `n`.
-fn padTo(x: u32, comptime n: u32) u32 {
-    return (x +% (n - 1)) & ~@as(u32, n - 1);
 }
 
 /// Ports `dsv4_clear_tensor_stream` (llama-kv-cache-dsv4.cpp:32 @b1b770d90):
@@ -439,8 +435,8 @@ pub fn planPositions(values: []const i32) [:0]u8 {
 /// `LLAMA_DSV4_COMPRESS_DEBUG`, read into `dsv4_build_comp_plan`'s static
 /// `debug` (llama-kv-cache-dsv4.cpp:738 @b1b770d90).
 pub fn compressDebug() bool {
-    const env = std.c.getenv("LLAMA_DSV4_COMPRESS_DEBUG") orelse return false;
-    return impl.atoi(env) > 0;
+    const env = stdlib.env.getenv("LLAMA_DSV4_COMPRESS_DEBUG") orelse return false;
+    return stdlib.num.atoiC(env) > 0;
 }
 
 /// Mirrors `llama_kv_cache_dsv4_context`'s `comp_plan` (llama-kv-cache-dsv4.h:294
@@ -736,7 +732,7 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
     // even before the first block is visible, so the graph's topology never
     // changes. Padded slots are masked out; the compressed buffers are
     // zero-initialized.
-    plan.n_kv = @max(padI64(plan.n_kv, 256), 256);
+    plan.n_kv = @max(stdlib.num.pad(i64, plan.n_kv, 256), 256);
 
     std.mem.sort(PersistRow, persist_rows.items, {}, struct {
         fn lt(_: void, a: PersistRow, b: PersistRow) bool {
@@ -831,11 +827,6 @@ fn buildCompPlan(ubatch: *const Ubatch, ratio: u32, overlap: bool, pad_blocks: b
     }
 
     return plan;
-}
-
-/// `GGML_PAD` (ggml.h:94 @b1b770d90) on a non-negative `int64_t`.
-fn padI64(x: i64, comptime n: i64) i64 {
-    return (x + (n - 1)) & ~@as(i64, n - 1);
 }
 
 /// Ports `dsv4_build_comp_plans` (llama-kv-cache-dsv4.cpp:759 @b1b770d90):
@@ -1657,15 +1648,15 @@ pub const KvCacheDsv4 = struct {
 
         impl.logInfo("%s: creating DSV4 CSA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
 
-        self.kv_csa = try KvCache.create(model, no_alloc, &self.hparams_csa, type_k, type_v, v_trans, offload, unified_compressed, padTo(compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_csa.filter(), .{}, .{}, exc);
+        self.kv_csa = try KvCache.create(model, no_alloc, &self.hparams_csa, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_csa.filter(), .{}, .{}, exc);
 
         impl.logInfo("%s: creating DSV4 HCA compressed KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_hca) });
 
-        self.kv_hca = try KvCache.create(model, no_alloc, &self.hparams_hca, type_k, type_v, v_trans, offload, unified_compressed, padTo(compSize(kv_size, ratio_hca), 256), n_seq_max, 0, .none, null, filter_hca.filter(), .{}, .{}, exc);
+        self.kv_hca = try KvCache.create(model, no_alloc, &self.hparams_hca, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_hca), 256), n_seq_max, 0, .none, null, filter_hca.filter(), .{}, .{}, exc);
 
         impl.logInfo("%s: creating DSV4 lightning-indexer KV cache, size = %u cells\n", .{ func, compSize(kv_size, ratio_csa) });
 
-        self.kv_lid = try KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified_compressed, padTo(compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_lid.filter(), .{}, .{}, exc);
+        self.kv_lid = try KvCache.create(model, no_alloc, &self.hparams_lid, type_k, type_v, v_trans, offload, unified_compressed, stdlib.num.pad(u32, compSize(kv_size, ratio_csa), 256), n_seq_max, 0, .none, null, filter_lid.filter(), .{}, .{}, exc);
 
         impl.logInfo("%s: creating DSV4 CSA compressor state\n", .{func});
 

@@ -44,7 +44,8 @@
 //! struct; that is `make cuda-struct-layout`'s job.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const common = @import("common.zig");
 const gen = @import("cuda_kernels");
@@ -287,8 +288,8 @@ fn pdlEnabled() bool {
     const S = struct {
         var value: bool = true;
         fn init() void {
-            const env = std.c.getenv("GGML_CUDA_PDL");
-            value = env == null or common.atoi(env.?) != 0;
+            const env = stdlib.env.getenv("GGML_CUDA_PDL");
+            value = env == null or stdlib.num.atoiC(env.?) != 0;
         }
         const once = common.Once(init);
     };
@@ -346,6 +347,11 @@ var smem_raised: [common.max_devices][gen.kernel_count]std.atomic.Value(bool) = 
 /// `half` in a kernel's template arguments. A distinct type, so a host
 /// function generic over the element type can name it.
 pub const half = enum(u16) { _ };
+
+/// `ggml_cuda_cast<half>(x)`: `__float2half`, round to nearest even.
+pub fn toHalf(x: f32) half {
+    return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
+}
 
 /// `nv_bfloat16` in a kernel's template arguments.
 pub const bf16 = enum(u16) { _ };

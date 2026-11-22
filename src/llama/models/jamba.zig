@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -161,7 +162,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const qkv = b.buildQkv(layer, cur, n_embd_head, b.n_head, n_head_kv, il);
 
             // No RoPE :)
-            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_hybrid.getAttn(), layer.wo, null, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
             cur = c.ggml_get_rows(ctx, cur, inp_out_ids);

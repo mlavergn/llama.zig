@@ -11,18 +11,13 @@
 //! # Locks
 //!
 //! The mutex and condition variable are the port's futex ones
-//! (`src/sync/`), as in all ported threading code. A dynamic worker's idle
+//! (`stdlib/sync/`), as in all ported threading code. A dynamic worker's idle
 //! wait runs against the steady clock, one deadline for the whole wait.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const detail = @import("detail.zig");
-const socket = @import("socket.zig");
-const sync = @import("sync");
-
-/// The steady clock, in nanoseconds.
-fn monotonicNs() u64 {
-    return @as(u64, @intCast(socket.steadyNowUs())) * std.time.ns_per_us;
-}
+const sync = stdlib.sync;
 
 extern "c" fn pthread_equal(t1: std.c.pthread_t, t2: std.c.pthread_t) c_int;
 
@@ -261,10 +256,10 @@ pub const ThreadPool = struct {
                 defer self.mutex.unlock();
                 self.idle_thread_count += 1;
                 if (is_dynamic) {
-                    const deadline = monotonicNs() + @as(u64, @intCast(self.idle_timeout_sec)) * std.time.ns_per_s;
+                    const deadline = @as(u64, @intCast(stdlib.clock.steadyNs())) + @as(u64, @intCast(self.idle_timeout_sec)) * std.time.ns_per_s;
                     var has_work = self.hasJobs() or self.shutdown_;
                     while (!has_work) {
-                        const now = monotonicNs();
+                        const now: u64 = @intCast(stdlib.clock.steadyNs());
                         const woken = now < deadline and self.cond.timedWait(&self.mutex, deadline - now);
                         has_work = self.hasJobs() or self.shutdown_;
                         if (!woken) break;

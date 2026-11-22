@@ -16,6 +16,7 @@
 //! `rms_norm_mul_rope_f32` through `ggml_cuda_kernel_launch` (PDL).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -24,8 +25,6 @@ const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
 const half = kernels.half;
-
-extern fn powf(x: f32, y: f32) f32;
 
 /// Ports `CUDA_ROPE_BLOCK_SIZE` (rope.cuh:3 @b1b770d90).
 const block_size = 256;
@@ -80,7 +79,7 @@ fn grid(a: *const Args) [2]kernels.Dim3 {
 }
 
 fn thetaScale(a: *const Args) f32 {
-    return powf(a.freq_base, -2.0 / @as(f32, @floatFromInt(a.n_dims)));
+    return libm.powf(a.freq_base, -2.0 / @as(f32, @floatFromInt(a.n_dims)));
 }
 
 fn key4(comptime name: []const u8, comptime forward: bool, comptime has_ff: bool, comptime T: type, comptime D: type) []const u8 {
@@ -386,7 +385,7 @@ fn rmsNormMulRopeCuda(
 
     const blocks_num: kernels.Dim3 = .{ .x = @bitCast(nrows), .y = @bitCast(@min(nchannels, std.math.maxInt(u16))), .z = @bitCast(@min(nsamples, std.math.maxInt(u16))) };
 
-    const theta_scale = powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
+    const theta_scale = libm.powf(freq_base, -2.0 / @as(f32, @floatFromInt(n_dims)));
 
     const mul_ncols_packed = common.initFastdivValues(mul_ncols);
     const mul_nrows_packed = common.initFastdivValues(mul_nrows);

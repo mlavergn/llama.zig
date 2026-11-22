@@ -30,6 +30,7 @@
 //! configuration, so the native path is no longer implied by the type.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -205,7 +206,7 @@ fn getNbytesShared(config: Config, x: c_int) usize {
     const nbs_ids: usize = @as(usize, @intCast(config.J)) * @sizeOf(c_int);
     const nbs_x: usize = @intCast(getNbytesSharedX(config, x));
     const nbs_y: usize = @as(usize, @intCast(config.J)) * sizeof_block_q8_1_mmq;
-    return nbs_ids + nbs_x + impl.pad(nbs_y, @as(usize, @intCast(config.nthreads)) * @sizeOf(c_int));
+    return nbs_ids + nbs_x + stdlib.num.pad(usize, nbs_y, @as(usize, @intCast(config.nthreads)) * @sizeOf(c_int));
 }
 
 /// Ports `ggml_cuda_mmq_fusion_supported` (mmq.cuh:439 @b1b770d90): the weight types with a fused gate/up/GLU path.
@@ -494,7 +495,7 @@ const PrecEnv = struct {
 /// `GGML_CUDA_MMQ_PREC` overrides the `src1` precision the graph
 /// asks for; "auto" (or anything unknown, with a warning) keeps it.
 fn getPrecEnv() c.enum_ggml_prec {
-    const env_c = std.c.getenv("GGML_CUDA_MMQ_PREC") orelse return c.GGML_PREC_UNDEFINED;
+    const env_c = stdlib.env.getenv("GGML_CUDA_MMQ_PREC") orelse return c.GGML_PREC_UNDEFINED;
     const env = std.mem.span(env_c);
     const env_cpp = common.allocator.allocSentinel(u8, env.len, 0) catch impl.abort("out of memory");
     defer common.allocator.free(env_cpp);
@@ -644,7 +645,7 @@ pub fn mulMatQ(ctx: *common.Context, src0: *const Tensor, src1: *const Tensor, i
         }
     }
 
-    const ne10_padded: i64 = @intCast(impl.pad(@intCast(ne10), common.matrix_row_padding));
+    const ne10_padded: i64 = @intCast(stdlib.num.pad(usize, @intCast(ne10), common.matrix_row_padding));
 
     const s01: i64 = @intCast(src0.nb[1] / ts_src0);
     const s1: i64 = @intCast(dst.nb[1] / ts_dst);

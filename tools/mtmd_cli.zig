@@ -19,6 +19,8 @@
 //!   video helpers on either side.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const c = tc.c;
@@ -37,9 +39,7 @@ comptime {
 /// upstream and so no C symbol to call.
 const mtmd_port = @import("mtmd");
 
-extern fn setlocale(cat: c_int, locale: [*:0]const u8) ?[*:0]const u8;
 extern fn atexit(f: *const fn () callconv(.c) void) c_int;
-extern fn _exit(code: c_int) noreturn;
 
 const lc_numeric: c_int = if (builtin.os.tag.isDarwin()) 4 else if (builtin.os.tag == .windows) 4 else 1;
 
@@ -75,7 +75,7 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
             setGenerating(false);
         } else {
             console.cleanup();
-            if (isInterrupted()) _exit(1);
+            if (isInterrupted()) libc._exit(1);
             @as(*volatile bool, &g_is_interrupted_).* = true;
         }
     }
@@ -84,7 +84,7 @@ fn sigintHandler(signo: std.posix.SIG) callconv(.c) void {
 /// Ports `inject_test_response_marker` (mtmd-cli.cpp:69 @b1b770d90): only
 /// used by upstream's tests.sh to capture the response.
 fn injectTestResponseMarker() void {
-    if (tc.env.get("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env.ptr});
+    if (stdlib.env.get("MTMD_TEST_RESPONSE_MARKER")) |env| log.out("%s\n", .{env.ptr});
 }
 
 /// Ports `mtmd_cli_context` (mtmd-cli.cpp:76 @b1b770d90).
@@ -122,7 +122,7 @@ const CliContext = struct {
     fn init(self: *CliContext, gpa: std.mem.Allocator, a: std.mem.Allocator, params: *tc.params.Params) !void {
         const llama_init = try tc.init.initFromParams(gpa, params, false);
         const model = llama_init.model;
-        if (model == null or llama_init.context == null) tc.cExit(1);
+        if (model == null or llama_init.context == null) stdlib.stdio.exit(1);
         self.* = .{
             .a = a,
             .llama_init = llama_init,
@@ -144,7 +144,7 @@ const CliContext = struct {
         if (!self.mtmd_cap.chat and !self.mtmd_cap.audio_stream) {
             log.err("Model does not support chat mode\n", .{});
             log.err("Hint: for TTS models, please use llama-tts\n", .{});
-            tc.cExit(1);
+            stdlib.stdio.exit(1);
         }
 
         if (c.llama_model_chat_template(model, null) == null and params.chat_template.len == 0) {
@@ -152,7 +152,7 @@ const CliContext = struct {
             log.err("  For old llava models, you may need to use '--chat-template vicuna'\n", .{});
             log.err("  For MobileVLM models, use '--chat-template deepseek'\n", .{});
             log.err("  For Mistral Small 3.1, use '--chat-template mistral-v7'\n", .{});
-            tc.cExit(1);
+            stdlib.stdio.exit(1);
         }
 
         var info = try chat.templates.modelInfo(a, @ptrCast(model.?));
@@ -193,7 +193,7 @@ const CliContext = struct {
 
     /// Ports `init_vision_context` (mtmd-cli.cpp:155 @b1b770d90).
     fn initVisionContext(self: *CliContext, params: *tc.params.Params) void {
-        const mmproj_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch tc.cExit(1);
+        const mmproj_path = self.a.dupeSentinel(u8, params.mmproj.path, 0) catch stdlib.stdio.exit(1);
         var mparams = c.mtmd_context_params_default();
         mparams.use_gpu = params.mmproj_use_gpu;
         mparams.device = params.mmproj_device;
@@ -216,17 +216,17 @@ const CliContext = struct {
                 mparams.image_min_tokens = @min(mparams.image_min_tokens, n_ubatch);
             }
         }
-        if (tc.env.get("MTMD_DEBUG_GRAPH") != null) {
+        if (stdlib.env.get("MTMD_DEBUG_GRAPH") != null) {
             log.err("MTMD_DEBUG_GRAPH needs common_debug_cb_eval, which this port does not have\n", .{});
-            tc.cExit(1);
+            stdlib.stdio.exit(1);
         }
         self.ctx_vision = c.mtmd_init_from_file(mmproj_path.ptr, self.model, mparams);
         if (self.ctx_vision == null) {
             log.err("Failed to load vision model from %s\n", .{mmproj_path.ptr});
-            tc.cExit(1);
+            stdlib.stdio.exit(1);
         }
 
-        self.video_ffmpeg_bin_dir = self.a.dupeSentinel(u8, params.video_ffmpeg_bin_dir, 0) catch tc.cExit(1);
+        self.video_ffmpeg_bin_dir = self.a.dupeSentinel(u8, params.video_ffmpeg_bin_dir, 0) catch stdlib.stdio.exit(1);
         self.init_opt.video_params.fps_target = params.video_fps;
         self.init_opt.video_params.timestamp_interval_ms = params.video_timestamp_interval_ms;
         self.init_opt.video_params.ffmpeg_bin_dir = if (self.video_ffmpeg_bin_dir.len == 0) null else self.video_ffmpeg_bin_dir.ptr;
@@ -269,7 +269,7 @@ fn generateResponse(ctx: *CliContext, n_predict: c_int) !c_int {
         }
 
         log.out("%s", .{(try tc.common.tokenToPiece(a, ctx.vocab, token_id, true)).ptr});
-        tc.io.flushStdout();
+        stdlib.stdio.stdout().flush();
 
         if (isInterrupted()) {
             log.out("\n", .{});
@@ -369,7 +369,7 @@ fn runAudioStream(ctx: *CliContext, fname_in: []const u8, n_predict: c_int) !c_i
         // the model emits pad and word-boundary tokens between words
         if (!c.llama_vocab_is_control(ctx.vocab, tok)) {
             log.out("%s", .{(try tc.common.tokenToPiece(a, ctx.vocab, tok, true)).ptr});
-            tc.io.flushStdout();
+            stdlib.stdio.stdout().flush();
         }
         n_gen += 1;
         if (n_gen >= n_predict) break;
@@ -530,11 +530,6 @@ fn consoleCleanup() callconv(.c) void {
     console.cleanup();
 }
 
-/// `string_strip` (common/common.cpp): leading and trailing whitespace off.
-fn stringStrip(s: []const u8) []const u8 {
-    return std.mem.trim(u8, s, " \t\n\r\x0b\x0c");
-}
-
 /// `common/chat.cpp`'s `LOG_DBG`, `LOG_INF`, `LOG_WRN` and `LOG_ERR`, which
 /// `cli/common_chat/log.zig` hands its host as finished lines: into
 /// `common_log` at the macro's level, as the server wires them.
@@ -575,7 +570,7 @@ fn verifyJinjaTemplate(_: std.mem.Allocator, tmpl: []const u8) anyerror!bool {
 }
 
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
-    _ = setlocale(lc_numeric, "C");
+    _ = libc.setlocale(lc_numeric, "C");
 
     // cli/common_chat into common_log, as upstream's common/chat.cpp logs
     chat.log.sink = chatLogSink;
@@ -692,7 +687,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             if (line_buf.items.len == 0) {
                 break;
             }
-            const line = stringStrip(line_buf.items);
+            const line = stdlib.strings.strip(line_buf.items);
             if (line.len == 0) continue;
             if (std.mem.eql(u8, line, "/quit") or std.mem.eql(u8, line, "/exit")) break;
             if (std.mem.eql(u8, line, "/clear")) {
@@ -757,9 +752,9 @@ fn consoleCtrlHandler(ctrl_type: u32) callconv(.winapi) c_int {
 
 /// Ports `main` (mtmd-cli.cpp:520 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

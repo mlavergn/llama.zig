@@ -23,8 +23,10 @@
 //! external dependency.
 
 const std = @import("std");
-const num = @import("num.zig");
-const env_mod = @import("env.zig");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const num = @import("stdlib").num;
+const env_mod = @import("stdlib").env;
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const params_mod = @import("params.zig");
@@ -52,7 +54,7 @@ pub fn what() []const u8 {
 /// `throw std::...(string_format(fmt, args))`: formats with the C's
 /// `snprintf`, so `%d` and `%s` read as the C's do.
 pub fn throw(comptime fmt: [*:0]const u8, args: anytype) error{Throw} {
-    const n = @call(.auto, snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
     return error.Throw;
 }
@@ -60,7 +62,7 @@ pub fn throw(comptime fmt: [*:0]const u8, args: anytype) error{Throw} {
 /// Records `e.what()` without throwing, for a message the caller returns
 /// with a different error.
 pub fn setWhat(comptime fmt: [*:0]const u8, args: anytype) void {
-    const n = @call(.auto, snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
+    const n = @call(.auto, libc.snprintf, .{ &what_buf, what_buf.len, fmt } ++ args);
     what_len = @min(@as(usize, @intCast(@max(n, 0))), what_buf.len - 1);
 }
 
@@ -70,8 +72,6 @@ pub fn throwStr(s: []const u8) error{Throw} {
     @memcpy(what_buf[0..what_len], s[0..what_len]);
     return error.Throw;
 }
-
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// `std::stoi`, as libc++ throws (string.cpp's `as_integer_helper`).
 pub fn stoi(s: [:0]const u8) error{Throw}!c_int {
@@ -374,9 +374,9 @@ pub const Context = struct {
     /// `string_format(...)` for a help text, built when the table is.
     pub fn fmt(self: *Context, comptime f: [*:0]const u8, args: anytype) ![]const u8 {
         const a = self.params.arena;
-        const n: usize = @intCast(@call(.auto, snprintf, .{ null, 0, f } ++ args));
+        const n: usize = @intCast(@call(.auto, libc.snprintf, .{ null, 0, f } ++ args));
         const buf = try a.alloc(u8, n + 1);
-        _ = @call(.auto, snprintf, .{ buf.ptr, n + 1, f } ++ args);
+        _ = @call(.auto, libc.snprintf, .{ buf.ptr, n + 1, f } ++ args);
         return buf[0..n];
     }
 };
@@ -401,7 +401,7 @@ pub fn parserInit(params: *Params, ex: Example, print_usage: ?*const fn ([]const
         else => {},
     }
 
-    params.use_color = log.ttyCanUseColors();
+    params.use_color = stdlib.tty.canUseColors();
 
     var ctx: Context = .{ .ex = ex, .params = params, .print_usage = print_usage };
     try options.addAll(&ctx);
@@ -430,9 +430,9 @@ fn refuseSystemConfig(a: std.mem.Allocator) !void {
         }
     }
     for (paths.items) |p| {
-        if (@import("fs_stat.zig").stat(p.ptr, true) != null) {
+        if (@import("stdlib").fs.stat(p, true) != null) {
             io.eprintf("error: config file %s found, but config files are not supported by this port\n", .{p.ptr});
-            exitC(1);
+            stdlib.stdio.exit(1);
         }
     }
 }
@@ -444,31 +444,12 @@ fn nonEmptyEnv(name: [:0]const u8) ?[*:0]const u8 {
     return if (v.len == 0) null else v.ptr;
 }
 
-extern fn getpwuid(uid: c_uint) ?*const anyopaque;
-extern fn getuid() c_uint;
-
 /// Ports `get_home_directory` (common/common.cpp:967 @b1b770d90): `$HOME`,
 /// else the password database's. Null where the C++ throws.
-fn homeDirectory() ?[*:0]const u8 {
+pub fn homeDirectory() ?[*:0]const u8 {
     if (nonEmptyEnv("HOME")) |h| return h;
-    if (comptime builtin.os.tag == .windows) return null;
-    const pw = getpwuid(getuid()) orelse return null;
-    const dir = pwDir(pw) orelse return null;
-    return if (dir[0] == 0) null else dir;
-}
-
-/// `pw_dir` of a `struct passwd`, whose layout is the libc's.
-fn pwDir(pw: *const anyopaque) ?[*:0]const u8 {
-    const Darwin = extern struct { pw_name: ?[*:0]const u8, pw_passwd: ?[*:0]const u8, pw_uid: c_uint, pw_gid: c_uint, pw_change: c_long, pw_class: ?[*:0]const u8, pw_gecos: ?[*:0]const u8, pw_dir: ?[*:0]const u8 };
-    const Glibc = extern struct { pw_name: ?[*:0]const u8, pw_passwd: ?[*:0]const u8, pw_uid: c_uint, pw_gid: c_uint, pw_gecos: ?[*:0]const u8, pw_dir: ?[*:0]const u8 };
-    return if (comptime builtin.os.tag.isDarwin())
-        @as(*const Darwin, @ptrCast(@alignCast(pw))).pw_dir
-    else
-        @as(*const Glibc, @ptrCast(@alignCast(pw))).pw_dir;
-}
-
-fn exitC(code: c_int) noreturn {
-    io.exitFlushed(code);
+    const dir = stdlib.env.passwdHome() orelse return null;
+    return if (dir.len == 0) null else dir.ptr;
 }
 
 /// Ports `postprocess_cpu_params` (common/common.cpp:309 @b1b770d90).
@@ -854,19 +835,70 @@ pub fn parse(argv: []const [:0]const u8, params: *Params, ex: Example, print_usa
         },
         error.Other => {
             io.eprintf("%.*s\n", .{ @as(c_int, @intCast(what_len)), &what_buf });
-            exitC(1); // for other exceptions, we exit with status code 1
+            stdlib.stdio.exit(1); // for other exceptions, we exit with status code 1
         },
         else => |other| return other,
     };
     if (params.usage) {
         try printUsage(&ctx);
         if (ctx.print_usage) |pu| pu(argv);
-        exitC(0);
+        stdlib.stdio.exit(0);
     }
     if (params.completion) {
         io.eprintf("error: --completion-bash is not supported by this port\n", .{});
-        exitC(1);
+        stdlib.stdio.exit(1);
     }
+    return true;
+}
+
+/// Ports `string_parse_kv_override` (common/common.cpp:675 @b1b770d90).
+///
+/// Return: false, having logged why, for a malformed override.
+pub fn parseKvOverride(data: [:0]const u8, overrides: *std.ArrayList(c.llama_model_kv_override), allocator: std.mem.Allocator) !bool {
+    const func = "string_parse_kv_override";
+    const sep_idx = std.mem.indexOfScalar(u8, data, '=') orelse {
+        log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
+        return false;
+    };
+    if (sep_idx >= 128) {
+        log.comErr(func, "%s: malformed KV override '%s'\n", .{ func, data.ptr });
+        return false;
+    }
+    var kvo: c.llama_model_kv_override = std.mem.zeroes(c.llama_model_kv_override);
+    @memcpy(kvo.key[0..sep_idx], data[0..sep_idx]);
+    kvo.key[sep_idx] = 0;
+    const sep = data[sep_idx + 1 ..];
+    if (std.mem.startsWith(u8, sep, "int:")) {
+        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_INT;
+        kvo.unnamed_0.val_i64 = num.atol(std.mem.sliceTo(sep[4..], 0));
+    } else if (std.mem.startsWith(u8, sep, "float:")) {
+        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_FLOAT;
+        kvo.unnamed_0.val_f64 = num.atof(std.mem.sliceTo(sep[6..], 0));
+    } else if (std.mem.startsWith(u8, sep, "bool:")) {
+        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_BOOL;
+        const v = sep[5..];
+        if (std.mem.eql(u8, v, "true")) {
+            kvo.unnamed_0.val_bool = true;
+        } else if (std.mem.eql(u8, v, "false")) {
+            kvo.unnamed_0.val_bool = false;
+        } else {
+            log.comErr(func, "%s: invalid boolean value for KV override '%s'\n", .{ func, data.ptr });
+            return false;
+        }
+    } else if (std.mem.startsWith(u8, sep, "str:")) {
+        kvo.tag = c.LLAMA_KV_OVERRIDE_TYPE_STR;
+        const v = sep[4..];
+        if (v.len > 127) {
+            log.comErr(func, "%s: malformed KV override '%s', value cannot exceed 127 chars\n", .{ func, data.ptr });
+            return false;
+        }
+        @memcpy(kvo.unnamed_0.val_str[0..v.len], v);
+        kvo.unnamed_0.val_str[127] = 0;
+    } else {
+        log.comErr(func, "%s: invalid type for KV override '%s'\n", .{ func, data.ptr });
+        return false;
+    }
+    try overrides.append(allocator, kvo);
     return true;
 }
 

@@ -34,6 +34,7 @@
 //! unreachable, rather than tidied into live code.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const types = @import("../types.zig");
@@ -55,8 +56,6 @@ const Arm = kernel.Arm;
 const tile_k = kernel.tile_k;
 const tile_rows = kernel.tile_rows;
 const micro = kernel.micro;
-
-extern fn atoi(s: [*:0]const u8) c_int;
 
 inline fn fp16(h: u16) f32 {
     return impl.fp16ToFp32(h);
@@ -609,10 +608,10 @@ const EnvFlags = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (!self.ready.load(.acquire)) {
-            const env = std.c.getenv("GGML_CPU_TILED_MM");
-            self.enabled = env == null or atoi(env.?) != 0;
-            const fenv = std.c.getenv("GGML_CPU_TILED_MM_FORCE");
-            self.forced = fenv != null and atoi(fenv.?) == 1;
+            const env = stdlib.env.getenv("GGML_CPU_TILED_MM");
+            self.enabled = env == null or stdlib.num.atoiC(env.?) != 0;
+            const fenv = stdlib.env.getenv("GGML_CPU_TILED_MM_FORCE");
+            self.forced = fenv != null and stdlib.num.atoiC(fenv.?) == 1;
             self.ready.store(true, .release);
         }
         return self;
@@ -1193,7 +1192,7 @@ fn mulMatDriver(comptime a: Arm, comptime f: Format, params: *const ComputeParam
     // per-thread workspace: after any converted src1 data in wdata, aligned to 64
     var ws_base: usize = @intFromPtr(params.wdata.?);
     if (src1.type != vec_dot_type) {
-        ws_base += impl.pad(types.ggml_row_size(vec_dot_type, types.ggml_nelements(src1)), 64);
+        ws_base += stdlib.num.pad(usize, types.ggml_row_size(vec_dot_type, types.ggml_nelements(src1)), 64);
     }
     ws_base = (ws_base + 63) & ~@as(usize, 63);
     const ws: *Ws = @ptrFromInt(ws_base + @as(usize, @intCast(ith)) * wsSize());
@@ -1388,7 +1387,7 @@ fn checkMulMat(comptime a: Arm, comptime t: c.enum_ggml_type, ne00: i64, ne01: i
     dst.src[1] = &src1;
 
     const nbw1 = types.ggml_row_size(c.GGML_TYPE_Q8_K, ne00);
-    const wsize = impl.pad(nbw1 * @as(usize, @intCast(ne11)), 64) + 64 + kernel.ws_slot;
+    const wsize = stdlib.num.pad(usize, nbw1 * @as(usize, @intCast(ne11)), 64) + 64 + kernel.ws_slot;
     const work = try alloc.alignedAlloc(u8, .@"64", wsize);
     defer alloc.free(work);
 
@@ -1460,7 +1459,7 @@ test "the MUL_MAT_ID expert path agrees with vec_dot" {
 
             const nbw1 = types.ggml_row_size(c.GGML_TYPE_Q8_K, ne00);
             const n_q8: usize = @intCast(ne11 * ne12);
-            const scratch_off = impl.pad(n_q8 * nbw1, 64);
+            const scratch_off = stdlib.num.pad(usize, n_q8 * nbw1, 64);
             const work = try alloc.alignedAlloc(u8, .@"64", scratch_off + kernel.ws_slot);
             defer alloc.free(work);
             var row: [512]f32 = undefined;

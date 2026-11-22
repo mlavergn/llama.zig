@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -48,9 +49,9 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // https://github.com/google/gemma_pytorch/blob/014acb7ac4563a5f77c76d7ff98f31b568c16508/gemma/config.py#L173
     hp.f_attention_scale = if (self.type == .@"27b")
-        1.0 / impl.sqrtf(@floatFromInt(hp.n_embd / hp.nHead(0)))
+        1.0 / libm.sqrtfInt(hp.n_embd / hp.nHead(0))
     else
-        1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
+        1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
 }
 
 /// Ports `llama_model_gemma2`'s `load_arch_tensors` (models/gemma2.cpp:30 @b1b770d90).
@@ -95,7 +96,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     var inpL: *Tensor = b.buildInpEmbd(model.tok_embd.?);
 
-    inpL = c.ggml_scale(ctx, inpL, impl.sqrtf(@floatFromInt(b.n_embd)));
+    inpL = c.ggml_scale(ctx, inpL, libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.

@@ -28,9 +28,10 @@
 //! so the gate can tell "not yet ported" from "the C++ would have thrown".
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("impl.zig");
 const arch = @import("arch.zig");
-const libcxx = @import("libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const gguf_meta = @import("gguf_meta.zig");
 const hparams_mod = @import("hparams.zig");
 const loader = @import("loader.zig");
@@ -1753,7 +1754,7 @@ pub const Model = struct {
                     const n: usize = block_size;
                     const data = allocator.alloc(f32, n * n) catch oom();
                     defer allocator.free(data);
-                    const scale = 1.0 / impl.sqrtf(@floatFromInt(block_size));
+                    const scale = 1.0 / libm.sqrtfInt(block_size);
                     for (0..n) |row| {
                         for (0..n) |col| {
                             var parity: u32 = @intCast(row & col);

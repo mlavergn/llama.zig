@@ -25,6 +25,7 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
         .sanitize_c = .off,
     });
     mod.addImport("mtmd", opts.mtmd);
+    mod.addImport("stdlib", llamacpp.stdlibOf(opts.mtmd));
     mod.addIncludePath(b.path(root ++ "/include"));
     mod.addIncludePath(b.path(root ++ "/ggml/include"));
     mod.addIncludePath(b.path(root ++ "/tools/mtmd"));

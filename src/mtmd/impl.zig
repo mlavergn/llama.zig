@@ -20,6 +20,8 @@
 //! libllama.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 
 pub const c = @import("llama").impl.c;
@@ -41,13 +43,13 @@ pub fn abort(comptime file: [*:0]const u8, comptime line: c_int, comptime msg: [
 
 /// An exception escaping `main`: libc++abi's message, then `abort`.
 pub fn abortUncaught(comptime kind: [*:0]const u8, what_: [*:0]const u8) noreturn {
-    const f = cStderr();
-    _ = fputs("libc++abi: terminating due to uncaught exception of type ", f);
-    _ = fputs(kind, f);
-    _ = fputs(": ", f);
-    _ = fputs(what_, f);
-    _ = fputs("\n", f);
-    _ = fflush(f);
+    const f = stdlib.stdio.cStream(.stderr);
+    _ = libc.fputs("libc++abi: terminating due to uncaught exception of type ", f);
+    _ = libc.fputs(kind, f);
+    _ = libc.fputs(": ", f);
+    _ = libc.fputs(what_, f);
+    _ = libc.fputs("\n", f);
+    _ = libc.fflush(f);
     std.process.abort();
 }
 
@@ -448,9 +450,9 @@ pub const ImageF32Batch = struct {
 pub fn logCallbackDefault(level: c.enum_ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque) callconv(.c) void {
     _ = level;
     _ = user_data;
-    const stderr_ = cStderr();
-    _ = fputs(text, stderr_);
-    _ = fflush(stderr_);
+    const stderr_ = stdlib.stdio.cStream(.stderr);
+    _ = libc.fputs(text, stderr_);
+    _ = libc.fflush(stderr_);
 }
 
 /// Ports `mtmd_logger_state` (mtmd-impl.h:960 @b1b770d90) and
@@ -462,25 +464,11 @@ pub const LoggerState = struct {
 
 pub var g_logger_state: LoggerState = .{};
 
-extern fn fputs(s: [*c]const u8, f: ?*anyopaque) c_int;
-extern fn fflush(f: ?*anyopaque) c_int;
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-
-/// The C library's `stderr`.
-pub fn cStderr() ?*anyopaque {
-    if (comptime builtin.os.tag.isDarwin()) return @extern(*?*anyopaque, .{ .name = "__stderrp" }).*;
-    if (comptime builtin.os.tag == .windows) {
-        const f = @extern(*const fn (c_uint) callconv(.c) ?*anyopaque, .{ .name = "__acrt_iob_func" });
-        return f(2);
-    }
-    return @extern(*?*anyopaque, .{ .name = "stderr" }).*;
-}
-
 /// Ports `mtmd_log_internal_v` (mtmd-impl.h:967 @b1b770d90): format into
 /// 128 bytes, or a heap buffer when that is too short.
 pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
-    const len = @call(.auto, snprintf, .{ &buffer, buffer.len, fmt } ++ args);
+    const len = @call(.auto, libc.snprintf, .{ &buffer, buffer.len, fmt } ++ args);
     const cb = g_logger_state.log_callback orelse return;
     if (len < 128) {
         cb(level, @ptrCast(&buffer), g_logger_state.log_callback_user_data);
@@ -488,7 +476,7 @@ pub fn logInternal(level: c.enum_ggml_log_level, comptime fmt: [*:0]const u8, ar
         const n: usize = @intCast(len);
         const buffer2 = gpa.alloc(u8, n + 1) catch return;
         defer gpa.free(buffer2);
-        _ = @call(.auto, snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
+        _ = @call(.auto, libc.snprintf, .{ buffer2.ptr, n + 1, fmt } ++ args);
         buffer2[n] = 0;
         cb(level, @ptrCast(buffer2.ptr), g_logger_state.log_callback_user_data);
     }
@@ -526,25 +514,17 @@ pub fn logCnt(comptime fmt: [*:0]const u8, args: anytype) void {
 /// `snprintf`: the string is `size` bytes, without the NUL `string_format`
 /// kept until v0.9.0 (7c2653acc). The caller owns the string.
 pub fn stringFormat(a: std.mem.Allocator, comptime fmt: [*:0]const u8, args: anytype) ![:0]u8 {
-    const size = @call(.auto, snprintf, .{ @as(?[*]u8, null), 0, fmt } ++ args);
+    const size = @call(.auto, libc.snprintf, .{ @as(?[*]u8, null), 0, fmt } ++ args);
     ggmlAssert(size >= 0, "mtmd.cpp", 41, "size >= 0 && size < INT_MAX");
     const buf = try a.allocSentinel(u8, @intCast(size), 0);
-    _ = @call(.auto, snprintf, .{ buf.ptr, @as(usize, @intCast(size)) + 1, fmt } ++ args);
+    _ = @call(.auto, libc.snprintf, .{ buf.ptr, @as(usize, @intCast(size)) + 1, fmt } ++ args);
     return buf;
 }
 
 /// Ports `string_replace_all` (mtmd-impl.h:1052 @b1b770d90).
 pub fn stringReplaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) ![]u8 {
-    if (search.len == 0) return a.dupe(u8, s);
-    var out: std.ArrayList(u8) = .empty;
-    var last: usize = 0;
-    while (std.mem.indexOfPos(u8, s, last, search)) |pos| {
-        try out.appendSlice(a, s[last..pos]);
-        try out.appendSlice(a, replace);
-        last = pos + search.len;
-    }
-    try out.appendSlice(a, s[last..]);
-    return out.toOwnedSlice(a);
+    // the same function as `common.cpp`'s, which upstream defines twice
+    return stdlib.strings.replaceAll(a, s, search, replace);
 }
 
 /// Ports `string_split_str` (mtmd-impl.h:1070 @b1b770d90).

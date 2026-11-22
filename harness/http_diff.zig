@@ -12,6 +12,7 @@
 //! Usage: http_port <config> <port-file>
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const http = @import("http");
 const tools_common = @import("tools_common");
 const json = @import("cli_fit").json;
@@ -398,8 +399,6 @@ fn envPort() i32 {
     return std.fmt.parseInt(i32, std.mem.span(s), 10) catch 0;
 }
 
-extern "c" fn fflush(stream: ?*anyopaque) c_int;
-
 pub fn main(init: std.process.Init) !u8 {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len != 3) {
@@ -471,6 +470,6 @@ pub fn main(init: std.process.Init) !u8 {
     ctx_http.stop();
     ctx_http.join();
     log.inf("harness: stopped\n", .{});
-    _ = fflush(null);
+    _ = libc.fflush(null);
     return 0;
 }

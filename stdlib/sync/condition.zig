@@ -14,6 +14,7 @@
 const std = @import("std");
 const futex = @import("futex.zig");
 const Mutex = @import("mutex.zig").Mutex;
+const clock = @import("../clock.zig");
 
 /// A condition variable. `.{}` is ready to use and needs no teardown.
 ///
@@ -52,6 +53,21 @@ pub const Condition = extern struct {
         m.lock();
         _ = self.waiters.fetchSub(1, .monotonic);
         return result != .timed_out;
+    }
+
+    /// `std::condition_variable::wait_until`: `wait`, giving up at
+    /// `deadline_ns` on `clock.steadyNs`, `steady_clock`'s.
+    ///
+    /// Parameters:
+    /// - `m`: the mutex the caller holds.
+    /// - `deadline_ns`: the moment to give up, from `clock.steadyNs`.
+    ///
+    /// Return: false when the deadline passed, true otherwise -- which
+    /// includes a spurious wakeup.
+    pub fn waitUntil(self: *Condition, m: *Mutex, deadline_ns: i64) bool {
+        const now = clock.steadyNs();
+        if (now >= deadline_ns) return false;
+        return self.timedWait(m, @intCast(deadline_ns - now));
     }
 
     /// Wakes one waiter.

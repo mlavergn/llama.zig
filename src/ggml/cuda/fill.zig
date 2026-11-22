@@ -17,11 +17,6 @@ const half = kernels.half;
 /// Ports `CUDA_FILL_BLOCK_SIZE` (fill.cu:4 @b1b770d90).
 const block_size = 256;
 
-/// `ggml_cuda_cast<half>(x)`: `__float2half`, round to nearest even.
-fn toHalf(x: f32) half {
-    return @fromBackingInt(@intCast(@as(u16, @bitCast(@as(f16, @floatCast(x))))));
-}
-
 /// Ports `ggml_cuda_op_fill` (fill.cu:15 @b1b770d90), which launches with
 /// `<<<>>>`.
 pub fn opFill(ctx: *common.Context, dst: *Tensor) void {
@@ -42,7 +37,7 @@ pub fn opFill(ctx: *common.Context, dst: *Tensor) void {
 
     switch (dst.type) {
         c.GGML_TYPE_F32 => kernels.launch(kernels.get("fill", "fill_kernel<float>"), p, .{ dst_d, k, value }),
-        c.GGML_TYPE_F16 => kernels.launch(kernels.get("fill", "fill_kernel<__half>"), p, .{ dst_d, k, toHalf(value) }),
+        c.GGML_TYPE_F16 => kernels.launch(kernels.get("fill", "fill_kernel<__half>"), p, .{ dst_d, k, kernels.toHalf(value) }),
         else => impl.abort("unsupported type"),
     }
 }

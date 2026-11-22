@@ -13,6 +13,7 @@
 //! the recurrence runs through the shared delta net.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -297,7 +298,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const n_embd_head_qk_rope: i64 = hp.nRot(0); // config.qk_rope_head_dim
     const n_embd_head_qk_nope = n_embd_head_k_mla - n_embd_head_qk_rope; // 192 - 64 = 128
     // MLA's attention scale.
-    const kq_scale_mla: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
+    const kq_scale_mla: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k_mla);
 
     var il: c_int = 0;
     while (il < b.n_layer) : (il += 1) {

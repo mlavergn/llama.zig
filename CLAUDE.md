@@ -31,7 +31,7 @@ Exactly four markdown files. Never add another.
 | `src/ggml/{cpu,metal,cuda,vulkan}/` | CPU backend and GPU host layers |
 | `src/llama/` | libllama. `api/` holds every `llama.h` function (unexported); `exports.zig` exports them; `harness_root.zig` re-exports without exports |
 | `src/mtmd/` | libmtmd; same wiring (`exports.zig`, `harness_root.zig`) |
-| `src/sync/` | The futex `Mutex` and `Condition` every module locks with; its own module (`build/llamacpp.zig`'s `syncModule`) |
+| `stdlib/` | The platform layer every module shares: locks (`sync/`), standard streams, files, the file system and paths, clocks, the environment, `errno`, C number parsing and `GGML_PAD`, strings, libm (`libm.zig`), every C library function still called (`libc.zig`, the ledger), the libc++ reproductions (`libcxx.zig`), CPU count, tty, subprocesses. Its own module (`build/llamacpp.zig`'s `stdlibModule`) |
 | `cli/` | `llama-cli`: `args.zig`, `fit.zig`, `session.zig`, `conversation.zig`, `common_chat/`, `json/`, `peg/` |
 | `tools/` | `llama-server` (`tools/server/`), the ten tools, `llama-tts`, `llama-mtmd-cli`, shared `tools/common/` |
 | `harness/` | Gate drivers and reference-side code |
@@ -67,7 +67,8 @@ Exactly four markdown files. Never add another.
 - **`zig translate-c` output is a draft to read, never to commit.**
 - **Metal kernels, CUDA kernels and Vulkan shaders are never ported**; they travel as embedded data.
 - **A newly ported file goes into `module.zig`.**
-- **Locks are `sync.Mutex` and `sync.Condition`** (`src/sync/`): futexes, no C library, no `std.Io`. Never `pthread_mutex_t`, `pthread_cond_t`, SRW locks or `std.Io.Mutex`. A module that imports `sync` and compiles beside libllama takes libllama's instance (`llamacpp.syncOf`); a gate script that declares modules by hand passes `--dep sync` and `-Msync=src/sync/module.zig`.
+- **Locks are `stdlib.sync.Mutex` and `stdlib.sync.Condition`** (`stdlib/sync/`): futexes, no C library, no `std.Io`. Never `pthread_mutex_t`, `pthread_cond_t`, SRW locks, `std.Io.Mutex` or a per-file wrapper. A module that imports `stdlib` and compiles beside libllama takes libllama's instance (`llamacpp.stdlibOf`); a gate script that declares modules by hand passes `--dep stdlib` and `-Mstdlib=stdlib/module.zig`.
+- **Platform helpers live only in `stdlib/`**: file reads and writes, the file system and `std::filesystem` paths, clocks and sleeps, the environment, `errno` text, C's number conversions, every C library declaration (`libc.zig`; a file never declares one itself), libm declarations and clang's rewrites of them (`libm.sinCos`, `math_errno`), libc++'s algorithms, RNG and `random_device`, the CPU count, the C streams, `exit`. Never a local copy, never a function that only forwards. Where upstream does two different things, `stdlib` has one function per idiom (`file.readStream` keeps what came before a read error, `Dir.readFileAlloc` fails whole); a call site uses the one upstream's code there uses. A port of an upstream function that upstream defines twice keeps its citation where upstream put it and delegates. Where std already does the job (`std.ascii`, `std.mem.sliceTo`, `Dir.readFileAlloc`, `Dir.writeFile`), call std.
 
 ### Citations (`make port-links`)
 
@@ -154,7 +155,7 @@ Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.W
 - **`p.*.arr[i]` through `[*c]T` miscompiles** (indexes by the whole array). Narrow with `impl.one` first.
 - **A small `extern struct` received by value across the C ABI reads zeros** unless its size is a multiple of 4 with no padding. Take an integer of the same size and `@bitCast`; add it to `harness/abi_structs.c`.
 - **`compiler_rt` shadows libm's `expf`/`logf`**: no `@panic` in libraries; native Linux executables link gcc's `libgcc.a` first (`llamacpp.addLibgcc`); `libm_check` guards it.
-- **`std.c.Stat` is `void` on Linux and Windows** (`tools/common/fs_stat.zig`); `std.c.clock_gettime` on Windows (`tools/common/clock.zig`); `std.c.write` takes a `HANDLE` on Windows (use `_write`).
+- **`std.c.Stat` is `void` on Linux and Windows** (`stdlib/fs.zig`); `std.c.clock_gettime` on Windows (`stdlib/clock.zig`); `std.c.write` takes a `HANDLE` on Windows (use `_write`).
 - **`char` is `c_char`**, unsigned on aarch64 Linux.
 - **`iN`/`uN` are type names**: the C's `i0`, `i11`... become `j0`, `j11`, digit for digit.
 - **A Zig range `a..b` with `a > b` is illegal** where the C loop runs zero times.
@@ -186,7 +187,7 @@ Zig **0.17.0**, 0.16-style std (`std.process.Init`, explicit `std.Io`, `std.Io.W
 
 ## libc++ reproduction
 
-`src/llama/libcxx.zig` and `regex.zig` reproduce the libc++ the reference links (Zig's bundled 22.1.8; headers identical to Apple's 22.1.6), not any correct algorithm.
+`stdlib/libcxx.zig` and `src/llama/regex.zig` reproduce the libc++ the reference links (Zig's bundled 22.1.8; headers identical to Apple's 22.1.6), not any correct algorithm.
 
 - `make_heap` takes a different path for arithmetic element types.
 - `<regex>`'s class/collating tables and `__match_any_but_newline` live in the dylib; measured, not guessed. `wregex` differs from `regex` (U+2028/9, names >= 127, `\u`, narrowing).

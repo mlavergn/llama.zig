@@ -26,6 +26,7 @@
 //! Usage: quant_diff <tmpdir> [--quick] [--skip-big] [--only section] [model.gguf...]
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const harness_root = @import("harness_root");
 
 const c = harness_root.impl.c;
@@ -1240,37 +1241,29 @@ fn bigRuns(dir: []const u8, models: []const [:0]const u8) void {
 // -----------------------------------------------------------------------------
 // Aborts, in forked children
 
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn dup2(old: c_int, new: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-
 /// What a child that should have died printed: `ggml_abort`'s message
 /// after its `file:line: `, which names the C++ source on one side and the
 /// port's citation on the other. Null when it did not die of SIGABRT.
 fn dies(body: *const fn (ctx: *const anyopaque) void, ctx: *const anyopaque, out: []u8) ?[]const u8 {
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) return null;
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) return null;
+    const pid = libc.fork();
     if (pid == 0) {
-        _ = dup2(fds[1], 2);
-        _ = close(fds[0]);
+        _ = libc.dup2(fds[1], 2);
+        _ = libc.close(fds[0]);
         body(ctx);
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var len: usize = 0;
     while (len < out.len) {
-        const got = read(fds[0], out[len..].ptr, out.len - len);
+        const got = libc.read(fds[0], out[len..].ptr, out.len - len);
         if (got <= 0) break;
         len += @intCast(got);
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     if (status & 0x7f != 6) return null;
     var lines = std.mem.splitScalar(u8, out[0..len], '\n');
     while (lines.next()) |line| {

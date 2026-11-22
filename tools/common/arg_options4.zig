@@ -18,14 +18,14 @@
 //! is where this port refuses it.
 
 const std = @import("std");
-const num = @import("num.zig");
+const stdlib = @import("stdlib");
+const num = @import("stdlib").num;
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
 const io = @import("io.zig");
 const options1 = @import("arg_options.zig");
 const options2 = @import("arg_options2.zig");
-const strings = @import("strings.zig");
 
 const Params = params_mod.Params;
 const SpeculativeType = params_mod.SpeculativeType;
@@ -140,14 +140,14 @@ pub fn add(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{ "--spec-draft-threads", "-td", "--threads-draft" }, .value_hint = "N", .help = "number of threads to use during generation (default: same as --threads)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.speculative.draft.cpuparams.n_threads = value;
-            if (q.speculative.draft.cpuparams.n_threads <= 0) q.speculative.draft.cpuparams.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
+            if (q.speculative.draft.cpuparams.n_threads <= 0) q.speculative.draft.cpuparams.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4047
     try ctx.add((Arg{ .args = &.{ "--spec-draft-threads-batch", "-tbd", "--threads-batch-draft" }, .value_hint = "N", .help = "number of threads to use during batch and prompt processing (default: same as --threads-draft)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.speculative.draft.cpuparams_batch.n_threads = value;
-            if (q.speculative.draft.cpuparams_batch.n_threads <= 0) q.speculative.draft.cpuparams_batch.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
+            if (q.speculative.draft.cpuparams_batch.n_threads <= 0) q.speculative.draft.cpuparams_batch.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } }).setSpec().setExamples(&spec_examples));
     // arg.cpp:4057
@@ -277,7 +277,7 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:4222
     try ctx.add((Arg{ .args = &.{"--spec-synth-len"}, .value_hint = "L", .help = "target mean synthetic acceptance length, including the target token (benchmarking only)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            const text = strings.strip(value);
+            const text = stdlib.strings.strip(value);
             const length, const pos = try stod(text);
             if (pos != text.len or length == -1.0) return throwStr("invalid value");
             q.speculative.synth_len = length;
@@ -286,10 +286,10 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:4235
     try ctx.add((Arg{ .args = &.{"--spec-synth-rates"}, .value_hint = "P0,P1,...", .help = "comma-separated unconditional per-position synthetic acceptance probabilities (benchmarking only)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            const values = try strings.split(q.arena, value, ',');
+            const values = try stdlib.strings.split(q.arena, value, ',');
             var rates: std.ArrayList(f64) = .empty;
             for (values.items) |raw| {
-                const text = strings.strip(raw);
+                const text = stdlib.strings.strip(raw);
                 const rate, const pos = try stod(text);
                 if (pos != text.len) return throwStr("invalid value");
                 try rates.append(q.arena, rate);
@@ -368,7 +368,7 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:4329
     try ctx.add((Arg{ .args = &.{"--spec-type"}, .value_hint = try allTypesStr(p.arena), .help = try ctx.fmt("comma-separated list of types of speculative decoding to use (default: %s)\n", .{(try typeNameStr(p.arena, p.speculative.types.items)).ptr}), .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            const types_str = try strings.split(q.arena, value, ',');
+            const types_str = try stdlib.strings.split(q.arena, value, ',');
             const types = try typesFromNames(q.arena, types_str.items);
             try q.speculative.types.appendSlice(q.arena, types.items);
         }

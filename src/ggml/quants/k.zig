@@ -789,7 +789,7 @@ fn checkK(
         quant(&src, @ptrCast(@alignCast(&buf)), @intCast(t.n_elem));
 
         const used = g.row_size * t.n_rows;
-        std.testing.expectEqual(g.ref.?, t.fnv(buf[0..used])) catch |e| {
+        std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
             std.debug.print("{s}: quantize differs on pattern '{s}'\n", .{ name, pattern.name() });
             return e;
         };
@@ -797,7 +797,7 @@ fn checkK(
         var out: [t.n_elem]f32 = undefined;
         @memset(&out, 0);
         dequant(@ptrCast(@alignCast(&buf)), &out, @intCast(t.n_elem));
-        std.testing.expectEqual(g.deq.?, t.fnv(std.mem.sliceAsBytes(out[0..]))) catch |e| {
+        std.testing.expectEqual(g.deq.?, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
             std.debug.print("{s}: dequantize differs on pattern '{s}'\n", .{ name, pattern.name() });
             return e;
         };

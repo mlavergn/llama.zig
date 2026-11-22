@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -131,7 +132,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
             // The C names Q's callback "Vcur" here; it is kept.
             b.cb(Qcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
             residual = c.ggml_get_rows(ctx, residual, inp_out_ids);

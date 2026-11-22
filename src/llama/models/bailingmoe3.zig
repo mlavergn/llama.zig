@@ -12,6 +12,7 @@
 //! `bailingmoe3_causal_conv1d`, and its `graph` and `graph_mtp`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -243,7 +244,7 @@ const MlaDims = struct {
             .qk_rope_head_dim = qk_rope_head_dim,
             .qk_nope_head_dim = qk_head_dim - qk_rope_head_dim,
             .kv_lora_rank = hp.n_lora_kv,
-            .kq_scale = 1.0 / impl.sqrtf(@floatFromInt(qk_head_dim)),
+            .kq_scale = 1.0 / libm.sqrtfInt(qk_head_dim),
         };
     }
 };

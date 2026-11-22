@@ -13,6 +13,7 @@
 //! `llm_graph_input_gemma4_ple`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -273,7 +274,7 @@ const Graph = struct {
 
         // Important: do not normalize weights for raw embeddings input (i.e.
         // encoded image embeddings): `build_inp_embd` scales the token rows only.
-        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(b.n_embd)));
+        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
@@ -289,7 +290,7 @@ const Graph = struct {
         if (inp_per_layer) |ipl_| {
             // per_layer_input_scale (1/sqrt(2)) from project_per_layer_inputs
             // is folded into tok_embd_scale.
-            const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_per_layer)) / impl.sqrtf(2.0);
+            const tok_embd_scale = libm.sqrtfInt(self.n_embd_per_layer) / libm.sqrtf(2.0);
 
             var ipl: *Tensor = c.ggml_scale(ctx, ipl_, tok_embd_scale);
             ipl = c.ggml_reshape_3d(ctx, ipl, self.n_embd_per_layer, b.n_layer, ipl.ne[1]);
@@ -441,7 +442,7 @@ const Graph = struct {
 
                 // Custom MoE logits: the router works on attn_out, not cur.
                 var tmp: *Tensor = c.ggml_rms_norm(ctx, attn_out, hp.f_norm_rms_eps);
-                tmp = c.ggml_scale(ctx, tmp, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd)));
+                tmp = c.ggml_scale(ctx, tmp, 1.0 / libm.sqrtfInt(b.n_embd));
                 tmp = c.ggml_mul(ctx, tmp, layer.ffn_gate_inp_s);
                 const logits = b.buildLoraMm(layer.ffn_gate_inp.?, tmp, null); // [n_expert, n_rows]
                 b.cb(logits, "ffn_moe_logits", il);
@@ -603,8 +604,8 @@ const Graph = struct {
     fn projectPerLayerInputs(self: *const Graph, inp_batch: *Tensor, inp_per_layer_: *Tensor) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
-        const per_layer_projection_scale = 1.0 / impl.sqrtf(@floatFromInt(b.n_embd));
-        const per_layer_input_scale = 1.0 / impl.sqrtf(2.0);
+        const per_layer_projection_scale = 1.0 / libm.sqrtfInt(b.n_embd);
+        const per_layer_input_scale = 1.0 / libm.sqrtf(2.0);
 
         // This product is computed in the input layer, i.e. on the CPU.
         // per_layer_input_scale is folded into proj_norm_w, and

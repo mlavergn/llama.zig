@@ -38,6 +38,7 @@
 //!   PEG_DIFF_STATS=1   lists every distinct error seen
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const builtin = @import("builtin");
 const win_child = @import("win_child.zig");
 const json = @import("json");
@@ -49,17 +50,6 @@ const peg_serialize = @import("peg_serialize.zig");
 extern fn ref_peg_run(prog: [*]const u8, len: usize, out_len: *usize) [*]u8;
 extern fn ref_peg_upstream(out_len: *usize) [*]u8;
 
-extern "c" fn free(p: ?*anyopaque) void;
-extern "c" fn fork() c_int;
-extern "c" fn pipe(fds: *[2]c_int) c_int;
-extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
-extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
-extern "c" fn dup2(a: c_int, b: c_int) c_int;
 extern "c" fn alarm(seconds: c_uint) c_uint;
 
 const gpa = std.heap.smp_allocator;
@@ -921,36 +911,36 @@ fn runForked(prog: ?[]const u8, out: *std.ArrayList(u8), seconds: c_uint) bool {
     if (comptime builtin.os.tag == .windows)
         return win_child.run(if (prog == null) "upstream" else "run", prog orelse "", out, seconds);
     var fds: [2]c_int = undefined;
-    if (pipe(&fds) != 0) oom();
-    const pid = fork();
+    if (libc.pipe(&fds) != 0) oom();
+    const pid = libc.fork();
     if (pid < 0) oom();
     if (pid == 0) {
-        _ = close(fds[0]);
+        _ = libc.close(fds[0]);
         // the converter's warnings go to stderr, as do the port's; the
         // debug trace is captured apart
-        const devnull = open("/dev/null", 1);
-        if (devnull >= 0) _ = dup2(devnull, 2);
+        const devnull = libc.open("/dev/null", 1);
+        if (devnull >= 0) _ = libc.dup2(devnull, 2);
         _ = alarm(seconds);
         var len: usize = 0;
         const p = if (prog) |pr| ref_peg_run(pr.ptr, pr.len, &len) else ref_peg_upstream(&len);
         var off: usize = 0;
         while (off < len) {
-            const k = write(fds[1], p + off, len - off);
-            if (k <= 0) _exit(3);
+            const k = libc.write(fds[1], p + off, len - off);
+            if (k <= 0) libc._exit(3);
             off += @intCast(k);
         }
-        _exit(0);
+        libc._exit(0);
     }
-    _ = close(fds[1]);
+    _ = libc.close(fds[1]);
     var chunk: [65536]u8 = undefined;
     while (true) {
-        const k = read(fds[0], &chunk, chunk.len);
+        const k = libc.read(fds[0], &chunk, chunk.len);
         if (k <= 0) break;
         out.appendSlice(gpa, chunk[0..@intCast(k)]) catch oom();
     }
-    _ = close(fds[0]);
+    _ = libc.close(fds[0]);
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     return status == 0;
 }
 
@@ -1634,7 +1624,7 @@ const required_phrases = [_][]const u8{
 };
 
 fn envUsize(name: [*:0]const u8, def: usize) usize {
-    const v = getenv(name) orelse return def;
+    const v = std.c.getenv(name) orelse return def;
     return std.fmt.parseInt(usize, std.mem.span(v), 10) catch def;
 }
 
@@ -1657,8 +1647,8 @@ pub fn main(init: std.process.Init) !void {
     // Windows: this process may be the reference's child (win_child.zig),
     // with stderr dropped as `runForked`'s fork drops it
     if (comptime builtin.os.tag == .windows) if (win_child.childArgs(argv)) |c| {
-        const devnull = open("NUL", 1);
-        if (devnull >= 0) _ = dup2(devnull, 2);
+        const devnull = libc.open("NUL", 1);
+        if (devnull >= 0) _ = libc.dup2(devnull, 2);
         var len: usize = 0;
         const p = if (std.mem.eql(u8, c.mode, "upstream")) ref_peg_upstream(&len) else ref_peg_run(c.input.ptr, c.input.len, &len);
         std.process.exit(if (win_child.writeFile(c.out.ptr, p[0..len])) 0 else 3);
@@ -1770,7 +1760,7 @@ pub fn main(init: std.process.Init) !void {
     var per_mapper: [3]usize = @splat(0);
     var phrase_seen: [required_phrases.len]bool = @splat(false);
     var stats: std.StringHashMapUnmanaged(usize) = .empty;
-    const want_stats = getenv("PEG_DIFF_STATS") != null;
+    const want_stats = std.c.getenv("PEG_DIFF_STATS") != null;
 
     const batch = 64;
     var start: usize = 0;

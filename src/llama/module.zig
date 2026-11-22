@@ -29,7 +29,7 @@ pub const impl = @import("impl.zig");
 pub const context = @import("context.zig");
 /// libc++'s containers and algorithms as the reference links them, for the
 /// tools under `tools/` that port code reading their order.
-pub const libcxx = @import("libcxx.zig");
+pub const libcxx = @import("stdlib").libcxx;
 /// `std::regex` as libc++ implements it, for `cli/json/schema_to_grammar.zig`
 /// and the chat parsers over it.
 pub const regex = @import("regex.zig");
@@ -47,7 +47,6 @@ comptime {
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("libcxx.zig");
     _ = @import("regex.zig");
     _ = @import("unicode.zig");
     _ = @import("arch.zig");

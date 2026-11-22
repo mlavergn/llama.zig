@@ -21,7 +21,7 @@ const c = @import("tools_h");
 const hash_map = @import("hash_map.zig");
 const log = @import("log.zig");
 const io = @import("io.zig");
-const file = @import("file.zig");
+const file = @import("stdlib").file;
 
 /// Ports `LLAMA_NGRAM_MIN`, `LLAMA_NGRAM_MAX`, `LLAMA_NGRAM_STATIC`
 /// (ngram-cache.h:9, 10, 11 @b1b770d90).

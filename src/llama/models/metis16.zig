@@ -11,6 +11,7 @@
 //! `build_arch_graph`, and its `graph` with the helpers it declares.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -289,7 +290,7 @@ const Graph = struct {
         q = c.ggml_reshape_3d(ctx, c.ggml_add(ctx, q, model.depth_mem_query_b), n_m, n_s, n_tokens);
 
         var kq = c.ggml_mul_mat(ctx, self.bank_k, q);
-        kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / impl.sqrtf(@floatFromInt(n_m)), 0.0);
+        kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / libm.sqrtfInt(n_m), 0.0);
 
         const ret = c.ggml_mul_mat(ctx, self.bank_vt, kq);
         var proj = c.ggml_mul_mat(ctx, model.depth_mem_out, c.ggml_reshape_2d(ctx, ret, n_m, n_s * n_tokens));
@@ -407,7 +408,7 @@ const Graph = struct {
                     const K = c.ggml_cont(ctx, c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head)) * es));
                     const V = c.ggml_cont(ctx, c.ggml_view_3d(ctx, qkv, n_hd, n_head_kv, n_tokens, hd * es, qkv.nb[1], hd * @as(usize, @intCast(n_head + n_head_kv)) * es));
 
-                    cur = b.buildAttn(inp.getAttn(), layer.wo, null, null, Q, K, V, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_hd)), il);
+                    cur = b.buildAttn(inp.getAttn(), layer.wo, null, null, Q, K, V, null, null, null, 1.0 / libm.sqrtfInt(n_hd), il);
                 } else {
                     cur = mamba_base.buildMamba2Layer(b, inp.getRecr(), cur, model, il);
                 }

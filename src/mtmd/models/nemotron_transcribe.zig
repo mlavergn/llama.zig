@@ -14,20 +14,18 @@
 //! and the line it began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const audio = @import("../audio.zig");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const c = impl.c;
 const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
-extern fn expf(x: f32) f32;
 
 /// `SPK_ACTIVITY_THR` (nemotron-transcribe.cpp:11 @b1b770d90): a speaker is
 /// active in an 80 ms frame where its prediction exceeds this.
@@ -78,11 +76,6 @@ comptime {
     std.debug.assert(window_core - spk_fifo_len > spk_cache_len);
 }
 
-/// `std::max(a, b)` for a `float`: `b` when `a < b`, else `a`.
-inline fn maxF(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
-
 /// Ports `build_spk_encoder` (nemotron-transcribe.cpp:30 @b1b770d90), a
 /// member of `mtmd_graph_nemotron_transcribe`: the speaker expert has its own
 /// layers, width and head count, which build_vit does not take; full rotary.
@@ -110,7 +103,7 @@ fn buildSpkEncoder(g: *graph.Graph, cur_in: T, pos: T) T {
         q = c.ggml_rope_ext(ctx0, q, pos, null, @intCast(d_head), c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
         k = c.ggml_rope_ext(ctx0, k, pos, null, @intCast(d_head), c.GGML_ROPE_TYPE_NEOX, 0, 10000.0, 1.0, 0.0, 1.0, 0.0, 0.0);
 
-        x = g.buildAttn(layer.o_w, layer.o_b, q, k, v, null, 1.0 / sqrtf(@floatFromInt(d_head)), il, null);
+        x = g.buildAttn(layer.o_w, layer.o_b, q, k, v, null, 1.0 / libm.sqrtfInt(d_head), il, null);
         cur = c.ggml_add(ctx0, cur, x);
 
         x = g.buildNorm(cur, layer.ln_2_w, layer.ln_2_b, .normal, eps, il);
@@ -259,7 +252,7 @@ fn spkCompressCache(emb: *std.ArrayList(f32), preds: *std.ArrayList(f32), n: c_i
     const weak: c_int = @intFromFloat(@floor(@as(f32, @floatFromInt(per_spk)) * spk_weak_boost_rate));
     const min_pos: c_int = @intFromFloat(@floor(@as(f32, @floatFromInt(per_spk)) * spk_min_pos_rate));
     const disabled: f32 = 0.0;
-    const latest = expf(spk_boost_latest);
+    const latest = libm.expf(spk_boost_latest);
 
     // speaker-major: each speaker's n rows, then its silence rows (+inf)
     const nt: usize = @intCast(n + spk_sil_frames);
@@ -276,10 +269,10 @@ fn spkCompressCache(emb: *std.ArrayList(f32), preds: *std.ArrayList(f32), n: c_i
             var prod: f32 = 1.0;
             for (0..ns) |j| {
                 if (j != s) {
-                    prod *= maxF(1.0 - pt[j], spk_pred_score_thr);
+                    prod *= libcxx.max(f32, 1.0 - pt[j], spk_pred_score_thr);
                 }
             }
-            prod *= maxF(pt[s], spk_pred_score_thr);
+            prod *= libcxx.max(f32, pt[s], spk_pred_score_thr);
             sc[t] = if (pt[s] > spk_speech_thr) prod * spk_score_offset else disabled;
             n_pos += @intFromBool(sc[t] > 1.0);
         }

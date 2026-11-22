@@ -17,7 +17,7 @@
 //! them is the arena's, and nothing in them is freed before it is.
 
 const std = @import("std");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
 

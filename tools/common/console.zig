@@ -15,6 +15,8 @@
 //! `console::log`/`error` (`llama-mtmd-cli` calls none of them).
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const io = @import("io.zig");
@@ -34,22 +36,10 @@ const ansi_bold = "\x1b[1m";
 
 // WEOF, as `char32_t`: `wint_t` is 16 bits on Windows
 const weof: u32 = if (is_windows) 0xFFFF else std.math.maxInt(u32);
-
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fclose(f: ?*anyopaque) c_int;
-extern fn fflush(f: ?*anyopaque) c_int;
-extern fn fputc(ch: c_int, f: ?*anyopaque) c_int;
-extern fn fputs(s: [*:0]const u8, f: ?*anyopaque) c_int;
-extern fn fwrite(p: ?*const anyopaque, size: usize, n: usize, f: ?*anyopaque) usize;
-extern fn fprintf(f: ?*anyopaque, fmt: [*:0]const u8, ...) c_int;
 extern fn fscanf(f: ?*anyopaque, fmt: [*:0]const u8, ...) c_int;
 extern fn getwchar() u32;
 extern fn wcwidth(wc: u32) c_int;
 extern fn iswspace(wc: u32) c_int;
-extern fn setlocale(cat: c_int, locale: [*:0]const u8) ?[*:0]const u8;
-extern fn ioctl(fd: c_int, req: c_ulong, ...) c_int;
-extern fn getline(lineptr: *?[*]u8, n: *usize, f: ?*anyopaque) isize;
-extern fn free(p: ?*anyopaque) void;
 
 // Ports `advanced_display` and the console state (console.cpp:71 @b1b770d90)
 var advanced_display: bool = false;
@@ -128,7 +118,6 @@ const win32 = struct {
     extern "kernel32" fn WideCharToMultiByte(codepage: u32, flags: u32, wide: [*]const u16, n: c_int, multi: ?[*]u8, size: c_int, default: ?[*]const u8, used: ?*c_int) callconv(.winapi) c_int;
     extern "c" fn _setmode(fd: c_int, mode: c_int) c_int;
     extern "c" fn _fileno(stream: ?*anyopaque) c_int;
-    extern "c" fn fgetwc(stream: ?*anyopaque) u16;
 };
 
 // The display: `stdout`, through the stream the tools share, until `init`
@@ -138,8 +127,8 @@ const win32 = struct {
 
 fn outWrite(bytes: []const u8) void {
     if (out_stream) |f| {
-        _ = fwrite(bytes.ptr, 1, bytes.len, f);
-    } else io.stdout().write(bytes);
+        _ = libc.fwrite(bytes.ptr, 1, bytes.len, f);
+    } else stdlib.stdio.stdout().write(bytes);
 }
 
 fn outPutc(ch: u8) void {
@@ -148,14 +137,14 @@ fn outPutc(ch: u8) void {
 
 fn outPrintf(comptime fmt: [*:0]const u8, args: anytype) void {
     if (out_stream) |f| {
-        _ = @call(.auto, fprintf, .{ f, fmt } ++ args);
+        _ = @call(.auto, libc.fprintf, .{ f, fmt } ++ args);
     } else io.printf(fmt, args);
 }
 
 fn outFlush() void {
     if (out_stream) |f| {
-        _ = fflush(f);
-    } else io.stdout().flush();
+        _ = libc.fflush(f);
+    } else stdlib.stdio.stdout().flush();
 }
 
 const lc_all: c_int = if (builtin.os.tag.isDarwin()) 0 else 6;
@@ -185,7 +174,7 @@ fn initWindows() void {
     const con_in = win32.GetStdHandle(win32.std_input_handle);
     if (con_in != win32.invalid_handle and win32.GetConsoleMode(con_in, &mode) != 0) {
         // Set console input codepage to UTF16
-        _ = win32._setmode(win32._fileno(io.cStdin()), win32.o_wtext);
+        _ = win32._setmode(win32._fileno(stdlib.stdio.cStream(.stdin)), win32.o_wtext);
 
         // Set ICANON (ENABLE_LINE_INPUT) and ECHO (ENABLE_ECHO_INPUT)
         if (simple_io) {
@@ -195,7 +184,7 @@ fn initWindows() void {
         }
         if (win32.SetConsoleMode(con_in, mode) == 0) simple_io = true;
     }
-    if (simple_io) _ = win32._setmode(win32._fileno(io.cStdin()), win32.o_u8text);
+    if (simple_io) _ = win32._setmode(win32._fileno(stdlib.stdio.cStream(.stdin)), win32.o_u8text);
 }
 
 /// Ports `init` (console.cpp:90 @b1b770d90).
@@ -213,11 +202,11 @@ pub fn init(use_simple_io: bool, use_advanced_display: bool) void {
         new_termios.cc[@backingInt(std.c.V.TIME)] = 0;
         _ = std.c.tcsetattr(std.posix.STDIN_FILENO, .NOW, &new_termios);
 
-        tty = fopen("/dev/tty", "w+");
+        tty = libc.fopen("/dev/tty", "w+");
         if (tty != null) out_stream = tty;
     }
 
-    _ = setlocale(lc_all, "");
+    _ = libc.setlocale(lc_all, "");
 }
 
 /// Ports `cleanup` (console.cpp:152 @b1b770d90).
@@ -230,7 +219,7 @@ pub fn cleanup() void {
     if (!simple_io) {
         if (tty != null) {
             out_stream = null;
-            _ = fclose(tty);
+            _ = libc.fclose(tty);
             tty = null;
         }
         _ = std.c.tcsetattr(std.posix.STDIN_FILENO, .NOW, &initial_state);
@@ -303,7 +292,7 @@ fn getchar32Windows() u32 {
 /// 32-bit `wchar_t`, so no surrogate handling.
 fn getchar32() u32 {
     if (comptime is_windows) return getchar32Windows();
-    io.beforeRead();
+    stdlib.stdio.flushLineBuffered();
     const wc = getwchar();
     if (wc == weof) return weof;
     return wc;
@@ -372,7 +361,7 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
         return expected_width;
     }
 
-    _ = fputs("\x1b[6n", tty); // Query cursor position
+    _ = libc.fputs("\x1b[6n", tty); // Query cursor position
     var x1: c_int = 0;
     var y1: c_int = 0;
     var x2: c_int = 0;
@@ -380,9 +369,9 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
     var results: c_int = 0;
     results = fscanf(tty, "\x1b[%d;%dR", &y1, &x1);
 
-    _ = fwrite(utf8.ptr, utf8.len, 1, tty);
+    _ = libc.fwrite(utf8.ptr, utf8.len, 1, tty);
 
-    _ = fputs("\x1b[6n", tty); // Query cursor position
+    _ = libc.fputs("\x1b[6n", tty); // Query cursor position
     results += fscanf(tty, "\x1b[%d;%dR", &y2, &x2);
 
     if (results != 4) return expected_width;
@@ -392,7 +381,7 @@ fn putCodepoint(utf8: []const u8, expected_width: c_int) c_int {
         // Calculate the width considering text wrapping
         var w: extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 } = undefined;
         const tiocgwinsz: c_ulong = if (builtin.os.tag.isDarwin()) 0x40087468 else 0x5413;
-        _ = ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
+        _ = libc.ioctl(std.posix.STDOUT_FILENO, tiocgwinsz, &w);
         width += w.ws_col;
     }
     return width;
@@ -760,7 +749,7 @@ fn historyNext(a: std.mem.Allocator, ed: *Editor) !void {
 /// in place with the cursor keys, backspace and history. A submitted line
 /// always ends with a newline.
 fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_input: bool) !bool {
-    if (out_stream != null) io.stdout().flush();
+    if (out_stream != null) stdlib.stdio.stdout().flush();
 
     line.clearRetainingCapacity();
     var ed: Editor = .{ .a = a, .line = line };
@@ -982,16 +971,16 @@ fn readlineAdvanced(a: std.mem.Allocator, line: *std.ArrayList(u8), multiline_in
     return has_more;
 }
 
-/// `std::getline(std::cin, line)` over the C library's `stdin`, which
+/// `std::libc.getline(std::cin, line)` over the C library's `stdin`, which
 /// libc++'s `cin` shares.
 ///
 /// Return: false when the stream is bad or at its end.
 fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     var buf: ?[*]u8 = null;
     var cap: usize = 0;
-    defer free(buf);
-    io.beforeRead();
-    const n = getline(&buf, &cap, io.cStdin());
+    defer libc.free(buf);
+    stdlib.stdio.flushLineBuffered();
+    const n = libc.getline(&buf, &cap, stdlib.stdio.cStream(.stdin));
     if (n < 0) return false;
     var got = buf.?[0..@intCast(n)];
     if (got.len != 0 and got[got.len - 1] == '\n') got = got[0 .. got.len - 1];
@@ -999,7 +988,7 @@ fn readLinePosix(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     return true;
 }
 
-/// `std::getline(std::wcin, wline)`, then upstream's `wstring_to_utf8`
+/// `std::libc.getline(std::wcin, wline)`, then upstream's `wstring_to_utf8`
 /// (common/common.cpp:899 @b1b770d90): `stdin` is in a wide text mode here, which `init`
 /// set. An end of input after some characters still yields them.
 ///
@@ -1009,8 +998,8 @@ fn readLineWindows(a: std.mem.Allocator, line: *std.ArrayList(u8)) !bool {
     defer wline.deinit(a);
     var any = false;
     while (true) {
-        io.beforeRead();
-        const wc = win32.fgetwc(io.cStdin());
+        stdlib.stdio.flushLineBuffered();
+        const wc = libc.fgetwc(stdlib.stdio.cStream(.stdin));
         if (wc == weof) break;
         any = true;
         if (wc == '\n') break;

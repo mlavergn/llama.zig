@@ -38,6 +38,7 @@
 const std = @import("std");
 const impl = @import("../impl.zig");
 const convert = @import("convert.zig");
+const common = @import("ops/common.zig");
 const defs = @import("defs.zig");
 const c = impl.c;
 
@@ -109,55 +110,8 @@ const use_accelerate = @import("builtin").os.tag.isDarwin();
 // -----------------------------------------------------------------------------
 // Element conversion
 
-/// Ports `type_conversion_table` (ggml-cpu/common.h:56 @b1b770d90), the four
-/// specialisations collapsed into two comptime functions.
-///
-/// Note **`vDSP_vsub`'s operand order is reversed** relative to the scalar
-/// path, which the call site handles; nothing here depends on it.
-inline fn toF32(comptime T: type, v: T) f32 {
-    return switch (T) {
-        f32 => v,
-        c.ggml_fp16_t => impl.fp16ToFp32(v),
-        c.ggml_bf16_t => impl.bf16ToFp32(v.bits),
-        i32 => @floatFromInt(v),
-        else => @compileError("no conversion for " ++ @typeName(T)),
-    };
-}
-
-/// Ports the `from_f32` half of `type_conversion_table`
-/// (ggml-cpu/common.h:56 @b1b770d90).
-inline fn fromF32(comptime T: type, v: f32) T {
-    return switch (T) {
-        f32 => v,
-        c.ggml_fp16_t => convert.cpuFp32ToFp16(v),
-        c.ggml_bf16_t => .{ .bits = impl.fp32ToBf16(v) },
-        i32 => @intFromFloat(v),
-        else => @compileError("no conversion for " ++ @typeName(T)),
-    };
-}
-
 // -----------------------------------------------------------------------------
 // The kernels
-
-/// Ports `get_thread_range` (ggml-cpu/common.h:88 @b1b770d90).
-///
-/// Return: `.{ ir0, ir1 }`, the half-open row range this thread owns. The
-/// last thread gets a short range rather than the division being exact.
-fn threadRange(params: *const ComputeParams, src0: *const Tensor) struct { i64, i64 } {
-    const ith: i64 = params.ith;
-    const nth: i64 = params.nth;
-
-    const nr = c.ggml_nrows(src0);
-
-    // rows per thread
-    const dr = @divTrunc(nr + nth - 1, nth);
-
-    // row range for this thread
-    const ir0 = dr * ith;
-    const ir1 = @min(ir0 + dr, nr);
-
-    return .{ ir0, ir1 };
-}
 
 /// Ports `vec_binary_op_contiguous` (binary-ops.cpp:26 @b1b770d90).
 inline fn vecBinaryOpContiguous(
@@ -172,7 +126,7 @@ inline fn vecBinaryOpContiguous(
 ) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
-        z[i] = fromF32(Dst, op.apply(toF32(Src0, x[i]), toF32(Src1, y[i])));
+        z[i] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[i]), common.toF32(Src1, y[i])));
     }
 }
 
@@ -201,7 +155,7 @@ inline fn vecBinaryOpNonContiguous(
         const j10 = @mod(i, ne10);
         const y_ptr: *const Src1 = @ptrCast(@alignCast(y + @as(usize, @intCast(j10)) * nb10));
         const idx: usize = @intCast(i);
-        z[idx] = fromF32(Dst, op.apply(toF32(Src0, x[idx]), toF32(Src1, y_ptr.*)));
+        z[idx] = common.fromF32(Dst, op.apply(common.toF32(Src0, x[idx]), common.toF32(Src1, y_ptr.*)));
     }
 }
 
@@ -230,7 +184,7 @@ fn applyBinaryOp(
     impl.assert(l.nb0 == @sizeOf(Dst), "nb0 == sizeof(dst_t)");
     impl.assert(l.nb00 == @sizeOf(Src0), "nb00 == sizeof(src0_t)");
 
-    const ir0, const ir1 = threadRange(params, src0);
+    const ir0, const ir1 = common.getThreadRange(params, src0);
     const is_src1_contiguous_rows = c.ggml_is_contiguous_rows(src1);
 
     // The C++ picks the vDSP routine here, by comparing the template's `op`

@@ -9,6 +9,7 @@
 //! (`granite.zig`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -27,7 +28,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
 
     // Backward-compatible defaults for older MiniCPM GGUFs.
     hp.f_embedding_scale = 12.0;
-    hp.f_residual_scale = 1.4 / impl.sqrtf(@floatFromInt(hp.nLayer()));
+    hp.f_residual_scale = 1.4 / libm.sqrtfInt(hp.nLayer());
     hp.f_logit_scale = if (hp.n_embd != 0) 256.0 / @as(f32, @floatFromInt(hp.n_embd)) else 1.0;
 
     hp.f_norm_rms_eps = (try meta.getKey(f32, .attention_layernorm_rms_eps, true, exc)).?;

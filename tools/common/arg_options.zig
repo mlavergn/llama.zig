@@ -24,7 +24,8 @@
 //! handler's error.
 
 const std = @import("std");
-const num = @import("num.zig");
+const stdlib = @import("stdlib");
+const num = @import("stdlib").num;
 const builtin = @import("builtin");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
@@ -32,7 +33,7 @@ const params_mod = @import("params.zig");
 const log = @import("log.zig");
 const io = @import("io.zig");
 const build_info = @import("build_info.zig");
-const file = @import("file.zig");
+const file = @import("stdlib").file;
 
 const Params = params_mod.Params;
 const Example = params_mod.Example;
@@ -268,8 +269,8 @@ fn addPart1(ctx: *Context) !void {
     // arg.cpp:1461
     try ctx.add(.{ .args = &.{"--version"}, .help = "show version and build info", .handler = .{ .void_ = struct {
         fn f(_: *Params) !void {
-            build_info.print(c.llama_version(), io.stderr());
-            io.exitFlushed(0);
+            build_info.print(c.llama_version(), stdlib.stdio.stderr());
+            stdlib.stdio.exit(0);
         }
     }.f } });
     // arg.cpp:1469
@@ -288,14 +289,14 @@ fn addPart1(ctx: *Context) !void {
     try ctx.add((Arg{ .args = &.{ "-t", "--threads" }, .value_hint = "N", .help = try ctx.fmt("number of CPU threads to use during generation (default: %d)", .{p.cpuparams.n_threads}), .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams.n_threads = value;
-            if (q.cpuparams.n_threads <= 0) q.cpuparams.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
+            if (q.cpuparams.n_threads <= 0) q.cpuparams.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } }).setEnv("LLAMA_ARG_THREADS"));
     // arg.cpp:1537
     try ctx.add(.{ .args = &.{ "-tb", "--threads-batch" }, .value_hint = "N", .help = "number of threads to use during batch and prompt processing (default: same as --threads)", .handler = .{ .int = struct {
         fn f(q: *Params, value: c_int) !void {
             q.cpuparams_batch.n_threads = value;
-            if (q.cpuparams_batch.n_threads <= 0) q.cpuparams_batch.n_threads = @intCast(std.Thread.getCpuCount() catch 0);
+            if (q.cpuparams_batch.n_threads <= 0) q.cpuparams_batch.n_threads = @intCast(stdlib.thread.hardwareConcurrency());
         }
     }.f } });
     // arg.cpp:1547

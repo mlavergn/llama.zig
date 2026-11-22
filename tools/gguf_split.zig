@@ -22,6 +22,7 @@
 //! so a failed write terminates the process; here it aborts.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const common = @import("tools_common");
 const c = common.c;
@@ -138,10 +139,10 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
         var arg_found = false;
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             printUsage(argv[0].ptr);
-            common.cExit(0);
+            stdlib.stdio.exit(0);
         } else if (std.mem.eql(u8, arg, "--version")) {
-            common.build_info.print(c.llama_version(), common.io.stderr());
-            common.cExit(0);
+            common.build_info.print(c.llama_version(), stdlib.stdio.stderr());
+            stdlib.stdio.exit(0);
         } else if (std.mem.eql(u8, arg, "--dry-run")) {
             arg_found = true;
             params.dry_run = true;
@@ -171,7 +172,7 @@ fn parseEx(argv: []const [:0]const u8, params: *Params, err: *ParseError, arena:
                 return err.set("error: either --split-max-tensors or --split-max-size can be specified, but not both", .{});
             }
             params.mode = .tensor;
-            params.n_split_tensors = common.num.atoi(argv[arg_idx]);
+            params.n_split_tensors = stdlib.num.atoi(argv[arg_idx]);
         } else if (std.mem.eql(u8, arg, "--split-max-size")) {
             arg_idx += 1;
             if (arg_idx >= argv.len) {
@@ -212,7 +213,7 @@ fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) 
         error.Invalid => {
             io.eprintf("%.*s\n", .{ @as(c_int, @intCast(err.len)), &err.buf });
             printUsage(argv[0].ptr);
-            common.cExit(1);
+            stdlib.stdio.exit(1);
         },
         else => |other| return other,
     };
@@ -221,7 +222,7 @@ fn parse(argv: []const [:0]const u8, params: *Params, arena: std.mem.Allocator) 
 // -----------------------------------------------------------------------------
 // Files, as the C++ streams
 
-const Out = common.file.Out;
+const Out = stdlib.file.Out;
 
 /// An output stream's `failbit` exception, which nothing catches.
 fn terminate() noreturn {
@@ -252,7 +253,7 @@ fn cstr(buf: *const [path_max:0]u8) [*:0]const u8 {
 
 /// `GGML_PAD(x, GGUF_DEFAULT_ALIGNMENT)`.
 fn pad(x: usize) usize {
-    return common.ggml.pad(x, c.GGUF_DEFAULT_ALIGNMENT);
+    return stdlib.num.pad(usize, x, c.GGUF_DEFAULT_ALIGNMENT);
 }
 
 // -----------------------------------------------------------------------------
@@ -325,7 +326,7 @@ const Strategy = struct {
         if (ctx_out.*) |prev| {
             if (c.gguf_get_n_tensors(prev) == 0 and !allow_no_tensors) {
                 io.eprintf("error: one of splits have 0 tensors. Maybe size or tensors limit is too small\n", .{});
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
             try self.ctx_outs.append(self.allocator, prev);
         }
@@ -385,7 +386,7 @@ const Strategy = struct {
 
             // open the output file
             io.printf("Writing file %s ... ", .{cstr(&split_path)});
-            io.flushStdout();
+            stdlib.stdio.stdout().flush();
             var fout = createOut(self.std_io, std.mem.sliceTo(&split_path, 0));
 
             // write metadata
@@ -422,9 +423,9 @@ const Strategy = struct {
     /// Ports `copy_file_to_file` (gguf-split.cpp:358 @b1b770d90).
     fn copyFileToFile(self: *Strategy, f_out: *Out, in_offset: usize, len: usize) !void {
         if (self.read_buf.items.len < len) try self.read_buf.resize(self.allocator, len);
-        if (!common.file.readAt(self.std_io, self.f_input, self.read_buf.items[0..len], in_offset)) {
+        if (!stdlib.file.readAt(self.std_io, self.f_input, self.read_buf.items[0..len], in_offset)) {
             io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ "copy_file_to_file", len, in_offset });
-            common.cExit(1);
+            stdlib.stdio.exit(1);
         }
         writeAll(f_out, self.read_buf.items[0..len]);
     }
@@ -436,14 +437,14 @@ fn ggufSplit(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
 
     const params: c.gguf_init_params = .{ .no_alloc = true, .ctx = &ctx_meta };
 
-    const f_input = common.file.openIn(std_io, split_params.input) catch {
+    const f_input = stdlib.file.openIn(std_io, split_params.input) catch {
         io.eprintf("%s:  failed to open input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     };
 
     const ctx_gguf = c.gguf_init_from_file(split_params.input.ptr, params) orelse {
         io.eprintf("%s:  failed to load input GGUF from %s\n", .{ "gguf_split", split_params.input.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     };
 
     // prepare the strategy
@@ -472,10 +473,10 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     var total_tensors: c_int = 0;
 
     // avoid overwriting existing output file
-    if (common.file.openIn(std_io, split_params.output)) |existing| {
+    if (stdlib.file.openIn(std_io, split_params.output)) |existing| {
         existing.close(std_io);
         io.eprintf("%s: output file %s already exists\n", .{ func, split_params.output.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     } else |_| {}
 
     const ctx_out = c.gguf_init_empty().?;
@@ -504,7 +505,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
 
         const ctx_gguf = c.gguf_init_from_file(&split_path, params) orelse {
             io.eprintf("\n%s:  failed to load input GGUF from %s\n", .{ func, split_params.input.ptr });
-            common.cExit(1);
+            stdlib.stdio.exit(1);
         };
         try ctx_ggufs.append(allocator, ctx_gguf);
         try ctx_metas.append(allocator, ctx_meta.?);
@@ -517,7 +518,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
                 key_split_count < 0 or c.gguf_get_val_u16(ctx_gguf, key_split_count) != n_split)
             {
                 io.eprintf("\n%s: %s is not split %d of %d\n", .{ func, cstr(&split_path), i_split + 1, n_split });
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
         }
 
@@ -528,7 +529,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
                 c.gguf_free(ctx_gguf);
                 c.ggml_free(ctx_meta);
                 c.gguf_free(ctx_out);
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
 
             n_split = c.gguf_get_val_u16(ctx_gguf, key_n_split);
@@ -537,7 +538,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
                 c.gguf_free(ctx_gguf);
                 c.ggml_free(ctx_meta);
                 c.gguf_free(ctx_out);
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
 
             // Verify the file naming and extract split_prefix
@@ -546,7 +547,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
                 c.gguf_free(ctx_gguf);
                 c.ggml_free(ctx_meta);
                 c.gguf_free(ctx_out);
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
 
             // Do not trigger merge if we try to merge again the output
@@ -572,7 +573,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     const key_n_tensors = c.gguf_find_key(ctx_ggufs.items[0], common.kv_split_tensors_count);
     if (key_n_tensors < 0 or c.gguf_get_val_i32(ctx_ggufs.items[0], key_n_tensors) != total_tensors) {
         io.eprintf("%s: splits contain %d tensors, which does not match %s\n", .{ func, total_tensors, common.kv_split_tensors_count.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     }
 
     var fout: Out = undefined;
@@ -588,7 +589,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
     i_split = 0;
     while (i_split < n_split) : (i_split += 1) {
         _ = c.llama_split_path(&split_path, split_path.len, &split_prefix, i_split, n_split);
-        const f_input = common.file.openIn(std_io, std.mem.sliceTo(&split_path, 0)) catch {
+        const f_input = stdlib.file.openIn(std_io, std.mem.sliceTo(&split_path, 0)) catch {
             io.eprintf("%s:  failed to open input GGUF from %s\n", .{ func, cstr(&split_path) });
             for (ctx_ggufs.items, ctx_metas.items) |g, m| {
                 c.gguf_free(g);
@@ -596,7 +597,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
             }
             c.gguf_free(ctx_out);
             if (!split_params.dry_run) fout.close(std_io);
-            common.cExit(1);
+            stdlib.stdio.exit(1);
         };
         io.eprintf("%s: writing tensors %s ...", .{ func, cstr(&split_path) });
 
@@ -614,9 +615,9 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
             if (read_data.items.len < n_bytes) try read_data.resize(allocator, n_bytes);
 
             const offset = c.gguf_get_data_offset(ctx_gguf) + c.gguf_get_tensor_offset(ctx_gguf, i_tensor);
-            if (!common.file.readAt(std_io, f_input, read_data.items[0..n_bytes], offset)) {
+            if (!stdlib.file.readAt(std_io, f_input, read_data.items[0..n_bytes], offset)) {
                 io.eprintf("%s: failed to read %zu bytes at offset %zu, input file may be truncated\n", .{ func, n_bytes, offset });
-                common.cExit(1);
+                stdlib.stdio.exit(1);
             }
             if (!split_params.dry_run) {
                 // write tensor data + padding
@@ -631,7 +632,7 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
         io.eprintf("\x1b[3Ddone\n", .{});
 
         if (!split_params.dry_run and split_params.delete_splits) {
-            if (common.file.remove(std_io, std.mem.sliceTo(&split_path, 0))) {
+            if (stdlib.file.remove(std_io, std.mem.sliceTo(&split_path, 0))) {
                 io.eprintf("%s: deleted file %s\n", .{ func, cstr(&split_path) });
             } else {
                 merge_error = true;
@@ -653,14 +654,14 @@ fn ggufMerge(allocator: std.mem.Allocator, std_io: std.Io, split_params: Params)
 
     io.eprintf("%s: %s merged from %d split with %d tensors.\n", .{ func, split_params.output.ptr, n_split, total_tensors });
 
-    if (merge_error) common.cExit(1);
+    if (merge_error) stdlib.stdio.exit(1);
 }
 
 /// Ports `main` (gguf-split.cpp:620 @b1b770d90).
 pub fn main(init: std.process.Init) !void {
-    common.io.begin();
-    common.env.set(init.environ_map);
-    defer common.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
 
@@ -672,7 +673,7 @@ pub fn main(init: std.process.Init) !void {
         .merge => try ggufMerge(init.gpa, init.io, params),
         else => {
             printUsage(argv[0].ptr);
-            common.cExit(1);
+            stdlib.stdio.exit(1);
         },
     }
 }

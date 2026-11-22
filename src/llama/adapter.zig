@@ -33,8 +33,9 @@
 //!   eight bytes, because libc++'s `hash<T *>` is `__hash_memory` over them.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
-const libcxx = @import("libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const arch = @import("arch.zig");
 const loader = @import("loader.zig");
 const mmap = @import("mmap.zig");
@@ -415,7 +416,7 @@ fn loraInitImpl(model: *Model, file: *c.FILE, adapter: *Lora, exc: *Exception) T
                 value.shrinkRetainingCapacity(max_value_len - 3);
                 value.appendSlice(allocator, "...") catch oom();
             }
-            loader.replaceAll(&value, "\n", "\\n");
+            impl.replaceAll(&value, "\n", "\\n");
 
             impl.logInfo("%s: - kv %3d: %42s %-16s = %.*s\n", .{
                 func, i, name, tn, @as(c_int, @intCast(value.items.len)), value.items.ptr,
@@ -479,10 +480,10 @@ fn loraInitImpl(model: *Model, file: *c.FILE, adapter: *Lora, exc: *Exception) T
         defer name.deinit(allocator);
         name.appendSlice(allocator, std.mem.sliceTo(&t.name, 0)) catch oom();
         if (endsWith(name.items, ".lora_a")) {
-            loader.replaceAll(&name, ".lora_a", "");
+            impl.replaceAll(&name, ".lora_a", "");
             ab_map.slot(name.items).a = t;
         } else if (endsWith(name.items, ".lora_b")) {
-            loader.replaceAll(&name, ".lora_b", "");
+            impl.replaceAll(&name, ".lora_b", "");
             ab_map.slot(name.items).b = t;
         } else if (endsWith(name.items, "_norm.weight")) {
             // TODO: add support for norm vector
@@ -624,9 +625,6 @@ fn loraInitImpl(model: *Model, file: *c.FILE, adapter: *Lora, exc: *Exception) T
     impl.logInfo("%s: loaded %zu tensors from lora file\n", .{ func, adapter.ab_map.count() * 2 });
 }
 
-/// libc's `strerror`, which `llama.h`'s import does not declare.
-extern "c" fn strerror(errnum: c_int) [*:0]const u8;
-
 /// Ports `llama_adapter_lora_init` (llama-adapter.cpp:430 @b1b770d90):
 /// open the file and read it through `loraInitFromFilePtr`.
 ///
@@ -640,7 +638,7 @@ pub fn loraInit(model: *Model, path_lora: [*:0]const u8) ?*Lora {
     impl.logInfo("%s: loading lora adapter from '%s' ...\n", .{ func, path_lora });
 
     const file = c.ggml_fopen(path_lora, "rb") orelse {
-        impl.logError("%s: failed to open '%s': %s\n", .{ func, path_lora, strerror(std.c._errno().*) });
+        impl.logError("%s: failed to open '%s': %s\n", .{ func, path_lora, stdlib.errno.strerror(std.c._errno().*) });
         return null;
     };
 

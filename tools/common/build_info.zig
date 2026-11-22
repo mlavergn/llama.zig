@@ -8,6 +8,7 @@
 //! `--version` reads the same from both sides of a gate.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const options = @import("build_info");
 const io = @import("io.zig");
 
@@ -22,8 +23,8 @@ pub const build_target: [:0]const u8 = options.build_target ++ "";
 
 /// Ports `llama_print_build_info` (build-info.cpp.in:32 @b1b770d90): two lines
 /// on `stream`, which `build-info.h` defaults to `stderr` -- every caller
-/// ported passes `io.stderr()`.
-pub fn print(version: [*:0]const u8, stream: *io.Stream) void {
+/// ported passes `stdlib.stdio.stderr()`.
+pub fn print(version: [*:0]const u8, stream: *stdlib.stdio.Stream) void {
     io.fprintf(stream, "version: %s (build %d, commit %s)\n", .{ version, build_number, commit.ptr });
     io.fprintf(stream, "built with %s for %s\n", .{ compiler.ptr, build_target.ptr });
 }

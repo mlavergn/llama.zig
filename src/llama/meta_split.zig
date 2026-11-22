@@ -19,6 +19,7 @@
 //! exactly where it matches there.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const regex = @import("regex.zig");
 const model_mod = @import("model.zig");
@@ -192,15 +193,14 @@ const Segment = struct { ne: i64, nr: u32 };
 
 const max_segments = 16;
 
-/// `std`'s `stoull` on the digits at the start of `s`.
+/// `std::stoull(s)`.
 fn stoull(s: []const u8) u64 {
-    var i: usize = 0;
-    while (i < s.len and std.ascii.isWhitespace(s[i])) i += 1;
-    var v: u64 = 0;
-    const start = i;
-    while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) v = v *% 10 +% (s[i] - '0');
-    if (i == start) impl.abort("llama-model.cpp", 504, "std::stoull: no conversion");
-    return v;
+    // nothing catches either throw: the process terminates
+    return switch (stdlib.num.stoull(s)) {
+        .ok => |v| v,
+        .no_conversion => impl.abort("llama-model.cpp", 504, "terminating due to uncaught exception of type std::invalid_argument: stoull: no conversion"),
+        .out_of_range => impl.abort("llama-model.cpp", 504, "terminating due to uncaught exception of type std::out_of_range: stoull: out of range"),
+    };
 }
 
 fn lcm(a: i64, b: i64) i64 {

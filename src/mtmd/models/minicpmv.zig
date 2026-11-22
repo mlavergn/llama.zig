@@ -7,12 +7,11 @@
 //! Ports `llama.cpp/tools/mtmd/models/minicpmv.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Ports `build` (minicpmv.cpp:3 @b1b770d90), a member of `mtmd_graph_minicpmv`.
 pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.ggml_cgraph {
@@ -91,7 +90,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         g.cb(K, "resampler_K", -1);
         g.cb(V, "resampler_V", -1);
 
-        const resampler_kq_scale: f32 = 1.0 / sqrtf(@floatFromInt(d_head));
+        const resampler_kq_scale: f32 = 1.0 / libm.sqrtfInt(d_head);
         embeddings = g.buildAttn(model.mm_model_attn_o_w, model.mm_model_attn_o_b, Q, K, V, null, resampler_kq_scale, -1, null);
         g.cb(embeddings, "resampler_attn_out", -1);
     }

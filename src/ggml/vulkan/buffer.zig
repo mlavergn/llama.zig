@@ -12,7 +12,8 @@
 //! C++'s lifetimes depend on take a reference.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+const sync = @import("stdlib").sync;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
@@ -89,17 +90,15 @@ fn formatSize(size: usize, buf: []u8) [:0]const u8 {
     const gib = mib * 1024;
     const f: f64 = @floatFromInt(size);
     const n = if (size >= gib)
-        snprintf(buf.ptr, buf.len, "%.2f GiB", f / @as(f64, @floatFromInt(gib)))
+        libc.snprintf(buf.ptr, buf.len, "%.2f GiB", f / @as(f64, @floatFromInt(gib)))
     else if (size >= mib)
-        snprintf(buf.ptr, buf.len, "%.2f MiB", f / @as(f64, @floatFromInt(mib)))
+        libc.snprintf(buf.ptr, buf.len, "%.2f MiB", f / @as(f64, @floatFromInt(mib)))
     else if (size >= kib)
-        snprintf(buf.ptr, buf.len, "%.2f KiB", f / @as(f64, @floatFromInt(kib)))
+        libc.snprintf(buf.ptr, buf.len, "%.2f KiB", f / @as(f64, @floatFromInt(kib)))
     else
-        snprintf(buf.ptr, buf.len, "%zu B", size);
+        libc.snprintf(buf.ptr, buf.len, "%zu B", size);
     return buf[0..@min(@as(usize, @intCast(n)), buf.len - 1) :0];
 }
-
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
 
 /// Ports `vk_memory_logger` (ggml-vulkan-types.h:1221 @b1b770d90), one per
 /// process here where the C++ keeps one per device; its totals are per
@@ -387,19 +386,17 @@ pub fn destroyBuffer(buf: *?*Buffer) void {
 
 /// Ports `portable_aligned_malloc` (ggml-vulkan-buffers.cpp:8 @b1b770d90).
 fn portableAlignedMalloc(alignment: usize, size: usize) ?*anyopaque {
-    if (builtin.os.tag == .windows) return win32._aligned_malloc(size, alignment);
+    if (builtin.os.tag == .windows) return libc._aligned_malloc(size, alignment);
     var ptr: ?*anyopaque = null;
-    if (posix_memalign(&ptr, alignment, size) != 0) return null;
+    if (libc.posix_memalign(&ptr, alignment, size) != 0) return null;
     return ptr;
 }
 
 /// Ports `portable_aligned_free` (ggml-vulkan-buffers.cpp:20 @b1b770d90).
 fn portableAlignedFree(ptr: ?*anyopaque) void {
-    if (builtin.os.tag == .windows) return win32._aligned_free(ptr);
+    if (builtin.os.tag == .windows) return libc._aligned_free(ptr);
     std.c.free(ptr);
 }
-
-extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
 
 /// Ports `vk_host_allocation` (ggml-vulkan-types.h:1369 @b1b770d90): one
 /// pinned host allocation and the buffer each device maps it through.

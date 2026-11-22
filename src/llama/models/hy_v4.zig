@@ -17,6 +17,7 @@
 //! `kv_cache_dsa.zig`'s.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -488,7 +489,7 @@ fn buildIndexerTopK(b: *const Builder, model: *const Model, inp_attn_dsa: *graph
 
     // Both of the reference's scale factors, folded into the weights
     // before the big score tensor.
-    iw = c.ggml_scale(ctx, iw, 1.0 / impl.sqrtf(@floatFromInt(n_embd_indexer * n_indexer_head)));
+    iw = c.ggml_scale(ctx, iw, 1.0 / libm.sqrtfInt(n_embd_indexer * n_indexer_head));
 
     var score: *Tensor = undefined;
     if (b.cparams.fused_lid) {
@@ -562,7 +563,7 @@ fn buildGraph(model: *const Model, b: *const Builder) void {
     const hp = b.hparams;
     const hc: i64 = hp.dsv4_hc_mult;
     const n_embd_head_k: i64 = hp.nEmbdHeadKMla();
-    const kq_scale = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k));
+    const kq_scale = 1.0 / libm.sqrtfInt(n_embd_head_k);
 
     var cur: *Tensor = undefined;
 

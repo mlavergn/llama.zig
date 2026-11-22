@@ -24,6 +24,7 @@
 //! block after the trunk.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -1061,7 +1062,7 @@ const Graph = struct {
         var sel_idx: *Tensor = undefined;
         {
             var weights: *Tensor = c.ggml_mul_mat(ctx, layer.indexer_proj, cur);
-            weights = c.ggml_scale(ctx, weights, 1.0 / impl.sqrtf(@floatFromInt(n_embd_indexer * n_indexer_head)));
+            weights = c.ggml_scale(ctx, weights, 1.0 / libm.sqrtfInt(n_embd_indexer * n_indexer_head));
             b.cb(weights, "indexer_weights", il);
 
             var score: *Tensor = undefined;
@@ -1175,7 +1176,7 @@ const Graph = struct {
         const n_embd_head_k_mla: i64 = hp.nEmbdHeadKMla();
         const kv_lora_rank: i64 = hp.n_lora_kv;
         const n_embd_head_qk_nope = n_embd_head_k_mla - @as(i64, hp.nRot(0));
-        const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k_mla));
+        const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k_mla);
 
         impl.assert(hp.nRot(0) == 0, src, 1039, "hparams.n_rot() == 0 && \"GLM5-Next MLA is nope-only\"");
 

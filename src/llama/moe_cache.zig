@@ -28,6 +28,8 @@
 //! only ever looked up, so a hash map of any order stands in for them.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const memory = @import("memory.zig");
 const model_mod = @import("model.zig");
@@ -41,11 +43,6 @@ const Model = model_mod.Model;
 
 fn oom() noreturn {
     impl.abort("llama-moe-cache.cpp", 0, "out of memory");
-}
-
-/// `GGML_PAD` over `size_t`.
-fn pad(x: usize, n: usize) usize {
-    return (x + n - 1) & ~(n - 1);
 }
 
 /// Ports `moe_cache_lru` (llama-moe-cache.cpp:25 @b1b770d90): ClassLRU, one
@@ -127,7 +124,7 @@ pub const Lru = struct {
 
     /// Ports `moe_cache_lru`'s `init` (llama-moe-cache.cpp:56 @b1b770d90).
     pub fn init(self: *Lru, n_layer: usize, n_expert: i32, n_slots: i32) void {
-        impl.assert(n_class == @as(c_int, @intFromFloat(impl.log2f(1.0 / (1.0 - impl.exp2f(-1.0 / crf_half_life))))) + 1, "llama-moe-cache.cpp", 57, "n_class == (int) std::log2(1.0f/(1.0f - std::exp2(-1.0f/crf_half_life))) + 1");
+        impl.assert(n_class == @as(c_int, @intFromFloat(libm.log2f(1.0 / (1.0 - libm.exp2f(-1.0 / crf_half_life))))) + 1, "llama-moe-cache.cpp", 57, "n_class == (int) std::log2(1.0f/(1.0f - std::exp2(-1.0f/crf_half_life))) + 1");
         self.n_expert = n_expert;
         self.n_slots = n_slots;
         self.empty = n_slots;
@@ -207,7 +204,7 @@ pub const Lru = struct {
     /// @b1b770d90): for a key after `use`, its CRF is at least 1, so the
     /// log2 is non-negative and the cast is the floor.
     fn classOf(self: *const Lru, key: i32) usize {
-        const cl: c_int = @intFromFloat(impl.log2f(self.crf[@intCast(key)]));
+        const cl: c_int = @intFromFloat(libm.log2f(self.crf[@intCast(key)]));
         return @intCast(@min(n_class - 1, cl));
     }
 
@@ -215,7 +212,7 @@ pub const Lru = struct {
     /// @b1b770d90): the CRF of a key, decayed by the time since its last use.
     fn decayedCrf(self: *const Lru, il: i32, key: i32) f32 {
         const age: i64 = self.clock[@intCast(il)] - self.last_use[@intCast(key)];
-        return self.crf[@intCast(key)] * impl.exp2f(@as(f32, @floatFromInt(-age)) / crf_half_life);
+        return self.crf[@intCast(key)] * libm.exp2f(@as(f32, @floatFromInt(-age)) / crf_half_life);
     }
 
     /// Ports `moe_cache_lru`'s `use` (llama-moe-cache.cpp:126 @b1b770d90):
@@ -701,7 +698,7 @@ pub const MoeCache = struct {
         // within a device the budget is split by the size of the experts, so
         // each group caches the same fraction of its experts
         self.cpu_share_q = @intFromFloat(@round(self.cpu_share * 65536.0));
-        if (std.c.getenv("LLAMA_MOE_CACHE_TRACE")) |path| {
+        if (stdlib.env.getenv("LLAMA_MOE_CACHE_TRACE")) |path| {
             if (path[0] != 0) {
                 self.trace = std.c.fopen(path, "wb");
                 if (self.trace == null) {
@@ -771,17 +768,17 @@ pub const MoeCache = struct {
                 _ = c.ggml_format_name(slot_map, "moe_cache.slot_map-%d", il);
                 l.slot_map = slot_map;
                 self.layer_of.put(allocator, slot_map, .{ .il = il, .has_cpu = false }) catch oom();
-                self.buf_host_size += pad(c.ggml_nbytes(slot_map), alignment_host);
+                self.buf_host_size += stdlib.num.pad(usize, c.ggml_nbytes(slot_map), alignment_host);
                 if (self.n_zero > 0) {
                     const slot_map_cpu: *Tensor = c.ggml_new_tensor_2d(self.ctx_host, c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
                     _ = c.ggml_format_name(slot_map_cpu, "moe_cache.slot_map_cpu-%d", il);
                     l.slot_map_cpu = slot_map_cpu;
                     self.layer_of.put(allocator, slot_map_cpu, .{ .il = il, .has_cpu = true }) catch oom();
-                    self.buf_host_size += pad(c.ggml_nbytes(slot_map_cpu), alignment_host);
+                    self.buf_host_size += stdlib.num.pad(usize, c.ggml_nbytes(slot_map_cpu), alignment_host);
                     const cpu_map: *Tensor = c.ggml_new_tensor_2d(self.ctx_host, c.GGML_TYPE_I32, 1, g.ref.items[0].ne[2]);
                     _ = c.ggml_format_name(cpu_map, "moe_cache.cpu_map-%d", il);
                     l.cpu_map = cpu_map;
-                    self.buf_host_size += pad(c.ggml_nbytes(cpu_map), alignment_host);
+                    self.buf_host_size += stdlib.num.pad(usize, c.ggml_nbytes(cpu_map), alignment_host);
                 }
             }
             self.devices.items[@intCast(g.id)].buf_size += self.allocSize(g, g.n_slots);
@@ -868,7 +865,7 @@ pub const MoeCache = struct {
         const alignment = c.ggml_backend_buft_get_alignment(self.devices.items[@intCast(g.id)].buft);
         var res: usize = 0;
         for (g.ref.items) |t| {
-            res += pad(t.nb[2] * @as(usize, @intCast(n_slots + self.n_zero + 1)), alignment);
+            res += stdlib.num.pad(usize, t.nb[2] * @as(usize, @intCast(n_slots + self.n_zero + 1)), alignment);
         }
         return res;
     }

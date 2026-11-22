@@ -1,4 +1,4 @@
-//! The two clocks the ported tools read, on `std.Io`.
+//! The clocks and sleeps the port reads, on `std.Io`.
 //!
 //! # Provenance
 //!
@@ -31,11 +31,18 @@ pub fn realtimeUs() i64 {
     return @divTrunc(nowNs(.real), 1000);
 }
 
-/// A monotonic clock: `steady_clock`.
+/// `std::chrono::steady_clock::now()`.
 ///
 /// Return: nanoseconds from an arbitrary origin.
-pub fn monotonicNs() u64 {
-    return @intCast(nowNs(steady));
+pub fn steadyNs() i64 {
+    return nowNs(steady);
+}
+
+/// `std::chrono::steady_clock::now()`, in libc++'s microseconds.
+///
+/// Return: microseconds from an arbitrary origin.
+pub fn steadyUs() i64 {
+    return @divTrunc(nowNs(steady), 1000);
 }
 
 /// `time(NULL)`.
@@ -64,6 +71,14 @@ pub fn isoUtc(buf: *[32]u8, t: i64) error{NoSpaceLeft}![]const u8 {
     });
 }
 
+/// `std::this_thread::sleep_for(std::chrono::microseconds(us))`, `usleep`.
+pub fn sleepUs(us: u64) void {
+    const d: std.Io.Clock.Duration = .{ .raw = .fromMicroseconds(@intCast(us)), .clock = .awake };
+    d.sleep(file.defaultIo()) catch |err| switch (err) {
+        error.Canceled => {}, // the global Io cannot be canceled
+    };
+}
+
 /// `std::this_thread::sleep_for(std::chrono::milliseconds(ms))`.
 pub fn sleepMs(ms: u64) void {
     const d: std.Io.Clock.Duration = .{ .raw = .fromMilliseconds(@intCast(ms)), .clock = .awake };
@@ -89,8 +104,8 @@ test {
 }
 
 test "the clocks read sensible values" {
-    const a = monotonicNs();
-    const b = monotonicNs();
+    const a = steadyNs();
+    const b = steadyNs();
     try std.testing.expect(b >= a);
     // After 2020-01-01, in microseconds.
     try std.testing.expect(realtimeUs() > 1_577_836_800_000_000);

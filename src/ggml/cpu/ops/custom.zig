@@ -33,6 +33,7 @@
 //! `j1`, digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -41,8 +42,6 @@ const threading = @import("../threading.zig");
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-
-extern fn sqrtf(x: f32) f32;
 
 /// `memcpy(&p, dst->op_params, sizeof(p))`: the four custom-op parameter
 /// structs share one layout, so one read serves them all.
@@ -322,7 +321,7 @@ fn optStepAdamwF32(params: *const ComputeParams, dst: *Tensor) void {
 
             const mh = m[j00] * beta1h;
             // The left operand of this `+` is a call, not a multiply: plain.
-            const vh = sqrtf(v[j00] * beta2h) + eps;
+            const vh = libm.sqrtf(v[j00] * beta2h) + eps;
 
             // The weight decay is applied independently of the Adam momenta m and v.
             // This is NOT equivalent to l2 regularization that adds w[i00]*w[i00] to the loss.

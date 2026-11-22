@@ -19,12 +19,12 @@
 //! `llama-server`.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
 const arg = @import("arg.zig");
 const params_mod = @import("params.zig");
 const io = @import("io.zig");
 const options1 = @import("arg_options.zig");
-const strings = @import("strings.zig");
 
 const Params = params_mod.Params;
 const Arg = arg.Arg;
@@ -84,7 +84,7 @@ pub fn allKvCacheTypes(a: std.mem.Allocator) ![:0]const u8 {
 /// Ports `parse_device_list` (arg.cpp:1127 @b1b770d90).
 pub fn parseDeviceList(p: *Params, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    const dev_names = try strings.split(p.arena, value, ',');
+    const dev_names = try stdlib.strings.split(p.arena, value, ',');
     if (dev_names.items.len == 0) return throwStr("no devices specified");
     if (dev_names.items.len == 1 and std.mem.eql(u8, dev_names.items[0], "none")) {
         try devices.append(p.arena, null);
@@ -158,7 +158,7 @@ pub fn parseTensorBufferOverrides(p: *Params, value: []const u8, overrides_out: 
         }
     }.lt);
 
-    const overrides = try strings.split(p.arena, value, ',');
+    const overrides = try stdlib.strings.split(p.arena, value, ',');
     for (overrides.items) |override| {
         const pos = std.mem.indexOfScalar(u8, override, '=') orelse return throwStr("invalid value");
         const tensor_name = override[0..pos];
@@ -569,7 +569,7 @@ pub fn add(ctx: *Context) !void {
     try ctx.add(.{ .args = &.{"--list-devices"}, .help = "print list of available devices and exit", .handler = .{ .void_ = struct {
         fn f(q: *Params) !void {
             try printAvailableDevices(q.arena);
-            io.exitFlushed(0);
+            stdlib.stdio.exit(0);
         }
     }.f } });
     // arg.cpp:2765
@@ -774,7 +774,7 @@ pub fn add(ctx: *Context) !void {
         fn f(q: *Params, value: S) !void {
             const items = try options1.parseCsvRow(q.arena, value);
             for (items.items) |item| {
-                if (!try strings.parseKvOverride(item, &q.kv_overrides, q.arena)) {
+                if (!try arg.parseKvOverride(item, &q.kv_overrides, q.arena)) {
                     return throw("error: Invalid type for KV override: %s\n", .{item.ptr});
                 }
             }
@@ -798,7 +798,7 @@ pub fn add(ctx: *Context) !void {
         fn f(q: *Params, value: S) !void {
             const items = try options1.parseCsvRow(q.arena, value);
             for (items.items) |item| {
-                const parts = try strings.split(q.arena, item, ':');
+                const parts = try stdlib.strings.split(q.arena, item, ':');
                 if (parts.items.len != 2) return throwStr("lora-scaled format: FNAME:SCALE");
                 const scale = try arg.stof(try arg.dupe(q, parts.items[1]));
                 try q.lora_adapters.append(q.arena, .{ .path = try arg.dupe(q, parts.items[0]), .scale = scale });
@@ -817,7 +817,7 @@ pub fn add(ctx: *Context) !void {
         fn f(q: *Params, value: S) !void {
             const items = try options1.parseCsvRow(q.arena, value);
             for (items.items) |item| {
-                const parts = try strings.split(q.arena, item, ':');
+                const parts = try stdlib.strings.split(q.arena, item, ':');
                 if (parts.items.len != 2) return throwStr("control-vector-scaled format: FNAME:SCALE");
                 const strength = try arg.stof(try arg.dupe(q, parts.items[1]));
                 try q.control_vectors.append(q.arena, .{ .strength = strength, .fname = try arg.dupe(q, parts.items[0]) });
@@ -834,9 +834,9 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:3032
     try ctx.add((Arg{ .args = &.{ "-a", "--alias" }, .value_hint = "STRING", .help = "set model name aliases, comma-separated (to be used by API)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            const parts = try strings.split(q.arena, value, ',');
+            const parts = try stdlib.strings.split(q.arena, value, ',');
             for (parts.items) |part| {
-                const alias = strings.strip(part);
+                const alias = stdlib.strings.strip(part);
                 if (alias.len != 0) try q.model_alias.insert(q.arena, try arg.dupe(q, alias));
             }
         }
@@ -844,9 +844,9 @@ pub fn add(ctx: *Context) !void {
     // arg.cpp:3044
     try ctx.add((Arg{ .args = &.{"--tags"}, .value_hint = "STRING", .help = "set model tags, comma-separated (informational, not used for routing)", .handler = .{ .string = struct {
         fn f(q: *Params, value: S) !void {
-            const parts = try strings.split(q.arena, value, ',');
+            const parts = try stdlib.strings.split(q.arena, value, ',');
             for (parts.items) |part| {
-                const tag = strings.strip(part);
+                const tag = stdlib.strings.strip(part);
                 if (tag.len != 0) try q.model_tags.insert(q.arena, try arg.dupe(q, tag));
             }
         }

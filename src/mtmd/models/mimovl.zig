@@ -7,12 +7,11 @@
 //! Ports `llama.cpp/tools/mtmd/models/mimovl.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const c = impl.c;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Ports `build_mm` (mimovl.cpp:3 @b1b770d90), a member of
 /// `mtmd_graph_mimovl`: every matmul asks for BF16 accumulation (d6be06557: the
@@ -63,7 +62,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
     const qkv_rows: c_int = @intCast(graph.ne(model.layers.items[0].qkv_w, 1));
     const head_dim = @divTrunc(qkv_rows, n_head + 2 * n_head_kv);
     impl.ggmlAssert(head_dim * (n_head + 2 * n_head_kv) == qkv_rows, "mimovl.cpp", 44, "head_dim * (n_head + 2 * n_head_kv) == qkv_rows");
-    const attn_scale: f32 = 1.0 / sqrtf(@floatFromInt(head_dim));
+    const attn_scale: f32 = 1.0 / libm.sqrtfInt(head_dim);
     const rope_n_dims = @divTrunc(head_dim, 2);
     var mrope_sections = [4]c_int{ @divTrunc(rope_n_dims, 2), @divTrunc(rope_n_dims, 2), 0, 0 };
 

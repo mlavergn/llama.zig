@@ -18,6 +18,8 @@
 //! pointer with a context pointer beside it.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
 const impl = @import("impl.zig");
 const model_mod = @import("model.zig");
 const names = @import("names.zig");
@@ -137,7 +139,7 @@ pub const Graph = struct {
             .n_layer = hp.n_layer,
             .n_mmproj_embd = src.n_mmproj_embd,
             .eps = hp.eps,
-            .kq_scale = if (d_head > 0) 1.0 / sqrtf(@floatFromInt(d_head)) else 0.0,
+            .kq_scale = if (d_head > 0) 1.0 / libm.sqrtfInt(d_head) else 0.0,
             .flash_attn_type = src.flash_attn_type,
             .owns_ctx = true,
             .ctx0 = ctx0,
@@ -674,7 +676,7 @@ pub const Graph = struct {
     pub fn buildRope2d(self: *const Graph, ctx0: ?*c.ggml_context, cur_in: T, pos_a: T, pos_b: T, freq_base: f32, interleave_freq: bool) T {
         _ = self;
         const n_dim = ne(cur_in, 0);
-        const freq_scale_odd: f32 = if (interleave_freq) powf(freq_base, @as(f32, -2) / @as(f32, @floatFromInt(n_dim))) else 1.0;
+        const freq_scale_odd: f32 = if (interleave_freq) libm.powf(freq_base, @as(f32, -2) / @as(f32, @floatFromInt(n_dim))) else 1.0;
 
         // first half, dims [0, n_dim/2)
         var cur = c.ggml_rope_ext(ctx0, cur_in, pos_a, null, @intCast(@divTrunc(n_dim, 2)), 0, 0, freq_base, 1.0, 0.0, 1.0, 0.0, 0.0);
@@ -761,14 +763,9 @@ pub const Graph = struct {
 /// mask `idx`, written into `buf`.
 pub fn attnMaskName(buf: *[32]u8, idx: c_int) [*:0]const u8 {
     if (idx == 0) return "attn_mask";
-    _ = snprintf(buf, buf.len, "attn_mask_%d", idx);
+    _ = libc.snprintf(buf, buf.len, "attn_mask_%d", idx);
     return @ptrCast(buf);
 }
-
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
-
-extern fn sqrtf(x: f32) f32;
-extern fn powf(x: f32, y: f32) f32;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

@@ -18,6 +18,7 @@
 //! way this file counts them.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const types = @import("../types.zig");
 const defs = @import("defs.zig");
@@ -52,10 +53,6 @@ const n_tasks_max: c_int = -1;
 inline fn up(n: i64, m: i64) i64 {
     impl.assert(m & (m - 1) == 0, "(m & (m - 1)) == 0");
     return (n + m - 1) & ~(m - 1);
-}
-
-inline fn min(a: i64, b: i64) i64 {
-    return if (a < b) a else b;
 }
 
 /// Ports `ggml_get_n_tasks` (ggml-cpu.c:2261 @b1b770d90).
@@ -126,13 +123,13 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
         },
 
         // Bounded by the rows there are to split.
-        c.GGML_OP_SOFT_MAX => @intCast(min(n_threads, types.ggml_nrows(impl.one(Tensor, node.src[0])))),
+        c.GGML_OP_SOFT_MAX => @intCast(@min(n_threads, types.ggml_nrows(impl.one(Tensor, node.src[0])))),
 
         // Bounded by the head count, which is where these parallelise.
         c.GGML_OP_RWKV_WKV6,
         c.GGML_OP_GATED_LINEAR_ATTN,
         c.GGML_OP_RWKV_WKV7,
-        => @intCast(min(n_threads, impl.one(Tensor, node.src[1]).ne[1])),
+        => @intCast(@min(n_threads, impl.one(Tensor, node.src[1]).ne[1])),
 
         // The caller chose a task count when it built the node. All four
         // op-params layouts put `n_tasks` in the same place.
@@ -143,7 +140,7 @@ pub fn getNTasks(node: *Tensor, n_threads: c_int) c_int {
         => blk: {
             var p: impl.CustomOpParams = undefined;
             @memcpy(std.mem.asBytes(&p), std.mem.asBytes(&node.op_params)[0..@sizeOf(impl.CustomOpParams)]);
-            break :blk if (p.n_tasks == n_tasks_max) n_threads else @intCast(min(p.n_tasks, n_threads));
+            break :blk if (p.n_tasks == n_tasks_max) n_threads else @intCast(@min(p.n_tasks, n_threads));
         },
 
         c.GGML_OP_COUNT => impl.abort("fatal error"),
@@ -284,7 +281,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             }
 
             // Workspace for tiled (see tiled.h)
-            cur = impl.pad(cur, 64);
+            cur = stdlib.num.pad(usize, cur, 64);
             cur += tiled.ggml_tiled_wdata_size(@intCast(n_tasks), node);
             return cur;
         },
@@ -314,7 +311,7 @@ fn nodeWorkSize(node: *const Tensor, n_tasks: i64) usize {
             // atomic_current_chunk
             cur += defs.cache_line_size * n_as + defs.cache_line_size;
             // Workspace for tiled (see tiled.h)
-            cur = impl.pad(cur, 64);
+            cur = stdlib.num.pad(usize, cur, 64);
             cur += tiled.ggml_tiled_wdata_size(@intCast(n_tasks), node);
 
             return cur;
@@ -562,7 +559,7 @@ test "mul_mat_id reserves room for all four sub-allocations" {
     const chunks = defs.cache_line_size * 3 + defs.cache_line_size;
     // Padded to 64 for the tiled workspace, which an F32 src0
     // never gets.
-    try std.testing.expectEqual(impl.pad(counts + rows + chunks, 64) + tiled.ggml_tiled_wdata_size(4, &node), size);
+    try std.testing.expectEqual(stdlib.num.pad(usize, counts + rows + chunks, 64) + tiled.ggml_tiled_wdata_size(4, &node), size);
     try std.testing.expectEqual(@as(usize, 0), tiled.ggml_tiled_wdata_size(4, &node));
 }
 

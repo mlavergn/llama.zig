@@ -10,6 +10,7 @@
 //! `build_arch_graph`, and its `graph` and `graph_mtp`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -189,7 +190,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const inp_attn = b.buildAttnInpKv();
     const inp_out_ids = b.buildInpOutIds();
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     // The MTP/NextN layers are loaded as extra decoder blocks but not run
     // in the main pass.
@@ -333,7 +334,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
         Qcur = b.buildRope(Qcur, inp_pos, il);
         Kcur = b.buildRope(Kcur, inp_pos, il);
 
-        const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+        const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
         cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
         b.cb(cur, "mtp_attn_out", il);

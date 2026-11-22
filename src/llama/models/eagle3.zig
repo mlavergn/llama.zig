@@ -16,6 +16,7 @@
 //! `build_arch_graph`, and its `graph<is_enc>` with `build_inp_embd_enc`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -256,7 +257,7 @@ fn buildGraphDec(model: *const Model, b: *const graph.Builder) void {
 
     const inp_attn = b.buildAttnInpKv();
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     // The single decoder layer.
     const il: c_int = 0;

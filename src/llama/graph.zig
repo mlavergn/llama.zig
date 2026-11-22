@@ -30,6 +30,8 @@
 //! the table from a type's own `setInput`, `canReuse` and `destroy`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const arch_mod = @import("arch.zig");
 const hparams_mod = @import("hparams.zig");
@@ -207,8 +209,8 @@ pub const AttnMask = struct {
 /// `LLAMA_GRAPH_INPUT_DEBUG`, read in `llm_graph_input_i`'s constructor
 /// (llama-graph.h:108 @b1b770d90).
 fn inputDebug() c_int {
-    const v = std.c.getenv("LLAMA_GRAPH_INPUT_DEBUG") orelse return 0;
-    return impl.atoi(v);
+    const v = stdlib.env.getenv("LLAMA_GRAPH_INPUT_DEBUG") orelse return 0;
+    return stdlib.num.atoiC(v);
 }
 
 /// Ports `llm_graph_input_embd` (llama-graph.h:134 @b1b770d90).
@@ -2130,7 +2132,7 @@ pub const Result = struct {
         const self = allocator.create(Result) catch oom();
         self.* = .{ .max_nodes = max_nodes };
         self.reset();
-        if (std.c.getenv("LLAMA_GRAPH_RESULT_DEBUG")) |v| self.debug = impl.atoi(v);
+        if (stdlib.env.getenv("LLAMA_GRAPH_RESULT_DEBUG")) |v| self.debug = stdlib.num.atoiC(v);
         return self;
     }
 
@@ -2321,8 +2323,6 @@ pub fn mulMatHadamard(ctx: *c.ggml_context, cur: *Tensor, rot: *Tensor) *Tensor 
     return res;
 }
 
-extern "c" fn log(x: f64) f64;
-
 /// Ports `llama_relative_position_bucket` (llama-graph.cpp:4614 @b1b770d90).
 ///
 /// The C++ computes the large-distance bucket for every position, and for
@@ -2349,9 +2349,9 @@ pub fn relativePositionBucket(x: i32, y: i32, n_buckets_: u64, bidirectional: bo
 
     // `logf` of a double narrows it; the product is a float; the division
     // by `log` is in double; `floorf` narrows again.
-    const lf = impl.logf(@floatCast(1.0 * @as(f64, @floatFromInt(relative_position)) / @as(f64, @floatFromInt(max_exact))));
+    const lf = libm.logf(@floatCast(1.0 * @as(f64, @floatFromInt(relative_position)) / @as(f64, @floatFromInt(max_exact))));
     const prod: f32 = lf * @as(f32, @floatFromInt(n_buckets -% @as(u64, @intCast(max_exact))));
-    const v: f64 = @as(f64, @floatFromInt(max_exact)) + @as(f64, prod) / log(1.0 * @as(f64, @floatFromInt(max_distance)) / @as(f64, @floatFromInt(max_exact)));
+    const v: f64 = @as(f64, @floatFromInt(max_exact)) + @as(f64, prod) / libm.log(1.0 * @as(f64, @floatFromInt(max_distance)) / @as(f64, @floatFromInt(max_exact)));
     var relative_position_if_large: i32 = @intFromFloat(@floor(@as(f32, @floatCast(v))));
     relative_position_if_large = @min(relative_position_if_large, @as(i32, @truncate(@as(i64, @bitCast(n_buckets -% 1)))));
     return relative_bucket +% relative_position_if_large;

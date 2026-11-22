@@ -19,7 +19,7 @@
 
 const std = @import("std");
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const unicode = @import("../unicode.zig");
 const vm = @import("module.zig");
 
@@ -351,8 +351,8 @@ pub const Session = struct {
         if (tok_pre == .nemotron_3_5_embd) {
             const zwnj = "\xe2\x80\x8c";
             normalized_text.appendSlice(allocator, text) catch oom();
-            vm.vocab.replaceAll(&normalized_text, "[" ++ zwnj, "[");
-            vm.vocab.replaceAll(&normalized_text, "<" ++ zwnj, "<");
+            impl.replaceAll(&normalized_text, "[" ++ zwnj, "[");
+            impl.replaceAll(&normalized_text, "<" ++ zwnj, "<");
             split_text = normalized_text.items;
         } else if (tok_pre == .soprano) {
             var space = false;

@@ -80,6 +80,7 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     // `cli/fit.zig`, the port of `common/fit.cpp`, shared with the CLI.
     const fit_module = b.createModule(.{ .root_source_file = b.path("cli/fit.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     fit_module.addImport("llama", opts.reference.llama.root_module);
+    fit_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     const common_module = b.createModule(.{ .root_source_file = b.path("tools/common/module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     common_module.addImport("tools_h", tools_h_module);
@@ -88,23 +89,26 @@ pub fn modules(b: *std.Build, opts: Options, optimize: std.builtin.OptimizeMode)
     // libllama's module, for what `common/speculative.cpp` reaches through
     // `llama-ext.h` (C++ linkage, so not in `tools_h`) and for `libcxx`.
     common_module.addImport("llama", opts.reference.llama.root_module);
-    // `io.zig` writes through `sync.stdio`, the one instance libggml flushes.
-    common_module.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    // `io.zig` writes through `stdlib.stdio`, the one instance libggml flushes.
+    common_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     // `json` is `cli_fit`'s `cli/json/` under the name `cli/common_chat/`
     // imports (`tools/server/json_module.zig` says why).
     const json_module = b.createModule(.{ .root_source_file = b.path("tools/server/json_module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     json_module.addImport("cli_fit", fit_module);
+    json_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     // The PEG engine, which `cli/common_chat/chat_peg.zig` imports.
     const peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     peg_module.addImport("json", json_module);
     peg_module.addImport("llama", opts.reference.llama.root_module);
+    peg_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
 
     const chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = opts.target, .optimize = optimize, .link_libc = true });
     chat_module.addImport("json", json_module);
     chat_module.addImport("peg", peg_module);
     chat_module.addImport("llama", opts.reference.llama.root_module);
+    chat_module.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     if (opts.jinja) |j| chat_module.addImport("zigjinja", j);
 
     // libmtmd's port: its `exports.zig` gives the mtmd tools and the server
@@ -151,7 +155,7 @@ pub fn serverModule(b: *std.Build, opts: Options, m: Modules, root_source_file: 
     mod.addImport("tools_h", m.tools_h);
     mod.addImport("cli_fit", m.cli_fit);
     mod.addImport("llama", opts.reference.llama.root_module);
-    mod.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     mod.addImport("mtmd", m.mtmd);
     mod.addImport("ui_assets", ui_assets);
     mod.addImport("json", m.json);
@@ -175,7 +179,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     data.addImport("tools_h", m.tools_h);
     data.addImport("cli_fit", m.cli_fit);
     data.addImport("llama", opts.reference.llama.root_module);
-    data.addImport("sync", llamacpp.syncOf(opts.reference.llama.root_module));
+    data.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     data.addImport("json", m.json);
     data.addImport("common_chat", m.common_chat);
     data.addImport("peg", m.peg);
@@ -192,6 +196,7 @@ pub fn add(b: *std.Build, opts: Options) void {
     port_mod.addImport("tools_common", m.tools_common);
     port_mod.addImport("tools_h", m.tools_h);
     port_mod.addImport("llama", opts.reference.llama.root_module);
+    port_mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     port_mod.addImport("json", m.json);
     port_mod.addImport("common_chat", m.common_chat);
     port_mod.addImport("mtmd", m.mtmd);

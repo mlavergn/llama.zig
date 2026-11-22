@@ -21,6 +21,8 @@
 //! table. See the notes on `cpuFp16ToFp32` and `cpuFp32ToFp16` below.
 
 const std = @import("std");
+const vecinline = @import("ops/vecinline.zig");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const c = impl.c;
@@ -224,8 +226,8 @@ pub fn initTables() void {
     for (0..1 << 16) |i| {
         const f = impl.fp16ToFp32(@intCast(i));
         ggml_table_f32_f16[i] = f;
-        ggml_table_gelu_f16[i] = cpuFp32ToFp16(gelu(f));
-        ggml_table_gelu_quick_f16[i] = cpuFp32ToFp16(geluQuick(f));
+        ggml_table_gelu_f16[i] = cpuFp32ToFp16(vecinline.geluScalarF32(f));
+        ggml_table_gelu_quick_f16[i] = cpuFp32ToFp16(vecinline.geluQuickScalarF32(f));
     }
 
     for (0..1 << 8) |i| {
@@ -237,35 +239,6 @@ pub fn initTables() void {
         ggml_table_f32_f8_e4m3[i] = impl.f8E4m3ToFp32(@intCast(i));
     }
 }
-
-/// Ports `GELU_COEF_A` (vec.h:998 @b1b770d90).
-const gelu_coef_a: f32 = 0.044715;
-
-/// Ports `GELU_QUICK_COEF` (vec.h:999 @b1b770d90).
-const gelu_quick_coef: f32 = -1.702;
-
-/// Ports `SQRT_2_OVER_PI` (vec.h:1000 @b1b770d90).
-const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
-
-/// Ports `ggml_gelu_f32` (vec.h:1003 @b1b770d90).
-///
-/// `static inline` in a header the port cannot import, and used only to fill
-/// the table above, so it lives here rather than being reached across.
-///
-/// The contracted `1.0f + GELU_COEF_A*x*x`, as `geluScalarF32` in
-/// `ops/vecinline.zig`. Unfused, one entry of the 65,536 is one f16 ULP out,
-/// `-1.999` in, which only `ops-diff`'s hash of the whole table can see.
-fn gelu(x: f32) f32 {
-    return 0.5 * x * (1.0 + tanhf(sqrt_2_over_pi * x * @mulAdd(f32, gelu_coef_a * x, x, 1.0)));
-}
-
-/// Ports `ggml_gelu_quick_f32` (vec.h:1065 @b1b770d90).
-fn geluQuick(x: f32) f32 {
-    return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
-}
-
-extern fn tanhf(x: f32) f32;
-extern fn expf(x: f32) f32;
 
 // -----------------------------------------------------------------------------
 // Unit Tests

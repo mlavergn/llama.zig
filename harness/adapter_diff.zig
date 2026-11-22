@@ -40,6 +40,7 @@
 //! Usage: adapter_diff <tmpdir> <model.gguf> [--quick] [--hadamard]
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const input_tensor_order = @import("input_tensor_order.zig");
 const derive_hadamard = @import("derive_hadamard.zig");
 const harness_root = @import("harness_root");
@@ -55,7 +56,6 @@ const gpa = std.heap.c_allocator;
 extern fn adapter_ref_loras_order(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, out_keys: [*]?*anyopaque, out_scales: [*]f32, out_bc: *usize) usize;
 extern fn adapter_ref_loras_find(keys: [*]const ?*anyopaque, scales: [*]const f32, n: usize, key: ?*anyopaque, out_scale: *f32) c_int;
 extern fn truncate(path: [*:0]const u8, len: i64) c_int;
-extern fn access(path: [*:0]const u8, mode: c_int) c_int;
 
 var checks: usize = 0;
 var failures: usize = 0;
@@ -1146,7 +1146,7 @@ pub fn main(init: std.process.Init) !void {
             var embedded = gpa.alloc([:0]u8, files.items.len) catch unreachable;
             defer gpa.free(embedded);
             for (files.items, 0..) |f, i| {
-                const exists = access(f.path.ptr, 0) == 0;
+                const exists = libc.access(f.path.ptr, 0) == 0;
                 embedded[i] = if (exists) embedFile(f.path) else @constCast("");
             }
             ref.clearRetainingCapacity();

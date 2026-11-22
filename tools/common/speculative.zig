@@ -33,8 +33,10 @@
 //! those names through libllama's module.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const ggml = @import("ggml.zig");
-const env_mod = @import("env.zig");
+const env_mod = @import("stdlib").env;
 const c = @import("tools_h");
 const llama = @import("llama");
 const params_mod = @import("params.zig");
@@ -42,7 +44,6 @@ const common = @import("common.zig");
 const log = @import("log.zig");
 const arg = @import("arg.zig");
 const ngram_cache = @import("ngram_cache.zig");
-const fs_stat = @import("fs_stat.zig");
 const ngram_map = @import("ngram_map.zig");
 const ngram_mod = @import("ngram_mod.zig");
 const draft_impls = @import("speculative_draft.zig");
@@ -705,8 +706,8 @@ pub const NgramCache = struct {
                     // std::filesystem::exists: ENOENT and ENOTDIR are an answer, any other errno an error
                     const enoent = 2;
                     const enotdir = 20;
-                    var info: fs_stat.Info = undefined;
-                    const errno = fs_stat.statErrno(path.ptr, true, &info);
+                    var info: stdlib.fs.Info = undefined;
+                    const errno = stdlib.fs.statErrno(path, true, &info);
                     if (errno == enoent or errno == enotdir) {
                         // missing file is created on destruction
                         spcWrn(func, "dynamic lookup cache file does not exist: %s, starting with empty cache\n", .{path.ptr});
@@ -1443,7 +1444,7 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
     for (rates, 0..) |rate, i| {
         result.synth_probs.appendAssumeCapacity(if (rate_prev > 0.0) rate / rate_prev else 0.0);
         var buf: [64]u8 = undefined;
-        const n = snprintf(&buf, buf.len, "%.6g", rate);
+        const n = libc.snprintf(&buf, buf.len, "%.6g", rate);
         if (i > 0) try rates_str.appendSlice(gpa, ", ");
         try rates_str.appendSlice(gpa, buf[0..@intCast(n)]);
         rate_prev = rate;
@@ -1460,8 +1461,6 @@ pub fn init(params: *SpecParams, n_seq: u32) InitError!?*Speculative {
 
     return result;
 }
-
-extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// Ports `common_speculative_free` (speculative.cpp:3057 @b1b770d90).
 pub fn free(spec: ?*Speculative) void {
@@ -1690,7 +1689,7 @@ pub fn printStats(spec: ?*const Speculative) void {
 /// `printf`'s `%.nf` does.
 fn appendFmt(out: *std.ArrayList(u8), comptime fmt: [*:0]const u8, args: anytype) void {
     var buf: [128]u8 = undefined;
-    const n = @call(.auto, snprintf, .{ &buf, buf.len, fmt } ++ args);
+    const n = @call(.auto, libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
     out.appendSlice(gpa, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]) catch oom();
 }
 

@@ -17,6 +17,7 @@
 //! `api.impl.llama_log_set` as well as the C++'s through `llama_log_set`.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const impl = @import("impl.zig");
 
 const c = impl.c;
@@ -29,8 +30,6 @@ pub const LoggerState = struct {
 
 /// Ports `g_logger_state` (llama-impl.cpp:20 @b1b770d90).
 pub var g_logger_state: LoggerState = .{};
-
-extern "c" fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// Ports `llama_log_internal` (llama-impl.cpp:77 @b1b770d90) and
 /// `llama_log_internal_v` (llama-impl.cpp:60 @b1b770d90): formats into 128
@@ -50,7 +49,7 @@ extern "c" fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_in
 /// Return: nothing.
 pub fn logInternal(level: c.enum_ggml_log_level, comptime format: [:0]const u8, args: anytype) void {
     var buffer: [128]u8 = undefined;
-    const len: c_int = @call(.auto, snprintf, .{ &buffer, @as(usize, 128), format.ptr } ++ args);
+    const len: c_int = @call(.auto, libc.snprintf, .{ &buffer, @as(usize, 128), format.ptr } ++ args);
     const cb = g_logger_state.log_callback.?;
     if (len < 128) {
         cb(level, &buffer, g_logger_state.log_callback_user_data);
@@ -58,7 +57,7 @@ pub fn logInternal(level: c.enum_ggml_log_level, comptime format: [:0]const u8, 
         const n: usize = @intCast(len);
         const buffer2 = impl.allocator.alloc(u8, n + 1) catch impl.abort("llama-impl.cpp", 67, "out of memory");
         defer impl.allocator.free(buffer2);
-        _ = @call(.auto, snprintf, .{ buffer2.ptr, n + 1, format.ptr } ++ args);
+        _ = @call(.auto, libc.snprintf, .{ buffer2.ptr, n + 1, format.ptr } ++ args);
         buffer2[n] = 0;
         cb(level, buffer2.ptr, g_logger_state.log_callback_user_data);
     }

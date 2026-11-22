@@ -9,6 +9,7 @@
 //! `graph`. Its loading is `llama_model_ernie4_5`'s, in `ernie4_5.zig`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const model_mod = @import("../model.zig");
 const graph = @import("../graph.zig");
@@ -66,7 +67,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             b.cb(Kcur, "Kcur", il);
             b.cb(Vcur, "Vcur", il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
         }
         if (il == b.n_layer - 1) {
             // Skip computing the output of unused tokens.

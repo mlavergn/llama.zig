@@ -34,13 +34,14 @@
 //! downloaded in its iteration order, which `libcxx.StringMap` reproduces.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const json = @import("json");
 const llama = @import("llama");
 const regex = llama.regex;
-const libcxx = llama.libcxx;
+const libcxx = @import("stdlib").libcxx;
 const common = @import("common.zig");
 const hf_cache = @import("hf_cache.zig");
 const client = @import("httplib/client.zig");
@@ -83,22 +84,13 @@ pub fn commonGetModelEndpoint(a: Allocator) Allocator.Error![]const u8 {
 
 /// Ports `common_get_env` (common/common.cpp:949 @b1b770d90).
 fn getEnv(name: [:0]const u8) []const u8 {
-    return tc.env.get(name) orelse "";
+    return stdlib.env.get(name) orelse "";
 }
 
-/// Ports `get_home_directory` (common/common.cpp:967 @b1b770d90): `HOME`,
-/// else the password database's home.
+/// `get_home_directory` (`tc.arg.homeDirectory`), throwing where it does.
 fn getHomeDirectory() Error![]const u8 {
-    const home = getEnv("HOME");
-    if (home.len != 0) {
-        return home;
-    }
-    const pw = std.c.getpwuid(std.c.getuid());
-    const dir = if (pw) |p| p.dir else null;
-    if (dir == null or dir.?[0] == 0) {
-        return throw(error.RuntimeError, "Failed to find $HOME directory", .{});
-    }
-    return std.mem.span(dir.?);
+    const home = tc.arg.homeDirectory() orelse return throw(error.RuntimeError, "Failed to find $HOME directory", .{});
+    return std.mem.span(home);
 }
 
 /// Ports `fs_get_cache_directory` (common/common.cpp:980 @b1b770d90), its
@@ -111,27 +103,27 @@ pub fn fsGetCacheDirectory(a: Allocator) Error![]const u8 {
         return cache_directory;
     }
     if (comptime builtin.os.tag.isDarwin()) {
-        cache_directory = try hf_cache.pathJoin(a, try getHomeDirectory(), "Library/Caches");
+        cache_directory = try stdlib.path.join(a, try getHomeDirectory(), "Library/Caches");
     } else {
         cache_directory = getEnv("XDG_CACHE_HOME");
         if (cache_directory.len == 0) {
-            cache_directory = try hf_cache.pathJoin(a, try getHomeDirectory(), ".cache");
+            cache_directory = try stdlib.path.join(a, try getHomeDirectory(), ".cache");
         }
     }
-    return hf_cache.pathJoin(a, cache_directory, "llama.cpp");
+    return stdlib.path.join(a, cache_directory, "llama.cpp");
 }
 
 /// Ports `fs_get_cache_file` (common/common.cpp:1017 @b1b770d90): `filename`
 /// in the cache directory, which is created.
 pub fn fsGetCacheFile(a: Allocator, filename: []const u8) Error![]const u8 {
-    common.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1018, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
+    tc.ggml.ggmlAssert(std.mem.indexOfScalar(u8, filename, '/') == null, "common/common.cpp", 1018, "filename.find(DIRECTORY_SEPARATOR) == std::string::npos");
     const cache_directory = try fsGetCacheDirectory(a);
     // `common_create_directories` (common/common.h:944 @b1b770d90): on Linux through
     // `path / ""`, which makes no difference here
-    if (hf_cache.createDirectories(a, cache_directory) != 0) {
+    if (stdlib.fs.createDirectories(cache_directory) != 0) {
         return throw(error.RuntimeError, "failed to create cache directory: {s}", .{cache_directory});
     }
-    return hf_cache.pathJoin(a, cache_directory, filename);
+    return stdlib.path.join(a, cache_directory, filename);
 }
 
 /// Ports `fs_write_atomic` (common/common.cpp:917 @b1b770d90): through a
@@ -143,20 +135,21 @@ pub fn fsWriteAtomic(a: Allocator, path: []const u8, data: []const u8) Error!voi
     @import("httplib/ws.zig").fillRandomBytes(&id_bytes);
     const path_tmp = try std.fmt.allocPrint(a, "{s}.{d}.tmp", .{ path, std.mem.readInt(u64, &id_bytes, .little) });
 
-    const parent = hf_cache.pathParent(path);
+    const parent = stdlib.path.parent(path);
     if (parent.len != 0) {
-        _ = hf_cache.createDirectories(a, parent);
+        _ = stdlib.fs.createDirectories(parent);
     }
 
-    const fail = !hf_cache.writeFile(a, path_tmp, data);
+    // `std::ofstream` written whole: false when it could not be opened or written
+    const fail = if (std.Io.Dir.cwd().writeFile(stdlib.file.defaultIo(), .{ .sub_path = path_tmp, .data = data })) |_| false else |_| true;
 
     var ec = false;
     if (!fail) {
-        ec = cRename(try common.zs(a, path_tmp), try common.zs(a, path)) != 0;
+        ec = stdlib.fs.rename(path_tmp, path) != 0;
     }
 
     if (fail or ec) {
-        _ = hf_cache.removeFile(a, path_tmp);
+        _ = stdlib.fs.removeIfExists(path_tmp);
         return throw(error.RuntimeError, "failed to write file: {s}", .{path});
     }
 }
@@ -370,7 +363,7 @@ fn commonHttpProxyBypass(a: Allocator, no_proxy: []const u8, host: []const u8) A
 
 /// The `getenv_s` lambda of `common_http_client`: the upper-case name first.
 fn getenvS(upper: [:0]const u8, lower: [:0]const u8) []const u8 {
-    return tc.env.get(upper) orelse tc.env.get(lower) orelse "";
+    return stdlib.env.get(upper) orelse stdlib.env.get(lower) orelse "";
 }
 
 /// Ports `common_http_client` (http.h:234 @b1b770d90): a client for the
@@ -609,10 +602,10 @@ fn writeEtag(a: Allocator, path: []const u8, etag: []const u8) Error!void {
 /// `<path>.etag`, or nothing.
 fn readEtag(a: Allocator, path: []const u8) Allocator.Error![]const u8 {
     const etag_path = try std.mem.concat(a, u8, &.{ path, ".etag" });
-    if (!hf_cache.exists(a, etag_path)) {
+    if (!stdlib.fs.exists(etag_path)) {
         return "";
     }
-    const etag = (try hf_cache.readFirstLine(a, etag_path)) orelse {
+    const etag = (try stdlib.file.readFirstLine(stdlib.file.defaultIo(), a, etag_path)) orelse {
         log.err("%s: could not open .etag file for reading: %s\n", .{ @as([*:0]const u8, "read_etag"), try common.zs(a, etag_path) });
         return "";
     };
@@ -627,10 +620,10 @@ fn isHttpStatusOk(status: c_int) bool {
 /// Ports `common_download_split_repo_tag` (download.cpp:71 @b1b770d90):
 /// `user/model:tag` into the repository and the tag, which may be empty.
 pub fn splitRepoTag(a: Allocator, hf_repo_with_tag: []const u8) Error!struct { []const u8, []const u8 } {
-    const parts = try tc.strings.split(a, hf_repo_with_tag, ':');
+    const parts = try stdlib.strings.split(a, hf_repo_with_tag, ':');
     const tag: []const u8 = if (parts.items.len > 1) parts.items[parts.items.len - 1] else "";
     const hf_repo = parts.items[0];
-    const sp = try tc.strings.split(a, hf_repo, '/');
+    const sp = try stdlib.strings.split(a, hf_repo, '/');
     if (sp.items.len != 2) {
         return throw(error.InvalidArgument, "error: invalid HF repo format, expected <user>/<model>[:quant]\n", .{});
     }
@@ -668,7 +661,7 @@ const ProgressBar = struct {
     }
 
     fn isOutputATty() bool {
-        return std.c.isatty(1) != 0;
+        return stdlib.tty.isTty(std.Io.File.stdout());
     }
 
     fn callback(self: *ProgressBar) Callback {
@@ -745,7 +738,7 @@ const ProgressBar = struct {
             io.printf("\x1b[%dB", .{lines_up});
         }
         io.printf("\r", .{});
-        io.flushStdout();
+        stdlib.stdio.stdout().flush();
 
         if (p.downloaded == p.total) {
             cleanup(self);
@@ -756,8 +749,8 @@ const ProgressBar = struct {
 /// The two `httplib::Client::Get` handlers of `common_pull_file`.
 const PullState = struct {
     a: Allocator,
-    fd: c_int,
-    fd_open: bool = true,
+    out: stdlib.file.Out,
+    open: bool = true,
     path_tmp: []const u8,
     p: *Progress,
     callback: ?*const Callback,
@@ -773,9 +766,9 @@ const PullState = struct {
                 // the kept partial cannot be resumed: 416 for a complete or stale one,
                 // 200 from a server that ignores the range; drop it, so the next
                 // attempt starts over instead of wedging on the same answer
-                _ = std.c.close(self.fd);
-                self.fd_open = false;
-                _ = cRemove(common.zs(self.a, self.path_tmp) catch return false);
+                self.out.close(stdlib.file.defaultIo());
+                self.open = false;
+                _ = stdlib.fs.remove(self.path_tmp);
             }
             return false;
         }
@@ -796,15 +789,10 @@ const PullState = struct {
     fn onData(ctx: *anyopaque, data: []const u8) bool {
         const self: *PullState = @ptrCast(@alignCast(ctx));
         const func = "common_pull_file";
-        var off: usize = 0;
-        while (off < data.len) {
-            const n = std.c.write(self.fd, data[off..].ptr, data.len - off);
-            if (n <= 0) {
-                log.err("%s: error writing to file: %s\n", .{ func, common.zs(self.a, self.path_tmp) catch "" });
-                return false;
-            }
-            off += @intCast(n);
-        }
+        self.out.write(data) catch {
+            log.err("%s: error writing to file: %s\n", .{ func, common.zs(self.a, self.path_tmp) catch "" });
+            return false;
+        };
         const p = self.p;
         p.downloaded += data.len;
         self.progress_step += data.len;
@@ -825,20 +813,10 @@ const PullState = struct {
 /// `std::stoull` on a header value; `error.Throw` where it throws (no
 /// digits, out of range).
 fn stoull(s: []const u8) !usize {
-    return switch (tc.num.stoull(s)) {
+    return switch (stdlib.num.stoull(s)) {
         .ok => |v| @intCast(v),
         else => error.Throw,
     };
-}
-const c_stdio = struct {
-    extern "c" fn remove(path: [*:0]const u8) c_int;
-    extern "c" fn rename(old: [*:0]const u8, new: [*:0]const u8) c_int;
-};
-fn cRemove(p: [*:0]const u8) c_int {
-    return c_stdio.remove(p);
-}
-fn cRename(o: [*:0]const u8, n: [*:0]const u8) c_int {
-    return c_stdio.rename(o, n);
 }
 
 /// Ports `common_pull_file` (download.cpp:175 @b1b770d90): a GET appended
@@ -849,15 +827,17 @@ fn cRename(o: [*:0]const u8, n: [*:0]const u8) c_int {
 /// the file did not close cleanly.
 fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path_tmp: []const u8, supports_ranges: bool, p: *Progress, callback: ?*const Callback) Allocator.Error!bool {
     const func = "common_pull_file";
+    const io = stdlib.file.defaultIo();
     const z = try a.dupeSentinel(u8, path_tmp, 0);
-    const fd = std.c.open(z.ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, @as(std.c.mode_t, 0o666));
-    if (fd < 0) {
+    // `std::ofstream(path_tmp, std::ios::binary | std::ios::app)`, written
+    // through: its buffer only delays the same bytes
+    const out = stdlib.file.Out.append(io, path_tmp) catch {
         log.err("%s: error opening local file for writing: %s\n", .{ func, z.ptr });
         return false;
-    }
-    var state: PullState = .{ .a = a, .fd = fd, .path_tmp = path_tmp, .p = p, .callback = callback };
-    defer if (state.fd_open) {
-        _ = std.c.close(fd);
+    };
+    var state: PullState = .{ .a = a, .out = out, .path_tmp = path_tmp, .p = p, .callback = callback };
+    defer if (state.open) {
+        state.out.close(io);
     };
 
     var headers: Headers = .{};
@@ -872,8 +852,8 @@ fn commonPullFile(a: Allocator, cli: *HttpClient, resolve_path: []const u8, path
         return false;
     }
 
-    state.fd_open = false;
-    if (std.c.close(fd) != 0) {
+    state.open = false;
+    if (!state.out.closeChecked(io)) {
         log.err("%s: error closing file: %s\n", .{ func, z.ptr });
         return false;
     }
@@ -906,8 +886,8 @@ const OnlineState = struct {
     /// The `cache_hit` lambda: `alt_path` is the HF snapshot, where the blob
     /// may have been moved when symlinks are unavailable.
     fn cacheHit(self: *const OnlineState) bool {
-        return hf_cache.exists(self.a, self.path) or
-            (self.alt_path.len != 0 and hf_cache.exists(self.a, self.alt_path));
+        return stdlib.fs.exists(self.path) or
+            (self.alt_path.len != 0 and stdlib.fs.exists(self.alt_path));
     }
 
     /// The lambda `lock.acquire` polls.
@@ -1032,23 +1012,23 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
             return st.finish(304); // 304 Not Modified - fake cached response
         }
         // pass this point, the file exists but is different from the server version, so we need to redownload it
-        if (cRemove(try common.zs(a, path)) != 0) {
+        if (stdlib.fs.remove(path) != 0) {
             log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path) });
             return st.finish(-1);
         }
     }
 
     { // silent
-        _ = hf_cache.createDirectories(a, hf_cache.pathParent(path));
+        _ = stdlib.fs.createDirectories(stdlib.path.parent(path));
     }
 
     var success = false;
     var delay: c_int = retry_delay_seconds;
 
     if (!skip_etag and etag.len != 0) {
-        if (hf_cache.exists(a, path_temporary) and !std.mem.eql(u8, try readEtag(a, path_temporary), etag)) {
+        if (stdlib.fs.exists(path_temporary) and !std.mem.eql(u8, try readEtag(a, path_temporary), etag)) {
             log.wrn("%s: partial file does not match the server etag, discarding it: %s\n", .{ func, try common.zs(a, path_temporary) });
-            if (cRemove(try common.zs(a, path_temporary)) != 0) {
+            if (stdlib.fs.remove(path_temporary) != 0) {
                 log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path_temporary) });
                 return st.finish(-1);
             }
@@ -1058,7 +1038,7 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
 
     if (opts.callback) |cb| {
         // report the resume offset, so a resumed file does not start at 0
-        p.downloaded = if (supports_ranges and hf_cache.exists(a, path_temporary)) fileSize(a, path_temporary) else 0;
+        p.downloaded = if (supports_ranges and stdlib.fs.exists(path_temporary)) @intCast(stdlib.fs.fileSize(path_temporary) orelse 0) else 0;
         cb.on_update(cb.ctx, &p);
     }
 
@@ -1069,16 +1049,16 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         };
         if (i != 0) {
             log.wrn("%s: retrying after %d seconds...\n", .{ func, delay });
-            tc.clock.sleepMs(@as(u64, @intCast(@max(delay, 0))) * 1000);
+            stdlib.clock.sleepMs(@as(u64, @intCast(@max(delay, 0))) * 1000);
             delay *= retry_delay_seconds;
         }
 
         var existing_size: usize = 0;
 
-        if (hf_cache.exists(a, path_temporary)) {
+        if (stdlib.fs.exists(path_temporary)) {
             if (supports_ranges) {
-                existing_size = fileSize(a, path_temporary);
-            } else if (cRemove(try common.zs(a, path_temporary)) != 0) {
+                existing_size = @intCast(stdlib.fs.fileSize(path_temporary) orelse 0);
+            } else if (stdlib.fs.remove(path_temporary) != 0) {
                 log.err("%s: unable to delete file: %s\n", .{ func, try common.zs(a, path_temporary) });
                 break;
             }
@@ -1089,13 +1069,13 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
         log.dbg("%s: downloading from %s to %s (etag:%s)...\n", .{ func, try common.zs(a, try commonHttpShowMaskedUrl(a, &parts)), try common.zs(a, path_temporary), try common.zs(a, etag) });
 
         if (try commonPullFile(a, &cli, parts.path, path_temporary, supports_ranges, &p, opts.callback)) {
-            if (cRename(try common.zs(a, path_temporary), try common.zs(a, path)) != 0) {
+            if (stdlib.fs.rename(path_temporary, path) != 0) {
                 log.err("%s: unable to rename file: %s to %s\n", .{ func, try common.zs(a, path_temporary), try common.zs(a, path) });
                 break;
             }
             if (etag.len != 0 and !skip_etag) {
                 try writeEtag(a, path, etag);
-                _ = cRemove(try common.zs(a, try std.mem.concat(a, u8, &.{ path_temporary, ".etag" })));
+                _ = stdlib.fs.remove(try std.mem.concat(a, u8, &.{ path_temporary, ".etag" }));
             }
             success = true;
             break;
@@ -1108,12 +1088,6 @@ fn downloadFileSingleOnline(a: Allocator, url: []const u8, path: []const u8, opt
     }
 
     return st.finish(if (success) hres.status else -1);
-}
-
-fn fileSize(a: Allocator, p: []const u8) usize {
-    const z = a.dupeSentinel(u8, p, 0) catch return 0;
-    const st = tc.fs_stat.stat(z.ptr, true) orelse return 0;
-    return @intCast(st.size);
 }
 
 /// The content receiver of `common_remote_get_content`.
@@ -1202,7 +1176,7 @@ pub fn downloadFileSingle(a: Allocator, url: []const u8, path: []const u8, opts:
         return downloadFileSingleOnline(a, url, path, &online_opts, skip_etag, lock_path, alt_path);
     }
 
-    if (!hf_cache.exists(a, path)) {
+    if (!stdlib.fs.exists(path)) {
         log.err("%s: required file is not available in cache (offline mode): %s\n", .{ func, try common.zs(a, path) });
         return -1;
     }
@@ -1243,7 +1217,7 @@ fn getGgufSplitInfo(a: Allocator, path: []const u8) Error!SplitInfo {
     var m = regex.Match.init();
     defer m.deinit();
 
-    var prefix = tc.strings.removeSuffix(path, ".gguf") orelse return .{};
+    var prefix = stdlib.strings.removeSuffix(path, ".gguf") orelse return .{};
 
     var index: c_int = 1;
     var count: c_int = 1;
@@ -1324,7 +1298,7 @@ fn findBestSibling(a: Allocator, files: []const HfFile, model: []const u8, keywo
     } else {
         model_bits = try extractQuantBits(a, model);
     }
-    const model_parts = (try tc.strings.split(a, model, '/')).items;
+    const model_parts = (try stdlib.strings.split(a, model, '/')).items;
     const model_dir = model_parts.len - 1;
 
     for (files) |f| {
@@ -1334,7 +1308,7 @@ fn findBestSibling(a: Allocator, files: []const HfFile, model: []const u8, keywo
             continue;
         }
 
-        const sib_parts = (try tc.strings.split(a, f.path, '/')).items;
+        const sib_parts = (try stdlib.strings.split(a, f.path, '/')).items;
         const sib_dir = sib_parts.len - 1;
 
         // std::mismatch(model_parts.begin(), model_dir, sib_parts.begin(), sib_dir)
@@ -1936,18 +1910,18 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
     // resolve blob paths from symlinks before deleting snapshot entries
     var blobs_to_check: std.ArrayList([]const u8) = .empty;
     for (to_remove) |p| {
-        if (hf_cache.isSymlink(a, p)) {
-            if (hf_cache.readSymlink(a, p)) |target| {
-                try blobs_to_check.append(a, try hf_cache.lexicallyNormal(a, try hf_cache.pathJoin(a, hf_cache.pathParent(p), target)));
+        if (stdlib.fs.isSymlink(p)) {
+            if (stdlib.fs.readLinkAlloc(a, p)) |target| {
+                try blobs_to_check.append(a, try stdlib.path.normal(a, try stdlib.path.join(a, stdlib.path.parent(p), target)));
             }
         }
     }
 
     // remove snapshot entries
     for (to_remove) |p| {
-        const ec = hf_cache.removeFile(a, p);
+        const ec = stdlib.fs.removeIfExists(p);
         if (ec != 0) {
-            log.wrn("%s: failed to remove %s: %s\n", .{ func, try common.zs(a, p), hf_cache.errMessage(ec) });
+            log.wrn("%s: failed to remove %s: %s\n", .{ func, try common.zs(a, p), stdlib.errno.strerror(ec) });
         }
     }
 
@@ -1959,9 +1933,9 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
     var still_referenced: std.StringHashMapUnmanaged(void) = .empty;
     for (try hf_cache.getCachedFiles(a, repo_id)) |f| {
         const p = f.local_path;
-        if (hf_cache.isSymlink(a, p)) {
-            if (hf_cache.readSymlink(a, p)) |target| {
-                try still_referenced.put(a, try hf_cache.lexicallyNormal(a, try hf_cache.pathJoin(a, hf_cache.pathParent(p), target)), {});
+        if (stdlib.fs.isSymlink(p)) {
+            if (stdlib.fs.readLinkAlloc(a, p)) |target| {
+                try still_referenced.put(a, try stdlib.path.normal(a, try stdlib.path.join(a, stdlib.path.parent(p), target)), {});
             }
         }
     }
@@ -1969,9 +1943,9 @@ fn removeSnapshotEntries(a: Allocator, repo_id: []const u8, to_remove: []const [
     // remove orphaned blobs
     for (blobs_to_check.items) |blob| {
         if (!still_referenced.contains(blob)) {
-            const ec = hf_cache.removeFile(a, blob);
+            const ec = stdlib.fs.removeIfExists(blob);
             if (ec != 0) {
-                log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try common.zs(a, blob), hf_cache.errMessage(ec) });
+                log.wrn("%s: failed to remove blob %s: %s\n", .{ func, try common.zs(a, blob), stdlib.errno.strerror(ec) });
             }
         }
     }
@@ -2026,9 +2000,9 @@ pub const ModelsHandler = struct {
 /// Ports `get_default_local_path` (arg.cpp:329 @b1b770d90): a URL's last
 /// path element, in the cache.
 fn getDefaultLocalPath(a: Allocator, url: []const u8) Error![]const u8 {
-    var f = (try tc.strings.split(a, url, '#')).items[0];
-    f = (try tc.strings.split(a, f, '?')).items[0];
-    const sp = (try tc.strings.split(a, f, '/')).items;
+    var f = (try stdlib.strings.split(a, url, '#')).items[0];
+    f = (try stdlib.strings.split(a, f, '?')).items[0];
+    const sp = (try stdlib.strings.split(a, f, '/')).items;
     return fsGetCacheFile(a, sp[sp.len - 1]);
 }
 

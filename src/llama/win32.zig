@@ -129,6 +129,4 @@ pub extern "kernel32" fn ReleaseSRWLockExclusive(lock: *SRWLOCK) callconv(.winap
 pub extern "c" fn _fileno(stream: *anyopaque) c_int;
 pub extern "c" fn _get_osfhandle(fd: c_int) isize;
 pub extern "c" fn _ftelli64(stream: *anyopaque) i64;
-pub extern "c" fn _aligned_malloc(size: usize, alignment: usize) ?*anyopaque;
-pub extern "c" fn _aligned_free(ptr: ?*anyopaque) void;
 pub extern "c" fn _fseeki64(stream: *anyopaque, offset: i64, whence: c_int) c_int;

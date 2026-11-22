@@ -29,6 +29,8 @@
 //! random strings; `server-task-diff` masks both.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -46,8 +48,6 @@ const TaskResultState = task.TaskResultState;
 const CompletionTokenOutput = task.CompletionTokenOutput;
 const ResponseType = task.ResponseType;
 const StopType = task.StopType;
-
-extern fn time(t: ?*i64) i64;
 
 /// Ports `llama_build_info` (build-info.cpp.in:27 @b1b770d90): `b<number>-<commit>`.
 pub const build_info = std.fmt.comptimePrint("b{d}-{s}", .{ tools.build_info.build_number, tools.build_info.commit });
@@ -453,7 +453,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_final`'s `to_json` (server-task.cpp:312 @b1b770d90).
     fn finalToJson(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
-        common.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
+        tools.ggml.ggmlAssert(f.is_updated, "server-task.cpp", 313, "is_updated && \"update() must be called before to_json()\"");
         return switch (f.res_type) {
             .none => self.finalNonOaicompat(a),
             .oai_cmpl => self.finalOaicompat(a),
@@ -462,7 +462,7 @@ pub const Result = struct {
             .oai_asr => self.finalOaicompatAsr(a),
             .anthropic => if (f.stream) self.finalAnthropicStream(a) else self.finalAnthropic(a),
             else => {
-                common.ggmlAssert(false, "server-task.cpp", 328, "false && \"Invalid task_response_type\"");
+                tools.ggml.ggmlAssert(false, "server-task.cpp", 328, "false && \"Invalid task_response_type\"");
                 unreachable;
             },
         };
@@ -516,7 +516,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat` (server-task.cpp:366 @b1b770d90).
     fn finalOaicompat(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         var logprobs: Value = .null; // OAI default to null
         errdefer logprobs.deinit(a);
         if (!f.stream and f.probs_output.len > 0) {
@@ -593,7 +593,7 @@ pub const Result = struct {
             try choice.put("logprobs", o.done());
         }
 
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
 
         var choices = Value.emptyArray();
         errdefer choices.deinit(a);
@@ -651,7 +651,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_final`'s `to_json_oaicompat_chat_stream` (server-task.cpp:454 @b1b770d90).
     fn finalOaicompatChatStream(self: *Result, a: Allocator) Error!Value {
         const f = &self.kind.cmpl_final;
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         var finish_reason: []const u8 = "length";
         if (f.stop == .word or f.stop == .eos) {
             finish_reason = if (f.oaicompat_msg.tool_calls.items.len == 0) "stop" else "tool_calls";
@@ -791,7 +791,7 @@ pub const Result = struct {
             try output.pushBack(a, try functionCallItem(a, tool_call));
         }
 
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         var res = Obj.init(a);
         errdefer res.deinit();
         try res.put("completed_at", t);
@@ -896,7 +896,7 @@ pub const Result = struct {
             try output.pushBack(a, try output_item.clone(a));
         }
 
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         var response = Obj.init(a);
         errdefer response.deinit();
         try response.put("id", f.oai_resp_id);
@@ -1213,7 +1213,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_partial`'s `to_json` (server-task.cpp:1029 @b1b770d90).
     fn partialToJson(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
-        common.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
+        tools.ggml.ggmlAssert(p.is_updated, "server-task.cpp", 1030, "is_updated && \"update() must be called before to_json()\"");
         if (p.is_begin) {
             return .null; // simply signal to HTTP handler to send the headers and status code
         }
@@ -1225,7 +1225,7 @@ pub const Result = struct {
             .oai_asr => self.partialOaicompatAsr(a),
             .anthropic => self.partialAnthropic(a),
             else => {
-                common.ggmlAssert(false, "server-task.cpp", 1048, "false && \"Invalid task_response_type\"");
+                tools.ggml.ggmlAssert(false, "server-task.cpp", 1048, "false && \"Invalid task_response_type\"");
                 unreachable;
             },
         };
@@ -1260,7 +1260,7 @@ pub const Result = struct {
     /// Ports `server_task_result_cmpl_partial`'s `to_json_oaicompat` (server-task.cpp:1076 @b1b770d90).
     fn partialOaicompat(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
         var logprobs: Value = .null; // OAI default to null
         errdefer logprobs.deinit(a);
         if (p.prob_output.probs.len > 0) {
@@ -1307,7 +1307,7 @@ pub const Result = struct {
     fn partialOaicompatChat(self: *Result, a: Allocator) Error!Value {
         const p = &self.kind.cmpl_partial;
         const first = p.n_decoded == 1;
-        const t = time(null);
+        const t = stdlib.clock.timeSeconds();
 
         var deltas = Value.emptyArray();
         errdefer deltas.deinit(a);
@@ -1326,7 +1326,7 @@ pub const Result = struct {
 
         if (!deltas.empty()) {
             const last_json = try deltas.back();
-            common.ggmlAssert((try last_json.at("choices")).size() >= 1, "server-task.cpp", 1150, "last_json.at(\"choices\").size() >= 1");
+            tools.ggml.ggmlAssert((try last_json.at("choices")).size() >= 1, "server-task.cpp", 1150, "last_json.at(\"choices\").size() >= 1");
 
             if (p.prob_output.probs.len > 0) {
                 var o = Obj.init(a);
@@ -1786,11 +1786,9 @@ pub const Result = struct {
     }
 };
 
-extern fn snprintf(buf: [*]u8, size: usize, fmt: [*:0]const u8, ...) c_int;
-
 /// `std::ostream << double` at the default precision: `%g` with 6 digits.
 fn ostreamDouble(buf: *[64]u8, v: f64) []const u8 {
-    const n = snprintf(buf, buf.len, "%g", v);
+    const n = libc.snprintf(buf, buf.len, "%g", v);
     return buf[0..@intCast(n)];
 }
 

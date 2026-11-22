@@ -314,8 +314,6 @@ pub fn supportsOp(dev_idx: usize, op: *const Tensor) bool {
     }
 }
 
-extern fn log2f(x: f32) f32;
-
 // -----------------------------------------------------------------------------
 // Unit Tests
 

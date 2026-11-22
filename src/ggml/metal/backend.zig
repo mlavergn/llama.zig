@@ -42,7 +42,9 @@
 //! which is why `ggml_backend_init` is not among the exports.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const impl = @import("../impl.zig");
 const mc = @import("device_c.zig");
 const fusion = @import("fusion.zig");
@@ -58,8 +60,6 @@ const allocator = std.heap.c_allocator;
 
 /// Zig 0.16's `std.c` does not declare `setenv`, only `getenv`. The C's
 /// macOS workaround below needs it, so it is declared here.
-extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
-
 /// Ports `GGML_METAL_NAME` (ggml-metal.cpp:15 @b1b770d90).
 const metal_name = "MTL";
 
@@ -937,7 +937,7 @@ pub export fn ggml_backend_metal_reg() callconv(.c) c.ggml_backend_reg_t {
             // The C reads this on every call, outside the `initialized`
             // guard, so a later change still takes effect for a later
             // buffer type. Kept where it is.
-            if (std.c.getenv("GGML_METAL_DEVICES")) |env| {
+            if (stdlib.env.getenv("GGML_METAL_DEVICES")) |env| {
                 g_devices = std.fmt.parseInt(c_int, std.mem.span(env), 10) catch 0;
             }
 
@@ -945,7 +945,7 @@ pub export fn ggml_backend_metal_reg() callconv(.c) c.ggml_backend_reg_t {
             // (kIOGPUCommandBufferCallbackErrorImpactingInteractivity)
             // until a proper fix becomes possible.
             // ref: https://github.com/ggml-org/llama.cpp/issues/20141#issuecomment-4272947703
-            _ = setenv("AGX_RELAX_CDM_CTXSTORE_TIMEOUT", "1", 1);
+            _ = libc.setenv("AGX_RELAX_CDM_CTXSTORE_TIMEOUT", "1", 1);
 
             var i: c_int = 0;
             while (i < g_devices) : (i += 1) {

@@ -27,22 +27,21 @@ const Value = json.Value;
 const Error = exception.Error;
 const Segment = types.Segment;
 const DiffSplit = types.DiffSplit;
-const isSpace = util.isSpace;
 
 /// Ports `trim_whitespace` (chat-auto-parser-helpers.cpp:12 @b1b770d90).
 pub fn trimWhitespace(str: []const u8) []const u8 {
     var start: usize = 0;
-    while (start < str.len and isSpace(str[start])) start += 1;
+    while (start < str.len and std.ascii.isWhitespace(str[start])) start += 1;
     if (start == str.len) return "";
     var end = str.len - 1;
-    while (end > start and isSpace(str[end])) end -= 1;
+    while (end > start and std.ascii.isWhitespace(str[end])) end -= 1;
     return str[start .. end + 1];
 }
 
 /// Ports `trim_leading_whitespace` (chat-auto-parser-helpers.cpp:30 @b1b770d90).
 pub fn trimLeadingWhitespace(str: []const u8) []const u8 {
     var start: usize = 0;
-    while (start < str.len and isSpace(str[start])) start += 1;
+    while (start < str.len and std.ascii.isWhitespace(str[start])) start += 1;
     return str[start..];
 }
 
@@ -50,9 +49,9 @@ pub fn trimLeadingWhitespace(str: []const u8) []const u8 {
 pub fn trimTrailingWhitespace(str: []const u8) []const u8 {
     if (str.len == 0) return "";
     var end = str.len - 1;
-    while (end > 0 and isSpace(str[end])) end -= 1;
+    while (end > 0 and std.ascii.isWhitespace(str[end])) end -= 1;
     // If first char is also whitespace, return empty string
-    if (end == 0 and isSpace(str[0])) return "";
+    if (end == 0 and std.ascii.isWhitespace(str[0])) return "";
     return str[0 .. end + 1];
 }
 

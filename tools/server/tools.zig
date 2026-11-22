@@ -21,10 +21,8 @@
 //! a further union. A C++ throw is an error with its `what()` in
 //! `common.what` (`error.JsonError`'s in `cli/json`'s buffer). Every JSON
 //! value a call builds lives in that call's arena. `std::filesystem` is
-//! ported as far as the tools use it, for POSIX paths:
-//! `lexically_normal`, `operator/`, `filename()`, `directory_iterator`
-//! (readdir order), `is_directory`/`is_regular_file`/`file_size` (through
-//! `stat`) and `create_directories`.
+//! `stdlib.path` and `stdlib.fs`, for POSIX paths; `directory_iterator` is
+//! `stdlib.fs.Dir`, in `readdir`'s order.
 //!
 //! # POSIX only
 //!
@@ -33,9 +31,10 @@
 //! Darwin has run this.
 
 const std = @import("std");
+const sync = stdlib.sync;
+const stdlib = @import("stdlib");
 const json = @import("json");
-const tc = @import("tools_common");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const regex = @import("llama").regex;
 const http = @import("http.zig");
 const common = @import("common.zig");
@@ -44,22 +43,11 @@ const mcp = @import("mcp.zig");
 
 const Value = json.Value;
 const Allocator = std.mem.Allocator;
-const Subproc = tc.subproc.Subproc;
+const Subproc = stdlib.subproc.Subproc;
 const srv = common.srv;
 const throw = common.throw;
 
 const gpa = std.heap.c_allocator;
-
-extern fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-extern fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
-extern fn getcwd(buf: [*]u8, size: usize) ?[*:0]u8;
-extern fn mkdir(path: [*:0]const u8, mode: c_uint) c_int;
-extern fn unlink(path: [*:0]const u8) c_int;
-extern fn pthread_self() usize;
-
-fn errno() c_int {
-    return std.c._errno().*;
-}
 
 // -----------------------------------------------------------------------------
 // internal helpers
@@ -78,7 +66,7 @@ pub const ListKind = enum { files, dirs, all };
 /// once, at first use; nothing here sets it, so reading it each time
 /// gives the same answer.
 fn homeDir() []const u8 {
-    return tc.env.get("HOME") orelse "";
+    return stdlib.env.get("HOME") orelse "";
 }
 
 /// Ports `expand_home` (server-tools.cpp:128 @b1b770d90): a leading `~` or `~/`.
@@ -108,137 +96,6 @@ fn isJunk(name: []const u8) bool {
         if (std.mem.eql(u8, n, name)) return true;
     }
     return false;
-}
-
-// -----------------------------------------------------------------------------
-// std::filesystem, as far as the tools use it (POSIX paths)
-
-fn isAbsolute(p: []const u8) bool {
-    return p.len != 0 and p[0] == '/';
-}
-
-/// `fs::path::operator/`: `rhs` replaces an absolute; otherwise one
-/// separator joins them unless `lhs` is empty or already ends in one.
-fn pathJoin(a: Allocator, lhs: []const u8, rhs: []const u8) ![]u8 {
-    if (isAbsolute(rhs)) return a.dupe(u8, rhs);
-    if (lhs.len == 0 or lhs[lhs.len - 1] == '/') return std.mem.concat(a, u8, &.{ lhs, rhs });
-    return std.mem.concat(a, u8, &.{ lhs, "/", rhs });
-}
-
-/// `fs::path::parent_path()` of a path whose last element is a name.
-fn pathParent(p: []const u8) []const u8 {
-    const slash = std.mem.findScalarLast(u8, p, '/') orelse return "";
-    var end = slash;
-    while (end > 0 and p[end - 1] == '/') end -= 1;
-    if (end == 0) return p[0..1];
-    return p[0..end];
-}
-
-/// `fs::path::lexically_normal()`, as libc++ implements it for POSIX
-/// paths: separators collapsed, `.` dropped, `name/..` folded, `..` at the
-/// root dropped, a trailing separator kept only after a name.
-fn lexicallyNormal(a: Allocator, p: []const u8) ![]u8 {
-    if (p.len == 0) return a.dupe(u8, "");
-    const PartKind = enum { root, name, dotdot };
-    const Part = struct { s: []const u8, k: PartKind };
-    var parts: std.ArrayList(Part) = .empty;
-    var maybe_need_trailing_sep = false;
-    var i: usize = 0;
-    if (p[0] == '/') {
-        try parts.append(a, .{ .s = "/", .k = .root });
-        while (i < p.len and p[i] == '/') i += 1;
-    }
-    while (i < p.len) {
-        const start = i;
-        while (i < p.len and p[i] != '/') i += 1;
-        const name = p[start..i];
-        const trailing_sep = blk: {
-            var j = i;
-            while (j < p.len and p[j] == '/') j += 1;
-            const had_sep = j > i;
-            i = j;
-            break :blk had_sep and j == p.len;
-        };
-        const last: ?PartKind = if (parts.items.len == 0) null else parts.items[parts.items.len - 1].k;
-        if (std.mem.eql(u8, name, ".")) {
-            maybe_need_trailing_sep = true;
-        } else if (std.mem.eql(u8, name, "..")) {
-            if (last == .name) {
-                _ = parts.pop();
-            } else if (last != .root) {
-                try parts.append(a, .{ .s = "..", .k = .dotdot });
-            }
-            maybe_need_trailing_sep = last == .name;
-        } else {
-            try parts.append(a, .{ .s = name, .k = .name });
-            maybe_need_trailing_sep = false;
-        }
-        if (trailing_sep) maybe_need_trailing_sep = true;
-    }
-    if (parts.items.len == 0) return a.dupe(u8, ".");
-    const need_trailing_sep = maybe_need_trailing_sep and parts.items[parts.items.len - 1].k == .name;
-    var result: []u8 = try a.dupe(u8, "");
-    for (parts.items) |part| result = try pathJoin(a, result, part.s);
-    if (need_trailing_sep) result = try std.mem.concat(a, u8, &.{ result, "/" });
-    return result;
-}
-
-/// `fs::current_path(ec)`.
-fn currentPath(a: Allocator) ?[]u8 {
-    var buf: [4096]u8 = undefined;
-    const r = getcwd(&buf, buf.len) orelse return null;
-    return a.dupe(u8, std.mem.span(r)) catch null;
-}
-
-const FileType = enum { none, regular, directory, other };
-
-/// `fs::status(p, ec).type()`, following links.
-fn statType(path: []const u8, size: ?*u64) FileType {
-    var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-    if (path.len >= buf.len) return .none;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    const st = tc.fs_stat.stat(@ptrCast(&buf), true) orelse return .none;
-    if (size) |s| s.* = @intCast(st.size);
-    return switch (st.mode & tc.fs_stat.IFMT) {
-        tc.fs_stat.IFREG => .regular,
-        tc.fs_stat.IFDIR => .directory,
-        else => .other,
-    };
-}
-
-/// `fs::create_directories(p, ec)`.
-///
-/// Return: false on an error.
-fn createDirectories(a: Allocator, p: []const u8) bool {
-    if (p.len == 0) return true;
-    switch (statType(p, null)) {
-        .directory => return true,
-        .none => {},
-        else => return false,
-    }
-    const parent = pathParent(p);
-    if (parent.len != 0 and parent.len < p.len and !createDirectories(a, parent)) return false;
-    const pz = a.dupeSentinel(u8, p, 0) catch return false;
-    if (mkdir(pz.ptr, 0o777) == 0) return true;
-    return statType(p, null) == .directory;
-}
-
-/// The bytes of a whole file, as `std::ifstream` and `ss << f.rdbuf()`
-/// read them: null when it cannot be opened; a read error ends the copy.
-fn readWhole(a: Allocator, path: []const u8) ?[]u8 {
-    const pz = a.dupeSentinel(u8, path, 0) catch return null;
-    const fd = std.c.open(pz.ptr, .{ .ACCMODE = .RDONLY });
-    if (fd < 0) return null;
-    defer _ = std.c.close(fd);
-    var out: std.ArrayList(u8) = .empty;
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = read(fd, &buf, buf.len);
-        if (n <= 0) break;
-        out.appendSlice(a, buf[0..@intCast(n)]) catch return null;
-    }
-    return out.items;
 }
 
 // -----------------------------------------------------------------------------
@@ -289,8 +146,8 @@ fn runSubprocess(
     var proc: Subproc = .{};
     defer proc.deinit();
 
-    var options = tc.subproc.option_no_window | tc.subproc.option_inherit_environment | tc.subproc.option_search_user_path;
-    if (combine_stderr) options |= tc.subproc.option_combined_stdout_stderr;
+    var options = stdlib.subproc.option_no_window | stdlib.subproc.option_inherit_environment | stdlib.subproc.option_search_user_path;
+    if (combine_stderr) options |= stdlib.subproc.option_combined_stdout_stderr;
 
     if (!proc.create(args, options, &.{}, if (cwd.len == 0) null else cwd)) {
         res.output = "failed to spawn process";
@@ -301,20 +158,20 @@ fn runSubprocess(
         done: std.atomic.Value(bool) = .init(false),
         timed_out: std.atomic.Value(bool) = .init(false),
         proc: *Subproc,
-        deadline: i128,
+        deadline: i64,
 
         fn run(self: *@This()) void {
             while (!self.done.load(.seq_cst)) {
-                if (mcp.nowNs() >= self.deadline) {
+                if (stdlib.clock.steadyNs() >= self.deadline) {
                     self.timed_out.store(true, .seq_cst);
                     self.proc.terminate();
                     return;
                 }
-                tc.clock.sleepMs(100);
+                stdlib.clock.sleepMs(100);
             }
         }
     };
-    var tm: Timeout = .{ .proc = &proc, .deadline = mcp.nowNs() + @as(i128, timeout_secs) * std.time.ns_per_s };
+    var tm: Timeout = .{ .proc = &proc, .deadline = stdlib.clock.steadyNs() + @as(i64, timeout_secs) * std.time.ns_per_s };
     const timeout_thread = std.Thread.spawn(.{}, Timeout.run, .{&tm}) catch null;
 
     // write stdin before reading stdout, the child drains stdin as it goes
@@ -322,7 +179,7 @@ fn runSubprocess(
     if (proc.stdinFile()) |in| {
         if (stdin_data) |d| {
             // a short write is not an error by itself, the exit code below decides
-            if (d.len != 0) in.writeStreamingAll(tc.file.defaultIo(), d) catch |err| switch (err) {
+            if (d.len != 0) in.writeStreamingAll(stdlib.file.defaultIo(), d) catch |err| switch (err) {
                 else => {}, // fwrite's count unchecked
             };
         }
@@ -337,7 +194,7 @@ fn runSubprocess(
         var buf: [4096]u8 = undefined;
         while (true) {
             // EINTR is retried; end of file or an error ends the output
-            const len = f.readStreaming(tc.file.defaultIo(), &.{&buf}) catch break;
+            const len = f.readStreaming(stdlib.file.defaultIo(), &.{&buf}) catch break;
             if (truncated) continue;
             if (output.items.len + len <= max_output) {
                 try output.appendSlice(a, buf[0..len]);
@@ -382,17 +239,17 @@ const Basic = struct {
         const p = try expandHome(a, path);
 
         var full: []const u8 = p;
-        if (!isAbsolute(full)) {
+        if (!stdlib.path.isAbsolute(full)) {
             if (self.cwd.len == 0) {
-                const cur = currentPath(a) orelse return p;
-                full = try pathJoin(a, cur, full);
+                const cur = stdlib.fs.currentPathAlloc(a) orelse return p;
+                full = try stdlib.path.join(a, cur, full);
             } else {
-                full = try pathJoin(a, self.cwd, full);
+                full = try stdlib.path.join(a, self.cwd, full);
             }
         }
 
         // drop "." and ".." so they never reach git or the client
-        full = try lexicallyNormal(a, full);
+        full = try stdlib.path.normal(a, full);
         // a trailing ".." normalizes to a path that ends with a separator
         if (full.len > 1 and full[full.len - 1] == '/') full = full[0 .. full.len - 1];
         return full;
@@ -400,46 +257,37 @@ const Basic = struct {
 
     /// Ports `tools_io_basic`'s `is_directory` (server-tools.cpp:330 @b1b770d90).
     fn isDirectory(self: *const Basic, a: Allocator, path: []const u8) !bool {
-        return statType(try self.resolve(a, path), null) == .directory;
+        return stdlib.fs.isDirectory(try self.resolve(a, path));
     }
 
     /// Ports `tools_io_basic`'s `is_regular_file` (server-tools.cpp:335 @b1b770d90).
     fn isRegularFile(self: *const Basic, a: Allocator, path: []const u8) !bool {
-        return statType(try self.resolve(a, path), null) == .regular;
+        return stdlib.fs.isRegularFile(try self.resolve(a, path));
     }
 
     /// Ports `tools_io_basic`'s `file_size` (server-tools.cpp:340 @b1b770d90): a
     /// regular file's size; anything else is an error.
     fn fileSize(self: *const Basic, a: Allocator, path: []const u8, out_size: *u64) !bool {
-        var size: u64 = 0;
-        const ty = statType(try self.resolve(a, path), &size);
-        out_size.* = if (ty == .regular) size else std.math.maxInt(u64);
-        return ty == .regular;
+        const p = try self.resolve(a, path);
+        const regular = stdlib.fs.isRegularFile(p);
+        out_size.* = if (regular) stdlib.fs.fileSize(p) orelse std.math.maxInt(u64) else std.math.maxInt(u64);
+        return regular;
     }
 
     /// Ports `tools_io_basic`'s `read_file` (server-tools.cpp:346 @b1b770d90).
     fn readFile(self: *const Basic, a: Allocator, path: []const u8) !?[]const u8 {
-        return readWhole(a, try self.resolve(a, path));
+        return stdlib.file.readStream(stdlib.file.defaultIo(), a, try self.resolve(a, path)) catch null;
     }
 
     /// Ports `tools_io_basic`'s `write_file` (server-tools.cpp:355 @b1b770d90): parent
     /// directories created first.
     fn writeFile(self: *const Basic, a: Allocator, path: []const u8, content: []const u8) !bool {
         const fpath = try self.resolve(a, path);
-        const parent = pathParent(fpath);
+        const parent = stdlib.path.parent(fpath);
         if (parent.len != 0) {
-            if (!createDirectories(a, parent)) return false;
+            if (stdlib.fs.createDirectories(parent) != 0) return false;
         }
-        const pz = try a.dupeSentinel(u8, fpath, 0);
-        const fd = std.c.open(pz.ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(std.c.mode_t, 0o666));
-        if (fd < 0) return false;
-        defer _ = std.c.close(fd);
-        var off: usize = 0;
-        while (off < content.len) {
-            const n = write(fd, content[off..].ptr, content.len - off);
-            if (n <= 0) return false;
-            off += @intCast(n);
-        }
+        std.Io.Dir.cwd().writeFile(stdlib.file.defaultIo(), .{ .sub_path = fpath, .data = content }) catch return false;
         return true;
     }
 
@@ -448,12 +296,12 @@ const Basic = struct {
     fn listEntries(self: *const Basic, a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind) !ListResult {
         var out: ListResult = .{};
 
-        if (statType(base, null) != .directory) {
+        if (!stdlib.fs.isDirectory(base)) {
             out.err = "path does not exist or is not a directory";
             return out;
         }
 
-        const deadline = mcp.nowNs() + @as(i128, list_entries_timeout) * std.time.ns_per_s;
+        const deadline = stdlib.clock.steadyNs() + @as(i64, list_entries_timeout) * std.time.ns_per_s;
 
         // git ls-files cannot list directories; use the walker when they are requested
         if (kind == .files) {
@@ -468,7 +316,7 @@ const Basic = struct {
                     const l = try a.dupe(u8, line);
                     std.mem.replaceScalar(u8, l, '\\', '/');
                     if (max_depth > 0 and entryDepth(l) > max_depth) continue;
-                    if (try self.isRegularFile(a, try pathJoin(a, base, l))) {
+                    if (try self.isRegularFile(a, try stdlib.path.join(a, base, l))) {
                         try out.entries.append(a, .{ .rel = l, .is_dir = false });
                     }
                 }
@@ -489,7 +337,7 @@ const Basic = struct {
     /// Ports `tools_io_basic`'s `list_entries_fallback` (server-tools.cpp:458 @b1b770d90): a
     /// depth-first walk that lists junk directories without entering them
     /// and never follows a link.
-    fn listEntriesFallback(a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind, deadline: i128, truncated: *bool) !std.ArrayList(ListEntry) {
+    fn listEntriesFallback(a: Allocator, base: []const u8, max_depth: c_int, kind: ListKind, deadline: i64, truncated: *bool) !std.ArrayList(ListEntry) {
         var result: std.ArrayList(ListEntry) = .empty;
 
         const Frame = struct { dir: []const u8, rel_dir: []const u8, depth: c_int };
@@ -497,36 +345,38 @@ const Basic = struct {
         try stack.append(a, .{ .dir = base, .rel_dir = "", .depth = 0 });
 
         while (stack.pop()) |frame| {
-            if (mcp.nowNs() >= deadline) {
+            if (stdlib.clock.steadyNs() >= deadline) {
                 truncated.* = true;
                 return result;
             }
 
-            const dz = try a.dupeSentinel(u8, frame.dir, 0);
-            const dirp = std.c.opendir(dz.ptr) orelse {
-                // permission errors are skipped (skip_permission_denied); anything else is a subtree the caller never sees
-                if (errno() != @backingInt(std.posix.E.ACCES)) truncated.* = true;
-                continue;
+            var dir = switch (stdlib.fs.Dir.open(frame.dir)) {
+                .ok => |d| d,
+                .err => |e| {
+                    // permission errors are skipped (skip_permission_denied); anything else is a subtree the caller never sees
+                    if (e != @backingInt(std.posix.E.ACCES)) truncated.* = true;
+                    continue;
+                },
             };
-            defer _ = std.c.closedir(dirp);
+            defer dir.close();
             while (true) {
-                std.c._errno().* = 0;
-                const ent = std.c.readdir(dirp) orelse {
-                    if (errno() != 0) truncated.* = true;
-                    break;
+                const fname = switch (dir.next()) {
+                    .name => |n| try a.dupe(u8, n),
+                    .end => break,
+                    .err => {
+                        truncated.* = true;
+                        break;
+                    },
                 };
-                if (mcp.nowNs() >= deadline) {
+                if (stdlib.clock.steadyNs() >= deadline) {
                     truncated.* = true;
                     return result;
                 }
-                const fname_z: [*:0]const u8 = @ptrCast(&ent.name);
-                const fname = std.mem.span(fname_z);
-                if (std.mem.eql(u8, fname, ".") or std.mem.eql(u8, fname, "..")) continue;
-                const entry_path = try pathJoin(a, frame.dir, fname);
-                const ty = statType(entry_path, null);
+                const entry_path = try stdlib.path.join(a, frame.dir, fname);
+                const ty = stdlib.fs.fileType(entry_path, true);
                 if (ty == .none) continue; // the status could not be read
                 if (ty == .directory) {
-                    const rel = try pathJoin(a, frame.rel_dir, fname);
+                    const rel = try stdlib.path.join(a, frame.rel_dir, fname);
                     if (kind == .dirs or kind == .all) try result.append(a, .{ .rel = rel, .is_dir = true });
                     // junk directories stay selectable but are never walked: they can be enormous
                     if (isJunk(fname)) continue;
@@ -534,7 +384,7 @@ const Basic = struct {
                         try stack.append(a, .{ .dir = entry_path, .rel_dir = rel, .depth = frame.depth + 1 });
                     }
                 } else if (ty == .regular) {
-                    if (kind == .files or kind == .all) try result.append(a, .{ .rel = try pathJoin(a, frame.rel_dir, fname), .is_dir = false });
+                    if (kind == .files or kind == .all) try result.append(a, .{ .rel = try stdlib.path.join(a, frame.rel_dir, fname), .is_dir = false });
                 }
             }
         }
@@ -545,9 +395,9 @@ const Basic = struct {
     /// Ports `tools_io_basic`'s `is_link` (server-tools.cpp:417 @b1b770d90): a link can
     /// point back to an ancestor, so it is never walked.
     fn isLink(a: Allocator, path: []const u8) bool {
-        const pz = a.dupeSentinel(u8, path, 0) catch return true;
-        const st = tc.fs_stat.stat(pz.ptr, false) orelse return true;
-        return (st.mode & tc.fs_stat.IFMT) == tc.fs_stat.IFLNK;
+        _ = a;
+        const st = stdlib.fs.stat(path, false) orelse return true;
+        return (st.mode & stdlib.fs.IFMT) == stdlib.fs.IFLNK;
     }
 };
 
@@ -614,7 +464,7 @@ const Isolate = struct {
     fn fileSize(self: *const Isolate, a: Allocator, path: []const u8, out_size: *u64) !bool {
         const res = try self.exec(a, &.{ "sh", "-c", "wc -c < \"$1\"", "_", try self.resolve(a, path) }, 64, true);
         if (res.exit_code != 0 or res.timed_out) return false;
-        const p = tc.num.strtoull(res.output, 10);
+        const p = stdlib.num.strtoull(res.output, 10);
         if (p.end == 0 or p.range) return false;
         out_size.* = p.value;
         return true;
@@ -1393,7 +1243,7 @@ fn invokeGrepSearch(a: Allocator, params: *const Value) !Value {
         for (listing.entries.items) |entry| {
             if (!try pathGlobMatch(a, include, entry.rel)) continue;
             if (exclude.len != 0 and try pathGlobMatch(a, exclude, entry.rel)) continue;
-            try files.append(a, .{ .abs = try pathJoin(a, abs_path, entry.rel), .display = entry.rel });
+            try files.append(a, .{ .abs = try stdlib.path.join(a, abs_path, entry.rel), .display = entry.rel });
         }
     } else {
         return errorObj(a, try std.mem.concat(a, u8, &.{ "path does not exist: ", path }));
@@ -1539,28 +1389,21 @@ fn normalizeLineForFuzzyMatch(a: Allocator, line: []const u8) ![]const u8 {
     while (end > 0 and (line[end - 1] == ' ' or line[end - 1] == '\t' or line[end - 1] == '\r')) end -= 1;
     var s: []const u8 = line[0..end];
 
-    const R = struct {
-        fn replaceAll(al: Allocator, str: []const u8, from: []const u8, to: []const u8) ![]const u8 {
-            if (from.len == 0 or std.mem.find(u8, str, from) == null) return str;
-            return std.mem.replaceOwned(u8, al, str, from, to);
-        }
-    };
-
     // smart single quotes -> '
-    for ([_]u8{ 0x98, 0x99, 0x9A, 0x9B }) |b| s = try R.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "'");
+    for ([_]u8{ 0x98, 0x99, 0x9A, 0x9B }) |b| s = try stdlib.strings.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "'");
     // smart double quotes -> "
-    for ([_]u8{ 0x9C, 0x9D, 0x9E, 0x9F }) |b| s = try R.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "\"");
+    for ([_]u8{ 0x9C, 0x9D, 0x9E, 0x9F }) |b| s = try stdlib.strings.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "\"");
     // various dashes -> -
     var b: u8 = 0x90;
-    while (b <= 0x95) : (b += 1) s = try R.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "-");
-    s = try R.replaceAll(a, s, "\xE2\x88\x92", "-"); // minus sign
+    while (b <= 0x95) : (b += 1) s = try stdlib.strings.replaceAll(a, s, &.{ 0xE2, 0x80, b }, "-");
+    s = try stdlib.strings.replaceAll(a, s, "\xE2\x88\x92", "-"); // minus sign
     // special spaces -> ' '
-    s = try R.replaceAll(a, s, "\xC2\xA0", " "); // no-break space
+    s = try stdlib.strings.replaceAll(a, s, "\xC2\xA0", " "); // no-break space
     b = 0x82;
-    while (b <= 0x8A) : (b += 1) s = try R.replaceAll(a, s, &.{ 0xE2, 0x80, b }, " ");
-    s = try R.replaceAll(a, s, "\xE2\x80\xAF", " "); // narrow no-break space
-    s = try R.replaceAll(a, s, "\xE2\x81\x9F", " "); // medium mathematical space
-    s = try R.replaceAll(a, s, "\xE3\x80\x80", " "); // ideographic space
+    while (b <= 0x8A) : (b += 1) s = try stdlib.strings.replaceAll(a, s, &.{ 0xE2, 0x80, b }, " ");
+    s = try stdlib.strings.replaceAll(a, s, "\xE2\x80\xAF", " "); // narrow no-break space
+    s = try stdlib.strings.replaceAll(a, s, "\xE2\x81\x9F", " "); // medium mathematical space
+    s = try stdlib.strings.replaceAll(a, s, "\xE3\x80\x80", " "); // ideographic space
     return s;
 }
 
@@ -1800,15 +1643,15 @@ fn invokeGetInfo(a: Allocator, params: *const Value) !Value {
     // inside an isolate, we always use the linux command
     const res = try io.run(a, &.{ "uname", "-a" }, get_info_max_output, get_info_timeout, null);
     // a failed spawn or a timeout leaves a diagnostic in res.output, which is not an OS name
-    const os_info = if (res.exit_code == 0 and !res.timed_out) tc.strings.strip(res.output) else "unknown";
+    const os_info = if (res.exit_code == 0 and !res.timed_out) stdlib.strings.strip(res.output) else "unknown";
 
     var cwd: []const u8 = common.jsonValue(params, "cwd", []const u8, "");
     if (cwd.len == 0) {
         if (common.jsonValue(params, "runtime", []const u8, "").len == 0) {
-            cwd = currentPath(a) orelse "";
+            cwd = stdlib.fs.currentPathAlloc(a) orelse "";
         } else {
             const pwd = try io.run(a, &.{"pwd"}, get_info_max_output, get_info_timeout, null);
-            cwd = if (pwd.exit_code == 0 and !pwd.timed_out) tc.strings.strip(pwd.output) else "unknown";
+            cwd = if (pwd.exit_code == 0 and !pwd.timed_out) stdlib.strings.strip(pwd.output) else "unknown";
         }
     }
 
@@ -1930,7 +1773,7 @@ const ContainerRuntime = struct {
     image: []const u8,
     container_id: []u8 = &.{},
     proc: Subproc = .{}, // `<engine> run` client that keeps the container alive
-    mutex: mcp.Mutex = .{},
+    mutex: sync.Mutex = .{},
 
     /// Ports `server_tools_container_runtime`'s constructor (server-tools.cpp:1865 @b1b770d90).
     fn create(spec_str: []const u8) !*ContainerRuntime {
@@ -1986,12 +1829,13 @@ const ContainerRuntime = struct {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         const a = arena.allocator();
-        const cidfile = try pathJoin(a, tempDirectoryPath(), try std.fmt.allocPrint(a, "llama-tools-runtime-cid-{d}.tmp", .{pthread_self()}));
-        const cz = try a.dupeSentinel(u8, cidfile, 0);
-        _ = unlink(cz.ptr);
+        // `std::hash<std::thread::id>` is libc++'s `pthread_self()`; any
+        // number that tells this thread's file from another's will do
+        const cidfile = try stdlib.path.join(a, stdlib.fs.tempDirectoryPath(), try std.fmt.allocPrint(a, "llama-tools-runtime-cid-{d}.tmp", .{std.Thread.getCurrentId()}));
+        _ = stdlib.fs.remove(cidfile);
 
         const args = [_][]const u8{ self.bin, "run", "--rm", "-i", "--cidfile", cidfile, self.image, "sh" };
-        const options = tc.subproc.option_no_window | tc.subproc.option_inherit_environment | tc.subproc.option_search_user_path;
+        const options = stdlib.subproc.option_no_window | stdlib.subproc.option_inherit_environment | stdlib.subproc.option_search_user_path;
         if (!self.proc.create(&args, options, &.{}, null)) {
             return throw(error.RuntimeError, "failed to spawn {s} container for tools runtime (image: {s})", .{ self.bin, self.image });
         }
@@ -1999,12 +1843,12 @@ const ContainerRuntime = struct {
         var cid: []const u8 = "";
         var i: usize = 0;
         while (i < 100 and cid.len == 0) : (i += 1) {
-            if (readWhole(a, cidfile)) |text| {
+            if (stdlib.file.readStream(stdlib.file.defaultIo(), a, cidfile) catch null) |text| {
                 cid = if (std.mem.findScalar(u8, text, '\n')) |nl| text[0..nl] else text;
             }
-            if (cid.len == 0) tc.clock.sleepMs(100);
+            if (cid.len == 0) stdlib.clock.sleepMs(100);
         }
-        _ = unlink(cz.ptr);
+        _ = stdlib.fs.remove(cidfile);
         if (cid.len == 0) {
             self.proc.terminate();
             return throw(error.RuntimeError, "timed out waiting for {s} container to start (image: {s})", .{ self.bin, self.image });
@@ -2013,20 +1857,6 @@ const ContainerRuntime = struct {
         self.container_id = try gpa.dupe(u8, cid);
     }
 };
-
-/// `fs::temp_directory_path(ec)`: `TMPDIR`, `TMP`, `TEMP`, `TEMPDIR` or
-/// `/tmp`, which must be a directory; empty on an error.
-fn tempDirectoryPath() []const u8 {
-    var p: []const u8 = "/tmp";
-    for ([_][:0]const u8{ "TMPDIR", "TMP", "TEMP", "TEMPDIR" }) |name| {
-        if (tc.env.get(name)) |v| {
-            p = v;
-            break;
-        }
-    }
-    if (statType(p, null) != .directory) return "";
-    return p;
-}
 
 /// Ports `make_tools_runtime` (server-tools.cpp:1989 @b1b770d90): the
 /// `"<engine>:<image>"` form owns a container; anything else names an
@@ -2409,15 +2239,10 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-test "lexically_normal and resolve agree with std::filesystem on POSIX paths" {
+test "resolve agrees with std::filesystem on POSIX paths" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try std.testing.expectEqualStrings("/a/c", try lexicallyNormal(a, "/a/./b/../c"));
-    try std.testing.expectEqualStrings("/a/", try lexicallyNormal(a, "/a/b/.."));
-    try std.testing.expectEqualStrings("/", try lexicallyNormal(a, "/.."));
-    try std.testing.expectEqualStrings("../x", try lexicallyNormal(a, "../x"));
-    try std.testing.expectEqualStrings(".", try lexicallyNormal(a, "a/.."));
     const io: Basic = .{ .cwd = "/w" };
     try std.testing.expectEqualStrings("/w/s", try io.resolve(a, "s/"));
     try std.testing.expectEqualStrings("/", try io.resolve(a, "/x/.."));

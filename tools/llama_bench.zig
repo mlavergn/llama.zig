@@ -18,6 +18,8 @@
 //! it fails as upstream does when the download fails.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const tc = @import("tools_common");
 const fit = @import("cli_fit");
@@ -33,12 +35,9 @@ comptime {
 
 const gpa = std.heap.c_allocator;
 
-extern fn rand() c_int;
-extern fn setlocale(category: c_int, locale: ?[*:0]const u8) ?[*:0]const u8;
-
 const Override = c.llama_model_tensor_buft_override;
 
-fn fput(f: *io.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
+fn fput(f: *stdlib.stdio.Stream, comptime fmt: [*:0]const u8, args: anytype) void {
     io.fprintf(f, fmt, args);
 }
 
@@ -49,7 +48,7 @@ fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void
 
 /// Ports `get_time_ns` (llama-bench.cpp:40 @b1b770d90).
 fn getTimeNs() u64 {
-    return @import("tools_common").clock.monotonicNs();
+    return @intCast(stdlib.clock.steadyNs());
 }
 
 /// Ports `tensor_buft_override_equal` (llama-bench.cpp:45 @b1b770d90).
@@ -91,7 +90,7 @@ fn join(a: std.mem.Allocator, comptime T: type, values: []const T, delim: []cons
             bool => try out.append(a, if (v) '1' else '0'),
             f64 => {
                 var buf: [64]u8 = undefined;
-                const n = snprintf(&buf, buf.len, "%g", v);
+                const n = libc.snprintf(&buf, buf.len, "%g", v);
                 try out.appendSlice(a, buf[0..@intCast(n)]);
             },
             else => try out.print(a, "{d}", .{v}),
@@ -100,8 +99,6 @@ fn join(a: std.mem.Allocator, comptime T: type, values: []const T, delim: []cons
     }
     return a.dupeSentinel(u8, out.items, 0);
 }
-
-extern fn snprintf(buf: [*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 /// Ports `avg` (llama-bench.cpp:102 @b1b770d90).
 fn avgU64(v: []const u64) u64 {
@@ -155,37 +152,24 @@ fn devInfo(a: std.mem.Allocator, gpu: bool) ![:0]u8 {
     return join(a, [*:0]const u8, list.items, ", ");
 }
 
-/// Ports `string_strip` (common/common.cpp:479 @b1b770d90).
-fn strip(s: []const u8) []const u8 {
-    var start: usize = 0;
-    var end = s.len;
-    while (start < end and isspace(s[start])) start += 1;
-    while (end > start and isspace(s[end - 1])) end -= 1;
-    return s[start..end];
-}
-
-fn isspace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
-
 /// What a thrown `std::invalid_argument` carries out of a parser here.
 const Thrown = error{Throw};
 
 /// Ports `parse_devices_arg` (llama-bench.cpp:144 @b1b770d90).
 fn parseDevicesArg(a: std.mem.Allocator, value: []const u8) !std.ArrayList(c.ggml_backend_dev_t) {
     var devices: std.ArrayList(c.ggml_backend_dev_t) = .empty;
-    const trimmed = strip(value);
+    const trimmed = stdlib.strings.strip(value);
     if (trimmed.len == 0) return arg.throwStr("no devices specified");
     if (std.mem.eql(u8, trimmed, "auto")) return devices;
 
-    const dev_names = try tc.strings.split(a, trimmed, '/');
-    if (dev_names.items.len == 1 and std.mem.eql(u8, strip(dev_names.items[0]), "none")) {
+    const dev_names = try stdlib.strings.split(a, trimmed, '/');
+    if (dev_names.items.len == 1 and std.mem.eql(u8, stdlib.strings.strip(dev_names.items[0]), "none")) {
         try devices.append(a, null);
         return devices;
     }
 
     for (dev_names.items) |name| {
-        const dev_name = strip(name);
+        const dev_name = stdlib.strings.strip(name);
         if (dev_name.len == 0) return arg.throwStr("invalid device specification");
         const z = try a.dupeSentinel(u8, dev_name, 0);
         const dev = c.ggml_backend_dev_by_name(z.ptr);
@@ -367,7 +351,7 @@ fn splitBool(a: std.mem.Allocator, s: []const u8) !std.ArrayList(bool) {
         // `std::getline` yields no empty last token after a final ','
         if (it.index == null and tok.len == 0) break;
         var k: usize = 0;
-        while (k < tok.len and isspace(tok[k])) k += 1;
+        while (k < tok.len and std.ascii.isWhitespace(tok[k])) k += 1;
         const st = k;
         if (k < tok.len and (tok[k] == '+' or tok[k] == '-')) k += 1;
         const ds = k;
@@ -627,12 +611,6 @@ fn typeFromName(s: []const u8) ?c.ggml_type {
     return null;
 }
 
-/// `exit` from the parser, flushing as the C runtime does.
-fn exitWith(code: u8) noreturn {
-    io.flushStdout();
-    tc.cExit(code);
-}
-
 const eql = struct {
     fn f(x: []const u8, ys: []const []const u8) bool {
         for (ys) |y| {
@@ -657,19 +635,19 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     const split_delim = ',';
     if (eql(cur, &.{ "-h", "--help" })) {
         try printUsage(a, argv[0].ptr);
-        exitWith(0);
+        stdlib.stdio.exit(0);
     } else if (std.mem.eql(u8, cur, "--version")) {
-        tc.build_info.print(c.llama_version(), tc.io.stderr());
-        exitWith(0);
+        tc.build_info.print(c.llama_version(), stdlib.stdio.stderr());
+        stdlib.stdio.exit(0);
     } else if (eql(cur, &.{ "-m", "--model" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        try params.model.appendSlice(a, (try tc.strings.split(a, v, split_delim)).items);
+        try params.model.appendSlice(a, (try stdlib.strings.split(a, v, split_delim)).items);
     } else if (eql(cur, &.{ "-hf", "-hfr", "--hf-repo" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        try params.hf_repo.appendSlice(a, (try tc.strings.split(a, v, split_delim)).items);
+        try params.hf_repo.appendSlice(a, (try stdlib.strings.split(a, v, split_delim)).items);
     } else if (eql(cur, &.{ "-hff", "--hf-file" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        try params.hf_file.appendSlice(a, (try tc.strings.split(a, v, split_delim)).items);
+        try params.hf_file.appendSlice(a, (try stdlib.strings.split(a, v, split_delim)).items);
     } else if (eql(cur, &.{ "-hft", "--hf-token" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         params.hf_token = v;
@@ -683,7 +661,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try params.n_gen.appendSlice(a, (try parseIntRange(a, v, false)).items);
     } else if (eql(cur, &.{"-pg"})) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        const p = try tc.strings.split(a, v, ',');
+        const p = try stdlib.strings.split(a, v, ',');
         if (p.items.len != 2) return error.Invalid;
         const x = try arg.stoi(try a.dupeSentinel(u8, p.items[0], 0));
         const y = try arg.stoi(try a.dupeSentinel(u8, p.items[1], 0));
@@ -700,14 +678,14 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{ "-ctk", "--cache-type-k", "-ctv", "--cache-type-v" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         var types: std.ArrayList(c.ggml_type) = .empty;
-        for ((try tc.strings.split(a, v, split_delim)).items) |t| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |t| {
             try types.append(a, typeFromName(t) orelse return error.Invalid);
         }
         const is_k = eql(cur, &.{ "-ctk", "--cache-type-k" });
         try (if (is_k) &params.type_k else &params.type_v).appendSlice(a, types.items);
     } else if (eql(cur, &.{ "-dev", "--device" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |combo| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |combo| {
             const devs = parseDevicesArg(a, combo) catch |e| switch (e) {
                 error.Throw => {
                     io.eprintf("error: %.*s\n", .{ @as(c_int, @intCast(arg.what().len)), arg.what().ptr });
@@ -719,13 +697,13 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         }
     } else if (eql(cur, &.{"--list-devices"})) {
         try tc.arg_options2.printAvailableDevices(a);
-        exitWith(0);
+        stdlib.stdio.exit(0);
     } else if (eql(cur, &.{ "-t", "--threads" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         try params.n_threads.appendSlice(a, (try parseIntRange(a, v, false)).items);
     } else if (eql(cur, &.{ "-C", "--cpu-mask" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        try params.cpu_mask.appendSlice(a, (try tc.strings.split(a, v, split_delim)).items);
+        try params.cpu_mask.appendSlice(a, (try stdlib.strings.split(a, v, split_delim)).items);
     } else if (eql(cur, &.{"--cpu-strict"})) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         try params.cpu_strict.appendSlice(a, (try splitBool(a, v)).items);
@@ -744,7 +722,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{ "-sm", "--split-mode" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         var modes: std.ArrayList(c.llama_split_mode) = .empty;
-        for ((try tc.strings.split(a, v, split_delim)).items) |m| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
             const mode: c.llama_split_mode = if (std.mem.eql(u8, m, "none"))
                 c.LLAMA_SPLIT_MODE_NONE
             else if (std.mem.eql(u8, m, "layer"))
@@ -765,7 +743,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
             .{ "auto", c.LLAMA_LOAD_MODE_AUTO },   .{ "none", c.LLAMA_LOAD_MODE_NONE },             .{ "mmap", c.LLAMA_LOAD_MODE_MMAP },
             .{ "mlock", c.LLAMA_LOAD_MODE_MLOCK }, .{ "mmap+mlock", c.LLAMA_LOAD_MODE_MMAP_MLOCK }, .{ "dio", c.LLAMA_LOAD_MODE_DIRECT_IO },
         };
-        for ((try tc.strings.split(a, v, split_delim)).items) |m| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
             var found: ?c.llama_load_mode = null;
             for (names) |n| {
                 if (std.mem.eql(u8, m, n[0])) found = n[1];
@@ -776,7 +754,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{ "-lzm", "--lazy-mode" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         var modes: std.ArrayList(c.llama_lazy_mode) = .empty;
-        for ((try tc.strings.split(a, v, split_delim)).items) |m| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |m| {
             const mode: c.llama_lazy_mode = if (std.mem.eql(u8, m, "on"))
                 c.LLAMA_LAZY_MODE_ON
             else if (std.mem.eql(u8, m, "auto"))
@@ -806,7 +784,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
     } else if (eql(cur, &.{ "-fa", "--flash-attn" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
         var types: std.ArrayList(c.llama_flash_attn_type) = .empty;
-        for ((try tc.strings.split(a, v, split_delim)).items) |t| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |t| {
             const ty: c.llama_flash_attn_type = if (arg.isTruthy(t))
                 c.LLAMA_FLASH_ATTN_TYPE_ENABLED
             else if (arg.isFalsey(t))
@@ -832,7 +810,7 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         try params.repack.appendSlice(a, (try splitBool(a, v)).items);
     } else if (eql(cur, &.{ "-ts", "--tensor-split" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |ts| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |ts| {
             // split string by ; and /
             const split_arg = try splitSemiSlash(a, ts);
             ggmlAssert(split_arg.items.len <= c.llama_max_devices(), 932, "split_arg.size() <= llama_max_devices()");
@@ -880,10 +858,10 @@ fn parseArg(a: std.mem.Allocator, argv: []const [:0]const u8, i: *usize, cur: []
         params.no_warmup = true;
     } else if (eql(cur, &.{ "-fitt", "--fit-target" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try arg.stoull(x));
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |x| try params.fit_params_target.append(a, try arg.stoull(x));
     } else if (eql(cur, &.{ "-fitc", "--fit-ctx" })) {
         const v = NextVal.get(argv, i) orelse return error.Invalid;
-        for ((try tc.strings.split(a, v, split_delim)).items) |x| {
+        for ((try stdlib.strings.split(a, v, split_delim)).items) |x| {
             try params.fit_params_min_ctx.append(a, @truncate(try arg.stoul(try a.dupeSentinel(u8, x, 0))));
         }
     } else {
@@ -897,7 +875,7 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     var argbuf: []const u8 = "";
     var invalid_param = false;
 
-    if (tc.env.get("HF_TOKEN")) |env| params.hf_token = env;
+    if (stdlib.env.get("HF_TOKEN")) |env| params.hf_token = env;
 
     var i: usize = 1;
     outer: while (i < argv.len) : (i += 1) {
@@ -921,13 +899,13 @@ fn parseCmdParams(a: std.mem.Allocator, argv: []const [:0]const u8) !CmdParams {
     if (invalid_param) {
         io.eprintf("error: invalid parameter for argument: %.*s\n", .{ @as(c_int, @intCast(argbuf.len)), argbuf.ptr });
         try printUsage(a, argv[0].ptr);
-        exitWith(1);
+        stdlib.stdio.exit(1);
     }
 
     if (params.hf_repo.items.len != 0) {
         // no downloader is ported: upstream's path when the download fails
         io.eprintf("error: failed to download model from HuggingFace\n", .{});
-        exitWith(1);
+        stdlib.stdio.exit(1);
     }
 
     // set defaults
@@ -1229,7 +1207,7 @@ const Test = struct {
         const model_type = try a.dupeSentinel(u8, std.mem.sliceTo(&buf, 0), 0);
         // RFC 3339 date-time format
         var time_buf: [32]u8 = undefined;
-        const test_time = try tc.clock.isoUtc(&time_buf, tc.clock.timeSeconds());
+        const test_time = try stdlib.clock.isoUtc(&time_buf, stdlib.clock.timeSeconds());
         return .{
             .cpu_info = try devInfo(a, false),
             .gpu_info = try devInfo(a, true),
@@ -1324,7 +1302,7 @@ const Test = struct {
         }
         for (0..max_nonzero + 1) |i| {
             var buf: [32]u8 = undefined;
-            const n = snprintf(&buf, buf.len, "%.2f", @as(f64, in.tensor_split[i]));
+            const n = libc.snprintf(&buf, buf.len, "%.2f", @as(f64, in.tensor_split[i]));
             try tensor_split_str.appendSlice(a, buf[0..@intCast(n)]);
             if (i < max_nonzero) try tensor_split_str.append(a, '/');
         }
@@ -1356,7 +1334,7 @@ const Test = struct {
             }
             fn f(al: std.mem.Allocator, v: f64) ![]const u8 {
                 var buf: [64]u8 = undefined;
-                const n = snprintf(&buf, buf.len, "%f", v);
+                const n = libc.snprintf(&buf, buf.len, "%f", v);
                 return al.dupe(u8, buf[0..@intCast(n)]);
             }
         };
@@ -1431,7 +1409,7 @@ fn escapeJson(a: std.mem.Allocator, value: []const u8) ![]const u8 {
             try escaped.appendSlice(a, "\\\\");
         } else if (ch <= 0x1f) {
             var buf: [8]u8 = undefined;
-            const n = snprintf(&buf, buf.len, "\\u%04x", ch);
+            const n = libc.snprintf(&buf, buf.len, "\\u%04x", ch);
             try escaped.appendSlice(a, buf[0..@min(@as(usize, @intCast(n)), buf.len - 1)]);
         } else {
             try escaped.append(a, byte);
@@ -1482,7 +1460,7 @@ fn fieldDisplayName(field: []const u8) []const u8 {
 /// Ports `printer` (llama-bench.cpp:1735 @b1b770d90) and its five subclasses.
 const Printer = struct {
     format: OutputFormat,
-    fout: *io.Stream,
+    fout: *stdlib.stdio.Stream,
     a: std.mem.Allocator,
     /// `json_printer::first`.
     first: bool = true,
@@ -1665,38 +1643,38 @@ const Printer = struct {
                 value = t.model_type;
             } else if (std.mem.eql(u8, field, "size")) {
                 const n = if (t.model_size < 1024 * 1024 * 1024)
-                    snprintf(&buf, buf.len, "%.2f MiB", @as(f64, @floatFromInt(t.model_size)) / 1024.0 / 1024.0)
+                    libc.snprintf(&buf, buf.len, "%.2f MiB", @as(f64, @floatFromInt(t.model_size)) / 1024.0 / 1024.0)
                 else
-                    snprintf(&buf, buf.len, "%.2f GiB", @as(f64, @floatFromInt(t.model_size)) / 1024.0 / 1024.0 / 1024.0);
+                    libc.snprintf(&buf, buf.len, "%.2f GiB", @as(f64, @floatFromInt(t.model_size)) / 1024.0 / 1024.0 / 1024.0);
                 value = try a.dupe(u8, buf[0..@intCast(n)]);
             } else if (std.mem.eql(u8, field, "params")) {
                 const n = if (t.model_n_params < 1000 * 1000 * 1000)
-                    snprintf(&buf, buf.len, "%.2f M", @as(f64, @floatFromInt(t.model_n_params)) / 1e6)
+                    libc.snprintf(&buf, buf.len, "%.2f M", @as(f64, @floatFromInt(t.model_n_params)) / 1e6)
                 else
-                    snprintf(&buf, buf.len, "%.2f B", @as(f64, @floatFromInt(t.model_n_params)) / 1e9);
+                    libc.snprintf(&buf, buf.len, "%.2f B", @as(f64, @floatFromInt(t.model_n_params)) / 1e9);
                 value = try a.dupe(u8, buf[0..@intCast(n)]);
             } else if (std.mem.eql(u8, field, "backend")) {
                 value = try Test.getBackend(a);
             } else if (std.mem.eql(u8, field, "test")) {
                 const in = &t.inst;
                 var n = if (in.n_prompt > 0 and in.n_gen == 0)
-                    snprintf(&buf, buf.len, "pp%d", in.n_prompt)
+                    libc.snprintf(&buf, buf.len, "pp%d", in.n_prompt)
                 else if (in.n_gen > 0 and in.n_prompt == 0)
-                    snprintf(&buf, buf.len, "tg%d", in.n_gen)
+                    libc.snprintf(&buf, buf.len, "tg%d", in.n_gen)
                 else
-                    snprintf(&buf, buf.len, "pp%d+tg%d", in.n_prompt, in.n_gen);
+                    libc.snprintf(&buf, buf.len, "pp%d+tg%d", in.n_prompt, in.n_gen);
                 if (in.n_depth > 0) {
                     const len: usize = @intCast(n);
-                    n += snprintf(buf[len..].ptr, buf.len - len, " @ d%d", in.n_depth);
+                    n += libc.snprintf(buf[len..].ptr, buf.len - len, " @ d%d", in.n_depth);
                 }
                 value = try a.dupe(u8, buf[0..@intCast(n)]);
             } else if (std.mem.eql(u8, field, "t/s")) {
-                const n = snprintf(&buf, buf.len, "%.2f ± %.2f", try t.avgTs(a), try t.stdevTs(a));
+                const n = libc.snprintf(&buf, buf.len, "%.2f ± %.2f", try t.avgTs(a), try t.stdevTs(a));
                 value = try a.dupe(u8, buf[0..@intCast(n)]);
             } else if (Test.valueOf(values, field)) |v| {
                 value = v;
             } else {
-                exitWith(1);
+                stdlib.stdio.exit(1);
             }
 
             var width = fieldWidth(field);
@@ -1740,9 +1718,9 @@ fn testPrompt(ctx: ?*c.llama_context, n_prompt: c_int, n_batch: c_int, n_threads
 
     while (n_processed < n_prompt) {
         const n_tokens = @min(n_prompt - n_processed, n_batch);
-        tokens[0] = if (n_processed == 0 and c.llama_vocab_get_add_bos(vocab)) c.llama_vocab_bos(vocab) else @rem(rand(), n_vocab);
+        tokens[0] = if (n_processed == 0 and c.llama_vocab_get_add_bos(vocab)) c.llama_vocab_bos(vocab) else @rem(libc.rand(), n_vocab);
         var i: usize = 1;
-        while (i < n_tokens) : (i += 1) tokens[i] = @rem(rand(), n_vocab);
+        while (i < n_tokens) : (i += 1) tokens[i] = @rem(libc.rand(), n_vocab);
         var batch = tc.common.batchGetOne(gpa, ctx, tokens[0..@intCast(n_tokens)]);
         defer batch.deinit();
         const res = c.llama_process(ctx, c.LLAMA_PROCESS_TYPE_DECODE, batch.get());
@@ -1765,7 +1743,7 @@ fn testGen(ctx: ?*c.llama_context, n_gen: c_int, n_threads: c_int) bool {
     const vocab = c.llama_model_get_vocab(model);
     const n_vocab = c.llama_vocab_n_tokens(vocab);
 
-    var token: c.llama_token = if (c.llama_vocab_get_add_bos(vocab)) c.llama_vocab_bos(vocab) else @rem(rand(), n_vocab);
+    var token: c.llama_token = if (c.llama_vocab_get_add_bos(vocab)) c.llama_vocab_bos(vocab) else @rem(libc.rand(), n_vocab);
 
     var batch = tc.common.Batch.init(gpa, ctx);
     defer batch.deinit();
@@ -1782,7 +1760,7 @@ fn testGen(ctx: ?*c.llama_context, n_gen: c_int, n_threads: c_int) bool {
             return false;
         }
         c.llama_synchronize(ctx);
-        token = @rem(rand(), n_vocab);
+        token = @rem(libc.rand(), n_vocab);
     }
     return true;
 }
@@ -1801,15 +1779,15 @@ fn failTest(comptime msg: [*:0]const u8, ctx: ?*c.llama_context, lmodel: ?*c.lla
     io.eprintf(msg, .{"llama_bench"});
     c.llama_free(ctx);
     c.llama_model_free(lmodel);
-    exitWith(1);
+    stdlib.stdio.exit(1);
 }
 
 /// Ports `llama_bench` (llama-bench.cpp:2256 @b1b770d90).
 fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     const func = "llama_bench";
-    _ = setlocale(4, "C"); // LC_NUMERIC
+    _ = libc.setlocale(4, "C"); // LC_NUMERIC
     // try to set locale for unicode characters in markdown
-    _ = setlocale(2, ".UTF-8"); // LC_CTYPE
+    _ = libc.setlocale(2, ".UTF-8"); // LC_CTYPE
 
     // the C's `NDEBUG` and `__OPTIMIZE__`, as Zig sets them for C
     if (builtin.mode == .debug or builtin.mode == .safe) {
@@ -1842,8 +1820,8 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     }
 
     // initialize printer
-    var p: ?Printer = if (params.output_format == .none) null else .{ .format = params.output_format, .fout = io.stdout(), .a = a };
-    var p_err: ?Printer = if (params.output_format_stderr == .none) null else .{ .format = params.output_format_stderr, .fout = io.stderr(), .a = a };
+    var p: ?Printer = if (params.output_format == .none) null else .{ .format = params.output_format, .fout = stdlib.stdio.stdout(), .a = a };
+    var p_err: ?Printer = if (params.output_format_stderr == .none) null else .{ .format = params.output_format_stderr, .fout = stdlib.stdio.stderr(), .a = a };
 
     if (p) |*pr| try pr.printHeader(&params);
     if (p_err) |*pr| try pr.printHeader(&params);
@@ -1936,7 +1914,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
         c.llama_memory_clear(c.llama_get_memory(ctx), false);
 
         // cool off before the test
-        if (params.delay != 0) try tc.clock.sleepSeconds(@intCast(params.delay));
+        if (params.delay != 0) try stdlib.clock.sleepSeconds(@intCast(params.delay));
 
         var tpp = c.ggml_threadpool_params_default(inst.n_threads);
         if (!tc.arg_options.parseCpuMask(inst.cpu_mask, &tpp.cpumask)) {
@@ -1944,7 +1922,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             io.eprintf("%s: failed to parse cpu-mask: %s\n", .{ func, z.ptr });
             c.llama_free(ctx);
             c.llama_model_free(lmodel);
-            exitWith(1);
+            stdlib.stdio.exit(1);
         }
         tpp.strict_cpu = inst.cpu_strict;
         tpp.poll = @intCast(inst.poll);
@@ -1954,7 +1932,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
             io.eprintf("%s: threadpool create failed : n_threads %d\n", .{ func, tpp.n_threads });
             c.llama_free(ctx);
             c.llama_model_free(lmodel);
-            exitWith(1);
+            stdlib.stdio.exit(1);
         };
 
         c.llama_attach_threadpool(ctx, threadpool, null);
@@ -2041,9 +2019,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 
 /// Ports `main` (tools/llama-bench/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

@@ -33,6 +33,7 @@
 //! computed it on the CPU are gone.
 
 const std = @import("std");
+const libcxx = @import("stdlib").libcxx;
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const model = @import("model.zig");
@@ -41,62 +42,13 @@ const c = impl.c;
 
 const Hparams = model.Hparams;
 
-const libm = struct {
-    /// The `__float2` Apple's `__sincosf_stret` returns.
-    const Float2 = extern struct { sin: f32, cos: f32 };
-    extern "c" fn __sincosf_stret(x: f32) Float2;
-    extern "c" fn __exp10(x: f64) f64;
-    extern "c" fn sinf(x: f32) f32;
-    extern "c" fn cosf(x: f32) f32;
-    extern "c" fn log(x: f64) f64;
-    extern "c" fn log10(x: f64) f64;
-    extern "c" fn pow(x: f64, y: f64) f64;
-    extern "c" fn exp(x: f64) f64;
-    // chatterbox's reference front-end
-    /// The `__double2` Apple's `__sincos_stret` returns.
-    const Double2 = extern struct { sin: f64, cos: f64 };
-    extern "c" fn __sincos_stret(x: f64) Double2;
-    extern "c" fn __exp10f(x: f32) f32;
-    extern "c" fn sin(x: f64) f64;
-    extern "c" fn cos(x: f64) f64;
-    extern "c" fn logf(x: f32) f32;
-    extern "c" fn powf(x: f32, y: f32) f32;
-};
-
-/// Whether the reference compiler treats libm calls as writing `errno`:
-/// clang's `-fmath-errno`, its default off Darwin. With it off -- Darwin --
-/// clang folds a `sinf`/`cosf` pair on one argument into Apple's
-/// `__sincosf_stret`, which rounds differently from the separate calls, and
-/// turns `pow(10.0, x)` into `__exp10(x)`. Both measured from the imports of
-/// the reference `mtmd-audio.o` (`___sincosf_stret`, `___exp10`); the same
-/// rule as `src/ggml/cpu/simd.zig`'s `math_errno`.
-const math_errno = !builtin.os.tag.isDarwin();
-
-/// `sinf(x)` and `cosf(x)` as clang emits the pair.
-pub fn sinCos(x: f32) [2]f32 {
-    if (comptime !math_errno) {
-        const r = libm.__sincosf_stret(x);
-        return .{ r.sin, r.cos };
-    }
-    return .{ libm.sinf(x), libm.cosf(x) };
-}
-
-/// `pow(10.0, x)` as clang emits it.
-fn pow10(x: f64) f64 {
-    if (comptime !math_errno) return libm.__exp10(x);
-    return libm.pow(10.0, x);
-}
+const libm = @import("stdlib").libm;
 
 /// `M_PI`.
 const m_pi: f64 = 3.14159265358979323846;
 
 fn ggmlAssert(ok: bool, comptime line: c_int, comptime expr: [*:0]const u8) void {
     impl.ggmlAssert(ok, "mtmd-audio.cpp", line, expr);
-}
-
-/// `std::max(a, b)`: `(a < b) ? b : a`, which picks `a` on a NaN.
-fn maxF64(a: f64, b: f64) f64 {
-    return if (a < b) b else a;
 }
 
 /// Ports `mtmd_audio_mel` (mtmd-audio.h:13 @b1b770d90): `n_mel` rows of
@@ -141,9 +93,9 @@ pub const Cache = struct {
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             const theta: f64 = (2 * m_pi * @as(f64, @floatFromInt(i))) / @as(f64, @floatFromInt(n));
-            const sc = sinCos(@floatCast(theta));
-            self.sin_vals.items[i] = sc[0];
-            self.cos_vals.items[i] = sc[1];
+            const sc = libm.sinCos(@floatCast(theta));
+            self.sin_vals.items[i] = sc.sin;
+            self.cos_vals.items[i] = sc.cos;
         }
     }
 
@@ -190,7 +142,7 @@ pub const Cache = struct {
                 return if (f_hz < min_log_hz) f_hz * lin_slope else min_log_mel + libm.log(f_hz / min_log_hz) / s.log_step;
             }
             fn melToHz(s: @This(), m: f64) f64 {
-                if (s.htk) return 700.0 * (pow10(m / 2595.0) - 1.0);
+                if (s.htk) return 700.0 * (libm.pow10(m / 2595.0) - 1.0);
                 return if (m < min_log_mel) m / lin_slope else min_log_hz * libm.exp((m - min_log_mel) * s.log_step);
             }
         };
@@ -225,9 +177,9 @@ pub const Cache = struct {
             const f_center = hz_pts[m + 1];
             const f_right = hz_pts[m + 2];
 
-            const denom_l = maxF64(1e-30, f_center - f_left);
-            const denom_r = maxF64(1e-30, f_right - f_center);
-            const enorm: f64 = if (slaney_area_norm) (2.0 / maxF64(1e-30, f_right - f_left)) else 1.0;
+            const denom_l = libcxx.max(f64, 1e-30, f_center - f_left);
+            const denom_r = libcxx.max(f64, 1e-30, f_right - f_center);
+            const enorm: f64 = if (slaney_area_norm) (2.0 / libcxx.max(f64, 1e-30, f_right - f_left)) else 1.0;
 
             var k: c_int = 0;
             while (k < n_fft_bins) : (k += 1) {
@@ -589,7 +541,7 @@ pub fn logMelFrame(cache: *const Cache, samples: [*]const f32, n_fft: c_int, n_m
         for (0..n_fft_bins) |k| {
             sum += fft_out[k] * cache.filters.data.items[j * n_fft_bins + k];
         }
-        out[j] = @floatCast(libm.log10(maxF64(sum, 1e-10)));
+        out[j] = @floatCast(libm.log10(libcxx.max(f64, sum, 1e-10)));
     }
 }
 
@@ -726,29 +678,6 @@ fn logMelSpectrogram(samples_in: []const f32, params: *const MelConfig, cache: *
 // -----------------------------------------------------------------------------
 // chatterbox's reference front-end
 
-/// `sin(x)` and `cos(x)` in `double` as clang emits the pair: Apple's
-/// `__sincos_stret` on Darwin (measured from the reference `mtmd-audio.o`'s
-/// imports), the separate calls under `-fmath-errno`.
-fn sinCosF64(x: f64) [2]f64 {
-    if (comptime !math_errno) {
-        const r = libm.__sincos_stret(x);
-        return .{ r.sin, r.cos };
-    }
-    return .{ libm.sin(x), libm.cos(x) };
-}
-
-/// `powf(10.0f, x)` as clang emits it: `__exp10f` on Darwin (measured from
-/// the reference `mtmd-audio.o`'s imports).
-fn pow10f(x: f32) f32 {
-    if (comptime !math_errno) return libm.__exp10f(x);
-    return libm.powf(10.0, x);
-}
-
-/// `std::max(a, b)` over `float`: `(a < b) ? b : a`.
-fn maxF32(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
-
 /// The FFT buffers upstream's chatterbox helpers allocate per call:
 /// `fft_in` of `2 * n_fft` and `fft_out` of `8 * n_fft`, zeroed.
 const CbxFftBufs = struct {
@@ -839,7 +768,7 @@ fn cbxS3tokLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList
         cbxReflectFrame(samples.ptr, n, fr * hop - @divTrunc(n_fft, 2), cache.hann_window.items, bufs.in);
         try cbxMelEnergies(cache, bufs.in, bufs.out, false, &e);
         for (0..n_mel) |m| {
-            mel[m * nf + fru] = libm.log10(maxF64(e.items[m], 1e-10));
+            mel[m * nf + fru] = libm.log10(libcxx.max(f64, e.items[m], 1e-10));
         }
     }
 
@@ -851,7 +780,7 @@ fn cbxS3tokLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayList
     out.clearRetainingCapacity();
     try out.resize(gpa, mel.len);
     for (out.items, mel) |*o, v| {
-        o.* = @floatCast((maxF64(v, mx - 8.0) + 4.0) / 4.0);
+        o.* = @floatCast((libcxx.max(f64, v, mx - 8.0) + 4.0) / 4.0);
     }
     return true;
 }
@@ -910,7 +839,7 @@ fn cbxMatchaLogMel(cache: *const Cache, samples: []const f32, out: *std.ArrayLis
         cbxReflectFrame(samples.ptr, n, fr * hop - pad, cache.hann_window.items, bufs.in);
         try cbxMelEnergies(cache, bufs.in, bufs.out, true, &e);
         for (0..n_mel) |m| {
-            out.items[fru * n_mel + m] = libm.logf(maxF32(@floatCast(e.items[m]), 1e-5));
+            out.items[fru * n_mel + m] = libm.logf(libcxx.max(f32, @floatCast(e.items[m]), 1e-5));
         }
     }
     return true;
@@ -940,7 +869,7 @@ fn cbxTrimSilence(samples: []const f32, top_db: f32, start: *usize, end: *usize)
             }
         }
         r.* = @sqrt(acc / @as(f64, win));
-        mx = maxF64(mx, r.*);
+        mx = libcxx.max(f64, mx, r.*);
     }
 
     // the call is inlined with a constant `top_db`, so clang folds the pow
@@ -1020,7 +949,7 @@ fn cbxGatedMean(z: []const f64, thr_lufs: f64) f64 {
     var acc: f64 = 0.0;
     var n: c_int = 0;
     for (z) |v| {
-        if (@mulAdd(f64, 10.0, libm.log10(maxF64(v, 1e-30)), -0.691) > thr_lufs) {
+        if (@mulAdd(f64, 10.0, libm.log10(libcxx.max(f64, v, 1e-30)), -0.691) > thr_lufs) {
             acc += v;
             n += 1;
         }
@@ -1041,9 +970,9 @@ fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
         // a constant argument: clang folds the pow through the host's `pow`
         const A = libm.pow(10.0, @as(f64, 3.99984385397) / 40.0);
         const w0 = 2.0 * m_pi * 1681.9744509555319 / sr;
-        const sc = sinCosF64(w0);
-        const alpha = sc[0] / (2.0 * 0.7071752369554196);
-        const cw = sc[1];
+        const sc = libm.sinCos64(w0);
+        const alpha = sc.sin / (2.0 * 0.7071752369554196);
+        const cw = sc.cos;
         const sq = 2.0 * @sqrt(A) * alpha;
         const b0 = A * (@mulAdd(f64, A - 1.0, cw, A + 1.0) + sq);
         const b1 = -2.0 * A * @mulAdd(f64, A + 1.0, cw, A - 1.0);
@@ -1056,9 +985,9 @@ fn cbxLufs(samples: []const f32, sample_rate: c_int) !f32 {
     // stage 2: high pass, f0 38.13547087602444 Hz, Q 0.5003270373238773
     {
         const w0 = 2.0 * m_pi * 38.13547087602444 / sr;
-        const sc = sinCosF64(w0);
-        const alpha = sc[0] / (2.0 * 0.5003270373238773);
-        const cw = sc[1];
+        const sc = libm.sinCos64(w0);
+        const alpha = sc.sin / (2.0 * 0.5003270373238773);
+        const cw = sc.cos;
         const b0 = (1.0 + cw) / 2.0;
         const b1 = -(1.0 + cw);
         const b2 = (1.0 + cw) / 2.0;
@@ -1214,7 +1143,7 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
     if (!self.is_mtl) {
         const lufs = try cbxLufs(pcm, sr);
         if (lufs != -std.math.inf(f32)) {
-            const gain = pow10f((-27.0 - lufs) / 20.0);
+            const gain = libm.pow10f((-27.0 - lufs) / 20.0);
             if (std.math.isFinite(gain) and gain > 0.0) {
                 for (pcm) |*v| v.* *= gain;
             }
@@ -1259,7 +1188,7 @@ fn cbxRefPreprocess(self: *const Preprocessor, samples: []const f32, output: *st
             }
             try cbxMelEnergies(&self.cache, bufs.in, bufs.out, false, &e);
             for (0..nm) |m| {
-                out.data.items[m * nf + fr] = @floatCast(libm.log(maxF64(e.items[m], @as(f64, std.math.floatEps(f32)))));
+                out.data.items[m * nf + fr] = @floatCast(libm.log(libcxx.max(f64, e.items[m], @as(f64, std.math.floatEps(f32)))));
             }
         }
 
@@ -1762,7 +1691,7 @@ pub const Preprocessor = struct {
                 if (v > mmax) mmax = v;
             }
             mmax -= 8.0;
-            for (mel_full.data.items) |*v| v.* = @floatCast((maxF64(v.*, mmax) + 4.0) / 4.0);
+            for (mel_full.data.items) |*v| v.* = @floatCast((libcxx.max(f64, v.*, mmax) + 4.0) / 4.0);
         }
 
         // the center-padded STFT gives ~n_samples/hop_length frames
@@ -1831,14 +1760,14 @@ pub const Preprocessor = struct {
             var m: i64 = 0;
             while (m < out.n_mel) : (m += 1) {
                 var t: i64 = 0;
-                while (t < n_valid) : (t += 1) mmax = maxF64(mmax, mel_full.data.items[@intCast(m * mel_full.n_len + t)]);
+                while (t < n_valid) : (t += 1) mmax = libcxx.max(f64, mmax, mel_full.data.items[@intCast(m * mel_full.n_len + t)]);
             }
             mmax -= 8.0;
             m = 0;
             while (m < out.n_mel) : (m += 1) {
                 var t: i64 = 0;
                 while (t < n_valid) : (t += 1) {
-                    const v = maxF64(mel_full.data.items[@intCast(m * mel_full.n_len + t)], mmax);
+                    const v = libcxx.max(f64, mel_full.data.items[@intCast(m * mel_full.n_len + t)], mmax);
                     out.data.items[@intCast(m * n_valid + t)] = @floatCast((v + 4.0) / 4.0);
                 }
             }

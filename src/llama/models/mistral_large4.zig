@@ -10,6 +10,7 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -247,7 +248,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // YaRN is used without magnitude scaling (apply_scale = false), so
     // there is no mscale in kq_scale.
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head_k));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head_k);
 
     // {n_embd, n_tokens}
     var inpL = b.buildInpEmbd(model.tok_embd.?);
@@ -346,7 +347,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 indexer_weights = c.ggml_view_4d(ctx, indexer_weights, indexer_weights.ne[0], @divTrunc(indexer_weights.ne[1], n_stream), indexer_weights.ne[2], n_stream, indexer_weights.nb[1], indexer_weights.nb[2] / ns, indexer_weights.nb[3] / ns, 0);
 
                 // The weights pre-scaled, to avoid scaling the huge indexer_score tensor.
-                indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / impl.sqrtf(@floatFromInt(n_embd_indexer_head * n_indexer_head)));
+                indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / libm.sqrtfInt(n_embd_indexer_head * n_indexer_head));
                 b.cb(indexer_weights, "indexer_weights", il);
 
                 var indexer_score: *Tensor = undefined;

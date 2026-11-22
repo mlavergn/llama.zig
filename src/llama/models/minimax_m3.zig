@@ -19,6 +19,8 @@
 //! hyperparameters they are loaded from, read where the graph needs them.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -119,12 +121,6 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
     buildGraph(model, b);
 }
 
-/// `GGML_PAD` (ggml.h:94 @b1b770d90) over `int64_t`: a mask, so for a
-/// block size that is not a power of two it is not a round-up, as in the C.
-fn padI64(x: i64, n: i64) i64 {
-    return (x +% n -% 1) & ~(n -% 1);
-}
-
 /// Ports `llm_graph_input_msa` (src/models/minimax-m3.cpp:96 @b1b770d90): the
 /// per-ubatch maps between positions and cells that MSA's block selection
 /// reads, and the bias that forces the local blocks.
@@ -184,7 +180,7 @@ const InpMsa = struct {
 
         self.mctx = mctx_new;
 
-        const n_ps = padI64(mctx_new.getNPos(), self.blk);
+        const n_ps = stdlib.num.pad(i64, mctx_new.getNPos(), self.blk);
         const ns: i64 = if (params.cparams.kv_unified) 1 else params.ubatch.n_seqs_unq;
 
         // One token per stream.
@@ -337,7 +333,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
         // The position axis covers every position in the cache, padded to
         // whole blocks.
-        n_ps = padI64(mctx_msa.getNPos(), blk);
+        n_ps = stdlib.num.pad(i64, mctx_msa.getNPos(), blk);
         nblk = @divTrunc(n_ps, blk);
         msa_decode = n_tps == 1;
 
@@ -402,7 +398,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
             const is_sparse = msa_enabled and il >= @as(c_int, @bitCast(hp.n_layer_dense_lead));
 
             if (!is_sparse) {
-                cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+                cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
             } else {
                 const m = msa.?;
                 const n_idx_dim: i64 = hp.indexer_head_size;
@@ -450,7 +446,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
                 const K64: i64 = K;
                 const blk64: i64 = blk;
 
-                const kq_scale = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+                const kq_scale = 1.0 / libm.sqrtfInt(n_embd_head);
 
                 if (msa_decode) {
                     // Decode: top-k and gather batched over the streams,
@@ -664,6 +660,6 @@ test {
 }
 
 test "GGML_PAD over int64 is a mask" {
-    try std.testing.expectEqual(@as(i64, 256), padI64(256, 64));
-    try std.testing.expectEqual(@as(i64, 320), padI64(257, 64));
+    try std.testing.expectEqual(@as(i64, 256), stdlib.num.pad(i64, 256, 64));
+    try std.testing.expectEqual(@as(i64, 320), stdlib.num.pad(i64, 257, 64));
 }

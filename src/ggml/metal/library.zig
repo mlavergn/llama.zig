@@ -33,7 +33,8 @@
 //! truncated kernel name would be a wrong lookup rather than a short one.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = @import("stdlib").sync;
 const impl = @import("../impl.zig");
 const mc = @import("device_c.zig");
 const fc = @import("impl_c.zig");
@@ -780,7 +781,7 @@ pub export fn ggml_metal_library_get_pipeline_ssm_scan(lib: *mc.Library, op: *co
     // - sgptg floats for shared_x_dt (nsg)
     // - sgptg floats for shared_dA (nsg)
     // Total: nsg * (32 + 2) floats
-    res.smem = impl.pad((32 + 2) * @sizeOf(f32) * @as(usize, @intCast(nsg)), 16);
+    res.smem = stdlib.num.pad(usize, (32 + 2) * @sizeOf(f32) * @as(usize, @intCast(nsg)), 16);
 
     return res;
 }
@@ -910,7 +911,7 @@ pub export fn ggml_metal_library_get_pipeline_solve_tri(lib: *mc.Library, op: *c
     }
 
     res.nsg = nsg;
-    res.smem = impl.pad(impl.pad(@intCast(n), 32) * @as(usize, @intCast(nsg)) * @sizeOf(f32), 16);
+    res.smem = stdlib.num.pad(usize, stdlib.num.pad(usize, @intCast(n), 32) * @as(usize, @intCast(nsg)) * @sizeOf(f32), 16);
 
     return res;
 }
@@ -1389,7 +1390,7 @@ pub export fn ggml_metal_library_get_pipeline_mul_mm_id_map0(lib: *mc.Library, n
     const n02: usize = @intCast(ne02);
     const n20: usize = @intCast(ne20);
     res.smem = 2 * n02 * @sizeOf(u32) + n02 * n20 * @sizeOf(u16);
-    res.smem = impl.pad(res.smem, 16);
+    res.smem = stdlib.num.pad(usize, res.smem, 16);
 
     return res;
 }

@@ -28,7 +28,9 @@
 //! it, through the socket mutex and the in-flight count.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+extern "c" fn connect(sock: c_int, addr: ?*const anyopaque, len: u32) c_int;
+const sync = @import("stdlib").sync;
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 const socket = @import("socket.zig");
@@ -41,9 +43,7 @@ const Oom = error{OutOfMemory};
 const Socket = socket.Socket;
 const k = socket.k;
 
-extern "c" fn connect(sock: c_int, addr: ?*const anyopaque, len: u32) c_int;
 extern "c" fn getsockopt(sock: c_int, level: c_int, optname: c_int, optval: ?*anyopaque, optlen: *u32) c_int;
-extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 
 const is_darwin = builtin.os.tag.isDarwin();
 const F_GETFL: c_int = 3;
@@ -535,8 +535,8 @@ fn hasConflictingContentLength(headers: *const Headers) bool {
 
 /// Ports `set_nonblocking` (httplib.cpp:2655 @b1b770d90).
 fn setNonblocking(sock: Socket, nonblocking: bool) void {
-    const flags = fcntl(sock, F_GETFL, @as(c_int, 0));
-    _ = fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
+    const flags = libc.fcntl(sock, F_GETFL, @as(c_int, 0));
+    _ = libc.fcntl(sock, F_SETFL, if (nonblocking) flags | O_NONBLOCK else flags & ~O_NONBLOCK);
 }
 
 /// Ports `wait_until_socket_is_ready` (httplib.cpp:1933 @b1b770d90): a non-blocking

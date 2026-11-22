@@ -17,6 +17,7 @@
 //! are in the C++'s order, arm by arm, optional ones included.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const impl = @import("impl.zig");
 const clip = @import("clip.zig");
 const names = @import("names.zig");
@@ -27,8 +28,6 @@ const gpa = impl.gpa;
 const T = graph.T;
 const Error = clip.Error;
 const TensorLoader = clip.TensorLoader;
-
-extern fn snprintf(buf: ?[*]u8, size: usize, format: [*:0]const u8, ...) c_int;
 
 const W: [*:0]const u8 = "weight";
 const B: [*:0]const u8 = "bias";
@@ -46,7 +45,7 @@ inline fn ci(v: anytype) c_int {
 /// `get_tensor(string_format(fmt, args...), required)`.
 fn get(tl: *TensorLoader, comptime fmt: [*:0]const u8, args: anytype, required: bool) Error!T {
     var buf: [256]u8 = undefined;
-    _ = @call(.auto, snprintf, .{ &buf, buf.len, fmt } ++ args);
+    _ = @call(.auto, libc.snprintf, .{ &buf, buf.len, fmt } ++ args);
     return tl.getTensor(@ptrCast(&buf), required);
 }
 
@@ -1709,7 +1708,7 @@ pub fn load(tl: *TensorLoader) Error!void {
 
             if (model.post_ln_w == null) {
                 var nb: [256]u8 = undefined;
-                _ = snprintf(&nb, nb.len, names.TN_LN_POST, prefix, W);
+                _ = libc.snprintf(&nb, nb.len, names.TN_LN_POST, prefix, W);
                 return clip.throwErr("%s: missing tensor %s\n", .{ func, @as([*:0]const u8, @ptrCast(&nb)) });
             }
 

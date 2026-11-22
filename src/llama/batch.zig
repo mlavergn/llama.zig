@@ -51,9 +51,10 @@
 //! copy constructor and destructor of the `shared_ptr` would run.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const vm = @import("vocab/module.zig");
-const libcxx = @import("libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const arch_mod = @import("arch.zig");
 const hparams_mod = @import("hparams.zig");
 
@@ -64,8 +65,6 @@ const Vocab = vm.Vocab;
 const Token = c.llama_token;
 const Pos = c.llama_pos;
 const SeqId = c.llama_seq_id;
-
-extern "c" fn atoi(s: [*:0]const u8) c_int;
 
 fn oom() noreturn {
     impl.abort("llama-batch.cpp", 0, "out of memory");
@@ -387,7 +386,7 @@ pub const BatchAllocr = struct {
     /// Return: an allocator with no batch; free it with `deinit`.
     pub fn init(n_pos_per_embd: u32, allow_mixed: bool) BatchAllocr {
         var self: BatchAllocr = .{ .n_pos_per_embd = n_pos_per_embd, .allow_mixed = allow_mixed };
-        self.debug = if (std.c.getenv("LLAMA_BATCH_DEBUG")) |v| atoi(v) else 0;
+        self.debug = if (stdlib.env.getenv("LLAMA_BATCH_DEBUG")) |v| stdlib.num.atoiC(v) else 0;
         self.seq_idx.appendNTimes(allocator, -1, max_seq) catch oom();
         return self;
     }

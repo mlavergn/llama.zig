@@ -29,6 +29,7 @@
 //! called is part of the output.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const audio_io = @import("audio_io.zig");
 const dr_wav = @import("dr_wav.zig");
 /// The FLAC backend, public for the gate.
@@ -383,8 +384,6 @@ fn monoOut(out: []f32, in: []const f32, frames: u64, channels_in: u32) void {
     }
 }
 
-extern "c" fn sin(x: f64) f64;
-
 /// `ma_biquad` (miniaudio.h:4631 @b1b770d90), at f32 with one channel.
 const Biquad = struct {
     b0: f32,
@@ -399,7 +398,7 @@ const Biquad = struct {
     /// (miniaudio.h:47959, 47494 @b1b770d90).
     fn lpf2(sample_rate: u32, cutoff: f64, q: f64) Biquad {
         const w = 2 * pi_d * cutoff / @as(f64, @floatFromInt(sample_rate));
-        const s = sin(w);
+        const s = libm.sin(w);
         const c = cosd(w);
         const a = s / (2 * q);
         const b0 = (1 - c) / 2;
@@ -431,9 +430,9 @@ const Biquad = struct {
     }
 };
 
-/// Ports `ma_cosd` (miniaudio.h:12472 @b1b770d90): `sin(pi/2 - x)`.
+/// Ports `ma_cosd` (miniaudio.h:12472 @b1b770d90): `libm.sin(pi/2 - x)`.
 fn cosd(x: f64) f64 {
-    return sin((pi_d * 0.5) - x);
+    return libm.sin((pi_d * 0.5) - x);
 }
 
 /// The decoder's resampler: `MA_DEFAULT_RESAMPLER_LPF_ORDER`.

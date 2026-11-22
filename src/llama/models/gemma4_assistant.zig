@@ -11,6 +11,7 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -157,7 +158,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const model_other = ctx_other.getModel();
 
     var x: *Tensor = if (b.ubatch.token != null) c.ggml_get_rows(ctx, model_other.tok_embd, inp_tokens) else inp_embd;
-    x = c.ggml_scale(ctx, x, impl.sqrtf(@floatFromInt(n_embd_backbone)));
+    x = c.ggml_scale(ctx, x, libm.sqrtfInt(n_embd_backbone));
     b.cb(x, "inp_embd_target", -1);
 
     const xh: *Tensor = c.ggml_concat(ctx, x, inp_h, 0);

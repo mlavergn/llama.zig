@@ -21,7 +21,8 @@
 //! their `#if` arms are cited nowhere below.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const config = @import("config");
 const impl = @import("../impl.zig");
@@ -261,32 +262,27 @@ pub fn Once(comptime f: fn () void) type {
     };
 }
 
-/// `atoi` over a C string.
-pub fn atoi(s: [*:0]const u8) c_int {
-    return std.c.atoi(@ptrCast(s));
-}
-
 // -----------------------------------------------------------------------------
 // Environment
 //
 // The backend's environment variables are read once, through these helpers.
 // `GGML_CUDA_ENABLE_UNIFIED_MEMORY`, `GGML_CUDA_NO_PINNED` and
-// `GGML_CUDA_REGISTER_HOST` are flags (`atoi(value) != 0`), not merely set.
+// `GGML_CUDA_REGISTER_HOST` are flags (`stdlib.num.atoiC(value) != 0`), not merely set.
 
 /// Ports `ggml_cuda_env_flag` (ggml-cuda.cu:145 @b1b770d90).
 pub fn envFlag(var_name: [*:0]const u8) bool {
-    const env = std.c.getenv(var_name);
-    return env != null and atoi(env.?) != 0;
+    const env = stdlib.env.getenv(var_name);
+    return env != null and stdlib.num.atoiC(env.?) != 0;
 }
 
 /// Ports `ggml_cuda_env_int` (ggml-cuda.cu:150 @b1b770d90).
 pub fn envInt(var_name: [*:0]const u8, default_value: c_int) c_int {
-    return if (std.c.getenv(var_name)) |env| atoi(env) else default_value;
+    return if (stdlib.env.getenv(var_name)) |env| stdlib.num.atoiC(env) else default_value;
 }
 
 /// Ports `ggml_cuda_env_set` (ggml-cuda.cu:155 @b1b770d90).
 pub fn envSet(var_name: [*:0]const u8) bool {
-    return std.c.getenv(var_name) != null;
+    return stdlib.env.getenv(var_name) != null;
 }
 
 /// A function-local `static const T x = read();`: `read` runs once.
@@ -442,9 +438,9 @@ fn init() Info {
     // systems on a machine with fewer GPUs
     inf.device_count = inf.physical_device_count;
 
-    if (std.c.getenv("GGML_CUDA_DEVICES")) |devices_env| {
+    if (stdlib.env.getenv("GGML_CUDA_DEVICES")) |devices_env| {
         if (inf.physical_device_count > 0) {
-            const requested = atoi(devices_env);
+            const requested = stdlib.num.atoiC(devices_env);
             if (requested > 0) {
                 inf.device_count = requested;
             } else {
@@ -1058,7 +1054,7 @@ pub const Graph = struct {
         const S = struct {
             var disabled_by_env = false;
             fn run() void {
-                disabled_by_env = std.c.getenv("GGML_CUDA_DISABLE_GRAPHS") != null;
+                disabled_by_env = stdlib.env.getenv("GGML_CUDA_DISABLE_GRAPHS") != null;
             }
             const once = Once(run);
         };

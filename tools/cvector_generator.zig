@@ -16,6 +16,8 @@
 //! has no randomness, and is what `scripts/tools-diff` compares on bytes.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const c = tc.c;
 const io = tc.io;
@@ -26,9 +28,6 @@ comptime {
     // libllama, compiled in (see `build/tools.zig`).
     _ = @import("llama");
 }
-
-extern fn malloc(n: usize) ?*anyopaque;
-extern fn free(p: ?*anyopaque) void;
 
 /// Ports `tokens_to_str` (cvector-generator.cpp:36 @b1b770d90).
 fn tokensToStr(a: std.mem.Allocator, vocab: ?*const c.llama_vocab, tokens: []const c.llama_token) ![:0]u8 {
@@ -88,7 +87,7 @@ const CallbackData = struct {
         // copy tensor data
         const n_bytes = c.ggml_nbytes(t);
         const t_layer = c.ggml_new_tensor_2d(self.ctx_ggml, t.type, t.ne[0], t.ne[1]);
-        t_layer.*.data = malloc(n_bytes);
+        t_layer.*.data = libc.malloc(n_bytes);
         c.ggml_backend_tensor_get(t, t_layer.*.data, 0, n_bytes);
         _ = c.ggml_set_name(t_layer, c.ggml_get_name(t));
 
@@ -136,7 +135,7 @@ const CallbackData = struct {
         // diff_filtered: [n_embd, n_nonzero_rows]
         const diff_filtered = c.ggml_new_tensor_2d(self.ctx_ggml, c.GGML_TYPE_F32, n_embd, n_nonzero_rows);
         _ = c.ggml_format_name(diff_filtered, "diff_filtered_%s", @as([*:0]const u8, @ptrCast(&a.name)));
-        diff_filtered.*.data = malloc(c.ggml_nbytes(diff_filtered));
+        diff_filtered.*.data = libc.malloc(c.ggml_nbytes(diff_filtered));
 
         // copy non-zero rows
         var dest_row: c_int = 0;
@@ -153,9 +152,9 @@ const CallbackData = struct {
 
     /// Ports `reset` (cvector-generator.cpp:164 @b1b770d90), a member of `callback_data`.
     fn reset(self: *CallbackData) void {
-        for (self.v_pos.items) |p| free(p.data);
-        for (self.v_neg.items) |p| free(p.data);
-        for (self.v_diff_filtered.items) |p| free(p.data);
+        for (self.v_pos.items) |p| libc.free(p.data);
+        for (self.v_neg.items) |p| libc.free(p.data);
+        for (self.v_diff_filtered.items) |p| libc.free(p.data);
         self.v_pos.clearRetainingCapacity();
         self.v_neg.clearRetainingCapacity();
         self.v_diff_filtered.clearRetainingCapacity();
@@ -187,7 +186,7 @@ const TrainContext = struct {
         while (il < n_layers - 1) : (il += 1) {
             try self.v_diff_tmp.append(a, .empty);
             const t = c.ggml_new_tensor_1d(self.ctx_ggml, c.GGML_TYPE_F32, n_embd);
-            t.*.data = malloc(c.ggml_nbytes(t));
+            t.*.data = libc.malloc(c.ggml_nbytes(t));
             try self.v_final.append(a, t);
         }
         return self;
@@ -218,7 +217,7 @@ const TrainContext = struct {
                 c.ggml_new_tensor_2d(self.ctx_ggml, c.GGML_TYPE_F32, self.n_embd, n_rows);
             const name = try std.fmt.allocPrintSentinel(self.a, "diff_{d}", .{il}, 0);
             _ = c.ggml_set_name(diff, name.ptr);
-            diff.*.data = malloc(c.ggml_nbytes(diff));
+            diff.*.data = libc.malloc(c.ggml_nbytes(diff));
             if (transpose) {
                 // copy data & transpose
                 const arr: [*]const f32 = @ptrCast(@alignCast(diff_tmp.items.ptr));
@@ -280,9 +279,9 @@ const TokenizedPrompt = struct {
 fn loadPromptFile(a: std.mem.Allocator, std_io: std.Io, path: []const u8, skip_empty_lines: bool) !std.ArrayList([]const u8) {
     var output: std.ArrayList([]const u8) = .empty;
     const z = try a.dupeSentinel(u8, path, 0);
-    const content = tc.file.readText(std_io, a, z) catch {
+    const content = stdlib.file.readText(std_io, a, z) catch {
         io.eprintf("error: unable to open file: %s\n", .{z.ptr});
-        tc.cExit(1);
+        stdlib.stdio.exit(1);
     };
     var lines = std.mem.splitScalar(u8, content, '\n');
     var consumed: usize = 0;
@@ -455,7 +454,7 @@ const PcaModel = struct {
         {
             const n: usize = @intCast(c.ggml_nelements(self.dev_eigenvector));
             const random_vec = try a.alloc(f32, n);
-            var generator = MinstdRand.init(@truncate(@as(u64, @bitCast(tc.clock.timeSeconds()))));
+            var generator = MinstdRand.init(@truncate(@as(u64, @bitCast(stdlib.clock.timeSeconds()))));
             var sum_sqr: f32 = 0.0; // for normalizing random_vec
             for (random_vec) |*v| {
                 const f = generator.uniform01();
@@ -695,7 +694,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     params.cb_eval_user_data = &cb_data;
     params.warmup = false;
 
-    tc.build_info.print(c.llama_version(), tc.io.stderr());
+    tc.build_info.print(c.llama_version(), stdlib.stdio.stderr());
     c.llama_backend_init();
     c.llama_numa_init(params.numa);
 
@@ -729,7 +728,7 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
     }
 
     io.printf("n_total_tokens: %zu\n", .{n_total_tokens});
-    io.flushStdout(); // `std::endl`
+    stdlib.stdio.stdout().flush(); // `std::endl`
 
     const vocab = c.llama_model_get_vocab(model);
     for (0..ctx_train.positive_entries.items.len) |i| {
@@ -791,9 +790,9 @@ fn run(init: std.process.Init, a: std.mem.Allocator, argv: []const [:0]const u8)
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(init, arena, argv);

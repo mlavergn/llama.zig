@@ -21,6 +21,7 @@
 //! the arena's, and nothing is freed singly.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -772,7 +773,7 @@ pub fn anthropicToOai(a: Allocator, body: *const Value) Error!Value {
 /// as `error.RuntimeError`, which the server answers as it answers any
 /// exception but `invalid_argument`). A minus sign negates modulo 2^64.
 pub fn stoul(s: []const u8) Error!c_ulong {
-    const p = tools.num.strtoul(std.mem.sliceTo(s, 0), 10);
+    const p = stdlib.num.strtoul(std.mem.sliceTo(s, 0), 10);
     if (p.range) return throw(error.RuntimeError, "stoul: out of range", .{});
     if (p.end == 0) return throw(error.InvalidArgument, "stoul: no conversion", .{});
     return p.value;
@@ -781,7 +782,7 @@ pub fn stoul(s: []const u8) Error!c_ulong {
 /// Ports libc++'s `std::stoll` (`as_integer` over `strtoll`, base 10) on
 /// `c_str()`, as `stoul` does.
 pub fn stoll(s: []const u8) Error!c_longlong {
-    const p = tools.num.strtoll(std.mem.sliceTo(s, 0), 10);
+    const p = stdlib.num.strtoll(std.mem.sliceTo(s, 0), 10);
     if (p.range) return throw(error.RuntimeError, "stoll: out of range", .{});
     if (p.end == 0) return throw(error.InvalidArgument, "stoll: no conversion", .{});
     return p.value;
@@ -790,7 +791,7 @@ pub fn stoll(s: []const u8) Error!c_longlong {
 /// Ports libc++'s `std::stof` (`as_float` over `strtof`) on `c_str()`, as
 /// `stoul` does.
 pub fn stof(s: []const u8) Error!f32 {
-    const p = tools.num.strtof(std.mem.sliceTo(s, 0));
+    const p = stdlib.num.strtof(std.mem.sliceTo(s, 0));
     if (p.range) return throw(error.RuntimeError, "stof: out of range", .{});
     if (p.end == 0) return throw(error.InvalidArgument, "stof: no conversion", .{});
     return p.value;

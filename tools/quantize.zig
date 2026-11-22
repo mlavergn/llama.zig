@@ -16,6 +16,7 @@
 //! `common_imatrix::entries`, a `std::map`, in name order.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const common = @import("tools_common");
 const c = common.c;
@@ -113,7 +114,7 @@ fn tryParseFtype(arena: std.mem.Allocator, ftype_str_in: [:0]const u8, ftype: *c
             return true;
         }
     }
-    switch (common.num.stoi(ftype_str)) {
+    switch (stdlib.num.stoi(ftype_str)) {
         .ok => |ftype_int| for (quant_options) |it| {
             if (it.ftype == ftype_int) {
                 ftype.* = it.ftype;
@@ -186,7 +187,7 @@ fn usage(executable: [*:0]const u8) noreturn {
         }
         io.printf(type_line, .{ @as(c_int, @intCast(it.name.len)), it.name.ptr, it.desc });
     }
-    common.cExit(1);
+    stdlib.stdio.exit(1);
 }
 
 /// `imatrix_data`: name to the values handed to libllama.
@@ -198,15 +199,15 @@ fn loadImatrix(a: std.mem.Allocator, imatrix_file: [:0]const u8, imatrix_dataset
     var loaded = try common.imatrix_loader.Imatrix.init(a);
     if (!try common.imatrix_loader.load(imatrix_file, &loaded)) {
         io.eprintf("%s: failed to load imatrix from '%s'\n", .{ func, imatrix_file.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     }
 
     if (!loaded.is_legacy and !loaded.has_metadata) {
         io.eprintf("%s: missing imatrix metadata in file %s\n", .{ func, imatrix_file.ptr });
-        common.cExit(1);
+        stdlib.stdio.exit(1);
     }
 
-    const trace = common.env.get("LLAMA_TRACE") != null;
+    const trace = stdlib.env.get("LLAMA_TRACE") != null;
     const names = try loaded.sortedNames(a);
     for (names) |name| {
         const entry = loaded.entries.get(name).?;
@@ -355,8 +356,8 @@ fn parseTensorType(a: std.mem.Allocator, data: [:0]const u8, tensor_type: *std.A
 /// Ports `parse_tensor_type_file` (quantize/quantize.cpp:349 @b1b770d90): each
 /// white-space-separated word of the file, as `file >> arg` reads them.
 fn parseTensorTypeFile(a: std.mem.Allocator, std_io: std.Io, filename: [:0]const u8, tensor_type: *std.ArrayList(TensorTypeOption)) !bool {
-    const text = common.file.readText(std_io, a, filename) catch |e| {
-        io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, common.file.errnoText(e) });
+    const text = stdlib.file.readText(std_io, a, filename) catch |e| {
+        io.printf("\n%s: failed to open file '%s': %s\n\n", .{ "parse_tensor_type_file", filename.ptr, stdlib.errno.text(e) });
         return false;
     };
     defer a.free(text);
@@ -373,11 +374,11 @@ fn parseTensorTypeFile(a: std.mem.Allocator, std_io: std.Io, filename: [:0]const
 /// Ports `parse_layer_prune` (quantize/quantize.cpp:366 @b1b770d90).
 fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.ArrayList(i32)) !bool {
     const func = "parse_layer_prune";
-    var block_ids = try common.strings.split(a, data, ',');
+    var block_ids = try stdlib.strings.split(a, data, ',');
     defer block_ids.deinit(a);
     for (block_ids.items) |block_id| {
         const z = try a.dupeSentinel(u8, block_id, 0);
-        const id: c_int = switch (common.num.stoi(z)) {
+        const id: c_int = switch (stdlib.num.stoi(z)) {
             .ok => |v| v,
             else => -1,
         };
@@ -400,37 +401,6 @@ fn parseLayerPrune(a: std.mem.Allocator, data: [:0]const u8, prune_layers: *std.
     prune_layers.shrinkRetainingCapacity(w);
     return true;
 }
-
-/// `std::filesystem::equivalent(a, b, ec)`: both exist and are one file.
-fn equivalent(std_io: std.Io, a: [:0]const u8, b: [:0]const u8) bool {
-    if (comptime builtin.os.tag == .windows) {
-        // Windows compares by volume serial and file index; resolving both
-        // paths is the closest the C library offers.
-        var ra: [260:0]u8 = undefined;
-        var rb: [260:0]u8 = undefined;
-        if (_fullpath(&ra, a.ptr, ra.len) == null or _fullpath(&rb, b.ptr, rb.len) == null) return false;
-        const fb = common.file.openIn(std_io, b) catch return false;
-        fb.close(std_io);
-        return std.ascii.eqlIgnoreCase(std.mem.sliceTo(&ra, 0), std.mem.sliceTo(&rb, 0));
-    }
-    if (comptime builtin.os.tag == .linux) {
-        // `std.c.Stat` is void on Linux; `statx` gives the same device and
-        // inode, following symlinks as `stat` does.
-        const linux = std.os.linux;
-        var sa: linux.Statx = undefined;
-        var sb: linux.Statx = undefined;
-        const mask: linux.STATX = .{ .INO = true };
-        if (linux.errno(linux.statx(linux.AT.FDCWD, a.ptr, 0, mask, &sa)) != .SUCCESS or
-            linux.errno(linux.statx(linux.AT.FDCWD, b.ptr, 0, mask, &sb)) != .SUCCESS) return false;
-        return sa.dev_major == sb.dev_major and sa.dev_minor == sb.dev_minor and sa.ino == sb.ino;
-    }
-    var sa: std.c.Stat = undefined;
-    var sb: std.c.Stat = undefined;
-    if (std.c.stat(a.ptr, &sa) != 0 or std.c.stat(b.ptr, &sb) != 0) return false;
-    return sa.dev == sb.dev and sa.ino == sb.ino;
-}
-
-extern fn _fullpath(abs: [*]u8, rel: [*:0]const u8, max: usize) ?[*:0]u8;
 
 /// The C's `strncpy(dst, src, 127); dst[127] = 0` into a `char[128]`.
 fn copyStr128(dst: *[128]u8, src: []const u8) void {
@@ -501,7 +471,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         } else if (std.mem.eql(u8, arg, "--override-kv")) {
             if (last) usage(exe);
             arg_idx += 1;
-            if (!try common.strings.parseKvOverride(argv[arg_idx], &kv_overrides, a)) usage(exe);
+            if (!try common.arg.parseKvOverride(argv[arg_idx], &kv_overrides, a)) usage(exe);
         } else if (std.mem.eql(u8, arg, "--dry-run")) {
             params.dry_run = true;
         } else if (std.mem.eql(u8, arg, "--allow-requantize")) {
@@ -525,7 +495,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
         } else if (std.mem.eql(u8, arg, "--max-buffer-size")) {
             if (last) usage(exe);
             arg_idx += 1;
-            const mib = common.num.atoi(argv[arg_idx]);
+            const mib = stdlib.num.atoi(argv[arg_idx]);
             if (mib <= 0) {
                 io.eprintf("%s: invalid --max-buffer-size '%s'\n", .{ func, argv[arg_idx].ptr });
                 return 1;
@@ -642,7 +612,7 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
 
     // parse nthreads
     if (argv.len > arg_idx) {
-        switch (common.num.stoi(argv[arg_idx])) {
+        switch (stdlib.num.stoi(argv[arg_idx])) {
             .ok => |n| params.nthread = n,
             else => |e| {
                 io.eprintf("%s: invalid nthread '%s' (%s)\n", .{ func, argv[arg_idx].ptr, e.what() });
@@ -654,13 +624,13 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
     const out_z = try a.dupeSentinel(u8, fname_out, 0);
     const ftype_z = try a.dupeSentinel(u8, ftype_str, 0);
     if (!params.dry_run) {
-        if (equivalent(std_io, fname_inp, out_z)) {
+        if (stdlib.fs.equivalent(fname_inp, out_z)) {
             io.eprintf("%s: error: input and output files are the same: '%s'\n", .{ func, fname_inp.ptr });
             return 1;
         }
     }
 
-    common.build_info.print(c.llama_version(), common.io.stderr());
+    common.build_info.print(c.llama_version(), stdlib.stdio.stderr());
 
     if (params.dry_run) {
         io.eprintf("%s: calculating quantization size for '%s' as %s", .{ func, fname_inp.ptr, ftype_z.ptr });
@@ -703,9 +673,9 @@ fn quantize(a: std.mem.Allocator, std_io: std.Io, argv: []const [:0]const u8) !u
 
 /// Ports `main` (tools/quantize/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    common.io.begin();
-    common.env.set(init.environ_map);
-    defer common.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return quantize(arena, init.io, argv);

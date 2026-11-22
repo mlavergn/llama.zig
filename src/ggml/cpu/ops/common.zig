@@ -16,6 +16,7 @@
 //! `ops.cpp` port, whose files share it through `module.zig`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const convert = @import("../convert.zig");
@@ -69,21 +70,6 @@ pub inline fn ref(comptime T: type, base: ?*anyopaque, byte_off: anytype) *T {
     return @ptrCast(@alignCast(b + @as(usize, @intCast(byte_off))));
 }
 
-/// Ports `std::min(a, b)` as libc++ defines it: `(b < a) ? b : a`.
-///
-/// **Not `@min`, which drops a NaN.** The C++'s returns `a` whenever the
-/// comparison is false, so a NaN input passes through. Several of these
-/// kernels feed it values that can be NaN.
-pub inline fn stdMin(a: f32, b: f32) f32 {
-    return if (b < a) b else a;
-}
-
-/// Ports `std::max(a, b)`: `(a < b) ? b : a`. Not `@max`, for the reason
-/// given on `stdMin`.
-pub inline fn stdMax(a: f32, b: f32) f32 {
-    return if (a < b) b else a;
-}
-
 /// `ggml_barrier(params->threadpool)`, which the C writes directly.
 pub inline fn barrier(params: *const ComputeParams) void {
     threading.ggml_barrier(@ptrCast(@alignCast(params.threadpool.?)));
@@ -126,9 +112,9 @@ pub inline fn fromF32(comptime T: type, v: f32) T {
         c.ggml_bf16_t => .{ .bits = impl.fp32ToBf16(v) },
         c.ggml_fp8_e4m3_t => .{ .bits = impl.fp32ToF8E4m3(v) },
         // `f32_to_i32` is a C cast, which truncates toward zero and is
-        // undefined out of range; `@intFromFloat` would panic instead, so the
-        // saturating form is the one that matches.
-        i32 => @intFromFloat(std.math.clamp(@trunc(v), -2147483648.0, 2147483647.0)),
+        // undefined out of range or on a NaN; `truncTo` gives what aarch64's
+        // `fcvtzs` gives (saturated, NaN to 0) where `@intFromFloat` traps
+        i32 => impl.truncTo(i32, v),
         else => @compileError("no conversion for " ++ @typeName(T)),
     };
 }
@@ -149,12 +135,6 @@ pub fn getThreadRange(params: *const ComputeParams, src0: *const Tensor) struct 
     return .{ ir0, @min(ir0 + dr, nr) };
 }
 
-/// The C's `MIN` over `i64`, kept as a named helper so the ported loops read
-/// like the C's.
-pub inline fn min64(a: i64, b: i64) i64 {
-    return @min(a, b);
-}
-
 /// `CACHE_LINE_SIZE_F32` (ggml-cpu/ops.h:20 @b1b770d90), the stride between
 /// per-thread scratch slots in `params.wdata`.
 ///
@@ -163,46 +143,3 @@ pub inline fn min64(a: i64, b: i64) i64 {
 /// translation units alike: the `std::hardware_destructive_interference_size`
 /// arm, which a C++ unit took depending on include order, is gone.
 pub const cache_line_size_f32: usize = 64 / @sizeOf(f32);
-
-/// A sine and cosine of the same argument, computed as the reference build
-/// computes them.
-pub const SinCos = struct { sin: f32, cos: f32 };
-
-/// Mirrors the `__float2` that `__sincosf_stret` returns (math.h).
-const Float2 = extern struct { sin: f32, cos: f32 };
-
-extern fn __sincosf_stret(x: f32) Float2;
-extern fn sinf(x: f32) f32;
-extern fn cosf(x: f32) f32;
-
-/// `sinf(x)` and `cosf(x)` **as clang emits them when both appear**.
-///
-/// Not a port of anything: the C calls `sinf` and `cosf`. But clang folds a
-/// `sinf`/`cosf` pair on one argument into a single libcall -- on Darwin,
-/// `__sincosf_stret` -- and Apple's combined routine does not round as the
-/// separate ones do. Measured over 10.9M arguments: `sin` differs in 4.0% of
-/// them, `cos` in 0.5%. The reference `ops.o` imports `___sincosf_stret` and
-/// neither `_sinf` nor `_cosf`, so the port has to call the same routine to
-/// produce the same bits. It is what `make ops-diff` caught on every f32 rope
-/// and on `timestep_embedding`.
-///
-/// **Off Darwin there is no fold**, and the pair stays two calls. Measured
-/// on the `aarch64-linux-gnu` reference: its `ops.o` imports `sinf` and
-/// `cosf` and no `sincosf` at all. Linux defaults to `-fmath-errno`
-/// (`simd.math_errno`), so the calls may set `errno` and clang will not
-/// combine them; with `-fno-math-errno` the same pair on Linux becomes
-/// `sincosf`, and with `-fmath-errno` on Darwin it stays `sinf` and `cosf`.
-/// An earlier version of this function assumed `sincosf` off Darwin, which
-/// matched nothing the reference calls.
-///
-/// Parameters:
-/// - `x`: the argument.
-///
-/// Return: both values, by value.
-pub inline fn sinCos(x: f32) SinCos {
-    if (comptime !simd.math_errno) {
-        const r = __sincosf_stret(x);
-        return .{ .sin = r.sin, .cos = r.cos };
-    }
-    return .{ .sin = sinf(x), .cos = cosf(x) };
-}

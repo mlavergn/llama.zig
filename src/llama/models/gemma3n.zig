@@ -12,6 +12,7 @@
 //! `build_arch_graph`, its `graph` and the graph's helpers.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -163,7 +164,7 @@ const Graph = struct {
 
         // Important: do not normalize weights for raw embeddings input (i.e.
         // encoded image embeddings): `build_inp_embd` scales the token rows only.
-        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(n_embd)));
+        var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(n_embd));
         b.cb(inpL, "inp_scaled", -1);
 
         // The positions.
@@ -261,7 +262,7 @@ const Graph = struct {
             cur = c.ggml_add(ctx, cur, active_prediction); // [n_embd, n_tokens]
             b.cb(cur, "attn_gated", il);
 
-            const attn_laurel: *Tensor = c.ggml_scale(ctx, c.ggml_add(ctx, cur, laurel_out), 1.0 / impl.sqrtf(2.0)); // [n_embd, n_tokens]
+            const attn_laurel: *Tensor = c.ggml_scale(ctx, c.ggml_add(ctx, cur, laurel_out), 1.0 / libm.sqrtf(2.0)); // [n_embd, n_tokens]
             b.cb(attn_laurel, "attn_laurel", il);
 
             cur = b.buildNorm(attn_laurel, layer.ffn_norm, null, .rms, il);
@@ -385,7 +386,7 @@ const Graph = struct {
         const ctx = b.ctx0;
         const model = self.model;
         var inp_per_layer: *Tensor = undefined;
-        const tok_embd_scale = impl.sqrtf(@floatFromInt(self.n_embd_altup));
+        const tok_embd_scale = libm.sqrtfInt(self.n_embd_altup);
         if (b.ubatch.token != null) {
             const inp = impl.allocator.create(graph.InpEmbd) catch impl.abort("models/gemma3n.cpp", 319, "out of memory");
             inp.* = .{ .n_embd = b.n_embd };
@@ -425,8 +426,8 @@ const Graph = struct {
     fn projectPerLayerInputs(self: *const Graph, inp_batch: *Tensor, inp_per_layer_: *Tensor) *Tensor {
         const b = self.b;
         const ctx = b.ctx0;
-        const per_layer_projection_scale = 1.0 / impl.sqrtf(@floatFromInt(b.n_embd));
-        const per_layer_input_scale = 1.0 / impl.sqrtf(2.0);
+        const per_layer_projection_scale = 1.0 / libm.sqrtfInt(b.n_embd);
+        const per_layer_input_scale = 1.0 / libm.sqrtf(2.0);
 
         var per_layer_proj: *Tensor = c.ggml_mul_mat(ctx, self.model.per_layer_model_proj, inp_batch);
         per_layer_proj = c.ggml_scale(ctx, per_layer_proj, per_layer_projection_scale);

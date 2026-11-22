@@ -25,9 +25,11 @@
 //! observable.
 
 const std = @import("std");
-const sync = @import("sync");
+const tc = @import("tools_common");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const json = @import("json");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 
 const http = @import("http.zig");
 const common = @import("common.zig");
@@ -51,32 +53,8 @@ const read_wake_interval_ms: i64 = 200;
 
 /// Ports `now_seconds` (server-stream.cpp:22 @b1b770d90).
 fn nowSeconds() i64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &ts);
-    return @intCast(ts.sec);
+    return stdlib.clock.timeSeconds();
 }
-
-/// A pthread mutex, as `queue.zig` takes them.
-const Mutex = struct {
-    m: sync.Mutex = .{},
-    fn lock(self: *Mutex) void {
-        self.m.lock();
-    }
-    fn unlock(self: *Mutex) void {
-        self.m.unlock();
-    }
-};
-
-/// A pthread condition variable.
-const Cond = struct {
-    c: sync.Condition = .{},
-    fn waitFor(self: *Cond, m: *Mutex, ns: u64) void {
-        _ = self.c.timedWait(&m.m, ns);
-    }
-    fn notifyAll(self: *Cond) void {
-        self.c.broadcast();
-    }
-};
 
 // -----------------------------------------------------------------------------
 // stream_session
@@ -90,8 +68,8 @@ pub const Session = struct {
 
     refs: std.atomic.Value(u32) = .init(1),
 
-    mu: Mutex = .{},
-    cv: Cond = .{},
+    mu: sync.Mutex = .{},
+    cv: sync.Condition = .{},
     buffer: std.ArrayList(u8) = .empty,
     prefix_dropped: usize = 0,
     cap_bytes: usize,
@@ -155,7 +133,7 @@ pub const Session = struct {
                 try self.buffer.appendSlice(gpa, data);
             }
         }
-        self.cv.notifyAll();
+        self.cv.broadcast();
         return true;
     }
 
@@ -170,7 +148,7 @@ pub const Session = struct {
             self.done = true;
             self.completed_ts = nowSeconds();
         }
-        self.cv.notifyAll();
+        self.cv.broadcast();
     }
 
     /// Ports `stream_session`'s `read_from` (server-stream.cpp:163
@@ -211,7 +189,7 @@ pub const Session = struct {
                 return .ok;
             }
             // wait for new bytes, finalize, or a periodic wake to re check should_stop
-            self.cv.waitFor(&self.mu, @intCast(read_wake_interval_ms * std.time.ns_per_ms));
+            _ = self.cv.timedWait(&self.mu, @intCast(read_wake_interval_ms * std.time.ns_per_ms));
         }
     }
 
@@ -264,12 +242,12 @@ pub const Session = struct {
 /// live session, keyed by conversation id; one conversation, at most one
 /// live session; a periodic GC evicts expired ones.
 const Manager = struct {
-    map_mu: Mutex = .{},
+    map_mu: sync.Mutex = .{},
     sessions: ?libcxx.StringMap(?*Session) = null, // key: conversation_id
     gc_thread: ?std.Thread = null,
     running: bool = false,
-    gc_wake_mu: Mutex = .{},
-    gc_wake_cv: Cond = .{},
+    gc_wake_mu: sync.Mutex = .{},
+    gc_wake_cv: sync.Condition = .{},
 
     fn map(self: *Manager) !*libcxx.StringMap(?*Session) {
         if (self.sessions == null) self.sessions = try libcxx.StringMap(?*Session).init(gpa);
@@ -406,7 +384,7 @@ const Manager = struct {
             self.running = false;
         }
         if (was_running) {
-            self.gc_wake_cv.notifyAll();
+            self.gc_wake_cv.broadcast();
             if (self.gc_thread) |t| {
                 t.join();
                 self.gc_thread = null;
@@ -441,7 +419,7 @@ const Manager = struct {
                 defer self.gc_wake_mu.unlock();
                 const deadline = nowSeconds() + session_gc_interval_seconds;
                 while (self.running and nowSeconds() < deadline) {
-                    self.gc_wake_cv.waitFor(&self.gc_wake_mu, @intCast(session_gc_interval_seconds * std.time.ns_per_s));
+                    _ = self.gc_wake_cv.timedWait(&self.gc_wake_mu, @intCast(session_gc_interval_seconds * std.time.ns_per_s));
                 }
                 if (!self.running) {
                     return;
@@ -594,7 +572,7 @@ fn getHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
     var from: usize = 0;
     const from_str = req.getParam("from", "");
     if (from_str.len != 0) {
-        from = stoull(from_str) orelse {
+        from = stoullOrNull(from_str) orelse {
             return makeErrorResponse(400, "Invalid 'from' offset", .invalid_request);
         };
     }
@@ -613,27 +591,6 @@ fn getHandler(_: ?*anyopaque, req: *const http.Req) anyerror!*http.Res {
     self.base.content_type = "text/event-stream";
     self.base.next = .{ .ctx = self, .func = ReplayRes.next };
     return &self.base;
-}
-
-/// `std::stoull`: leading whitespace, an optional sign, digits in base 10;
-/// null where it throws (no digits, or out of range).
-fn stoull(s: []const u8) ?usize {
-    var i: usize = 0;
-    while (i < s.len and std.ascii.isWhitespace(s[i])) i += 1;
-    var neg = false;
-    if (i < s.len and (s[i] == '+' or s[i] == '-')) {
-        neg = s[i] == '-';
-        i += 1;
-    }
-    const start = i;
-    var v: u64 = 0;
-    while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) {
-        v = std.math.mul(u64, v, 10) catch return null;
-        v = std.math.add(u64, v, s[i] - '0') catch return null;
-    }
-    if (i == start) return null;
-    // strtoull negates in unsigned arithmetic
-    return if (neg) @as(usize, 0) -% v else v;
 }
 
 /// Ports `server_stream_make_get_handler` (server-stream.cpp:454 @b1b770d90).
@@ -802,7 +759,7 @@ pub const Spipe = struct {
 
     /// Ports `server_res_spipe`'s `conn_alive` (server-stream.cpp:617 @b1b770d90).
     pub fn connAlive(self: *const Spipe) bool {
-        common.ggmlAssert(self.req != null, "server-stream.cpp", 618, "req != nullptr");
+        tc.ggml.ggmlAssert(self.req != null, "server-stream.cpp", 618, "req != nullptr");
         return !self.req.?.should_stop.call();
     }
 
@@ -865,6 +822,16 @@ pub const Spipe = struct {
     }
 };
 
+/// `std::stoull`, where the C++ catches its throws.
+///
+/// Return: the value; null for either throw.
+fn stoullOrNull(s: []const u8) ?usize {
+    return switch (stdlib.num.stoull(s)) {
+        .ok => |v| @intCast(v),
+        else => null,
+    };
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 
@@ -873,8 +840,8 @@ test {
 }
 
 test "stoull reads a leading number and refuses none" {
-    try std.testing.expectEqual(@as(?usize, 12), stoull("12abc"));
-    try std.testing.expectEqual(@as(?usize, 7), stoull("  +7"));
-    try std.testing.expectEqual(@as(?usize, null), stoull("x"));
-    try std.testing.expectEqual(@as(?usize, null), stoull(""));
+    try std.testing.expectEqual(@as(?usize, 12), stoullOrNull("12abc"));
+    try std.testing.expectEqual(@as(?usize, 7), stoullOrNull("  +7"));
+    try std.testing.expectEqual(@as(?usize, null), stoullOrNull("x"));
+    try std.testing.expectEqual(@as(?usize, null), stoullOrNull(""));
 }

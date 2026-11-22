@@ -10,6 +10,7 @@
 //! (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
 
@@ -30,10 +31,6 @@ const ops = m.ops;
 const ceilDiv = ops.ceilDiv;
 const roundupPow2 = m.ops_matmul.roundupPow2;
 const sub = m.ops_matmul.sub;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn log2f(x: f32) f32;
-extern fn floorf(x: f32) f32;
 
 const vendor_id_amd = 0x1002;
 const vendor_id_intel = 0x8086;
@@ -825,10 +822,10 @@ pub fn flashAttn(ctx: *BackendCtx, subctx: *Context, q: *const Tensor, k: *const
     }
 
     const n_head_kv = u(q.ne[2]);
-    const n_head_log2: u32 = @as(u32, 1) << @intCast(@as(u32, @intFromFloat(floorf(log2f(@floatFromInt(n_head_kv))))));
+    const n_head_log2: u32 = @as(u32, 1) << @intCast(@as(u32, @intFromFloat(libm.floorf(libm.log2fInt(n_head_kv)))));
     const nhl: f32 = @floatFromInt(n_head_log2);
-    const m0 = powf(2.0, -max_bias / nhl);
-    const m1 = powf(2.0, -(max_bias / 2.0) / nhl);
+    const m0 = libm.powf(2.0, -max_bias / nhl);
+    const m1 = libm.powf(2.0, -(max_bias / 2.0) / nhl);
 
     const q_buf = m.context.tensorSubbuffer(ctx, q, false);
     var k_buf = m.context.tensorSubbuffer(ctx, k, false);

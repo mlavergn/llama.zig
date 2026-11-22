@@ -29,6 +29,7 @@
 //!   and is reproduced exactly. See the comment there.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 // The hash-set lifecycle used to be reached through `impl.zig` as an extern,
@@ -148,7 +149,7 @@ export fn ggml_tallocr_alloc(
     tensor: *c.ggml_tensor,
 ) c.enum_ggml_status {
     var size = c.ggml_backend_buffer_get_alloc_size(talloc.buffer, tensor);
-    size = impl.pad(size, talloc.alignment);
+    size = stdlib.num.pad(usize, size, talloc.alignment);
 
     if (talloc.offset + size > c.ggml_backend_buffer_get_size(talloc.buffer)) {
         impl.logError(

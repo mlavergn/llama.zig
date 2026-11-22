@@ -23,6 +23,7 @@
 //! exported names differ between the two halves.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const blocks = @import("blocks.zig");
 const helpers = @import("../../quants/helpers.zig");
@@ -70,12 +71,10 @@ fn quantizeMatQ80(comptime blck_size_interleave: i32, x: [*]const f32, vy: *anyo
             src_offset += @rem(jj, blck_size_interleave);
 
             const x0 = srcv[@intCast(src_id)][@intCast(src_offset)] * id[@intCast(src_id)];
-            y[@intCast(i)].qs[j] = @intFromFloat(roundf(x0));
+            y[@intCast(i)].qs[j] = @intFromFloat(libm.roundf(x0));
         }
     }
 }
-
-extern fn roundf(x: f32) f32;
 
 /// Ports `ggml_quantize_mat_q8_K_4x4_generic` and
 /// `ggml_quantize_mat_q8_K_4x8_generic`

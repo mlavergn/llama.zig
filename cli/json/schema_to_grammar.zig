@@ -30,6 +30,7 @@
 //! is a shallow copy of the map.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("module.zig");
 const schema = @import("schema.zig");
 const trie_mod = @import("trie.zig");
@@ -63,41 +64,6 @@ fn stringRepeat(a: std.mem.Allocator, s: []const u8, n: usize) Error![]u8 {
     const out = try a.alloc(u8, s.len * n);
     for (0..n) |k| @memcpy(out[k * s.len ..][0..s.len], s);
     return out;
-}
-
-/// Ports `string_split` (common/common.cpp:561 @b1b770d90), the overload
-/// taking a string delimiter: every piece, empty ones included.
-fn stringSplit(a: std.mem.Allocator, s: []const u8, delim: []const u8) Error![][]const u8 {
-    var parts: std.ArrayList([]const u8) = .empty;
-    var it = std.mem.splitSequence(u8, s, delim);
-    while (it.next()) |p| try parts.append(a, p);
-    return parts.items;
-}
-
-/// `std::stoi(s)`: `strtol` in base 10 -- leading white space, an optional
-/// sign, at least one digit, the rest ignored -- then a range check to
-/// `int`.
-///
-/// Return: the value, or null where `stoi` throws (`invalid_argument` or
-/// `out_of_range`, both `std::logic_error`).
-fn stoi(s: []const u8) ?c_int {
-    var k: usize = 0;
-    while (k < s.len and schema.isCSpace(s[k])) k += 1;
-    var negative = false;
-    if (k < s.len and (s[k] == '+' or s[k] == '-')) {
-        negative = s[k] == '-';
-        k += 1;
-    }
-    const start = k;
-    var r: i128 = 0;
-    while (k < s.len and s[k] >= '0' and s[k] <= '9') : (k += 1) {
-        // past `long`'s range strtol reports ERANGE; keep reading digits
-        if (r <= std.math.maxInt(i64) + 1) r = r * 10 + (s[k] - '0');
-    }
-    if (k == start) return null;
-    if (negative) r = -r;
-    if (r < std.math.minInt(c_int) or r > std.math.maxInt(c_int)) return null;
-    return @intCast(r);
 }
 
 fn intText(a: std.mem.Allocator, v: anytype) Error![]u8 {
@@ -629,12 +595,12 @@ pub const Converter = struct {
         } else |e| switch (e) {
             error.UnsupportedPattern => {
                 self.rules = snapshot;
-                try self.warnings.append(self.a, try self.cat(&.{ "pattern ", pattern, " is not supported (", cstr(p.message), "), accepting any string" }));
+                try self.warnings.append(self.a, try self.cat(&.{ "pattern ", pattern, " is not supported (", std.mem.sliceTo(p.message, 0), "), accepting any string" }));
                 return self.addRule(name, try self.addPrimitive("string", primitive("string")));
             },
             error.InvalidPattern => {
                 self.rules = snapshot;
-                try self.errors.append(self.a, try self.cat(&.{ "Invalid pattern ", pattern, ": ", cstr(p.message) }));
+                try self.errors.append(self.a, try self.cat(&.{ "Invalid pattern ", pattern, ": ", std.mem.sliceTo(p.message, 0) }));
                 return "";
             },
             else => |other| return @as(Error, @errorCast(other)),
@@ -868,7 +834,7 @@ pub const Converter = struct {
             while (it.next()) |e| {
                 if (e.value_ptr.* == children.len) try keys.append(self.a, e.key_ptr.*);
             }
-            std.mem.sort([]const u8, keys.items, {}, lessBytes);
+            std.mem.sort([]const u8, keys.items, {}, stdlib.strings.lessThan);
             if (keys.items.len != 0) {
                 return self.addRule(rule_name, try self.cat(&.{ "(", try stringJoin(self.a, keys.items, " | "), ")" }));
             }
@@ -1001,7 +967,7 @@ pub const Converter = struct {
         if (self.warnings.items.len != 0) {
             // `fprintf(stderr, "...%s\n", ...c_str())`: the `%s` stops at a NUL
             const joined = try stringJoin(self.a, self.warnings.items, "; ");
-            const line = try self.cat(&.{ "WARNING: JSON schema conversion was incomplete: ", cstr(joined), "\n" });
+            const line = try self.cat(&.{ "WARNING: JSON schema conversion was incomplete: ", std.mem.sliceTo(joined, 0), "\n" });
             if (warning_sink) |sink| sink(line) else json.errors.writeStderr(line);
         }
     }
@@ -1014,7 +980,7 @@ pub const Converter = struct {
         var keys: std.ArrayList([]const u8) = .empty;
         var it = self.rules.keyIterator();
         while (it.next()) |k| try keys.append(self.a, k.*);
-        std.mem.sort([]const u8, keys.items, {}, lessBytes);
+        std.mem.sort([]const u8, keys.items, {}, stdlib.strings.lessThan);
         var out: std.ArrayList(u8) = .empty;
         for (keys.items) |k| {
             try out.appendSlice(self.a, k);
@@ -1201,16 +1167,16 @@ const PatternState = struct {
                 if (self.i >= length) return self.unsupported(&.{"unterminated curly brackets"});
                 try curly.append(a, '}');
                 self.i += 1;
-                const nums = try stringSplit(a, curly.items[1 .. curly.items.len - 1], ",");
+                const nums = try stdlib.strings.splitString(a, curly.items[1 .. curly.items.len - 1], ",");
                 var min_times: c_int = 0;
                 var max_times: c_int = std.math.maxInt(c_int);
                 if (nums.len != 1 and nums.len != 2) return self.unsupported(&.{"wrong number of values in curly brackets"});
                 if (nums.len == 1) {
-                    min_times = stoi(nums[0]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
+                    min_times = stoiOrNull(nums[0]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
                     max_times = min_times;
                 } else {
-                    if (nums[0].len != 0) min_times = stoi(nums[0]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
-                    if (nums[1].len != 0) max_times = stoi(nums[1]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
+                    if (nums[0].len != 0) min_times = stoiOrNull(nums[0]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
+                    if (nums[1].len != 0) max_times = stoiOrNull(nums[1]) orelse return self.unsupported(&.{"invalid number in curly brackets"});
                 }
                 if (seq.items.len == 0) return self.invalid("nothing to repeat");
                 const last = &seq.items[seq.items.len - 1];
@@ -1264,15 +1230,6 @@ const PatternState = struct {
         return self.joinSeq(seq.items);
     }
 };
-
-/// A string as `what()` returns it: up to its first NUL.
-fn cstr(s: []const u8) []const u8 {
-    return if (std.mem.indexOfScalar(u8, s, 0)) |n| s[0..n] else s;
-}
-
-fn lessBytes(_: void, x: []const u8, y: []const u8) bool {
-    return std.mem.order(u8, x, y) == .lt;
-}
 
 // -----------------------------------------------------------------------------
 // Entry points
@@ -1366,6 +1323,17 @@ pub fn buildGrammar(
     try cb(ctx, &builder);
     try conv.checkErrors();
     return gpa.dupe(u8, try conv.formatGrammar());
+}
+
+/// `std::stoi`, where `_visit_pattern`'s caller catches its throws as
+/// `std::logic_error`.
+///
+/// Return: the value; null for either throw.
+fn stoiOrNull(s: []const u8) ?c_int {
+    return switch (stdlib.num.stoi(s)) {
+        .ok => |v| v,
+        else => null,
+    };
 }
 
 // -----------------------------------------------------------------------------

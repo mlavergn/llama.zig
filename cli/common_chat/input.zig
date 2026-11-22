@@ -141,12 +141,6 @@ pub const Input = struct {
     }
 };
 
-/// `std::isspace` of a `char` in the C locale: a byte past 0x7f is a
-/// negative `char`, which no locale here calls space.
-fn isSpace(c: u8) bool {
-    return util.isSpace(c);
-}
-
 /// The `llama_vocab *` of libllama's port that `vocab` is.
 fn vocabPtr(vocab: *const anyopaque) VocabPtr {
     return @ptrCast(@alignCast(vocab));
@@ -183,7 +177,7 @@ pub fn commonTokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8,
         result = try gpa.realloc(result, @intCast(-n_tokens));
         const check = api.vocab.tokenize(v, text, result, add_special, parse_special, &exc) catch
             return exception.throw(error.RuntimeError, "{s}", .{exc.what()});
-        util.ggmlAssert(check == -n_tokens, "check == -n_tokens");
+        @import("llama").impl.assert(check == -n_tokens, "common/common.cpp", 1881, "check == -n_tokens");
         return result;
     }
     return gpa.realloc(result, @intCast(n_tokens));
@@ -224,7 +218,7 @@ pub fn tokenize(gpa: Allocator, vocab: *const anyopaque, text: []const u8) Error
         // `piece[0]` and `text[0]` of an empty string are its NUL
         const p0: u8 = if (piece.len > 0) piece[0] else 0;
         const t0: u8 = if (text.len > 0) text[0] else 0;
-        if (i == 0 and isSpace(p0) and !isSpace(t0)) {
+        if (i == 0 and std.ascii.isWhitespace(p0) and !std.ascii.isWhitespace(t0)) {
             // Some tokenizers will add a space before the first special token, need to exclude
             continue;
         }

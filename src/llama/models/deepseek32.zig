@@ -14,6 +14,7 @@
 //! `graph_mtp`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -236,9 +237,9 @@ const variant: Variant = .{
 /// `attn_factor` `llama_hparams`'s `yarn_attn_factor_adjust` adjusted.
 fn mlaKqScale(b: *const graph.Builder, n_embd_head_k: i64) f32 {
     const hp = b.hparams;
-    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * impl.logf(1.0 / b.freq_scale));
-    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * impl.logf(1.0 / b.freq_scale));
-    return 1.0 * mscale * mscale / impl.sqrtf(@floatFromInt(n_embd_head_k));
+    const attn_factor_org = b.attn_factor * (1.0 + 0.1 * libm.logf(1.0 / b.freq_scale));
+    const mscale = attn_factor_org * (1.0 + 0.1 * hp.rope_yarn_log_mul * libm.logf(1.0 / b.freq_scale));
+    return 1.0 * mscale * mscale / libm.sqrtfInt(n_embd_head_k);
 }
 
 /// Ports the constructor of `llama_model_deepseek32`'s `graph`
@@ -514,7 +515,7 @@ pub fn lightningIndexer(
     indexer_weights = c.ggml_view_4d(ctx, indexer_weights, indexer_weights.ne[0], @divTrunc(indexer_weights.ne[1], n_stream), indexer_weights.ne[2], n_stream, indexer_weights.nb[1], indexer_weights.nb[2] / n_stream_u, indexer_weights.nb[3] / n_stream_u, 0);
 
     // Pre-scale the weights, to spare scaling the huge `indexer_score`.
-    indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / impl.sqrtf(@floatFromInt(n_embd_indexer_head * n_indexer_head)));
+    indexer_weights = c.ggml_scale(ctx, indexer_weights, 1.0 / libm.sqrtfInt(n_embd_indexer_head * n_indexer_head));
     b.cb(indexer_weights, "indexer_weights", il);
 
     var indexer_score: *Tensor = undefined;

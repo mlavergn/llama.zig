@@ -43,6 +43,8 @@
 //!   locking is `VirtualLock`, growing the working set once on failure.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const win32 = @import("win32.zig");
@@ -52,17 +54,10 @@ const allocator = impl.allocator;
 const Exception = impl.Exception;
 const Thrown = impl.Thrown;
 
-extern "c" fn strerror(errnum: c_int) [*:0]const u8;
 /// `errno`'s location: `__error` on Darwin, `__errno_location` on glibc.
 const errnoPtr = std.c._errno;
-extern "c" fn mmap(addr: ?*anyopaque, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) ?*anyopaque;
-extern "c" fn munmap(addr: ?*anyopaque, len: usize) c_int;
-extern "c" fn posix_madvise(addr: ?*anyopaque, len: usize, advice: c_int) c_int;
-extern "c" fn sysconf(name: c_int) c_long;
 extern "c" fn mlock(addr: ?*const anyopaque, len: usize) c_int;
 extern "c" fn fileno(stream: *c.FILE) c_int;
-extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
-extern "c" fn free(ptr: ?*anyopaque) void;
 
 /// Ports `LLAMA_DIRECT_IO_BUFFER_SIZE` (llama-mmap.h:10 @b1b770d90): the
 /// staging buffer for direct I/O reads; 64 MiB works well for NVMe drives.
@@ -127,15 +122,6 @@ fn osHandle(fp: *c.FILE) win32.HANDLE {
     return @ptrFromInt(@as(usize, @bitCast(win32._get_osfhandle(win32._fileno(fp)))));
 }
 
-/// The libc calls only the `__linux__` arms make. Zig 0.17 declares no
-/// `struct stat` for Linux, so `init_fd`'s `fstat` is asked through `statx`
-/// on the descriptor, which reports the same size and block size without a
-/// per-architecture layout.
-const linux_c = if (is_linux) struct {
-    extern "c" fn statx(dirfd: c_int, path: [*:0]const u8, flags: c_int, mask: std.os.linux.STATX, buf: *std.os.linux.Statx) c_int;
-    extern "c" fn posix_fadvise(fd: c_int, offset: i64, len: i64, advice: c_int) c_int;
-} else struct {};
-
 // <sys/mman.h>, <unistd.h> and <limits.h> on this target.
 const PROT_READ: c_int = 1;
 const MAP_SHARED: c_int = 1;
@@ -149,7 +135,7 @@ const _SC_PAGESIZE: c_int = if (@import("builtin").os.tag.isDarwin()) 29 else 30
 const PATH_MAX: usize = if (is_windows) 260 else if (@import("builtin").os.tag.isDarwin()) 1024 else 4096;
 
 fn errnoText() []const u8 {
-    return std.mem.span(strerror(errnoPtr().*));
+    return std.mem.span(stdlib.errno.strerror(errnoPtr().*));
 }
 
 // -----------------------------------------------------------------------------
@@ -225,7 +211,7 @@ pub const File = struct {
                 impl.logInfo("%s: file '%s' opened with direct I/O (alignment: %zu bytes)\n", .{ "impl", fname.ptr, f.alignment });
                 return f;
             }
-            impl.logWarn("Failed to open file '%s' with unbuffered I/O: %s. Falling back to buffered I/O\n", .{ fname.ptr, strerror(errnoPtr().*) });
+            impl.logWarn("Failed to open file '%s' with unbuffered I/O: %s. Falling back to buffered I/O\n", .{ fname.ptr, stdlib.errno.strerror(errnoPtr().*) });
         }
         try f.initFp(mode, exc);
         return f;
@@ -243,7 +229,7 @@ pub const File = struct {
             if (fd == -1) return false;
             self.fd = fd;
             var file_stats: std.os.linux.Statx = std.mem.zeroes(std.os.linux.Statx);
-            _ = linux_c.statx(fd, "", std.os.linux.AT.EMPTY_PATH, std.os.linux.STATX.BASIC_STATS, &file_stats);
+            _ = libc.statx(fd, "", std.os.linux.AT.EMPTY_PATH, std.os.linux.STATX.BASIC_STATS, &file_stats);
             self.size = @intCast(file_stats.size);
             self.alignment = @intCast(file_stats.blksize);
             if (std.c.lseek(fd, 0, std.c.SEEK.SET) == -1) {
@@ -459,7 +445,7 @@ pub const File = struct {
                 const err: std.c.E = @fromBackingInt(@intCast(errnoPtr().*));
                 if (err == .INTR) continue;
                 if (err == .FAULT or err == .INVAL) {
-                    impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_raw_unsafe", self.fname.ptr, strerror(errnoPtr().*) });
+                    impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_raw_unsafe", self.fname.ptr, stdlib.errno.strerror(errnoPtr().*) });
                     const read_offset = try self.tell(exc);
                     _ = std.c.close(self.fd);
                     self.fd = -1;
@@ -501,9 +487,9 @@ pub const File = struct {
         const buffer_size = @min(bytes_to_read, direct_io_buffer_size);
 
         var raw_buffer: ?*anyopaque = null;
-        const ret = posix_memalign(&raw_buffer, alignment, buffer_size);
+        const ret = libc.posix_memalign(&raw_buffer, alignment, buffer_size);
         if (ret != 0) {
-            impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_aligned_chunk", self.fname.ptr, strerror(ret) });
+            impl.logWarn("%s: file '%s' falling back to buffered I/O due to %s\n", .{ "read_aligned_chunk", self.fname.ptr, stdlib.errno.strerror(ret) });
             _ = std.c.close(self.fd);
             self.fd = -1;
             self.alignment = 1;
@@ -511,7 +497,7 @@ pub const File = struct {
             try self.seek(offset, c.SEEK_SET, exc);
             return self.readRawUnsafe(dest, len, exc);
         }
-        defer free(raw_buffer);
+        defer libc.free(raw_buffer);
 
         try self.seek(aligned_offset, c.SEEK_SET, exc);
 
@@ -722,7 +708,7 @@ pub const File = struct {
         const bytes_to_read = (offset_from_alignment + len + alignment - 1) & ~(alignment - 1);
         const buffer_size = @min(bytes_to_read, direct_io_buffer_size);
 
-        const raw_buffer = win32._aligned_malloc(buffer_size, alignment) orelse {
+        const raw_buffer = libc._aligned_malloc(buffer_size, alignment) orelse {
             const msg = errorMessageWin32(win32.ERROR_NOT_ENOUGH_MEMORY);
             defer allocator.free(msg);
             const msg_z = allocator.dupeSentinel(u8, msg, 0) catch impl.abort("llama-mmap.cpp", 317, "out of memory");
@@ -732,7 +718,7 @@ pub const File = struct {
             try self.seek(offset, c.SEEK_SET, exc);
             return self.readRawUnsafeWin32(dest, len, exc);
         };
-        defer win32._aligned_free(raw_buffer);
+        defer libc._aligned_free(raw_buffer);
 
         try self.seek(aligned_offset, c.SEEK_SET, exc);
 
@@ -860,13 +846,13 @@ pub const Mmap = struct {
         var flags: c_int = MAP_SHARED;
         if (numa) prefetch = 0;
         if (is_linux) {
-            if (linux_c.posix_fadvise(fd, 0, 0, std.os.linux.POSIX_FADV.SEQUENTIAL) != 0) {
-                impl.logWarn("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n", .{strerror(errnoPtr().*)});
+            if (libc.posix_fadvise(fd, 0, 0, std.os.linux.POSIX_FADV.SEQUENTIAL) != 0) {
+                impl.logWarn("warning: libc.posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
             }
             // MAP_POPULATE would fault in the lazy ranges too.
             if (prefetch != 0 and lazy_ranges.len == 0) flags = @bitCast(std.os.linux.MAP{ .TYPE = .SHARED, .POPULATE = true });
         }
-        const addr = mmap(null, file.size, PROT_READ, flags, fd, 0);
+        const addr = libc.mmap(null, file.size, PROT_READ, flags, fd, 0);
         if (addr == null or @intFromPtr(addr) == MAP_FAILED) {
             return exc.throw(.runtime_error, "mmap failed: {s}", .{errnoText()});
         }
@@ -878,8 +864,8 @@ pub const Mmap = struct {
         }
         for (lazy_ranges) |range| advise(addr.?, file.size, range[0], range[1], POSIX_MADV_RANDOM, "POSIX_MADV_RANDOM");
         if (numa) {
-            if (posix_madvise(addr, file.size, POSIX_MADV_RANDOM) != 0) {
-                impl.logWarn("warning: posix_madvise(.., POSIX_MADV_RANDOM) failed: %s\n", .{strerror(errnoPtr().*)});
+            if (libc.posix_madvise(addr, file.size, POSIX_MADV_RANDOM) != 0) {
+                impl.logWarn("warning: libc.posix_madvise(.., POSIX_MADV_RANDOM) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
             }
         }
         var m: Mmap = .{ .addr = addr.?, .size = size };
@@ -891,12 +877,12 @@ pub const Mmap = struct {
     /// (llama-mmap.cpp:712 @b1b770d90): a page-aligned `posix_madvise` over
     /// `[beg, end)`, clamped to the file.
     fn advise(addr: *anyopaque, file_size: usize, beg_: usize, end_: usize, advice: c_int, name: [*:0]const u8) void {
-        const page_size: usize = @intCast(sysconf(_SC_PAGESIZE));
+        const page_size: usize = @intCast(libc.sysconf(_SC_PAGESIZE));
         const beg = beg_ & ~(page_size - 1);
         const end = @min((end_ +% page_size -% 1) & ~(page_size - 1), file_size);
         if (beg >= end) return;
-        if (posix_madvise(@ptrFromInt(@intFromPtr(addr) + beg), end - beg, advice) != 0) {
-            impl.logWarn("warning: posix_madvise(.., %s) failed: %s\n", .{ name, strerror(errnoPtr().*) });
+        if (libc.posix_madvise(@ptrFromInt(@intFromPtr(addr) + beg), end - beg, advice) != 0) {
+            impl.logWarn("warning: libc.posix_madvise(.., %s) failed: %s\n", .{ name, stdlib.errno.strerror(errnoPtr().*) });
         }
     }
 
@@ -970,7 +956,7 @@ pub const Mmap = struct {
         if (comptime is_windows) return;
         var first = first_;
         var last = last_;
-        const page_size: c_int = @intCast(sysconf(_SC_PAGESIZE));
+        const page_size: c_int = @intCast(libc.sysconf(_SC_PAGESIZE));
         const ps: usize = @intCast(page_size);
         alignRange(&first, &last, ps);
         const len = last - first;
@@ -981,8 +967,8 @@ pub const Mmap = struct {
         impl.assert(last > first, "llama-mmap.cpp", 784, "last > first");
 
         const next_page_start: *anyopaque = @ptrFromInt(@intFromPtr(self.addr) + first);
-        if (munmap(next_page_start, len) != 0) {
-            impl.logWarn("warning: munmap failed: %s\n", .{strerror(errnoPtr().*)});
+        if (libc.munmap(next_page_start, len) != 0) {
+            impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
         }
 
         var next: std.ArrayList([2]usize) = .empty;
@@ -1016,8 +1002,8 @@ pub const Mmap = struct {
     pub fn deinit(self: *Mmap) void {
         if (comptime is_windows) return self.deinitWin32();
         for (self.fragments.items) |frag| {
-            if (munmap(@ptrFromInt(@intFromPtr(self.addr) + frag[0]), frag[1] - frag[0]) != 0) {
-                impl.logWarn("warning: munmap failed: %s\n", .{strerror(errnoPtr().*)});
+            if (libc.munmap(@ptrFromInt(@intFromPtr(self.addr) + frag[0]), frag[1] - frag[0]) != 0) {
+                impl.logWarn("warning: munmap failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
             }
         }
         self.fragments.deinit(allocator);
@@ -1070,7 +1056,7 @@ pub const Mlock = struct {
             win32.GetSystemInfo(&si);
             return si.dwPageSize;
         }
-        return @intCast(sysconf(_SC_PAGESIZE));
+        return @intCast(libc.sysconf(_SC_PAGESIZE));
     }
 
     /// Ports `llama_mlock`'s `_WIN32` `impl`'s `raw_lock` (llama-mmap.cpp:979
@@ -1111,7 +1097,7 @@ pub const Mlock = struct {
         if (comptime is_windows) return self.rawLockWin32(@constCast(addr), size);
         if (mlock(addr, size) == 0) return true;
 
-        const errmsg = strerror(errnoPtr().*);
+        const errmsg = stdlib.errno.strerror(errnoPtr().*);
         var suggest = errnoPtr().* == @backingInt(std.c.E.NOMEM);
         if (comptime builtin.os.tag.isDarwin()) {
             suggest = false;
@@ -1169,7 +1155,6 @@ pub const MemoryRange = struct {
     size: usize,
 };
 
-extern "c" fn madvise(addr: ?*anyopaque, len: usize, advice: c_int) c_int;
 /// `MADV_WILLNEED`, the same on Linux's every architecture and on Darwin.
 const MADV_WILLNEED: c_int = 3;
 
@@ -1205,7 +1190,7 @@ pub fn prefetchRanges(mr: []MemoryRange) void {
         var info: win32.SYSTEM_INFO = undefined;
         win32.GetSystemInfo(&info);
         break :blk @intCast(info.dwPageSize);
-    } else sysconf(_SC_PAGESIZE);
+    } else libc.sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return;
 
     const page: usize = @intCast(page_size);
@@ -1246,8 +1231,8 @@ pub fn prefetchRanges(mr: []MemoryRange) void {
         }
     } else {
         for (merged) |range| {
-            if (madvise(@constCast(range.addr), range.size, MADV_WILLNEED) != 0) {
-                impl.logWarn("llama_prefetch: madvise(MADV_WILLNEED) failed: %s\n", .{strerror(errnoPtr().*)});
+            if (libc.madvise(@constCast(range.addr), range.size, MADV_WILLNEED) != 0) {
+                impl.logWarn("llama_prefetch: libc.madvise(MADV_WILLNEED) failed: %s\n", .{stdlib.errno.strerror(errnoPtr().*)});
                 return;
             }
         }

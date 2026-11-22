@@ -260,7 +260,7 @@ pub fn checkRow(quant: RowFn, t: c.enum_ggml_type, g: anytype) !void {
         quant(&xf, &out, nelem);
 
         const bytes = ggml_row_size(t, nelem);
-        const got = fnv1a(out[0..bytes]);
+        const got = std.hash.Fnv1a_64.hash(out[0..bytes]);
         const want = p.pick(g);
         if (got != want) {
             std.debug.print(
@@ -285,16 +285,6 @@ fn expectNotAllZero(g: anytype) !void {
         std.debug.print("every golden for this kernel is zero -- the capture is broken\n", .{});
         return error.GoldensAllZero;
     }
-}
-
-/// FNV-1a, matching the generator's.
-fn fnv1a(bytes: []const u8) u64 {
-    var h: u64 = 0xcbf29ce484222325;
-    for (bytes) |b| {
-        h ^= b;
-        h *%= 0x100000001b3;
-    }
-    return h;
 }
 
 // -----------------------------------------------------------------------------

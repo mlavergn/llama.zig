@@ -14,6 +14,7 @@
 //! `build_arch_graph`, and its `graph<decision>` with the lambda inside it.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -161,7 +162,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_in: *Tensor,
     q = b.buildRope(q, inp_pos, il);
     k = b.buildRope(k, inp_pos, il);
 
-    var attn_out = b.buildAttn(inp_attn, null, null, null, q, k, v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+    var attn_out = b.buildAttn(inp_attn, null, null, null, q, k, v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
     b.cb(attn_out, "attn_out", il);
 
     var gate = b.buildLoraMm(layer.wqkv_gate.?, cur_in, layer.wqkv_gate_s);

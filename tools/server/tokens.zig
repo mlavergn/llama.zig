@@ -26,7 +26,7 @@
 //! three statics.
 
 const std = @import("std");
-const sync = @import("sync");
+const sync = @import("stdlib").sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
@@ -39,7 +39,7 @@ const Error = common.Error;
 const Token = common.Token;
 const token_null = common.token_null;
 const throw = common.throw;
-const ggmlAssert = common.ggmlAssert;
+const ggmlAssert = tools.ggml.ggmlAssert;
 
 /// `raw_buffer` (server-common.h:42 @b1b770d90): a file's bytes.
 pub const RawBuffer = []u8;
@@ -1181,23 +1181,6 @@ pub fn formatPromptInfill(
     try embd_inp.append(a, c.llama_vocab_fim_mid(vocab));
 
     return embd_inp.toOwnedSlice(a);
-}
-
-/// Ports `string_replace_all` (common/common.cpp:528 @b1b770d90).
-///
-/// Return: owned by `a`.
-pub fn replaceAll(a: Allocator, s: []const u8, search: []const u8, replace: []const u8) Error![]u8 {
-    if (search.len == 0) return a.dupe(u8, s);
-    var o: std.ArrayList(u8) = .empty;
-    errdefer o.deinit(a);
-    var last: usize = 0;
-    while (std.mem.indexOfPos(u8, s, last, search)) |pos| {
-        try o.appendSlice(a, s[last..pos]);
-        try o.appendSlice(a, replace);
-        last = pos + search.len;
-    }
-    try o.appendSlice(a, s[last..]);
-    return o.toOwnedSlice(a);
 }
 
 /// Ports `format_rerank_template` (server-common.cpp:2022 @b1b770d90): one

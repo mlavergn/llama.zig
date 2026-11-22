@@ -39,6 +39,8 @@
 //! digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const libcxx = @import("stdlib").libcxx;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -49,8 +51,6 @@ const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 const fp16 = c.ggml_fp16_t;
 const bf16 = c.ggml_bf16_t;
-
-extern fn expf(x: f32) f32;
 
 // -----------------------------------------------------------------------------
 // The unary kernels `unary-ops.cpp` provides
@@ -453,15 +453,6 @@ fn gegluQuick(params: *const ComputeParams, dst: *Tensor) void {
     gluByType(gegluQuickF32, vec.geglu_quick_f16, vec.geglu_quick_bf16, params, dst);
 }
 
-/// `std::min` with the C++'s NaN behaviour; see `common.stdMin`.
-const stdMin = common.stdMin;
-
-/// Ports `std::clamp(v, lo, hi)` as libc++ defines it:
-/// `v < lo ? lo : (hi < v ? hi : v)`. A NaN `v` passes through.
-inline fn stdClamp(v: f32, lo: f32, hi: f32) f32 {
-    return if (v < lo) lo else if (hi < v) hi else v;
-}
-
 /// Ports `ggml_compute_forward_swiglu_oai_f32` (ops.cpp:3388 @b1b770d90) and
 /// `ggml_compute_forward_swiglu_oai_f16` (ops.cpp:3455 @b1b770d90).
 ///
@@ -488,14 +479,14 @@ fn swigluOaiRows(comptime T: type, params: *const ComputeParams, dst: *Tensor) v
 
         for (0..nc) |k| {
             if (T == f32) {
-                const x = stdMin(src0_p[k], limit);
-                const y = stdClamp(src1_p[k], -limit, limit);
-                const out_glu = x / (1.0 + expf(alpha * (-x)));
+                const x = libcxx.min(f32, src0_p[k], limit);
+                const y = libcxx.clamp(f32, src1_p[k], -limit, limit);
+                const out_glu = x / (1.0 + libm.expf(alpha * (-x)));
                 dst_p[k] = out_glu * (y + 1.0);
             } else {
-                const x = stdMin(convert.cpuFp16ToFp32(src0_p[k]), limit);
-                const y = stdClamp(convert.cpuFp16ToFp32(src1_p[k]), -limit, limit);
-                const out_glu = x / (1.0 + expf(alpha * (-x)));
+                const x = libcxx.min(f32, convert.cpuFp16ToFp32(src0_p[k]), limit);
+                const y = libcxx.clamp(f32, convert.cpuFp16ToFp32(src1_p[k]), -limit, limit);
+                const out_glu = x / (1.0 + libm.expf(alpha * (-x)));
                 dst_p[k] = convert.cpuFp32ToFp16(out_glu * (y + 1.0));
             }
         }
@@ -535,13 +526,13 @@ fn swigluClampRows(comptime T: type, params: *const ComputeParams, dst: *Tensor)
 
         for (0..nc) |k| {
             if (T == f32) {
-                const gate = stdMin(src0_p[k], limit);
-                const up = stdClamp(src1_p[k], -limit, limit);
-                dst_p[k] = gate / (1.0 + expf(-gate)) * up;
+                const gate = libcxx.min(f32, src0_p[k], limit);
+                const up = libcxx.clamp(f32, src1_p[k], -limit, limit);
+                dst_p[k] = gate / (1.0 + libm.expf(-gate)) * up;
             } else {
-                const gate = stdMin(impl.fp16ToFp32(src0_p[k]), limit);
-                const up = stdClamp(impl.fp16ToFp32(src1_p[k]), -limit, limit);
-                dst_p[k] = impl.fp32ToFp16(gate / (1.0 + expf(-gate)) * up);
+                const gate = libcxx.min(f32, impl.fp16ToFp32(src0_p[k]), limit);
+                const up = libcxx.clamp(f32, impl.fp16ToFp32(src1_p[k]), -limit, limit);
+                dst_p[k] = impl.fp32ToFp16(gate / (1.0 + libm.expf(-gate)) * up);
             }
         }
     }
@@ -617,9 +608,9 @@ test {
 
 test "std::min and std::clamp pass a NaN through, as libc++'s do" {
     const nan = std.math.nan(f32);
-    try std.testing.expect(std.math.isNan(stdMin(nan, 1.0)));
-    try std.testing.expect(std.math.isNan(stdClamp(nan, -1.0, 1.0)));
-    try std.testing.expectEqual(@as(f32, 1.0), stdMin(3.0, 1.0));
-    try std.testing.expectEqual(@as(f32, -1.0), stdClamp(-3.0, -1.0, 1.0));
-    try std.testing.expectEqual(@as(f32, 0.5), stdClamp(0.5, -1.0, 1.0));
+    try std.testing.expect(std.math.isNan(libcxx.min(f32, nan, 1.0)));
+    try std.testing.expect(std.math.isNan(libcxx.clamp(f32, nan, -1.0, 1.0)));
+    try std.testing.expectEqual(@as(f32, 1.0), libcxx.min(f32, 3.0, 1.0));
+    try std.testing.expectEqual(@as(f32, -1.0), libcxx.clamp(f32, -3.0, -1.0, 1.0));
+    try std.testing.expectEqual(@as(f32, 0.5), libcxx.clamp(f32, 0.5, -1.0, 1.0));
 }

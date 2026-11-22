@@ -23,6 +23,9 @@
 //! HTTP only, as the reference has no SSL.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const tc = @import("tools_common");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const chat = @import("common_chat");
 const common = @import("common.zig");
@@ -184,31 +187,6 @@ pub fn fsValidateFilename(filename: []const u8, allow_subdirs: bool) bool {
     return true;
 }
 
-extern fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
-extern fn fread(ptr: [*]u8, size: usize, n: usize, f: *anyopaque) usize;
-extern fn fclose(f: *anyopaque) c_int;
-
-/// `std::ifstream(path, std::ios::binary)` read whole: libc++'s `filebuf`
-/// opens with `fopen`, so a directory opens and reads as empty.
-///
-/// Return: the bytes, or null when the file cannot be opened.
-fn readFile(a: Allocator, path: []const u8) Error!?[]u8 {
-    const z = try a.dupeSentinel(u8, path, 0);
-    defer a.free(z);
-    const f = fopen(z.ptr, "rb") orelse return null;
-    defer _ = fclose(f);
-    var data: std.ArrayList(u8) = .empty;
-    errdefer data.deinit(a);
-    var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = fread(&buf, 1, buf.len, f);
-        if (n == 0) break;
-        try data.appendSlice(a, buf[0..n]);
-    }
-    return try data.toOwnedSlice(a);
-}
-
-extern "c" fn inet_pton(af: c_int, src: [*:0]const u8, dst: *anyopaque) c_int;
 const AF_INET: c_int = 2;
 const AF_INET6: c_int = if (@import("builtin").os.tag.isDarwin()) 30 else 10;
 
@@ -233,10 +211,10 @@ pub fn serverAddrIsPublic(addr: []const u8) bool {
     zbuf[n] = 0;
     const z: [*:0]const u8 = zbuf[0..n :0];
     var b: [16]u8 = undefined;
-    if (inet_pton(AF_INET, z, &b) == 1) {
+    if (libc.inet_pton(AF_INET, z, &b) == 1) {
         return ipv4IsPublic(&b);
     }
-    if (inet_pton(AF_INET6, z, &b) != 1) {
+    if (libc.inet_pton(AF_INET6, z, &b) != 1) {
         return false; // e.g. scoped address "fe80::1%eth0"
     }
     const v4_mapped = [12]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
@@ -288,7 +266,7 @@ fn resolveHostForMedia(ctx: ?*const anyopaque, a: Allocator, host: []const u8) E
 pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u8, media_path: []const u8, allow_private_urls: bool) Error!void {
     if (media_path.len != 0) {
         // should already be enforced by arg.cpp, but checking just in case
-        common.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1271, "media_path.back() == DIRECTORY_SEPARATOR");
+        tc.ggml.ggmlAssert(media_path[media_path.len - 1] == directory_separator, "server-common.cpp", 1271, "media_path.back() == DIRECTORY_SEPARATOR");
     }
 
     if (std.mem.startsWith(u8, url, "http")) {
@@ -323,7 +301,8 @@ pub fn handleMedia(a: Allocator, out_files: *std.ArrayList([]u8), url: []const u
         const fz = common.dupZ(full);
         defer common.freeZ(fz);
         common.srv(.inf, "handle_media", "loading image from local file '%s'\n", .{fz});
-        const data = try readFile(a, full) orelse
+        // `std::ifstream(full, std::ios::binary)`, read whole
+        const data = try stdlib.file.readStream(stdlib.file.defaultIo(), a, full) orelse
             return throw(error.InvalidArgument, "file does not exist or cannot be opened: {s}", .{file_path});
         out_files.append(a, data) catch |e| {
             a.free(data);
@@ -994,7 +973,7 @@ pub fn formatResponseRerank(
         try elements.append(a, elem.done());
     }
 
-    @import("llama").libcxx.sort(Value, elements.items, ScoreCtx{ .label = score_label }, scoreGreater);
+    @import("stdlib").libcxx.sort(Value, elements.items, ScoreCtx{ .label = score_label }, scoreGreater);
 
     const keep = @min(@as(usize, @intCast(top_n)), elements.items.len);
     for (elements.items[keep..]) |*e| e.deinit(a);

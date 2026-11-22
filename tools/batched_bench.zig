@@ -9,6 +9,8 @@
 //! as upstream's are, so both decode the same batches.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const c = tc.c;
 const io = tc.io;
@@ -19,8 +21,6 @@ comptime {
     // libllama, compiled in (see `build/tools.zig`).
     _ = @import("llama");
 }
-
-extern fn rand() c_int;
 
 /// Ports `print_usage` (batched-bench.cpp:12 @b1b770d90).
 fn printUsage(argv: []const [:0]const u8) void {
@@ -103,7 +103,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
     // warm up
     {
         var i: c_int = 0;
-        while (i < 16) : (i += 1) _ = batch.add(@rem(rand(), n_vocab), i, 0, false);
+        while (i < 16) : (i += 1) _ = batch.add(@rem(libc.rand(), n_vocab), i, 0, false);
 
         if (!decodeHelper(ctx, &batch, n_batch, true)) {
             log.err("%s: llama_decode() failed\n", .{func});
@@ -135,7 +135,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                 var j: i32 = 0;
                 while (j < (if (is_pp_shared != 0) 1 else pl)) : (j += 1) {
                     var i: i32 = 0;
-                    while (i < pp) : (i += 1) _ = batch.add(@rem(rand(), n_vocab), i, j, i == pp - 1);
+                    while (i < pp) : (i += 1) _ = batch.add(@rem(libc.rand(), n_vocab), i, j, i == pp - 1);
                 }
 
                 c.llama_memory_clear(mem, false);
@@ -160,7 +160,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     if (!params.kv_unified) {
                         // run one dummy token to apply the memory copy
                         batch.clear();
-                        _ = batch.add(@rem(rand(), n_vocab), pp + 0, 0, true);
+                        _ = batch.add(@rem(libc.rand(), n_vocab), pp + 0, 0, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
                             log.err("%s: llama_decode() failed\n", .{func});
                             c.llama_free(ctx);
@@ -181,7 +181,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                         var i: i32 = 0;
                         while (i < tg) : (i += 1) {
                             batch.clear();
-                            _ = batch.add(@rem(rand(), n_vocab), pp + i, jj, true);
+                            _ = batch.add(@rem(libc.rand(), n_vocab), pp + i, jj, true);
                             if (!decodeHelper(ctx, &batch, n_batch, true)) {
                                 log.err("%s: llama_decode() failed\n", .{func});
                                 c.llama_free(ctx);
@@ -197,7 +197,7 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
                     while (i < tg) : (i += 1) {
                         batch.clear();
                         var jj: i32 = 0;
-                        while (jj < pl) : (jj += 1) _ = batch.add(@rem(rand(), n_vocab), pp + i, jj, true);
+                        while (jj < pl) : (jj += 1) _ = batch.add(@rem(libc.rand(), n_vocab), pp + i, jj, true);
                         if (!decodeHelper(ctx, &batch, n_batch, true)) {
                             log.err("%s: llama_decode() failed\n", .{func});
                             c.llama_free(ctx);
@@ -247,9 +247,9 @@ fn run(a: std.mem.Allocator, argv: []const [:0]const u8) !u8 {
 
 /// Ports `main` (tools/batched-bench/main.cpp:3 @b1b770d90).
 pub fn main(init: std.process.Init) !u8 {
-    tc.io.begin();
-    tc.env.set(init.environ_map);
-    defer tc.io.end();
+    stdlib.stdio.bufferAsC();
+    stdlib.env.set(init.environ_map);
+    defer stdlib.stdio.flushAll();
     const arena = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(arena);
     return run(arena, argv);

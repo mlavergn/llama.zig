@@ -15,6 +15,7 @@
 //! `k_compute_batched_ptrs` stays CUDA.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -294,7 +295,7 @@ pub fn mulMatCublas(ctx: *common.Context, src0: *const Tensor, src1: *const Tens
         compute_type = c.GGML_TYPE_F32;
     }
 
-    if (std.c.getenv("GGML_CUDA_CUBLAS_COMPUTE_TYPE")) |env_c| {
+    if (stdlib.env.getenv("GGML_CUDA_CUBLAS_COMPUTE_TYPE")) |env_c| {
         var buf: [64]u8 = undefined;
         const env = std.mem.span(env_c);
         const n = @min(env.len, buf.len);

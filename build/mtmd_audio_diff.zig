@@ -40,7 +40,9 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
         .link_libc = true,
     });
     audio_mod.addImport("llama", opts.reference.llama.root_module);
+    audio_mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     mod.addImport("mtmd_audio", audio_mod);
+    mod.addImport("stdlib", llamacpp.stdlibOf(opts.reference.llama.root_module));
     for ([_][]const u8{ "", "/include", "/common", "/ggml/include", "/ggml/src", "/vendor", "/tools/mtmd" }) |sub| {
         mod.addIncludePath(b.path(b.fmt("{s}{s}", .{ root, sub })));
     }

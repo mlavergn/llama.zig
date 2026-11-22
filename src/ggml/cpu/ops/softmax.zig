@@ -26,6 +26,7 @@
 //! digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -33,10 +34,6 @@ const vec = @import("vecinline.zig");
 const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn expf(x: f32) f32;
-extern fn log2(x: f64) f64;
 
 /// Typed pointer at a byte offset; see `common.ptr`.
 const at = common.ptr;
@@ -84,10 +81,10 @@ fn softMaxF32(params: *const ComputeParams, dst: *Tensor) void {
     // TODO: is this supposed to be ceil instead of floor?
     //       https://huggingface.co/mosaicml/mpt-7b/blob/main/attention.py#L370
     const n_head: u32 = @truncate(@as(u64, @bitCast(l.ne02)));
-    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(@floor(log2(@floatFromInt(n_head))));
+    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(@floor(libm.log2(@floatFromInt(n_head))));
 
-    const m0 = powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
-    const m1 = powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
+    const m0 = libm.powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
+    const m1 = libm.powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
 
     const wbase: [*]f32 = @ptrCast(@alignCast(params.wdata.?));
     const wp = wbase + (@as(usize, @intCast(l.ne00)) + common.cache_line_size_f32) * @as(usize, @intCast(ith));
@@ -113,9 +110,9 @@ fn softMaxF32(params: *const ComputeParams, dst: *Tensor) void {
                 const h: u32 = @truncate(@as(u64, @bitCast(j02))); // head
                 const slope: f32 = if (max_bias > 0.0)
                     (if (h < n_head_log2)
-                        powf(m0, @floatFromInt(h + 1))
+                        libm.powf(m0, @floatFromInt(h + 1))
                     else
-                        powf(m1, @floatFromInt(2 *% (h -% n_head_log2) +% 1)))
+                        libm.powf(m1, @floatFromInt(2 *% (h -% n_head_log2) +% 1)))
                 else
                     1.0;
 
@@ -154,7 +151,7 @@ fn softMaxF32(params: *const ComputeParams, dst: *Tensor) void {
                 // it is left out rather than ported.
 
                 if (sk) |k| {
-                    sum += @as(f64, expf(k[@intCast(j02)] - max));
+                    sum += @as(f64, libm.expf(k[@intCast(j02)] - max));
                 }
 
                 sum = 1.0 / sum;

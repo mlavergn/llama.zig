@@ -26,6 +26,7 @@
 //! digit — the `cpu/mulmat.zig` convention. Do not renumber them.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -41,7 +42,6 @@ const Stride = isize;
 const Length = c_ulong;
 extern fn vDSP_vsadd(a: [*]const f32, ia: Stride, b: *const f32, cc: [*]f32, ic: Stride, n: Length) void;
 extern fn vDSP_measqv(a: [*]const f32, ia: Stride, cc: *f32, n: Length) void;
-extern fn fmaxf(x: f32, y: f32) f32;
 
 /// Byte offset `i*nb`; see `common.byteOff`.
 const at = common.byteOff;
@@ -466,7 +466,7 @@ fn l2NormF32(params: *const ComputeParams, dst: *Tensor) void {
                     sum += @as(GgmlFloat, xi * xi);
                 }
 
-                const scale = 1.0 / fmaxf(@sqrt(@as(f32, @floatCast(sum))), eps);
+                const scale = 1.0 / libm.fmaxf(@sqrt(@as(f32, @floatCast(sum))), eps);
 
                 const y = dd + at(j01, l.nb1) + at(j02, l.nb2) + at(j03, l.nb3);
 

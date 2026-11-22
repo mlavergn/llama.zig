@@ -33,7 +33,9 @@
 //! none of the three there; `supported` is that condition.
 
 const std = @import("std");
-const sync = @import("sync");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
@@ -50,20 +52,10 @@ const Tensor = c.ggml_tensor;
 /// `#if !defined(_WIN32)` around the whole of `ggml-vulkan-comm.cpp`.
 pub const supported = builtin.os.tag != .windows;
 
-extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
-extern "c" fn atoi(s: [*:0]const u8) c_int;
-extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern "c" fn pthread_setname_np(thread: std.c.pthread_t, name: [*:0]const u8) c_int;
 
 fn oom() noreturn {
     impl.abort("ggml_vulkan: out of memory");
-}
-
-/// `std::chrono::steady_clock::now()`, in nanoseconds.
-fn now() i64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, @intCast(ts.sec)) * std.time.ns_per_s + @as(i64, @intCast(ts.nsec));
 }
 
 /// Ports `ggml_vk_comm_f16_min_size` (ggml-vulkan-comm.cpp:10 @b1b770d90).
@@ -160,10 +152,10 @@ fn ensure(comm: *CommCtx, nbytes: usize) bool {
     freeBuffers(comm);
 
     const n = comm.devs.len;
-    const cap = impl.pad(nbytes, comm.@"align");
+    const cap = stdlib.num.pad(usize, nbytes, comm.@"align");
     for (0..n) |i| {
         const dv = &comm.devs[i];
-        if (posix_memalign(&dv.host_ptr, comm.@"align", 2 * cap) != 0) {
+        if (libc.posix_memalign(&dv.host_ptr, comm.@"align", 2 * cap) != 0) {
             dv.host_ptr = null;
             return fail(comm);
         }
@@ -218,10 +210,10 @@ fn notifySubmitted(comm: *CommCtx, round: u64) void {
 ///
 /// Return: false on stop.
 fn waitSubmitted(comm: *CommCtx, r: u64) bool {
-    const t0 = now();
+    const t0 = stdlib.clock.steadyNs();
     while (comm.submitted.load(.seq_cst) < r) {
         if (comm.stop.load(.seq_cst)) return false;
-        if (now() - t0 < comm.spin) {
+        if (stdlib.clock.steadyNs() - t0 < comm.spin) {
             common.yield();
             continue;
         }
@@ -261,7 +253,7 @@ fn bridgeRelease(comm: *CommCtx, r: u64, seen: []u64, sent: []bool) common.VkErr
     const n = comm.devs.len;
     @memset(sent, false);
     var left = n;
-    const t0 = now();
+    const t0 = stdlib.clock.steadyNs();
     while (true) {
         var pending = n;
         for (0..n) |i| {
@@ -284,7 +276,7 @@ fn bridgeRelease(comm: *CommCtx, r: u64, seen: []u64, sent: []bool) common.VkErr
             }
         }
         if (left == 0) return true;
-        if (now() - t0 < comm.spin) {
+        if (stdlib.clock.steadyNs() - t0 < comm.spin) {
             common.yield();
             continue;
         }
@@ -468,7 +460,7 @@ fn sfdExchange(comm: *CommCtx, r: u64) void {
         const last = if (j == n - 1) n - 2 else n - 1;
         for (0..n) |i| {
             if (i == j) continue;
-            const imp_fd = if (fd < 0 or i == last) fd else fcntl(fd, std.c.F.DUPFD_CLOEXEC, @as(c_int, 0));
+            const imp_fd = if (fd < 0 or i == last) fd else libc.fcntl(fd, std.c.F.DUPFD_CLOEXEC, @as(c_int, 0));
             impl.assert(imp_fd >= 0 or fd < 0, "imp_fd >= 0 || fd < 0");
             sfdImport(&comm.devs[i], comm.devs[i].sfd.imp[j], imp_fd);
         }
@@ -591,8 +583,8 @@ pub fn commInit(backends: [*c]c.ggml_backend_t, n_backends: usize) callconv(.c) 
     } else true;
     if (all_sfd) comm.mode = .sync_fd;
 
-    if (std.c.getenv("GGML_VK_ALLREDUCE_SPIN_US")) |spin| {
-        comm.spin = @as(i64, @max(0, atoi(spin))) * std.time.ns_per_us;
+    if (stdlib.env.getenv("GGML_VK_ALLREDUCE_SPIN_US")) |spin| {
+        comm.spin = @as(i64, @max(0, stdlib.num.atoiC(spin))) * std.time.ns_per_us;
     }
     const ip: c.ggml_init_params = .{ .mem_size = c.ggml_tensor_overhead(), .mem_buffer = null, .no_alloc = true };
     comm.tctx = c.ggml_init(ip);
@@ -649,7 +641,7 @@ pub fn commAllreduceTensor(comm_ctx: ?*anyopaque, tensors: [*c][*c]Tensor) callc
         const cx = m.context.getComputeCtx(ctx);
         m.context.syncBuffers(ctx, cx);
         if (t.flags & c.GGML_TENSOR_FLAG_COMPUTE == 0) {
-            d.vkCmdFillBuffer.?(cx.cmd(), hbuf.buffer, slot_offs, impl.pad(slot_size, 4), 0);
+            d.vkCmdFillBuffer.?(cx.cmd(), hbuf.buffer, slot_offs, stdlib.num.pad(usize, slot_size, 4), 0);
             d.vkCmdFillBuffer.?(cx.cmd(), tbuf.buffer, toffs, nbytes, 0);
         } else if (wire == c.GGML_TYPE_F32) {
             m.submit.bufferCopyAsync(cx, hbuf, slot_offs, tbuf, toffs, nbytes);

@@ -8,6 +8,7 @@
 //! environment.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const tc = @import("tools_common");
 const c = tc.c;
 const sampling = tc.sampling;
@@ -77,21 +78,13 @@ fn dumpCache(label: [*:0]const u8, nc: *const ngram_cache.Cache) void {
 }
 
 fn fileHash(path: [:0]const u8, size: *usize) u64 {
-    const f = c.fopen(path.ptr, "rb") orelse {
+    const data = std.Io.Dir.cwd().readFileAlloc(std.Io.Threaded.global_single_threaded.io(), path, gpa, .unlimited) catch {
         size.* = 0;
         return 0;
     };
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    var tmp: [4096]u8 = undefined;
-    while (true) {
-        const n = c.fread(&tmp, 1, tmp.len, f);
-        if (n == 0) break;
-        buf.appendSlice(gpa, tmp[0..n]) catch unreachable;
-    }
-    _ = c.fclose(f);
-    size.* = buf.items.len;
-    return fnv(buf.items, fnv0);
+    defer gpa.free(data);
+    size.* = data.len;
+    return fnv(data, fnv0);
 }
 
 fn apiTypes() void {
@@ -623,7 +616,6 @@ fn printCands(smpl: *sampling.Sampler, s: c_int) void {
     _ = printf("\n");
 }
 
-extern fn setlocale(category: c_int, locale: [*:0]const u8) ?[*:0]u8;
 /// `LC_NUMERIC`: 4 on Darwin, 1 on glibc.
 const lc_numeric: c_int = if (@import("builtin").os.tag == .linux) 1 else 4;
 
@@ -944,7 +936,7 @@ fn runDecode(params: *params_mod.Params) !u8 {
 }
 
 fn run(argv_in: []const [:0]const u8) !u8 {
-    _ = setlocale(lc_numeric, "C");
+    _ = libc.setlocale(lc_numeric, "C");
     if (argv_in.len < 2) return 2;
     const mode = argv_in[1];
     var argv = try gpa.dupe([:0]const u8, argv_in[1..]);

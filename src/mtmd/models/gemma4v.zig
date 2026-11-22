@@ -7,13 +7,12 @@
 //! Ports `llama.cpp/tools/mtmd/models/gemma4v.cpp` at v1.0.0 (`b1b770d90`).
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
 const model_mod = @import("../model.zig");
 const c = impl.c;
-
-extern fn sqrtf(x: f32) f32;
 
 /// The `add_pos` lambda (gemma4v.cpp:46 @b1b770d90): `build_rope_2d` with
 /// NEOX ordering, `pos_x` on the first half of each head and `pos_y` on
@@ -112,7 +111,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         // [out_x, out_y, n_embd, n_batch] -> [n_embd, out_x * out_y, n_batch]
         cur = c.ggml_reshape_3d(ctx0, cur, out_x * out_y, g.n_embd, g.n_batch);
         cur = c.ggml_cont(ctx0, c.ggml_transpose(ctx0, cur));
-        cur = c.ggml_scale(ctx0, cur, sqrtf(@floatFromInt(g.n_embd)));
+        cur = c.ggml_scale(ctx0, cur, libm.sqrtfInt(g.n_embd));
         g.cb(cur, "pooled", -1);
     }
 

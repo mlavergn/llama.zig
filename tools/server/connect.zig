@@ -11,10 +11,10 @@
 //! what it ports and the line it began at.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
 const common = @import("common.zig");
 const context = @import("context.zig");
-const hf_cache = @import("hf_cache.zig");
 const models_mod = @import("models.zig");
 const ws_mod = @import("httplib/ws.zig");
 
@@ -79,7 +79,7 @@ fn formatShareCode(a: Allocator, code: []const u8) Allocator.Error![]u8 {
 fn normalizeShareCode(a: Allocator, key: []const u8) Allocator.Error![]const u8 {
     var code: std.ArrayList(u8) = .empty;
     for (key) |ch| {
-        if (!tc.strings.isSpace(ch)) {
+        if (!std.ascii.isWhitespace(ch)) {
             try code.append(a, ch);
         }
     }
@@ -158,7 +158,7 @@ fn upstreamHost(a: Allocator, hosts: []const []const u8) Allocator.Error![]const
 /// Ports `server_connect` (server-connect.h:14 @b1b770d90): the
 /// `llama-connect` child, its log thread, and whether its exit is expected.
 pub const ServerConnect = struct {
-    proc: ?*tc.subproc.Subproc = null,
+    proc: ?*stdlib.subproc.Subproc = null,
     log_thread: ?std.Thread = null,
     stopping: std.atomic.Value(bool) = .init(false), // tells the log thread the exit is expected
 
@@ -169,8 +169,8 @@ pub const ServerConnect = struct {
     /// Return: empty if not found.
     pub fn findBinary(a: Allocator) Allocator.Error![]const u8 {
         if (models_mod.getServerExecPath(a)) |exe| {
-            const sibling = try hf_cache.pathJoin(a, hf_cache.pathParent(exe), connect_exe_name);
-            if (hf_cache.isRegularFile(a, sibling)) {
+            const sibling = try stdlib.path.join(a, stdlib.path.parent(exe), connect_exe_name);
+            if (stdlib.fs.isRegularFile(sibling)) {
                 return sibling;
             }
         } else |e| {
@@ -178,14 +178,14 @@ pub const ServerConnect = struct {
             srv(.wrn, "find_binary", "could not resolve the llama-server path (%s), looking for llama-connect in PATH only\n", .{try common.zs(a, common.what(e))});
         }
 
-        const path_env: []const u8 = tc.env.get("PATH") orelse "";
+        const path_env: []const u8 = stdlib.env.get("PATH") orelse "";
         var pos: usize = 0;
         while (pos <= path_env.len) {
             const end = std.mem.indexOfScalarPos(u8, path_env, pos, ':') orelse path_env.len;
             const dir = path_env[pos..end];
             if (dir.len != 0) {
-                const candidate = try hf_cache.pathJoin(a, dir, connect_exe_name);
-                if (hf_cache.isRegularFile(a, candidate)) {
+                const candidate = try stdlib.path.join(a, dir, connect_exe_name);
+                if (stdlib.fs.isRegularFile(candidate)) {
                     return candidate;
                 }
             }
@@ -200,7 +200,7 @@ pub const ServerConnect = struct {
     ///
     /// Return: empty if it can.
     pub fn unavailableReason(a: Allocator, params: *const Params) Allocator.Error![]const u8 {
-        if (!tc.subproc.Subproc.isSupported()) {
+        if (!stdlib.subproc.Subproc.isSupported()) {
             return "this build has subprocess support disabled, rebuild with -DLLAMA_SUBPROCESS=ON";
         }
 
@@ -252,7 +252,7 @@ pub const ServerConnect = struct {
             return;
         };
         var read_buf: [4096]u8 = undefined;
-        var reader = out.readerStreaming(tc.file.defaultIo(), &read_buf);
+        var reader = out.readerStreaming(stdlib.file.defaultIo(), &read_buf);
         var buf: [4096]u8 = undefined;
         while (fgets(&reader.interface, &buf)) |line| {
             forwardChildLog(line.ptr);
@@ -279,7 +279,7 @@ pub const ServerConnect = struct {
 
         // main() resolves this before anything can read it from /props
         const code = params.server_connect_code;
-        common.ggmlAssert(code.len != 0, "tools/server/server-connect.cpp", 203, "!code.empty()");
+        tc.ggml.ggmlAssert(code.len != 0, "tools/server/server-connect.cpp", 203, "!code.empty()");
 
         const args = [_][]const u8{
             bin,
@@ -294,12 +294,12 @@ pub const ServerConnect = struct {
             "--exit-on-stdin-eof",
         };
 
-        const proc = try gpa.create(tc.subproc.Subproc);
+        const proc = try gpa.create(stdlib.subproc.Subproc);
         proc.* = .{};
 
-        const options = tc.subproc.option_no_window |
-            tc.subproc.option_combined_stdout_stderr |
-            tc.subproc.option_inherit_environment;
+        const options = stdlib.subproc.option_no_window |
+            stdlib.subproc.option_combined_stdout_stderr |
+            stdlib.subproc.option_inherit_environment;
 
         if (!proc.create(&args, options, &.{}, null)) {
             srv(.err, func, "failed to spawn '%s'\n", .{try common.zs(a, bin)});
@@ -333,8 +333,7 @@ pub const ServerConnect = struct {
 
         var elapsed: c_int = 0;
         while (elapsed < connect_stop_timeout_ms and proc.alive()) : (elapsed += 100) {
-            var ts: std.c.timespec = .{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
-            while (std.c.nanosleep(&ts, &ts) != 0) {}
+            stdlib.clock.sleepMs(100);
         }
 
         // no-op if the child already exited. the log thread leaves fgets() on EOF, which the kernel

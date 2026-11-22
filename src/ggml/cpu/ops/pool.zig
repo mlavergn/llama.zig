@@ -10,7 +10,7 @@
 //! All three kernels return immediately on any thread but the first. The max
 //! pools call `std::max(v, res)`, which is `(v < res) ? res : v`: it returns
 //! the *first* argument when either is NaN. Zig's `@max` drops a NaN instead,
-//! so the C's expression is written out as `stdMax`.
+//! so the C's expression is written out as `stdlib.libcxx.max`.
 //!
 //! # The `f16` average gradient adds bit patterns
 //!
@@ -21,6 +21,7 @@
 //! bug upstream, not here.
 
 const std = @import("std");
+const libcxx = @import("stdlib").libcxx;
 const impl = @import("../../impl.zig");
 const convert = @import("../convert.zig");
 const common = @import("common.zig");
@@ -32,9 +33,6 @@ const fp16 = c.ggml_fp16_t;
 
 /// `FLT_MAX`, which the max pools start from negated.
 const flt_max = std.math.floatMax(f32);
-
-/// `std::max` with the C++'s NaN behaviour; see `common.stdMax`.
-const stdMax = common.stdMax;
 
 /// Reads element `j` of a row as `f32`, from `f32` or `f16` storage.
 inline fn loadF32(is_f32: bool, row: [*]const u8, j: i64) f32 {
@@ -91,7 +89,7 @@ fn pool1dKsp(params: *const ComputeParams, op: c.enum_ggml_op_pool, k: i32, s: i
 
                 switch (op) {
                     c.GGML_OP_POOL_AVG => res += v,
-                    c.GGML_OP_POOL_MAX => res = stdMax(v, res),
+                    c.GGML_OP_POOL_MAX => res = libcxx.max(f32, v, res),
                     c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
                     else => {},
                 }
@@ -189,7 +187,7 @@ pub export fn ggml_compute_forward_pool_2d(params: *const ComputeParams, dst: *T
                         const srow_j = loadF32(is_f32, srow, j);
                         switch (op) {
                             c.GGML_OP_POOL_AVG => res += srow_j,
-                            c.GGML_OP_POOL_MAX => res = stdMax(srow_j, res),
+                            c.GGML_OP_POOL_MAX => res = libcxx.max(f32, srow_j, res),
                             c.GGML_OP_POOL_COUNT => impl.abort("fatal error"),
                             else => {},
                         }
@@ -339,10 +337,10 @@ test {
     std.testing.refAllDecls(@This());
 }
 
-test "stdMax returns its first argument when either is NaN, as std::max does" {
+test "libcxx.max returns its first argument when either is NaN, as std::max does" {
     const nan = std.math.nan(f32);
-    try std.testing.expect(std.math.isNan(stdMax(nan, 1.0)));
-    try std.testing.expectEqual(@as(f32, 1.0), stdMax(1.0, nan));
-    try std.testing.expectEqual(@as(f32, 2.0), stdMax(1.0, 2.0));
-    try std.testing.expectEqual(@as(f32, 2.0), stdMax(2.0, 1.0));
+    try std.testing.expect(std.math.isNan(libcxx.max(f32, nan, 1.0)));
+    try std.testing.expectEqual(@as(f32, 1.0), libcxx.max(f32, 1.0, nan));
+    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 2.0, 1.0));
 }

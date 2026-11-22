@@ -581,6 +581,7 @@ pub fn build(b: *std.Build) !void {
     // compilation, so the `llama.h` calls and the Zig ones reach the same
     // code; the module links `libggml` itself.
     cli_module.addImport("llama", reference.llama.root_module);
+    cli_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     // The chat stack, which the conversation loop renders and parses
     // through (`cli/conversation.zig`). `cli/common_chat/` and `cli/peg/`
     // import `json` by name, and `cli/fit.zig` already compiles `cli/json/`
@@ -594,15 +595,19 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
     cli_fit_module.addImport("llama", reference.llama.root_module);
+    cli_fit_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     const cli_json_module = b.createModule(.{ .root_source_file = b.path("cli/json_module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
     cli_json_module.addImport("cli_fit", cli_fit_module);
+    cli_json_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     const cli_peg_module = b.createModule(.{ .root_source_file = b.path("cli/peg/module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
     cli_peg_module.addImport("json", cli_json_module);
     cli_peg_module.addImport("llama", reference.llama.root_module);
+    cli_peg_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     const cli_chat_module = b.createModule(.{ .root_source_file = b.path("cli/common_chat/module.zig"), .target = cfg.target, .optimize = cfg.optimize, .link_libc = true });
     cli_chat_module.addImport("json", cli_json_module);
     cli_chat_module.addImport("peg", cli_peg_module);
     cli_chat_module.addImport("llama", reference.llama.root_module);
+    cli_chat_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     cli_chat_module.addImport("zigjinja", jinja_module);
     for ([_]*std.Build.Module{cli_module}) |m| {
         m.addImport("cli_fit", cli_fit_module);
@@ -740,15 +745,15 @@ pub fn build(b: *std.Build) !void {
     const tests_step = b.step("test", "Run unit tests");
     tests_step.dependOn(&tests_run.step);
 
-    // `src/sync/`, the futex mutex and condition variable every module locks
-    // with, is a module of its own, so its tests are a compile step too.
-    const sync_tests = b.addTest(.{
-        .root_module = llamacpp.syncModule(b, cfg.target, cfg.optimize),
+    // `stdlib/`, the platform layer every module shares, is a module of its
+    // own, so its tests are a compile step too.
+    const stdlib_tests = b.addTest(.{
+        .root_module = llamacpp.stdlibModule(b, cfg.target, cfg.optimize),
         .filters = test_filters,
     });
-    const sync_tests_run = b.addRunArtifact(sync_tests);
-    sync_tests_run.has_side_effects = true;
-    tests_step.dependOn(&sync_tests_run.step);
+    const stdlib_tests_run = b.addRunArtifact(stdlib_tests);
+    stdlib_tests_run.has_side_effects = true;
+    tests_step.dependOn(&stdlib_tests_run.step);
 
     // The CLI is its own module, so its tests need their own compile step.
     const cli_tests_module = b.createModule(.{
@@ -763,6 +768,7 @@ pub fn build(b: *std.Build) !void {
     // the header and the library behind it.
     cli_tests_module.addImport("llama_h", llama_h_module);
     cli_tests_module.addImport("llama", reference.llama.root_module);
+    cli_tests_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     cli_tests_module.addImport("cli_fit", cli_fit_module);
     cli_tests_module.addImport("json", cli_json_module);
     cli_tests_module.addImport("peg", cli_peg_module);
@@ -789,6 +795,7 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
     cli_fit_tests_module.addImport("llama", reference.llama.root_module);
+    cli_fit_tests_module.addImport("stdlib", llamacpp.stdlibOf(reference.llama.root_module));
     llamacpp.addSdkPaths(b, cli_fit_tests_module, sdk);
     llamacpp.addCudaLibraries(b, cli_fit_tests_module, cuda);
     llamacpp.addVulkanLibraries(b, cli_fit_tests_module, vulkan);

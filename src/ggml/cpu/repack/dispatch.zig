@@ -35,6 +35,7 @@
 //! the converters they would have reached.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const impl = @import("../../impl.zig");
 const defs = @import("../defs.zig");
 const extra = @import("../extra.zig");
@@ -248,7 +249,7 @@ fn TensorTraits(
                 },
                 c.GGML_OP_MUL_MAT_ID => {
                     var sz = c.ggml_row_size(param_type, c.ggml_nelements(op.src[1]));
-                    sz = impl.pad(sz, @sizeOf(i64)); // + padding for the next block
+                    sz = stdlib.num.pad(usize, sz, @sizeOf(i64)); // + padding for the next block
 
                     // `p.*.ne[2]` on a `[*c]` types as the whole `[4]i64`
                     // in Zig 0.16, so both are narrowed first.
@@ -536,13 +537,13 @@ fn TensorTraits(
             const nbw3 = nbw2 * @as(usize, @intCast(l.ne12));
 
             impl.assert(
-                params.wsize >= impl.pad(nbw3, @sizeOf(i64)) +
+                params.wsize >= stdlib.num.pad(usize, nbw3, @sizeOf(i64)) +
                     @as(usize, @intCast(n_as)) * @as(usize, @intCast(l.ne12 + 1)) * @sizeOf(MmidRowMapping),
                 "wsize covers the activations and the row map",
             );
 
             const wdata: [*]u8 = @ptrCast(params.wdata.?);
-            const wdata_src1_end: [*]u8 = wdata + impl.pad(nbw3, @sizeOf(i64));
+            const wdata_src1_end: [*]u8 = wdata + stdlib.num.pad(usize, nbw3, @sizeOf(i64));
 
             // [n_as][ne12 + 1] of mmid_row_mapping, which is two int32_t,
             // so the counts and the map share one int64-aligned run.

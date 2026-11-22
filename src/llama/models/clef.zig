@@ -23,6 +23,7 @@
 //! `llama_decision_order`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -581,7 +582,7 @@ fn buildLayerAttn(model: *const Model, b: *const graph.Builder, inp: *graph.InpA
     Qcur = b.buildRope(Qcur, inp_pos, il);
     Kcur = b.buildRope(Kcur, inp_pos, il);
 
-    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
+    const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
     var cur = b.buildAttn(inp, null, null, null, Qcur, Kcur, Vcur, null, null, null, kq_scale, il);
     b.cb(cur, "attn_pregate", il);
@@ -692,7 +693,7 @@ fn buildHeadAttn(model: *const Model, b: *const graph.Builder, q: *Tensor, kv: *
     Vcur = c.ggml_cont(ctx, Vcur);
 
     var kq = c.ggml_mul_mat(ctx, Kcur, Qcur); // [n_kv, n_q, n_head]
-    kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / impl.sqrtf(@floatFromInt(d_head)), 0.0);
+    kq = c.ggml_soft_max_ext(ctx, kq, null, 1.0 / libm.sqrtfInt(d_head), 0.0);
 
     var cur = c.ggml_mul_mat(ctx, Vcur, kq); // [d_head, n_q, n_head]
     cur = c.ggml_cont_2d(ctx, c.ggml_permute(ctx, cur, 0, 2, 1, 3), n_embd_h, n_q);
@@ -773,7 +774,7 @@ fn buildHead(model: *const Model, b: *const graph.Builder, hidden_: *Tensor, inp
     {
         // Each question weights its own options.
         var weights = c.ggml_mul_mat(ctx, options, fields); // [n_options, n_questions]
-        weights = c.ggml_scale(ctx, weights, 1.0 / impl.sqrtf(@floatFromInt(n_embd_h)));
+        weights = c.ggml_scale(ctx, weights, 1.0 / libm.sqrtfInt(n_embd_h));
         weights = c.ggml_soft_max(ctx, c.ggml_add(ctx, weights, inp.option_mask));
 
         const summary = c.ggml_mul_mat(ctx, c.ggml_cont(ctx, c.ggml_transpose(ctx, options)), weights);

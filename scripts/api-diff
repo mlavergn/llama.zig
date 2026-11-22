@@ -34,8 +34,8 @@ zig translate-c -lc -I llama.cpp/include -I llama.cpp/ggml/include \
     || { echo "FAIL: cannot translate llama.h" >&2; head -10 "$tmp/terr" >&2; exit 1; }
 
 zig build-exe -mcpu baseline -femit-bin="$tmp/api_diff" -Ofast -lc \
-    --dep harness_root -Mroot=harness/api_diff.zig \
-    --dep llama_c --dep sync -Mharness_root="$HARNESS_ROOT" -Msync="$(dirname "$HARNESS_ROOT")/../sync/module.zig" -Mllama_c="$tmp/llama_c.zig" \
+    --dep harness_root --dep stdlib -Mroot=harness/api_diff.zig \
+    --dep llama_c --dep stdlib -Mharness_root="$HARNESS_ROOT" -Mstdlib="$(dirname "$HARNESS_ROOT")/../../stdlib/module.zig" -Mllama_c="$tmp/llama_c.zig" \
     zig-out/lib/libllama-ref.a zig-out/lib/libggml.a -lc++ \
     "${PLATFORM_LIBS[@]}" 2>"$tmp/berr" \
     || { echo "FAIL: could not build the harness" >&2; head -60 "$tmp/berr" >&2; exit 1; }

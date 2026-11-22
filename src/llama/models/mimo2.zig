@@ -10,6 +10,7 @@
 //! `build_arch_graph`, its `graph` and its `graph_mtp`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -191,7 +192,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
             const sinks = layer.attn_sinks;
 
-            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, sinks, null, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd_head_k)), il);
+            cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, sinks, null, 1.0 / libm.sqrtfInt(b.n_embd_head_k), il);
             b.cb(cur, "attn_out", il);
 
             if (v_scale != 0.0) {
@@ -357,7 +358,7 @@ fn buildGraphMtp(model: *const Model, b: *const graph.Builder) void {
     b.cb(Kcur, "mtp_Kcur", il);
     b.cb(Vcur, "mtp_Vcur", il);
 
-    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, layer.attn_sinks, null, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd_head_k)), il);
+    cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, Qcur, Kcur, Vcur, null, layer.attn_sinks, null, 1.0 / libm.sqrtfInt(b.n_embd_head_k), il);
     b.cb(cur, "mtp_attn_out", il);
 
     if (v_scale != 0.0) {

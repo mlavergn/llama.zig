@@ -54,18 +54,16 @@
 //!   this port rather than `ggml-opt.cpp:LINE`; the abort is the same.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const libm = @import("stdlib").libm;
+const libcxx = @import("stdlib").libcxx;
+const stdlib = @import("stdlib");
 const impl = @import("impl.zig");
 const c = impl.c;
 
 /// The heap the rest of ggml uses. A function entered through a C ABI has no
 /// allocator to be handed one, the same reasoning as `backend.zig`.
 const allocator = std.heap.c_allocator;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn fprintf(stream: *anyopaque, fmt: [*:0]const u8, ...) c_int;
-extern fn fflush(stream: ?*anyopaque) c_int;
-/// libc's `stderr`; see `impl.cStderr`.
-const cStderr = impl.cStderr;
 
 // -----------------------------------------------------------------------------
 // Export switch
@@ -124,202 +122,6 @@ comptime {
 }
 
 // -----------------------------------------------------------------------------
-// libc++'s std::shuffle over std::mt19937
-
-/// Ports `mersenne_twister_engine<uint_fast32_t, 32, 624, 397, 31,
-/// 0x9908b0df, 11, 0xffffffff, 7, 0x9d2c5680, 15, 0xefc60000, 18,
-/// 1812433253>` (mersenne_twister_engine.h), which is `std::mt19937`.
-///
-/// A copy of `src/llama/libcxx.zig`'s `Mt19937`: a ggml module cannot import
-/// above `src/ggml/`, and the engine is fully specified by the standard, so
-/// the two cannot drift apart without one of them being wrong.
-pub const Mt19937 = struct {
-    const n = 624;
-    const m = 397;
-
-    x: [n]u32,
-    i: usize,
-
-    /// The engine's `default_seed`, 5489, which a default-constructed
-    /// `std::mt19937` — the one in `ggml_opt_context` — is seeded with.
-    pub const default_seed: u32 = 5489;
-
-    /// Constructs an engine seeded with `sd`, as `std::mt19937(sd)` does.
-    ///
-    /// Parameters:
-    /// - `sd`: the seed.
-    ///
-    /// Return: the seeded engine.
-    pub fn init(sd: u32) Mt19937 {
-        var e: Mt19937 = undefined;
-        e.seed(sd);
-        return e;
-    }
-
-    /// Ports `mersenne_twister_engine::seed(result_type)`.
-    ///
-    /// Parameters:
-    /// - `sd`: the seed.
-    ///
-    /// Return: nothing.
-    pub fn seed(self: *Mt19937, sd: u32) void {
-        self.x[0] = sd;
-        for (1..n) |k| {
-            const prev = self.x[k - 1];
-            self.x[k] = 1812433253 *% (prev ^ (prev >> 30)) +% @as(u32, @truncate(k));
-        }
-        self.i = 0;
-    }
-
-    /// Ports `mersenne_twister_engine::operator()()`.
-    ///
-    /// Return: the next 32-bit output.
-    pub fn next(self: *Mt19937) u32 {
-        const j = (self.i + 1) % n;
-        const mask: u32 = (@as(u32, 1) << 31) - 1;
-        const yp = (self.x[self.i] & ~mask) | (self.x[j] & mask);
-        const k = (self.i + m) % n;
-        self.x[self.i] = self.x[k] ^ (yp >> 1) ^ (0x9908b0df *% (yp & 1));
-        var z = self.x[self.i] ^ ((self.x[self.i] >> 11) & 0xffffffff);
-        self.i = j;
-        z ^= (z << 7) & 0x9d2c5680;
-        z ^= (z << 15) & 0xefc60000;
-        return z ^ (z >> 18);
-    }
-};
-
-/// Ports `__independent_bits_engine<mt19937, unsigned long>`
-/// (uniform_int_distribution.h), the bit source `uniform_int_distribution`
-/// draws from for a 64-bit result type.
-///
-/// The engine yields 32 bits, so `_Rp` is 2^32 in the 64-bit working type
-/// and `__m` is 32; `__y0_` and `__y1_` then reject nothing until `__w0_`
-/// reaches 32, but the arithmetic is kept whole so a width above 32 — two
-/// engine draws per value — takes the same path as the C++.
-const IndependentBits = struct {
-    e: *Mt19937,
-    w: usize,
-    w0: usize,
-    n: usize,
-    n0: usize,
-    y0: u64,
-    y1: u64,
-    mask0: u32,
-    mask1: u32,
-
-    const rp: u64 = 1 << 32;
-    const m: usize = 32;
-    const wdt: usize = 64;
-    const edt: usize = 32;
-
-    /// Ports `__independent_bits_engine::__independent_bits_engine`.
-    ///
-    /// Parameters:
-    /// - `e`: the engine; borrowed for the lifetime of the result.
-    /// - `w`: how many bits each value has, 1 to 64.
-    ///
-    /// Return: the bits engine.
-    fn init(e: *Mt19937, w: usize) IndependentBits {
-        var self: IndependentBits = undefined;
-        self.e = e;
-        self.w = w;
-        self.n = w / m + @intFromBool(w % m != 0);
-        self.w0 = w / self.n;
-        self.y0 = if (self.w0 < wdt) (rp >> @intCast(self.w0)) << @intCast(self.w0) else 0;
-        if (rp - self.y0 > self.y0 / @as(u64, self.n)) {
-            self.n += 1;
-            self.w0 = w / self.n;
-            self.y0 = if (self.w0 < wdt) (rp >> @intCast(self.w0)) << @intCast(self.w0) else 0;
-        }
-        self.n0 = self.n - w % self.n;
-        self.y1 = if (self.w0 < wdt - 1) (rp >> @intCast(self.w0 + 1)) << @intCast(self.w0 + 1) else 0;
-        self.mask0 = if (self.w0 > 0) ~@as(u32, 0) >> @intCast(edt - self.w0) else 0;
-        self.mask1 = if (self.w0 < edt - 1) ~@as(u32, 0) >> @intCast(edt - (self.w0 + 1)) else ~@as(u32, 0);
-        return self;
-    }
-
-    /// Ports `__independent_bits_engine::__eval(true_type)`.
-    ///
-    /// Return: the next `w`-bit value.
-    fn next(self: *const IndependentBits) u64 {
-        const w_rt: usize = 64;
-        var sp: u64 = 0;
-        var k: usize = 0;
-        while (k < self.n0) : (k += 1) {
-            var u: u32 = undefined;
-            while (true) {
-                u = self.e.next();
-                if (@as(u64, u) < self.y0) break;
-            }
-            if (self.w0 < w_rt) sp <<= @intCast(self.w0) else sp = 0;
-            sp +%= u & self.mask0;
-        }
-        while (k < self.n) : (k += 1) {
-            var u: u32 = undefined;
-            while (true) {
-                u = self.e.next();
-                if (@as(u64, u) < self.y1) break;
-            }
-            if (self.w0 < w_rt - 1) sp <<= @intCast(self.w0 + 1) else sp = 0;
-            sp +%= u & self.mask1;
-        }
-        return sp;
-    }
-};
-
-/// Ports `uniform_int_distribution<ptrdiff_t>::operator()(_URNG&, const
-/// param_type&)` (uniform_int_distribution.h) over a `std::mt19937`.
-///
-/// Parameters:
-/// - `g`: the engine; advanced as many times as the rejection loop needs.
-/// - `a`: the smallest value.
-/// - `b`: the largest value, at least `a`.
-///
-/// Return: a value in `[a, b]`.
-pub fn uniformInt(g: *Mt19937, a: i64, b: i64) i64 {
-    const dt: usize = 64;
-    const r: u64 = @as(u64, @bitCast(b)) -% @as(u64, @bitCast(a)) +% 1;
-    if (r == 1) return a;
-    if (r == 0) return @bitCast(IndependentBits.init(g, dt).next());
-    var w: usize = dt - @clz(r) - 1;
-    if ((r & (@as(u64, std.math.maxInt(u64)) >> @intCast(dt - w))) != 0) w += 1;
-    const e = IndependentBits.init(g, w);
-    var u: u64 = undefined;
-    while (true) {
-        u = e.next();
-        if (u < r) break;
-    }
-    return @bitCast(u +% @as(u64, @bitCast(a)));
-}
-
-/// Ports `std::__shuffle` (shuffle.h), which `std::shuffle` forwards to.
-///
-/// The swap is skipped when the draw is zero, and the last element is never
-/// the left side of a swap — both libc++'s, and both observable in which
-/// draws are made.
-///
-/// Parameters:
-/// - `items`: the range to permute in place.
-/// - `g`: the engine; advanced once per element but the last, or more when a
-///   draw is rejected.
-///
-/// Return: nothing.
-pub fn shuffle(items: []i64, g: *Mt19937) void {
-    var d: i64 = @intCast(items.len);
-    if (d <= 1) return;
-    var first: usize = 0;
-    const last: usize = items.len - 1;
-    d -= 1;
-    while (first < last) : ({
-        first += 1;
-        d -= 1;
-    }) {
-        const i = uniformInt(g, 0, d);
-        if (i != 0) std.mem.swap(i64, &items[first], &items[first + @as(usize, @intCast(i))]);
-    }
-}
-
-// -----------------------------------------------------------------------------
 // The three opaque structs
 
 /// Ports `struct ggml_opt_dataset` (ggml-opt.cpp:16 @b1b770d90).
@@ -354,7 +156,7 @@ const Context = struct {
     ctx_copy: ?*c.ggml_context = null,
     buf_static: c.ggml_backend_buffer_t = null,
     buf_cpu: c.ggml_backend_buffer_t = null,
-    rng: Mt19937 = undefined,
+    rng: libcxx.Mt19937 = undefined,
     loss_type: c.enum_ggml_opt_loss_type = undefined,
     build_type: c.enum_ggml_opt_build_type = undefined,
     build_type_alloc: c.enum_ggml_opt_build_type = undefined,
@@ -553,13 +355,13 @@ pub fn ggml_opt_dataset_shuffle(opt_ctx: c.ggml_opt_context_t, dataset: c.ggml_o
     impl.assert(idata <= ds.ndata, "idata <= dataset->ndata");
 
     if (idata < 0) {
-        shuffle(ds.permutation, &ctx.rng);
+        libcxx.shuffle(i64, ds.permutation, &ctx.rng);
         return;
     }
 
     impl.assert(@rem(idata, ds.ndata_shard) == 0, "idata % dataset->ndata_shard == 0");
     const ishard_max = @divTrunc(idata, ds.ndata_shard);
-    shuffle(ds.permutation[0..@intCast(ishard_max)], &ctx.rng);
+    libcxx.shuffle(i64, ds.permutation[0..@intCast(ishard_max)], &ctx.rng);
 }
 
 /// Ports `ggml_opt_dataset_get_batch` (ggml-opt.cpp:163 @b1b770d90).
@@ -1040,7 +842,7 @@ fn optBuild(opt_ctx: *Context) void {
 /// Return: a new context; free it with `ggml_opt_free`.
 pub fn ggml_opt_init(params: c.struct_ggml_opt_params) callconv(.c) c.ggml_opt_context_t {
     const result = create(Context);
-    result.rng = Mt19937.init(Mt19937.default_seed);
+    result.rng = libcxx.Mt19937.init(libcxx.Mt19937.default_seed);
     result.backend_sched = params.backend_sched;
     result.ctx_compute = params.ctx_compute;
     result.loss_type = params.loss_type;
@@ -1418,7 +1220,7 @@ pub fn ggml_opt_alloc(opt_ctx: c.ggml_opt_context_t, backward: bool) callconv(.c
 
 /// Ports `ggml_opt_eval` (ggml-opt.cpp:782 @b1b770d90).
 ///
-/// `powf(beta, iter)` converts the 64-bit iteration count to `float` and
+/// `libm.powf(beta, iter)` converts the 64-bit iteration count to `float` and
 /// calls libm's `powf`, as the reference object does — two calls, measured.
 ///
 /// Parameters:
@@ -1446,8 +1248,8 @@ pub fn ggml_opt_eval(opt_ctx: c.ggml_opt_context_t, result: c.ggml_opt_result_t)
 
                 // beta1, beta2 after applying warmup
                 const iter_f: f32 = @floatFromInt(ctx.iter);
-                const beta1h: f32 = 1.0 / (1.0 - powf(opt_pars.adamw.beta1, iter_f));
-                const beta2h: f32 = 1.0 / (1.0 - powf(opt_pars.adamw.beta2, iter_f));
+                const beta1h: f32 = 1.0 / (1.0 - libm.powf(opt_pars.adamw.beta1, iter_f));
+                const beta2h: f32 = 1.0 / (1.0 - libm.powf(opt_pars.adamw.beta2, iter_f));
 
                 const adamw_par_data: [*]f32 = @ptrCast(c.ggml_get_data_f32(ctx.opt_step_params));
                 adamw_par_data[0] = opt_pars.adamw.alpha;
@@ -1608,7 +1410,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
     ibatch_max: i64,
     t_start_us: i64,
 ) callconv(.c) void {
-    _ = fprintf(cStderr(), "%s[", @as([*:0]const u8, if (train) "train: " else "val:   "));
+    _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "%s[", @as([*:0]const u8, if (train) "train: " else "val:   "));
 
     // The progress bar consists of partially filled blocks, unicode has 8 separate fill levels.
     const bar_length: i64 = 8;
@@ -1633,7 +1435,7 @@ pub fn ggml_opt_epoch_callback_progress_bar(
             "\u{258F}" // 1/8 filled
         else
             " ";
-        _ = fprintf(cStderr(), block);
+        _ = libc.fprintf(stdlib.stdio.cStream(.stderr), block);
     }
 
     const batch_size = tensorOf(ggml_opt_inputs(opt_ctx)).ne[1];
@@ -1662,8 +1464,8 @@ pub fn ggml_opt_epoch_callback_progress_bar(
     const t_eta_m = @divTrunc(t_eta_s, 60);
     t_eta_s -= t_eta_m * 60;
 
-    _ = fprintf(
-        cStderr(),
+    _ = libc.fprintf(
+        stdlib.stdio.cStream(.stderr),
         "] data=%07lld/%07lld loss=%.5lf\u{b1}%.5lf acc=%.2lf\u{b1}%.2lf%% t=%02lld:%02lld:%02lld ETA=%02lld:%02lld:%02lld \r",
         idata,
         idata_max,
@@ -1679,9 +1481,9 @@ pub fn ggml_opt_epoch_callback_progress_bar(
         t_eta_s,
     );
     if (ibatch == ibatch_max) {
-        _ = fprintf(cStderr(), "\n");
+        _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "\n");
     }
-    _ = fflush(cStderr());
+    _ = libc.fflush(stdlib.stdio.cStream(.stderr));
 
     _ = dataset;
 }
@@ -1766,11 +1568,11 @@ pub fn ggml_opt_fit(
         ggml_opt_result_reset(result_val);
 
         if (!silent) {
-            _ = fprintf(cStderr(), "%s: epoch %04lld/%04lld:\n", "ggml_opt_fit", epoch, nepoch);
+            _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "%s: epoch %04lld/%04lld:\n", "ggml_opt_fit", epoch, nepoch);
         }
         ggml_opt_epoch(opt_ctx, dataset, result_train, result_val, idata_split, epoch_callback, epoch_callback);
         if (!silent) {
-            _ = fprintf(cStderr(), "\n");
+            _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "\n");
         }
     }
 
@@ -1780,7 +1582,7 @@ pub fn ggml_opt_fit(
         t_total_s -= t_total_h * 3600;
         const t_total_m = @divTrunc(t_total_s, 60);
         t_total_s -= t_total_m * 60;
-        _ = fprintf(cStderr(), "%s: training took %02lld:%02lld:%02lld\n", "ggml_opt_fit", t_total_h, t_total_m, t_total_s);
+        _ = libc.fprintf(stdlib.stdio.cStream(.stderr), "%s: training took %02lld:%02lld:%02lld\n", "ggml_opt_fit", t_total_h, t_total_m, t_total_s);
     }
 
     ggml_opt_free(opt_ctx);
@@ -1817,42 +1619,6 @@ pub fn ggml_opt_optimizer_name(o: c.enum_ggml_opt_optimizer_type) callconv(.c) [
 
 test {
     std.testing.refAllDecls(@This());
-    std.testing.refAllDecls(Mt19937);
-}
-
-test "Mt19937's 10000th output is the standard's" {
-    // [rand.predef]: the 10000th consecutive invocation of a
-    // default-constructed mt19937 produces 4123659995.
-    var g = Mt19937.init(Mt19937.default_seed);
-    var v: u32 = 0;
-    for (0..10000) |_| v = g.next();
-    try std.testing.expectEqual(@as(u32, 4123659995), v);
-}
-
-test "uniformInt stays in range and degenerate ranges draw nothing" {
-    var g = Mt19937.init(1);
-    for (0..1000) |k| {
-        const b: i64 = @intCast(k % 37);
-        const v = uniformInt(&g, 0, b);
-        try std.testing.expect(v >= 0 and v <= b);
-    }
-    var h = Mt19937.init(1);
-    const before = h;
-    try std.testing.expectEqual(@as(i64, 5), uniformInt(&h, 5, 5));
-    try std.testing.expectEqualSlices(u32, &before.x, &h.x);
-    try std.testing.expectEqual(before.i, h.i);
-}
-
-test "shuffle is a permutation" {
-    var g = Mt19937.init(Mt19937.default_seed);
-    var items: [64]i64 = undefined;
-    for (&items, 0..) |*p, i| p.* = @intCast(i);
-    shuffle(&items, &g);
-    var seen: [64]bool = @splat(false);
-    for (items) |v| {
-        try std.testing.expect(!seen[@intCast(v)]);
-        seen[@intCast(v)] = true;
-    }
 }
 
 test "the optimizer names are the C's" {

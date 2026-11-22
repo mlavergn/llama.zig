@@ -33,6 +33,7 @@
 //! a drop-in.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const upstream = @import("upstream_flags.zig");
 const common_chat = @import("common_chat");
 
@@ -719,7 +720,10 @@ fn parseFitTarget(v: []const u8, target: *[max_devices]usize) !void {
     while (rest.len > 0) {
         const end = std.mem.indexOfAny(u8, rest, ",/") orelse rest.len;
         if (n == max_devices) return error.BadNumber;
-        parts[n] = try stoull(rest[0..end]);
+        parts[n] = switch (stdlib.num.stoull(rest[0..end])) {
+            .ok => |value| value,
+            else => return error.BadNumber,
+        };
         n += 1;
         rest = rest[end..];
         while (rest.len > 0 and (rest[0] == ',' or rest[0] == '/')) rest = rest[1..];
@@ -731,27 +735,6 @@ fn parseFitTarget(v: []const u8, target: *[max_devices]usize) !void {
         return;
     }
     for (parts[0..n], 0..) |p, k| target[k] = p *% mib;
-}
-
-/// `std::stoull(s)` in base 10: leading white space, an optional sign (a
-/// minus negates modulo 2^64), at least one digit, and whatever follows the
-/// digits ignored.
-fn stoull(s: []const u8) !u64 {
-    var k: usize = 0;
-    while (k < s.len and std.ascii.isWhitespace(s[k])) k += 1;
-    var negative = false;
-    if (k < s.len and (s[k] == '+' or s[k] == '-')) {
-        negative = s[k] == '-';
-        k += 1;
-    }
-    const start = k;
-    var r: u64 = 0;
-    while (k < s.len and std.ascii.isDigit(s[k])) : (k += 1) {
-        r = std.math.mul(u64, r, 10) catch return error.BadNumber;
-        r = std.math.add(u64, r, s[k] - '0') catch return error.BadNumber;
-    }
-    if (k == start) return error.BadNumber;
-    return if (negative) 0 -% r else r;
 }
 
 fn parseI32(s: []const u8) !i32 {

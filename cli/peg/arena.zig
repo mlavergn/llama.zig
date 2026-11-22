@@ -26,7 +26,7 @@
 
 const std = @import("std");
 const json = @import("json");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const errors = @import("errors.zig");
 const trie = json.trie;
 const schema = json.schema;
@@ -345,11 +345,7 @@ pub const ParseContext = struct {
     ///
     /// Return: the context; `deinit` frees it.
     pub fn initTokens(gpa: Allocator, input: []const u8, tokens: []const i32, flags: u32) Error!ParseContext {
-        if (!(tokens.len == 0 or tokens.len == input.len)) {
-            const text = "GGML_ASSERT(this->tokens.empty() || this->tokens.size() == this->input.size()) failed\n";
-            _ = errors.writeFd2(text);
-            std.c.abort();
-        }
+        @import("llama").impl.assert(tokens.len == 0 or tokens.len == input.len, "common/peg-parser.h", 208, "this->tokens.empty() || this->tokens.size() == this->input.size()");
         var self = try init(gpa, input, flags);
         errdefer self.deinit();
         self.tokens = try gpa.dupe(i32, tokens);
@@ -787,11 +783,6 @@ pub fn joinTo(gpa: Allocator, out: *std.ArrayList(u8), parts: []const []const u8
     }
 }
 
-/// A string as `printf`'s `%s` prints its `c_str()`: up to the first NUL.
-pub fn cstr(s: []const u8) []const u8 {
-    return if (std.mem.indexOfScalar(u8, s, 0)) |n| s[0..n] else s;
-}
-
 /// `std::isspace` in the `"C"` locale.
 pub fn isCSpace(c: u8) bool {
     return c == ' ' or (c >= '\t' and c <= '\r');
@@ -904,7 +895,7 @@ const Executor = struct {
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.logDbg("{s}SEQ start at {d} '{s}' ({d} children)\n", .{ self.indent(), self.start_pos, cstr(s), children.len });
+            try errors.logDbg("{s}SEQ start at {d} '{s}' ({d} children)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
         }
         ctx.parse_depth += 1;
 
@@ -915,7 +906,7 @@ const Executor = struct {
             if (ctx.isDebug()) {
                 const d = try self.dumpOf(child_id);
                 defer a.free(d);
-                try errors.eprint("{s}SEQ child {d}: {s}\n", .{ self.indent(), i, cstr(d) });
+                try errors.eprint("{s}SEQ child {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
             }
             const result = try self.arena.parseAt(child_id, ctx, pos);
             if (ctx.isDebug()) {
@@ -947,7 +938,7 @@ const Executor = struct {
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.eprint("{s}CHOICE start at {d} '{s}' ({d} options)\n", .{ self.indent(), self.start_pos, cstr(s), children.len });
+            try errors.eprint("{s}CHOICE start at {d} '{s}' ({d} options)\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), children.len });
         }
         ctx.parse_depth += 1;
         const pos = self.start_pos;
@@ -955,7 +946,7 @@ const Executor = struct {
             if (ctx.isDebug()) {
                 const d = try self.dumpOf(child_id);
                 defer a.free(d);
-                try errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, cstr(d) });
+                try errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, std.mem.sliceTo(d, 0) });
             }
             const result = try self.arena.parseAt(child_id, ctx, pos);
             if (ctx.isDebug()) try errors.eprint("{s}CHOICE option {d}: {s}\n", .{ self.indent(), i, result.type.name() });
@@ -977,7 +968,7 @@ const Executor = struct {
         if (ctx.isDebug()) {
             const s = try self.snippet(a, self.start_pos);
             defer a.free(s);
-            try errors.eprint("{s}REPEAT start at {d} '{s}' (min={d}, max={d})\n", .{ self.indent(), self.start_pos, cstr(s), min_count, max_count });
+            try errors.eprint("{s}REPEAT start at {d} '{s}' (min={d}, max={d})\n", .{ self.indent(), self.start_pos, std.mem.sliceTo(s, 0), min_count, max_count });
         }
         ctx.parse_depth += 1;
 
@@ -995,7 +986,7 @@ const Executor = struct {
                 try errors.eprint("{s}REPEAT iter {d}: {s} at {d}->{d}, nodes={d}\n", .{ self.indent(), match_count, result.type.name(), result.start, result.end, result.nodes.len });
                 const d = try self.dumpOf(child);
                 defer a.free(d);
-                try errors.eprint("{s}REPEAT CHILD: {s}\n", .{ self.indent(), cstr(d) });
+                try errors.eprint("{s}REPEAT CHILD: {s}\n", .{ self.indent(), std.mem.sliceTo(d, 0) });
             }
             if (result.success()) {
                 if (result.end == pos) {
@@ -1237,7 +1228,7 @@ const Executor = struct {
     }
 
     fn tagged(self: *Executor, child: ParserId, tag: []const u8) Error!ParseResult {
-        if (self.ctx.isDebug()) try errors.eprint("{s}TAG: {s}\n", .{ self.indent(), cstr(tag) });
+        if (self.ctx.isDebug()) try errors.eprint("{s}TAG: {s}\n", .{ self.indent(), std.mem.sliceTo(tag, 0) });
         return self.named(child, "", tag);
     }
 

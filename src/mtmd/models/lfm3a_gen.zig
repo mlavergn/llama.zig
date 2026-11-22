@@ -14,6 +14,7 @@
 //! and the line it began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -24,8 +25,6 @@ const gpa = impl.gpa;
 const T = graph.T;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Ports `list_lfm3a_gen_state_slots` (lfm3a-gen.cpp:12 @b1b770d90): the
 /// state carried between GEN_WAV calls: rope offset, short-conv taps and
@@ -87,7 +86,7 @@ fn buildLfmAttn(g: *const graph.Graph, cur: T, layer: *const model_mod.Layer, n_
         c.ggml_reshape_3d(ctx0, k, head_dim, n_head_kv, n_kv),
         c.ggml_reshape_3d(ctx0, v, head_dim, n_head_kv, n_kv),
         kq_mask,
-        1.0 / sqrtf(@floatFromInt(head_dim)),
+        1.0 / libm.sqrtfInt(head_dim),
         il,
         null,
     );

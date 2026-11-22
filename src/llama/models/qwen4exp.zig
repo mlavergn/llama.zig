@@ -32,6 +32,7 @@
 //! here it is `Graph.buildMtp` beside `Graph.build`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -1143,7 +1144,7 @@ const Graph = struct {
         // The reference sums the rectified head scores unweighted, scaled by
         // 1/sqrt(head_dim): the lightning indexer with every head weight set
         // to that scale.
-        const weights: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_idx_h, n_tokens), 1.0 / impl.sqrtf(@floatFromInt(idx_dim)));
+        const weights: *Tensor = c.ggml_fill(ctx, c.ggml_new_tensor_2d(ctx, c.GGML_TYPE_F32, n_idx_h, n_tokens), 1.0 / libm.sqrtfInt(idx_dim));
         const score: *Tensor = c.ggml_lightning_indexer(ctx, q, pooled, weights, inp_kpool.pool_mask); // [n_pool, n_tokens]
         b.res.addFusedNode(.{ .op = .lightning_indexer, .tensor = score, .il = il });
         b.cb(score, "indexer_score", il);
@@ -1345,7 +1346,7 @@ const Graph = struct {
         b.cb(Kcur, "Kcur", il);
         b.cb(Vcur, "Vcur", il);
 
-        const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)) else hp.f_attention_scale;
+        const kq_scale: f32 = if (hp.f_attention_scale == 0.0) 1.0 / libm.sqrtfInt(n_embd_head) else hp.f_attention_scale;
 
         var cur: *Tensor = undefined;
         if (sel) |sl| {
@@ -1635,7 +1636,7 @@ const Graph = struct {
         // A per-stream dot product, then a signed square root before the
         // sigmoid.
         var s: *Tensor = c.ggml_sum_rows(ctx, c.ggml_mul(ctx, key, query));
-        s = c.ggml_scale(ctx, s, 1.0 / impl.sqrtf(@floatFromInt(b.n_embd)));
+        s = c.ggml_scale(ctx, s, 1.0 / libm.sqrtfInt(b.n_embd));
 
         const mag: *Tensor = c.ggml_sqrt(ctx, c.ggml_clamp(ctx, c.ggml_abs(ctx, s), 1e-6, std.math.inf(f32)));
         const gate: *Tensor = c.ggml_sigmoid(ctx, c.ggml_mul(ctx, c.ggml_sgn(ctx, s), mag));

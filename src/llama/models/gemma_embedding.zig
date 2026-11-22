@@ -10,6 +10,7 @@
 //! `load_arch_tensors` and `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -50,7 +51,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
         24 => .@"0_3b",
         else => .unknown,
     };
-    hp.f_attention_scale = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
+    hp.f_attention_scale = 1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
 }
 
 /// Ports `llama_model_gemma_embedding`'s `load_arch_tensors` (models/gemma-embedding.cpp:30 @b1b770d90).
@@ -109,7 +110,7 @@ fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     // Raw embeddings given as input (e.g. encoded images) are not scaled:
     // the scale applies to the token rows only.
-    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, impl.sqrtf(@floatFromInt(b.n_embd)));
+    var inpL: *Tensor = b.buildInpEmbdScaled(model.tok_embd.?, libm.sqrtfInt(b.n_embd));
     b.cb(inpL, "inp_scaled", -1);
 
     // The positions.

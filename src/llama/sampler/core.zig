@@ -24,9 +24,11 @@
 //! `scripts/libcxx-diff`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
-const libcxx = @import("../libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 
 const c = impl.c;
 
@@ -410,7 +412,7 @@ pub fn softmaxImpl(cur_p: *TokenDataArray, do_sort: bool) void {
 
     var cum_sum: f32 = 0.0;
     for (items(cur_p)) |*d| {
-        const p = impl.expf(d.logit - max_l);
+        const p = libm.expf(d.logit - max_l);
         d.p = p;
         cum_sum += p;
     }
@@ -460,24 +462,15 @@ pub fn topKImpl(cur_p: *TokenDataArray, k_in: i32) void {
 /// Return: `seed`, or a random one for `LLAMA_DEFAULT_SEED`.
 pub fn getRngSeed(seed: u32) u32 {
     if (seed == c.LLAMA_DEFAULT_SEED) {
-        if (comptime uses_arc4random) return impl.arc4random();
-        if (comptime uses_win32_random) return @truncate(@as(u64, @bitCast(systemClockCount())));
-
         // use system clock if std::random_device is not a true RNG
         if (randomDeviceIsPrng()) return @truncate(@as(u64, @bitCast(systemClockCount())));
 
-        var rd = RandomDevice.open();
+        var rd = libcxx.RandomDevice.open() catch |e| rdFail(e);
         defer rd.close();
-        return rd.next();
+        return rd.next() catch |e| rdFail(e);
     }
     return seed;
 }
-
-/// libc++'s `_LIBCPP_USING_ARC4_RANDOM`: Apple and the BSDs.
-const uses_arc4random = builtin.os.tag.isDarwin() or builtin.os.tag.isBSD();
-
-/// libc++'s `_LIBCPP_USING_WIN32_RANDOM`: Windows.
-const uses_win32_random = builtin.os.tag == .windows;
 
 /// The C++'s `static bool is_rd_prng`, initialised on first use. A C++
 /// function-local static is initialised once, under a guard; this caches the
@@ -492,11 +485,18 @@ fn randomDeviceIsPrng() bool {
         2 => return true,
         else => {},
     }
-    var rd = RandomDevice.open();
+    var rd = libcxx.RandomDevice.open() catch |e| rdFail(e);
     defer rd.close();
     const is_prng = rd.entropy() == 0;
     rd_prng_state.store(if (is_prng) 2 else 1, .release);
     return is_prng;
+}
+
+/// A `std::system_error` from the device: nothing in `get_rng_seed`'s callers
+/// catches it, so it terminates -- here, through `ggml_abort` with libc++'s
+/// message.
+fn rdFail(err: libcxx.RandomDevice.Error) noreturn {
+    c.ggml_abort("llama-sampler.cpp", 341, "terminating due to uncaught exception of type std::system_error: %s: %s", libcxx.RandomDevice.what(err).ptr, stdlib.errno.strerror(std.c._errno().*));
 }
 
 /// `std::chrono::system_clock::now().time_since_epoch().count()` in libc++
@@ -505,81 +505,10 @@ fn randomDeviceIsPrng() bool {
 /// `GetSystemTimePreciseAsFileTime`, 100 ns ticks since 1601, and truncates
 /// to microseconds since 1970 (`chrono.cpp`'s `__libcpp_system_clock_now`).
 fn systemClockCount() i64 {
-    if (comptime builtin.os.tag == .windows) {
-        const win32 = @import("../win32.zig");
-        var ft: std.os.windows.FILETIME = undefined;
-        win32.GetSystemTimePreciseAsFileTime(&ft);
-        const ticks: i64 = @bitCast((@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime);
-        const nt_to_unix_epoch: i64 = 11644473600 * 10_000_000;
-        return @divTrunc(ticks - nt_to_unix_epoch, 10);
-    }
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(.REALTIME, &ts);
-    return @as(i64, ts.sec) * 1_000_000 + @divTrunc(@as(i64, ts.nsec), 1000);
+    // std reads `RtlGetSystemTimePrecise` on Windows, the call under
+    // `GetSystemTimePreciseAsFileTime`, and truncates to microseconds alike
+    return stdlib.clock.realtimeUs();
 }
-
-/// libc++'s `std::random_device` under `_LIBCPP_USING_DEV_RANDOM`, with the
-/// default token `/dev/urandom`.
-///
-/// The constructor opens the device and throws `std::system_error` if it
-/// cannot; `entropy()` is the kernel's `RNDGETENTCNT` count clamped to
-/// `[0, 32]`, and 0 if the ioctl fails; `operator()` reads four bytes,
-/// retrying on `EINTR` and throwing on any other error or on end of file.
-/// Nothing in `get_rng_seed`'s callers catches, so a throw terminates --
-/// here, through `ggml_abort` with libc++'s message.
-const RandomDevice = struct {
-    fd: c_int,
-
-    /// `RNDGETENTCNT`, `_IOR('R', 0x00, int)`, in the generic ioctl encoding
-    /// aarch64 and x86_64 share.
-    const rnd_get_ent_cnt: c_ulong = 0x80045200;
-
-    const libc = struct {
-        extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
-        extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
-        extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
-        extern "c" fn close(fd: c_int) c_int;
-        extern "c" fn strerror(err: c_int) [*:0]const u8;
-    };
-
-    fn open() RandomDevice {
-        const fd = libc.open("/dev/urandom", @as(c_int, 0)); // O_RDONLY
-        if (fd < 0) fail("random_device failed to open /dev/urandom");
-        return .{ .fd = fd };
-    }
-
-    fn close(self: *RandomDevice) void {
-        _ = libc.close(self.fd);
-    }
-
-    fn entropy(self: *const RandomDevice) f64 {
-        var ent: c_int = 0;
-        if (libc.ioctl(self.fd, rnd_get_ent_cnt, &ent) < 0) return 0;
-        if (ent < 0) return 0;
-        if (ent > 32) return 32;
-        return @floatFromInt(ent);
-    }
-
-    fn next(self: *const RandomDevice) u32 {
-        var r: u32 = 0;
-        const p: [*]u8 = @ptrCast(&r);
-        var got: usize = 0;
-        while (got < @sizeOf(u32)) {
-            const n = libc.read(self.fd, p + got, @sizeOf(u32) - got);
-            if (n == 0) fail("random_device got EOF");
-            if (n < 0) {
-                if (std.c._errno().* == @backingInt(std.c.E.INTR)) continue;
-                fail("random_device got an unexpected error");
-            }
-            got += @intCast(n);
-        }
-        return r;
-    }
-
-    fn fail(comptime what: [:0]const u8) noreturn {
-        c.ggml_abort("llama-sampler.cpp", 341, "terminating due to uncaught exception of type std::system_error: " ++ what ++ ": %s", libc.strerror(std.c._errno().*));
-    }
-};
 
 // -----------------------------------------------------------------------------
 // The llama_sampler API

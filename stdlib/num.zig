@@ -14,7 +14,6 @@
 //! where `strtol` and `strtoul` saturate.
 
 const std = @import("std");
-const strings = @import("strings.zig");
 const builtin = @import("builtin");
 
 /// What a conversion answers: the value, the offset where it stopped (`end
@@ -29,7 +28,7 @@ pub fn Parsed(comptime T: type) type {
 
 fn skipSpace(s: []const u8) usize {
     var i: usize = 0;
-    while (i < s.len and strings.isSpace(s[i])) i += 1;
+    while (i < s.len and std.ascii.isWhitespace(s[i])) i += 1;
     return i;
 }
 
@@ -131,6 +130,12 @@ pub fn atoi(s: []const u8) c_int {
     return @truncate(v);
 }
 
+/// `atoi(s)` over a C string, as the libraries call it on `getenv`'s
+/// answer.
+pub fn atoiC(s: [*:0]const u8) c_int {
+    return atoi(std.mem.span(s));
+}
+
 /// `atol`: `strtol(s, NULL, 10)`.
 pub fn atol(s: []const u8) c_long {
     return strtol(s, 10).value;
@@ -141,10 +146,6 @@ pub fn atof(s: []const u8) f64 {
     return strtod(s).value;
 }
 
-/// What `std::stoi` returns or throws: libc++'s `string.cpp`, `strtol` in
-/// base 10, then `invalid_argument` if nothing converted and
-/// `out_of_range` if `errno` says so or the value leaves `int`, with the
-/// messages libc++ throws, which upstream prints through `e.what()`.
 /// What `std::stoi` or `std::stoull` gives: the value, or which of its two
 /// exceptions it throws.
 ///
@@ -175,9 +176,13 @@ pub const Stoi = Converted(c_int, "stoi");
 /// `std::stoull`'s result.
 pub const Stoull = Converted(u64, "stoull");
 
-/// `std::stoi(s)`.
-pub fn stoi(s: [:0]const u8) Stoi {
-    const p = strtol(s, 10);
+/// `std::stoi(s)`: libc++'s `string.cpp`, `strtol` in base 10 over the C
+/// string, then `invalid_argument` if nothing converted and `out_of_range`
+/// if `errno` says so or the value leaves `int`.
+///
+/// Return: the value, or which exception upstream throws.
+pub fn stoi(s: []const u8) Stoi {
+    const p = strtol(std.mem.sliceTo(s, 0), 10);
     const v = p.value;
     if (p.end == 0) return .no_conversion;
     if (p.range or v < std.math.minInt(c_int) or v > std.math.maxInt(c_int)) return .out_of_range;
@@ -477,6 +482,14 @@ fn parseScanned(comptime T: type, text: []const u8, hex: bool) T {
     return std.fmt.parseFloat(T, z) catch 0;
 }
 
+/// Ports `GGML_PAD` (ggml.h:94 @b1b770d90): `(x + n - 1) & ~(n - 1)` in
+/// `T`'s own arithmetic, which wraps as the C's `size_t`, `uint32_t` and
+/// two's-complement `int64_t` do. A mask, so for an `n` that is not a power
+/// of two it is not a round-up, as in the C.
+pub inline fn pad(comptime T: type, x: T, n: T) T {
+    return (x +% n -% 1) & ~(n -% 1);
+}
+
 // -----------------------------------------------------------------------------
 // Unit Tests
 
@@ -507,4 +520,12 @@ test "stoull converts a prefix, wraps a sign and throws as libc++ does" {
     try std.testing.expectEqual(Stoull.no_conversion, stoull("abc"));
     try std.testing.expectEqual(Stoull.out_of_range, stoull("18446744073709551616"));
     try std.testing.expectEqualStrings("stoull: out of range", std.mem.span((Stoull{ .out_of_range = {} }).what()));
+}
+
+test "pad is GGML_PAD: a round-up to a power of two, wrapping as size_t does" {
+    try std.testing.expectEqual(@as(usize, 32), pad(usize, 1, 32));
+    try std.testing.expectEqual(@as(usize, 32), pad(usize, 32, 32));
+    try std.testing.expectEqual(@as(u32, 0), pad(u32, 0, 256));
+    try std.testing.expectEqual(@as(usize, 0), pad(usize, std.math.maxInt(usize), 32));
+    try std.testing.expectEqual(@as(i64, 96), pad(i64, 65, 32));
 }

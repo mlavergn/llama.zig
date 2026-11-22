@@ -23,7 +23,7 @@
 //! `std::max(a, b)` is `(a < b) ? b : a`, which returns `a` when either is
 //! NaN; Zig's `@max` returns the non-NaN operand. The two agree on every
 //! ordered input, but the C's version is reproduced so a NaN coordinate takes
-//! the C's path. See `stdMin` and `stdMax`.
+//! the C's path. See `stdlib.libcxx.min` and `max`.
 //!
 //! # Plain `assert`, not `GGML_ASSERT`
 //!
@@ -37,6 +37,8 @@
 //! `j0`…`j3`, `j00`…`j03`, digit for digit.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
+const libcxx = @import("stdlib").libcxx;
 const impl = @import("../../impl.zig");
 const common = @import("common.zig");
 const vec = @import("vecinline.zig");
@@ -45,9 +47,6 @@ const c = impl.c;
 const Tensor = common.Tensor;
 const ComputeParams = common.ComputeParams;
 
-extern fn expf(x: f32) f32;
-extern fn logf(x: f32) f32;
-
 /// Stride as `i64`; see `common.sz`.
 const s = common.sz;
 
@@ -55,12 +54,6 @@ const s = common.sz;
 inline fn at(base: ?*anyopaque, off: i64) *f32 {
     return common.ref(f32, base, off);
 }
-
-/// `std::min` with the C++'s NaN behaviour; see `common.stdMin`.
-const stdMin = common.stdMin;
-
-/// `std::max` with the C++'s NaN behaviour; see `common.stdMax`.
-const stdMax = common.stdMax;
 
 /// `(float) i`, the C's implicit promotion of an `int64_t` operand.
 inline fn f(i: i64) f32 {
@@ -78,7 +71,7 @@ inline fn trunc64(x: f32) i64 {
 /// Ports the `triangle_filter` lambda in `ggml_compute_forward_upscale_f32`
 /// (ops.cpp:8084 @b1b770d90): `std::max(1.0f - fabsf(x), 0.0f)`.
 inline fn triangleFilter(x: f32) f32 {
-    return stdMax(1.0 - @abs(x), 0.0);
+    return libcxx.max(f32, 1.0 - @abs(x), 0.0);
 }
 
 /// `a` in the bicubic lambdas of `ggml_compute_forward_upscale_f32`: the
@@ -185,9 +178,9 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
         // https://github.com/pytorch/pytorch/blob/8871ff29b743948d1225389d5b7068f37b22750b/aten/src/ATen/native/cpu/UpSampleKernel.cpp
 
         // support and invscale, minimum 1 pixel for bilinear
-        const support1 = stdMax(1.0, 1.0 / sf1);
+        const support1 = libcxx.max(f32, 1.0, 1.0 / sf1);
         const invscale1 = 1.0 / support1;
-        const support0 = stdMax(1.0, 1.0 / sf0);
+        const support0 = libcxx.max(f32, 1.0, 1.0 / sf0);
         const invscale0 = 1.0 / support0;
 
         var j3: i64 = 0;
@@ -257,7 +250,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                     y1 = @max(0, @min(y1, l.ne01 - 1));
 
                     var dy = y - f(y0);
-                    dy = stdMax(0.0, stdMin(dy, 1.0));
+                    dy = libcxx.max(f32, 0.0, libcxx.min(f32, dy, 1.0));
 
                     var j0: i64 = 0;
                     while (j0 < l.ne0) : (j0 += 1) {
@@ -269,7 +262,7 @@ fn upscaleF32(params: *const ComputeParams, dst: *Tensor) void {
                         x1 = @max(0, @min(x1, l.ne00 - 1));
 
                         var dx = x - f(x0);
-                        dx = stdMax(0.0, stdMin(dx, 1.0));
+                        dx = libcxx.max(f32, 0.0, libcxx.min(f32, dx, 1.0));
 
                         // fetch the four surrounding pixel values and interpolate
                         // (`c` is renamed `cc`: `c` is the C import here.)
@@ -655,14 +648,14 @@ fn timestepEmbeddingF32(params: *const ComputeParams, dst: *Tensor) void {
         var j: i64 = ith;
         while (j < half) : (j += nth) {
             const timestep = src[@intCast(i)];
-            // `-logf(max_period) * j / half`, each `int` promoted to `float`;
+            // `-libm.logf(max_period) * j / half`, each `int` promoted to `float`;
             // no add, so nothing to fuse.
-            const freq = expf(-logf(@floatFromInt(max_period)) * f(j) / f(half));
+            const freq = libm.expf(-libm.logf(@floatFromInt(max_period)) * f(j) / f(half));
             const arg = timestep * freq;
             // On Darwin clang folds this `cosf`/`sinf` pair into one
             // `__sincosf_stret` call, which rounds differently -- see
-            // `common.sinCos`.
-            const sc = common.sinCos(arg);
+            // `stdlib.libm.sinCos`.
+            const sc = libm.sinCos(arg);
             embed_data[@intCast(j)] = sc.cos;
             embed_data[@intCast(j + half)] = sc.sin;
         }
@@ -692,11 +685,11 @@ test {
 test "std::min and std::max keep the C's NaN behaviour" {
     const nan = std.math.nan(f32);
     // `std::min(NaN, 1)` is `(1 < NaN) ? 1 : NaN`, so NaN; `@min` would say 1.
-    try std.testing.expect(std.math.isNan(stdMin(nan, 1.0)));
+    try std.testing.expect(std.math.isNan(libcxx.min(f32, nan, 1.0)));
     // `std::max(0, NaN)` is `(0 < NaN) ? NaN : 0`, so 0.
-    try std.testing.expectEqual(@as(f32, 0.0), stdMax(0.0, nan));
-    try std.testing.expectEqual(@as(f32, 2.0), stdMax(1.0, 2.0));
-    try std.testing.expectEqual(@as(f32, 1.0), stdMin(1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 0.0), libcxx.max(f32, 0.0, nan));
+    try std.testing.expectEqual(@as(f32, 2.0), libcxx.max(f32, 1.0, 2.0));
+    try std.testing.expectEqual(@as(f32, 1.0), libcxx.min(f32, 1.0, 2.0));
 }
 
 test "the bicubic weights sum to one" {

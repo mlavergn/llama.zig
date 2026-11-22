@@ -13,6 +13,7 @@
 //! `VK_INCOMPLETE` retry of every `enumerate*` -- and nothing else.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 
@@ -402,7 +403,7 @@ pub inline fn yield() void {
 /// Whether the environment variable `var_name` is set: the C++'s
 /// `getenv(...) != nullptr`.
 pub fn envSet(comptime var_name: [:0]const u8) bool {
-    return std.c.getenv(var_name) != null;
+    return stdlib.env.getenv(var_name) != null;
 }
 
 // -----------------------------------------------------------------------------

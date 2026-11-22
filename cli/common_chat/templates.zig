@@ -27,6 +27,7 @@
 //! never a `llama_*` C symbol: in a harness the C symbols are upstream's.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("json");
 const peg = @import("peg");
 const exception = @import("exception.zig");
@@ -106,7 +107,7 @@ fn tokenToPiece(a: Allocator, vocab: anytype, token: i32) Error![]u8 {
     if (n < 0) {
         buf = try a.alloc(u8, @intCast(-n));
         const check = api.vocab.llama_token_to_piece(vocab, token, buf.ptr, @intCast(buf.len), 0, true);
-        util.ggmlAssert(check == -n, "check == -n_chars");
+        @import("llama").impl.assert(check == -n, "common/common.cpp", 1901, "check == -n_chars");
         n = check;
     }
     return buf[0..@intCast(n)];
@@ -190,7 +191,7 @@ pub fn init(gpa: Allocator, model: ?*const ModelInfo, chat_template_override: []
 
     var has_explicit_template = chat_template_override.len != 0;
     if (chat_template_override.len == 0) {
-        util.ggmlAssert(model != null, "model != nullptr");
+        @import("llama").impl.assert(model != null, "common/chat.cpp", 925, "model != nullptr");
         const info = model.?;
         if (info.chat_template) |s| {
             default_template_src = s;
@@ -217,7 +218,7 @@ pub fn init(gpa: Allocator, model: ?*const ModelInfo, chat_template_override: []
         // search for the error message and patch it
         util.contains(default_template_src, "in message.content or"))
     {
-        default_template_src = try util.replaceAll(a, default_template_src, "{%- if \"<|channel|>analysis<|message|>\" in message.content or " ++
+        default_template_src = try stdlib.strings.replaceAll(a, default_template_src, "{%- if \"<|channel|>analysis<|message|>\" in message.content or " ++
             "\"<|channel|>final<|message|>\" in message.content %}", "{%- if false %}");
     }
 
@@ -227,7 +228,7 @@ pub fn init(gpa: Allocator, model: ?*const ModelInfo, chat_template_override: []
         // search for the error message and patch it
         util.contains(default_template_src, "if (message['content'] is none or"))
     {
-        default_template_src = try util.replaceAll(a, default_template_src, "{%- if (message['content'] is none or message['content'] == '' or " ++
+        default_template_src = try stdlib.strings.replaceAll(a, default_template_src, "{%- if (message['content'] is none or message['content'] == '' or " ++
             "message['content']|length == 0) and (message['tool_calls'] is not defined or " ++
             "message['tool_calls'] is none or message['tool_calls']|length == 0) %}", "{%- if false %}");
     }
@@ -622,7 +623,7 @@ fn systemMessageNotSupported(a: Allocator, messages: *Value) Error!void {
 
 /// Ports `workaround`'s `requires_non_null_content` (chat.cpp:1214 @b1b770d90).
 fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
-    util.ggmlAssert(messages.isArray(), "messages.is_array()");
+    @import("llama").impl.assert(messages.isArray(), "common/chat.cpp", 1215, "messages.is_array()");
     var it = messages.items();
     while (it.next()) |item| {
         const message = item.value;
@@ -637,7 +638,7 @@ fn requiresNonNullContent(a: Allocator, messages: *Value) Error!void {
 /// tool call's string arguments parsed, for a template that reads them as
 /// an object.
 fn funcArgsNotString(a: Allocator, messages: *Value) Error!void {
-    util.ggmlAssert(messages.isArray(), "messages.is_array()");
+    @import("llama").impl.assert(messages.isArray(), "common/chat.cpp", 1224, "messages.is_array()");
     var it = messages.items();
     while (it.next()) |item| {
         const message = item.value;

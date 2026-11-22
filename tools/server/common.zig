@@ -26,11 +26,13 @@
 //! gate masks them (`server-task-diff` and `server-diff` both do).
 
 const std = @import("std");
-const sync = @import("sync");
+const libm = @import("stdlib").libm;
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const json = @import("json");
 const chat = @import("common_chat");
 const tools = @import("tools_common");
-const libcxx = @import("llama").libcxx;
+const libcxx = @import("stdlib").libcxx;
 const llama_api = @import("llama").api;
 const LlamaException = @import("llama").impl.Exception;
 
@@ -77,10 +79,6 @@ pub fn pathFilename(p: []const u8) []const u8 {
 /// Return: the copy, freed with `a`.
 pub fn zs(a: std.mem.Allocator, s: []const u8) std.mem.Allocator.Error![*:0]const u8 {
     return (try a.dupeSentinel(u8, s, 0)).ptr;
-}
-
-pub fn ggmlAssert(ok: bool, comptime file: [*:0]const u8, comptime line: c_int, comptime cond: [*:0]const u8) void {
-    tools.ggml.ggmlAssert(ok, file, line, cond);
 }
 
 /// The levels of the `SRV_*` macros.
@@ -370,24 +368,13 @@ pub const GrammarTrigger = struct {
 // -----------------------------------------------------------------------------
 // random string / id
 
-extern fn arc4random() u32;
-
-/// One `std::random_device` draw: libc++ reads `arc4random` on Darwin and
-/// `getrandom` elsewhere; either is an unpredictable 32-bit value.
-pub fn randomDevice() u32 {
-    if (comptime @import("builtin").os.tag.isDarwin()) return arc4random();
-    var b: [4]u8 = undefined;
-    _ = std.os.linux.getrandom(&b, b.len, 0);
-    return std.mem.readInt(u32, &b, .little);
-}
-
 /// Ports `random_string` (server-common.cpp:172 @b1b770d90): 32 characters of
 /// `[0-9A-Za-z]` from an `mt19937` seeded by the random device.
 ///
 /// Return: owned by the caller.
 pub fn randomString(a: Allocator) Error![]u8 {
     const str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    var generator = libcxx.Mt19937.init(randomDevice());
+    var generator = libcxx.Mt19937.init(libcxx.randomDevice());
     const result = try a.alloc(u8, 32);
     for (result) |*ch| ch.* = str[generator.next() % str.len];
     return result;
@@ -412,7 +399,7 @@ var media_marker: [:0]const u8 = "";
 
 fn initMediaMarker() void {
     // allow user to pin a reproducible marker via env var
-    if (tools.env.get("LLAMA_MEDIA_MARKER")) |env| {
+    if (stdlib.env.get("LLAMA_MEDIA_MARKER")) |env| {
         if (env.len != 0) {
             media_marker = std.heap.c_allocator.dupeSentinel(u8, env, 0) catch "";
             return;
@@ -540,7 +527,7 @@ pub fn loraShouldClearCache(current: []const LoraInfo, next: []const LoraInfo) b
     // This should always be called after determining that the two sets are
     // _not_ equal. This assert is therefore some slightly wasted work and
     // should be safe to remove as long as this method is called correctly.
-    ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 311, "!are_lora_equal(current, next)");
+    tools.ggml.ggmlAssert(!areLoraEqual(current, next), "server-common.cpp", 311, "!are_lora_equal(current, next)");
 
     return (!(loraEnabledEmpty(current) or loraAllAlora(current)) or !loraAllAlora(next));
 }
@@ -790,13 +777,13 @@ pub const SlotStats = struct {
 
     /// Ports `update_prompt_start` (server-common.h:440 @b1b770d90).
     pub fn updatePromptStart(self: *SlotStats) void {
-        ggmlAssert(self.t_start == 0, "server-common.h", 441, "t_start == 0");
+        tools.ggml.ggmlAssert(self.t_start == 0, "server-common.h", 441, "t_start == 0");
         self.t_start = c.ggml_time_us();
     }
 
     /// Ports `set_prompt_last` (server-common.h:444 @b1b770d90).
     pub fn setPromptLast(self: *SlotStats, t_us: i64) void {
-        ggmlAssert(self.t_start > 0, "server-common.h", 445, "t_start > 0");
+        tools.ggml.ggmlAssert(self.t_start > 0, "server-common.h", 445, "t_start > 0");
         self.t_prompt_last = t_us;
     }
 
@@ -807,7 +794,7 @@ pub const SlotStats = struct {
 
     /// Ports `update_gen_last` (server-common.h:451 @b1b770d90).
     pub fn updateGenLast(self: *SlotStats) void {
-        ggmlAssert(self.t_prompt_last > 0, "server-common.h", 452, "t_prompt_last > 0");
+        tools.ggml.ggmlAssert(self.t_prompt_last > 0, "server-common.h", 452, "t_prompt_last > 0");
         self.t_gen_last = c.ggml_time_us();
     }
 
@@ -1027,7 +1014,7 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
     }
     var cum_sum: f32 = 0.0;
     for (cur) |*t| {
-        const p = expf(t.logit - max_l);
+        const p = libm.expf(t.logit - max_l);
         t.p = p;
         cum_sum += p;
     }
@@ -1037,8 +1024,6 @@ pub fn getTokenProbabilities(a: Allocator, ctx: ?*c.llama_context, idx: c_int, n
 
     return cur;
 }
-
-extern fn expf(x: f32) f32;
 
 /// Ports `safe_json_to_str` (server-common.cpp:1785 @b1b770d90): compact, with
 /// bad UTF-8 replaced instead of throwing.
@@ -1092,7 +1077,7 @@ pub fn tokenize(a: Allocator, vocab: ?*const c.llama_vocab, text: []const u8, ad
         result = try a.realloc(result, @intCast(-n_tokens));
         const check = llama_api.vocab.tokenize(@ptrCast(vocab), text, result, add_special, parse_special, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
-        ggmlAssert(check == -n_tokens, "common.cpp", 1881, "check == -n_tokens");
+        tools.ggml.ggmlAssert(check == -n_tokens, "common.cpp", 1881, "check == -n_tokens");
     } else {
         result = try a.realloc(result, @intCast(n_tokens));
     }
@@ -1114,7 +1099,7 @@ pub fn detokenize(a: Allocator, vocab: ?*const c.llama_vocab, tokens: []const To
         text = try a.realloc(text, @intCast(-n_chars));
         n_chars = llama_api.vocab.detokenize(@ptrCast(vocab), tokens, text, false, special, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
-        ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1923, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
+        tools.ggml.ggmlAssert(n_chars <= @as(i32, @intCast(text.len)), "common.cpp", 1923, "n_chars <= (int32_t)text.size()"); // whitespace trimming is performed after per-token detokenization
     }
 
     // NOTE: the original tokenizer decodes bytes after collecting the pieces.
@@ -1136,7 +1121,7 @@ pub fn piece(a: Allocator, vocab: ?*const c.llama_vocab, t: Token) Error![]u8 {
         errdefer a.free(out);
         const check = llama_api.vocab.tokenToPiece(@ptrCast(vocab), t, out, 0, true, &exc) catch
             return throw(error.RuntimeError, "{s}", .{exc.what()});
-        ggmlAssert(check == -n_chars, "common.cpp", 1901, "check == -n_chars");
+        tools.ggml.ggmlAssert(check == -n_chars, "common.cpp", 1901, "check == -n_chars");
         return out;
     }
     return a.dupe(u8, buf[0..@intCast(n_chars)]);

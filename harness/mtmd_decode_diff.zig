@@ -22,6 +22,7 @@
 //! show a corpus decodes rather than failing on both sides.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
 const vendor = @import("vendor");
 const stb = vendor.stb_image;
 const ma = vendor.miniaudio;
@@ -76,31 +77,26 @@ fn report(comptime fmt: []const u8, args: anytype) void {
     if (verbose or stats.reported <= 40) std.debug.print("DIFF " ++ fmt ++ "\n", args);
 }
 
-extern "c" fn fork() c_int;
-extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
-extern "c" fn _exit(code: c_int) noreturn;
-extern "c" fn signal(sig: c_int, handler: ?*const fn (c_int) callconv(.c) void) ?*const anyopaque;
-
 /// Whether the reference crashes on `buf`, asked in a child process. Only
 /// a PIC can: a failed core load hands a null buffer to
 /// `stbi__convert_format` (see `stb_image.zig`'s `picLoadImpl`).
 fn refCrashes(buf: []const u8, req: c_int) bool {
     if (buf.len < 92 or !std.mem.eql(u8, buf[0..4], "\x53\x80\xF6\x34") or !std.mem.eql(u8, buf[88..92], "PICT")) return false;
-    const pid = fork();
+    const pid = libc.fork();
     if (pid == 0) {
         // the expected crash needs no stack trace from a safe build's handler
-        _ = signal(11, null); // SIGSEGV, SIG_DFL
-        _ = signal(10, null); // SIGBUS on Darwin
-        _ = signal(7, null); // SIGBUS on Linux
+        _ = libc.signal(11, 0); // SIGSEGV, SIG_DFL
+        _ = libc.signal(10, 0); // SIGBUS on Darwin
+        _ = libc.signal(7, 0); // SIGBUS on Linux
         var x: c_int = 0;
         var y: c_int = 0;
         var c: c_int = 0;
         var reason: ?[*:0]const u8 = null;
         ref_stbi_free(ref_stbi_load(buf.ptr, @intCast(@min(buf.len, std.math.maxInt(c_int))), req, &x, &y, &c, &reason));
-        _exit(0);
+        libc._exit(0);
     }
     var status: c_int = 0;
-    _ = waitpid(pid, &status, 0);
+    _ = libc.waitpid(pid, &status, 0);
     return (status & 0x7f) != 0; // terminated by a signal
 }
 

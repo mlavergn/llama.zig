@@ -156,7 +156,7 @@ test "every i-quant matches the C on every pattern" {
                 @memset(&buf, 0);
                 ref(&src, &buf, @intCast(t.n_elem));
                 const used = g.row_size * t.n_rows;
-                std.testing.expectEqual(g.ref.?, t.fnv(buf[0..used])) catch |e| {
+                std.testing.expectEqual(g.ref.?, std.hash.Fnv1a_64.hash(buf[0..used])) catch |e| {
                     std.debug.print("{s}: ref differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
                 };
@@ -167,7 +167,7 @@ test "every i-quant matches the C on every pattern" {
             if (g.chunk) |want| {
                 @memset(&buf, 0);
                 const n = case.chunk(&src, &buf, t.n_rows, t.n_per_row, null);
-                std.testing.expectEqual(want, t.fnv(buf[0..n])) catch |e| {
+                std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                     std.debug.print("{s}: chunk differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
                 };
@@ -176,7 +176,7 @@ test "every i-quant matches the C on every pattern" {
             if (g.chunk_imatrix) |want| {
                 @memset(&buf, 0);
                 const n = case.chunk(&src, &buf, t.n_rows, t.n_per_row, &imatrix);
-                std.testing.expectEqual(want, t.fnv(buf[0..n])) catch |e| {
+                std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(buf[0..n])) catch |e| {
                     std.debug.print("{s}: chunk+imatrix differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
                 };
@@ -191,7 +191,7 @@ test "every i-quant matches the C on every pattern" {
                 @memset(&out, 0);
                 std.debug.assert(deq_len > 0);
                 case.dequant(@ptrCast(&deq_src), &out, @intCast(t.n_elem));
-                std.testing.expectEqual(want, t.fnv(std.mem.sliceAsBytes(out[0..]))) catch |e| {
+                std.testing.expectEqual(want, std.hash.Fnv1a_64.hash(std.mem.sliceAsBytes(out[0..]))) catch |e| {
                     std.debug.print("{s}: dequantize differs on '{s}'\n", .{ case.name, pattern.name() });
                     return e;
                 };

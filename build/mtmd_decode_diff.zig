@@ -27,7 +27,9 @@ pub fn add(b: *std.Build, opts: mtmd.GateOptions) void {
         // reference code compiles as shipped
         .sanitize_c = .off,
     });
+    vendor.addImport("stdlib", llamacpp.stdlibModule(b, opts.target, opts.optimize));
     mod.addImport("vendor", vendor);
+    mod.addImport("stdlib", llamacpp.stdlibModule(b, opts.target, opts.optimize));
     mod.addIncludePath(b.path("llama.cpp/vendor"));
     mod.addCSourceFile(.{ .file = b.path("harness/mtmd_decode_ref.cpp"), .flags = &.{ "-std=c++17", "-w" } });
     llamacpp.addSdkPaths(b, mod, opts.sdk);

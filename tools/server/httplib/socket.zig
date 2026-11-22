@@ -17,6 +17,8 @@
 //! (Winsock) is not yet.
 
 const std = @import("std");
+const libc = @import("stdlib").libc;
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const detail = @import("detail.zig");
 
@@ -156,37 +158,21 @@ extern "c" fn recv(sock: c_int, buf: ?*anyopaque, len: usize, flags: c_int) isiz
 extern "c" fn send(sock: c_int, buf: ?*const anyopaque, len: usize, flags: c_int) isize;
 extern "c" fn poll(fds: *PollFd, nfds: c_uint, timeout: c_int) c_int;
 extern "c" fn shutdown(sock: c_int, how: c_int) c_int;
-extern "c" fn close(fd: c_int) c_int;
-extern "c" fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern "c" fn getsockname(sock: c_int, addr: *anyopaque, len: *u32) c_int;
 extern "c" fn getpeername(sock: c_int, addr: *anyopaque, len: *u32) c_int;
 extern "c" fn getaddrinfo(node: ?[*:0]const u8, service: ?[*:0]const u8, hints: *const AddrInfo, res: *?*AddrInfo) c_int;
 extern "c" fn freeaddrinfo(res: *AddrInfo) void;
 extern "c" fn getnameinfo(addr: *const anyopaque, len: u32, host: [*]u8, hostlen: u32, serv: ?[*]u8, servlen: u32, flags: c_int) c_int;
-extern "c" fn signal(sig: c_int, handler: usize) usize;
-extern "c" fn usleep(us: c_uint) c_int;
 
 /// The calling thread's `errno`.
 pub fn errno() c_int {
     return std.c._errno().*;
 }
 
-/// `std::chrono::steady_clock::now()`, in microseconds.
-pub fn steadyNowUs() i64 {
-    var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
-    return @as(i64, ts.sec) * 1000000 + @divTrunc(@as(i64, ts.nsec), 1000);
-}
-
-/// `std::this_thread::sleep_for`, in microseconds.
-pub fn sleepUs(us: u32) void {
-    _ = usleep(us);
-}
-
 /// `signal(SIGPIPE, SIG_IGN)`, as `Server`'s constructor does
 /// (httplib.cpp:8726 @b1b770d90).
 pub fn ignoreSigpipe() void {
-    _ = signal(k.SIGPIPE, 1);
+    _ = libc.signal(k.SIGPIPE, 1); // SIG_IGN
 }
 
 /// Ports `set_socket_opt_impl` (httplib.cpp:515 @b1b770d90).
@@ -207,7 +193,7 @@ pub fn setSocketOpt(sock: Socket, level: c_int, optname: c_int, optval: c_int) b
 
 /// Ports `close_socket` (httplib.cpp:1795 @b1b770d90).
 pub fn closeSocket(sock: Socket) c_int {
-    return close(sock);
+    return libc.close(sock);
 }
 
 /// Ports `shutdown_socket` (httplib.cpp:2118 @b1b770d90).
@@ -222,7 +208,7 @@ pub fn readSocket(sock: Socket, ptr: [*]u8, size: usize, flags: c_int) isize {
     while (true) {
         const res = recv(sock, ptr, size, flags);
         if (res < 0 and errno() == k.EINTR) {
-            sleepUs(1);
+            stdlib.clock.sleepUs(1);
             continue;
         }
         return res;
@@ -234,7 +220,7 @@ pub fn sendSocket(sock: Socket, ptr: [*]const u8, size: usize, flags: c_int) isi
     while (true) {
         const res = send(sock, ptr, size, flags);
         if (res < 0 and errno() == k.EINTR) {
-            sleepUs(1);
+            stdlib.clock.sleepUs(1);
             continue;
         }
         return res;
@@ -249,7 +235,7 @@ fn selectImpl(sock: Socket, events: c_short, sec: i64, usec: i64) isize {
     while (true) {
         const res = poll(&pfd, 1, timeout);
         if (res < 0 and errno() == k.EINTR) {
-            sleepUs(1);
+            stdlib.clock.sleepUs(1);
             continue;
         }
         return res;
@@ -281,9 +267,9 @@ pub const ReadInterrupt = struct {
 pub fn selectReadInterruptible(sock: Socket, sec: i64, usec: i64, interrupted: ?ReadInterrupt) isize {
     const it = interrupted orelse return selectRead(sock, sec, usec);
     const slice: i64 = 100000;
-    const deadline: i64 = if (sec < 0) std.math.maxInt(i64) else steadyNowUs() + sec * 1000000 + usec;
+    const deadline: i64 = if (sec < 0) std.math.maxInt(i64) else stdlib.clock.steadyUs() + sec * 1000000 + usec;
     while (!it.func(it.ctx)) {
-        const left = deadline -| steadyNowUs();
+        const left = deadline -| stdlib.clock.steadyUs();
         const last = left < slice;
         // C++ integer division truncates toward zero.
         const wait_usec = if (last) @max(@divTrunc(left + 999, 1000) * 1000, 0) else slice;
@@ -329,9 +315,9 @@ pub fn drainAndCloseSocket(sock: Socket) void {
     _ = shutdown(sock, k.SHUT_WR);
     var buf: [detail.recv_bufsiz]u8 = undefined;
     var total: usize = 0;
-    const deadline = steadyNowUs() + 100 * 1000;
+    const deadline = stdlib.clock.steadyUs() + 100 * 1000;
     while (total < 1024 * 1024) {
-        const remaining = deadline - steadyNowUs();
+        const remaining = deadline - stdlib.clock.steadyUs();
         if (remaining <= 0) break;
         if (selectRead(sock, 0, remaining) <= 0) break;
         const n = readSocket(sock, &buf, buf.len, 0);
@@ -353,7 +339,6 @@ fn getIpAndPort(a: std.mem.Allocator, addr: *const SockaddrStorage, addr_len: u3
     return true;
 }
 
-extern "c" fn inet_pton(af: c_int, src: [*:0]const u8, dst: *anyopaque) c_int;
 /// glibc's `res_init`, which `<resolv.h>` names `__res_init`.
 extern "c" fn __res_init() c_int;
 
@@ -364,7 +349,7 @@ pub fn isIpAddress(a: std.mem.Allocator, host: []const u8) error{OutOfMemory}!bo
     defer a.free(hz);
     var addr4: [4]u8 = undefined;
     var addr6: [16]u8 = undefined;
-    return inet_pton(k.AF_INET, hz.ptr, &addr4) == 1 or inet_pton(k.AF_INET6, hz.ptr, &addr6) == 1;
+    return libc.inet_pton(k.AF_INET, hz.ptr, &addr4) == 1 or libc.inet_pton(k.AF_INET6, hz.ptr, &addr6) == 1;
 }
 
 /// Ports `hosted_at` (httplib.cpp:6809 @b1b770d90), the overload filling a
@@ -501,7 +486,7 @@ pub fn createSocket(
             }
             unescapeAbstractNamespaceUnixDomain(addr[2..], host);
             const len: u32 = @intCast(2 + addrlen);
-            if (k.SOCK_CLOEXEC == null) _ = fcntl(sock, k.F_SETFD, k.FD_CLOEXEC);
+            if (k.SOCK_CLOEXEC == null) _ = libc.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC);
             if (socket_options) |so| so.call(sock);
             var dummy = false;
             if (!bind_or_connect.func(bind_or_connect.ctx, sock, &addr, len, &dummy)) {
@@ -527,7 +512,7 @@ pub fn createSocket(
         const sock = socket(ai.ai_family, ai.ai_socktype | (k.SOCK_CLOEXEC orelse 0), ai.ai_protocol);
         if (sock == invalid_socket) continue;
         if (k.SOCK_CLOEXEC == null) {
-            if (fcntl(sock, k.F_SETFD, k.FD_CLOEXEC) == -1) {
+            if (libc.fcntl(sock, k.F_SETFD, k.FD_CLOEXEC) == -1) {
                 _ = closeSocket(sock);
                 continue;
             }
@@ -560,15 +545,6 @@ pub fn boundPort(sock: Socket) error{ GetSockName, UnsupportedAddressFamily }!c_
     if (fam == k.AF_INET or fam == k.AF_INET6) return addr.port();
     return error.UnsupportedAddressFamily;
 }
-
-/// `std::thread::hardware_concurrency()`, as libc++ answers it:
-/// `sysconf(_SC_NPROCESSORS_ONLN)`, 0 on failure.
-pub fn hardwareConcurrency() c_uint {
-    const sc_nprocessors_onln: c_int = if (is_darwin) 58 else 84;
-    const r = sysconf(sc_nprocessors_onln);
-    return if (r < 0) 0 else @intCast(r);
-}
-extern "c" fn sysconf(name: c_int) c_long;
 
 // -----------------------------------------------------------------------------
 // Streams
@@ -613,7 +589,7 @@ pub const SocketStream = struct {
         if (self.max_timeout_msec <= 0) {
             return selectReadInterruptible(self.sock, self.read_timeout_sec, self.read_timeout_usec, self.read_interrupted) > 0;
         }
-        const duration_msec = @divTrunc(steadyNowUs() - self.start_time_us, 1000);
+        const duration_msec = @divTrunc(stdlib.clock.steadyUs() - self.start_time_us, 1000);
         const timeout_msec = self.read_timeout_sec * 1000 + @divTrunc(self.read_timeout_usec, 1000);
         var actual = @min(self.max_timeout_msec - duration_msec, timeout_msec);
         if (actual < 0) actual = 0;
@@ -632,7 +608,7 @@ pub const SocketStream = struct {
     /// top of the timeout of each one. 0 lifts the bound.
     pub fn setMaxTimeout(self: *SocketStream, msec: i64) void {
         self.max_timeout_msec = msec;
-        self.start_time_us = steadyNowUs();
+        self.start_time_us = stdlib.clock.steadyUs();
     }
 
     /// Ports `set_read_interrupt` (httplib.cpp:7993 @b1b770d90), a member
@@ -857,7 +833,7 @@ pub const LineReader = struct {
 pub fn keepAlive(svr_sock: *const std.atomic.Value(Socket), sock: Socket, keep_alive_timeout_sec: i64) bool {
     const interval_usec = detail.keepalive_timeout_check_interval_usecond;
     if (selectRead(sock, 0, interval_usec) > 0) return true;
-    const start = steadyNowUs() - interval_usec;
+    const start = stdlib.clock.steadyUs() - interval_usec;
     const timeout = keep_alive_timeout_sec * 1000000;
     while (true) {
         if (svr_sock.load(.seq_cst) == invalid_socket) break;
@@ -865,7 +841,7 @@ pub fn keepAlive(svr_sock: *const std.atomic.Value(Socket), sock: Socket, keep_a
         if (val < 0) {
             break;
         } else if (val == 0) {
-            if (steadyNowUs() - start > timeout) break;
+            if (stdlib.clock.steadyUs() - start > timeout) break;
         } else {
             return true;
         }

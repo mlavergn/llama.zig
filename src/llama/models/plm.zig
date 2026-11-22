@@ -9,6 +9,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -79,7 +80,7 @@ pub fn buildArchGraph(model: *const Model, b: *const graph.Builder, _: *const gr
 fn buildGraph(model: *const Model, b: *const graph.Builder) void {
     const ctx = b.ctx0;
     const hp = b.hparams;
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(hp.nEmbdHeadK(0)));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(hp.nEmbdHeadK(0));
 
     const n_embd_head_qk_rope: u32 = hp.nRot(0);
     const n_embd_head_qk_nope: u32 = hp.nEmbdHeadK(0) -% hp.nRot(0);

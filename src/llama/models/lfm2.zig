@@ -23,6 +23,7 @@
 //! `lfm_base.zig`'s. LFM2-MoE (`lfm2moe.zig`) builds the same graph.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -263,7 +264,7 @@ fn buildAttnBlock(model: *const Model, b: *const graph.Builder, cur_: *Tensor, i
     q = b.buildRope(q, inp_pos, il);
     k = b.buildRope(k, inp_pos, il);
 
-    const cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, q, k, v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+    const cur = b.buildAttn(inp_attn, layer.wo, null, layer.wo_s, q, k, v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
 
     b.cb(cur, "model.layers.{}.self_attn.out_proj", il);
 
@@ -514,7 +515,7 @@ fn buildGraphDecision(model: *const Model, b: *const graph.Builder) void {
             q = b.buildRope(q, inp_pos, il);
             k = b.buildRope(k, inp_pos, il);
 
-            cur = b.buildAttn(inp_attn[0], layer.wo, null, layer.wo_s, q, k, qkv.v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_attn[0], layer.wo, null, layer.wo_s, q, k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "model.layers.{}.self_attn.out_proj", il);
         }
 
@@ -566,7 +567,7 @@ fn buildDecisionHead(model: *const Model, b: *const graph.Builder, inp: *Tensor,
             // No positional encoding in the head.
             const qkv = b.buildQkv(layer, cur, n_embd_head, hp.nHead(@intCast(il)), hp.nHeadKv(@intCast(il)), il);
 
-            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / impl.sqrtf(@floatFromInt(n_embd_head)), il);
+            cur = b.buildAttn(inp_attn, layer.wo, layer.wo_b, layer.wo_s, qkv.q, qkv.k, qkv.v, null, null, null, 1.0 / libm.sqrtfInt(n_embd_head), il);
             b.cb(cur, "kqv_out", il);
 
             if (il == n_layer - 1) {

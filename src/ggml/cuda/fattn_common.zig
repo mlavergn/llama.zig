@@ -26,6 +26,8 @@
 //! the helpers from it, as the C++ does.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const common = @import("common.zig");
 const kernels = @import("kernels.zig");
@@ -35,10 +37,6 @@ const fattn = @import("fattn.zig");
 const c = impl.c;
 const cu = common.cu;
 const Tensor = c.ggml_tensor;
-
-extern fn powf(x: f32, y: f32) f32;
-extern fn log2f(x: f32) f32;
-extern fn floorf(x: f32) f32;
 
 /// Ports `FATTN_KQ_STRIDE` (fattn-common.cuh:9 @b1b770d90).
 pub const kq_stride = 256;
@@ -164,7 +162,7 @@ pub fn getF16ExtraData(dst: *const Tensor, need_f16_K: bool, need_f16_V: bool) F
     data.end = @intFromPtr(dst.data) +% c.ggml_nbytes(dst);
 
     if (need_f16_K and K.type != c.GGML_TYPE_F16) {
-        data.end = impl.pad(data.end, 128);
+        data.end = stdlib.num.pad(usize, data.end, 128);
         data.K = data.end;
         data.end +%= @as(usize, @bitCast(c.ggml_nelements(K))) *% c.ggml_type_size(c.GGML_TYPE_F16);
     }
@@ -173,7 +171,7 @@ pub fn getF16ExtraData(dst: *const Tensor, need_f16_K: bool, need_f16_V: bool) F
         if (V_is_K_view) {
             data.V = data.K;
         } else {
-            data.end = impl.pad(data.end, 128);
+            data.end = stdlib.num.pad(usize, data.end, 128);
             data.V = data.end;
             data.end +%= @as(usize, @bitCast(c.ggml_nelements(V))) *% c.ggml_type_size(c.GGML_TYPE_F16);
         }
@@ -519,10 +517,10 @@ pub fn launchFattn(
     }
 
     const n_head: u32 = u32Of(Q.ne[2]);
-    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(floorf(log2f(@floatFromInt(n_head))));
+    const n_head_log2: u32 = @as(u32, 1) << @intFromFloat(libm.floorf(libm.log2fInt(n_head)));
 
-    const m0 = powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
-    const m1 = powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
+    const m0 = libm.powf(2.0, -(max_bias) / @as(f32, @floatFromInt(n_head_log2)));
+    const m1 = libm.powf(2.0, -(max_bias / 2.0) / @as(f32, @floatFromInt(n_head_log2)));
 
     // TODO other tensor dimensions after removal of WMMA kernel:
     const ne01 = common.initFastdivValues(@bitCast(Q.ne[1]));

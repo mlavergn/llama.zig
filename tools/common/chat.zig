@@ -22,6 +22,7 @@
 //! (capabilities, role workarounds, the auto-parser) is not ported.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const c = @import("tools_h");
 const log = @import("log.zig");
 const common = @import("common.zig");
@@ -117,7 +118,7 @@ pub const Templates = struct {
         if (std.mem.indexOf(u8, default_template_src, "<|channel|>") != null and
             std.mem.indexOf(u8, default_template_src, "in message.content or") != null)
         {
-            default_template_src = try replaceAll(a, default_template_src, "{%- if \"<|channel|>analysis<|message|>\" in message.content or " ++
+            default_template_src = try stdlib.strings.replaceAll(a, default_template_src, "{%- if \"<|channel|>analysis<|message|>\" in message.content or " ++
                 "\"<|channel|>final<|message|>\" in message.content %}", "{%- if false %}");
         }
 
@@ -126,7 +127,7 @@ pub const Templates = struct {
         if (std.mem.indexOf(u8, default_template_src, "[TOOL_CALLS]") != null and
             std.mem.indexOf(u8, default_template_src, "if (message['content'] is none or") != null)
         {
-            default_template_src = try replaceAll(a, default_template_src, "{%- if (message['content'] is none or message['content'] == '' or " ++
+            default_template_src = try stdlib.strings.replaceAll(a, default_template_src, "{%- if (message['content'] is none or message['content'] == '' or " ++
                 "message['content']|length == 0) and (message['tool_calls'] is not defined or " ++
                 "message['tool_calls'] is none or message['tool_calls']|length == 0) %}", "{%- if false %}");
         }
@@ -261,21 +262,6 @@ fn substr(s: []const u8, pos: usize, count: usize) []const u8 {
         std.process.abort();
     }
     return s[pos..][0..@min(count, s.len - pos)];
-}
-
-/// Ports `string_replace_all` (common/common.cpp:528 @b1b770d90): every `search`
-/// replaced. The caller owns the result.
-fn replaceAll(a: std.mem.Allocator, s: []const u8, search: []const u8, replace: []const u8) ![]const u8 {
-    if (search.len == 0) return s;
-    var o: std.ArrayList(u8) = .empty;
-    var last: usize = 0;
-    while (std.mem.indexOfPos(u8, s, last, search)) |pos| {
-        try o.appendSlice(a, s[last..pos]);
-        try o.appendSlice(a, replace);
-        last = pos + search.len;
-    }
-    try o.appendSlice(a, s[last..]);
-    return o.toOwnedSlice(a);
 }
 
 // -----------------------------------------------------------------------------

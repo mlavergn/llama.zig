@@ -661,17 +661,17 @@ pub const Builder = struct {
 
     /// Ports `operator`+ (peg-parser.cpp:1066 @b1b770d90): `"str" + a`.
     pub fn litPlus(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
-        return self.plus(try self.literal(cstr(s)), a);
+        return self.plus(try self.literal(std.mem.sliceTo(s, 0)), a);
     }
 
     /// Ports `operator`<< (peg-parser.cpp:1074 @b1b770d90): `"str" << a`.
     pub fn litShl(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
-        return self.shl(try self.literal(cstr(s)), a);
+        return self.shl(try self.literal(std.mem.sliceTo(s, 0)), a);
     }
 
     /// Ports `operator`| (peg-parser.cpp:1082 @b1b770d90): `"str" | a`.
     pub fn litOr(self: *Builder, s: []const u8, a: ParserId) Error!ParserId {
-        return self.orr(try self.literal(cstr(s)), a);
+        return self.orr(try self.literal(std.mem.sliceTo(s, 0)), a);
     }
 
     /// Ports `operator`+= (peg-parser.cpp:1020 @b1b770d90): `a += b`.
@@ -684,12 +684,6 @@ pub const Builder = struct {
         a.* = try self.choice(&.{ a.*, b });
     }
 };
-
-/// The `std::string` overloads of the left-hand operators go through
-/// `str.c_str()`: the string ends at its first NUL.
-fn cstr(s: []const u8) []const u8 {
-    return if (std.mem.indexOfScalar(u8, s, 0)) |n| s[0..n] else s;
-}
 
 /// Ports `build_peg_parser` (peg-parser.cpp:1830 @b1b770d90): a builder,
 /// its root from `f`, built.

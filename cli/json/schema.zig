@@ -29,6 +29,7 @@
 //! which one escaped.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const json = @import("module.zig");
 
 const Value = json.Value;
@@ -437,7 +438,10 @@ const Builder = struct {
             if (target.isObject() and target.contains(sel)) {
                 target = target.at(sel) catch |e| return fromJson(e);
             } else if (target.isArray()) {
-                const idx = stoull(sel) orelse target.size();
+                const idx = switch (stdlib.num.stoull(sel)) {
+                    .ok => |v| v,
+                    else => target.size(),
+                };
                 if (idx >= target.size()) {
                     return fail(path, &.{ "cannot resolve $ref ", ref, ", ", sel, " is out of range" });
                 }
@@ -673,39 +677,6 @@ const Builder = struct {
         return fail(path, &.{ "unrecognized type ", type_name });
     }
 };
-
-/// `std::stoull(s)` in base 10, as `resolve_ref` uses it: leading white
-/// space, an optional sign (a minus negates modulo 2^64), at least one
-/// digit, and whatever follows ignored.
-///
-/// Return: the value, or null where `stoull` throws (`invalid_argument`
-/// for no digits, `out_of_range` past 2^64 - 1) -- `resolve_ref` catches
-/// both as `std::logic_error`.
-pub fn stoull(s: []const u8) ?u64 {
-    var k: usize = 0;
-    while (k < s.len and isCSpace(s[k])) k += 1;
-    var negative = false;
-    if (k < s.len and (s[k] == '+' or s[k] == '-')) {
-        negative = s[k] == '-';
-        k += 1;
-    }
-    const start = k;
-    var r: u64 = 0;
-    var overflow = false;
-    while (k < s.len and s[k] >= '0' and s[k] <= '9') : (k += 1) {
-        const m = @mulWithOverflow(r, 10);
-        const ad = @addWithOverflow(m[0], s[k] - '0');
-        if (m[1] != 0 or ad[1] != 0) overflow = true;
-        r = ad[0];
-    }
-    if (k == start or overflow) return null;
-    return if (negative) 0 -% r else r;
-}
-
-/// `isspace` in the `"C"` locale, which `strtoull` and `strtol` skip.
-pub fn isCSpace(ch: u8) bool {
-    return ch == ' ' or (ch >= '\t' and ch <= '\r');
-}
 
 /// Ports `json_type` (json-schema.cpp:365 @b1b770d90).
 fn jsonType(v: *const Value) ValueType {

@@ -14,6 +14,7 @@
 //! falls through to. Where that is the case the doc comment says so.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const builtin = @import("builtin");
 const impl = @import("../../impl.zig");
 const convert = @import("../convert.zig");
@@ -375,17 +376,13 @@ fn scaleF16Avx(n: i64, y: [*]c.ggml_fp16_t, v: f32) void {
 
 const tables = @import("../vec.zig");
 
-extern fn tanhf(x: f32) f32;
-extern fn expf(x: f32) f32;
-extern fn erff(x: f32) f32;
-
 /// `SQRT_2_INV` (vec.h:1001 @b1b770d90).
 const sqrt_2_inv: f32 = 0.70710678118654752440084436210484;
 
 /// Ports `ggml_vec_tanh_f32` (vec.h:944 @b1b770d90).
 pub inline fn tanh_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
-    while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = tanhf(x[i]);
+    while (i < @as(usize, @intCast(n))) : (i += 1) y[i] = libm.tanhf(x[i]);
 }
 
 /// Ports `ggml_vec_leaky_relu_f32` (vec.h:964 @b1b770d90).
@@ -424,7 +421,7 @@ pub inline fn gelu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = impl.fp16ToFp32(x[i]);
-        const res = 0.5 * xi * (1.0 + erff(xi * sqrt_2_inv));
+        const res = 0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv));
         y[i] = convert.cpuFp32ToFp16(res);
     }
 }
@@ -450,7 +447,7 @@ pub inline fn gelu_erf_f32(n: i64, y: [*]f32, x: [*]const f32) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = x[i];
-        y[i] = 0.5 * xi * (1.0 + erff(xi * sqrt_2_inv));
+        y[i] = 0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv));
     }
 }
 
@@ -463,7 +460,7 @@ pub inline fn gelu_quick_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp1
 /// Ports `ggml_silu_f16` (vec.h:1099 @b1b770d90).
 inline fn siluF16(x: c.ggml_fp16_t) c.ggml_fp16_t {
     const v = impl.fp16ToFp32(x);
-    return convert.cpuFp32ToFp16(v / (1.0 + expf(-v)));
+    return convert.cpuFp32ToFp16(v / (1.0 + libm.expf(-v)));
 }
 
 /// Ports `ggml_vec_silu_f16` (vec.h:1510 @b1b770d90).
@@ -477,7 +474,7 @@ pub inline fn silu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t) v
 /// `1.0f + x*(1.0f - s)` is one expression and clang fuses it into
 /// `fma(x, 1 - s, 1)`; the outer products are not adds and stay plain.
 inline fn siluBackwardF32(x: f32, dy: f32) f32 {
-    const s = 1.0 / (1.0 + expf(-x));
+    const s = 1.0 / (1.0 + libm.expf(-x));
     return dy * s * @mulAdd(f32, x, 1.0 - s, 1.0);
 }
 
@@ -485,7 +482,7 @@ inline fn siluBackwardF32(x: f32, dy: f32) f32 {
 /// `siluBackwardF32` is.
 inline fn siluBackwardF16(x: c.ggml_fp16_t, dy: c.ggml_fp16_t) c.ggml_fp16_t {
     const v = impl.fp16ToFp32(x);
-    const s = 1.0 / (1.0 + expf(-v));
+    const s = 1.0 / (1.0 + libm.expf(-v));
     return convert.cpuFp32ToFp16(impl.fp16ToFp32(dy) * s * @mulAdd(f32, v, 1.0 - s, 1.0));
 }
 
@@ -550,7 +547,7 @@ pub inline fn swiglu_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16_t,
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = impl.fp16ToFp32(x[i]);
         const gi = impl.fp16ToFp32(g[i]);
-        y[i] = convert.cpuFp32ToFp16((xi / (1.0 + expf(-xi))) * gi);
+        y[i] = convert.cpuFp32ToFp16((xi / (1.0 + libm.expf(-xi))) * gi);
     }
 }
 
@@ -559,7 +556,7 @@ pub inline fn geglu_erf_f32(n: i64, y: [*]f32, x: [*]const f32, g: [*]const f32)
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = x[i];
-        y[i] = 0.5 * xi * (1.0 + erff(xi * sqrt_2_inv)) * g[i];
+        y[i] = 0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv)) * g[i];
     }
 }
 
@@ -569,7 +566,7 @@ pub inline fn geglu_erf_f16(n: i64, y: [*]c.ggml_fp16_t, x: [*]const c.ggml_fp16
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = impl.fp16ToFp32(x[i]);
         const gi = impl.fp16ToFp32(g[i]);
-        y[i] = convert.cpuFp32ToFp16(0.5 * xi * (1.0 + erff(xi * sqrt_2_inv)) * gi);
+        y[i] = convert.cpuFp32ToFp16(0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv)) * gi);
     }
 }
 
@@ -592,9 +589,9 @@ const bf16 = c.ggml_bf16_t;
 
 /// Ports `GELU_COEF_A`, `GELU_QUICK_COEF` and `SQRT_2_OVER_PI`
 /// (vec.h:998, 999, 1000 @b1b770d90), for the scalar functions below.
-const gelu_coef_a: f32 = 0.044715;
-const gelu_quick_coef: f32 = -1.702;
-const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
+pub const gelu_coef_a: f32 = 0.044715;
+pub const gelu_quick_coef: f32 = -1.702;
+pub const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
 
 /// Ports `ggml_gelu_f32` (vec.h:1003 @b1b770d90), with libm's `tanhf` as the
 /// C calls it.
@@ -604,19 +601,21 @@ const sqrt_2_over_pi: f32 = 0.79788456080286535587989211986876;
 /// rounding -- and its vectorised geglu `fmla.4s` the same product, read
 /// from `llama.cpp.zmake`'s `ops.o`. BF16 output hides the last f32 bit, so
 /// `ops-diff` cannot tell the two apart (an unfused injection passed 2^20
-/// elements); the disassembly is the oracle.
-inline fn geluScalarF32(x: f32) f32 {
-    return 0.5 * x * (1.0 + tanhf(sqrt_2_over_pi * x * @mulAdd(f32, gelu_coef_a * x, x, 1.0)));
+/// elements); the disassembly is the oracle. `convert.zig`'s gelu table is
+/// filled from this too: unfused, one entry of the 65,536 is one f16 ULP
+/// out, `-1.999` in, which only `ops-diff`'s hash of the whole table sees.
+pub inline fn geluScalarF32(x: f32) f32 {
+    return 0.5 * x * (1.0 + libm.tanhf(sqrt_2_over_pi * x * @mulAdd(f32, gelu_coef_a * x, x, 1.0)));
 }
 
 /// Ports `ggml_gelu_quick_f32` (vec.h:1065 @b1b770d90).
-inline fn geluQuickScalarF32(x: f32) f32 {
-    return x * (1.0 / (1.0 + expf(gelu_quick_coef * x)));
+pub inline fn geluQuickScalarF32(x: f32) f32 {
+    return x * (1.0 / (1.0 + libm.expf(gelu_quick_coef * x)));
 }
 
 /// Ports `ggml_silu_f32` (vec.h:1096 @b1b770d90).
-inline fn siluScalarF32(x: f32) f32 {
-    return x / (1.0 + expf(-x));
+pub inline fn siluScalarF32(x: f32) f32 {
+    return x / (1.0 + libm.expf(-x));
 }
 
 inline fn toF32(v: bf16) f32 {
@@ -638,7 +637,7 @@ pub inline fn gelu_erf_bf16(n: i64, y: [*]bf16, x: [*]const bf16) void {
     var i: usize = 0;
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
-        y[i] = toBf16(0.5 * xi * (1.0 + erff(xi * sqrt_2_inv)));
+        y[i] = toBf16(0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv)));
     }
 }
 
@@ -675,7 +674,7 @@ pub inline fn swiglu_bf16(n: i64, y: [*]bf16, x: [*]const bf16, g: [*]const bf16
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
         const gi = toF32(g[i]);
-        y[i] = toBf16((xi / (1.0 + expf(-xi))) * gi);
+        y[i] = toBf16((xi / (1.0 + libm.expf(-xi))) * gi);
     }
 }
 
@@ -685,7 +684,7 @@ pub inline fn geglu_erf_bf16(n: i64, y: [*]bf16, x: [*]const bf16, g: [*]const b
     while (i < @as(usize, @intCast(n))) : (i += 1) {
         const xi = toF32(x[i]);
         const gi = toF32(g[i]);
-        y[i] = toBf16(0.5 * xi * (1.0 + erff(xi * sqrt_2_inv)) * gi);
+        y[i] = toBf16(0.5 * xi * (1.0 + libm.erff(xi * sqrt_2_inv)) * gi);
     }
 }
 

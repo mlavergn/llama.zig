@@ -11,7 +11,8 @@
 //! them from a static destructor at exit, which the port does not reproduce.
 
 const std = @import("std");
-const sync = @import("sync");
+const stdlib = @import("stdlib");
+const sync = stdlib.sync;
 const impl = @import("../impl.zig");
 const m = @import("module.zig");
 
@@ -849,14 +850,12 @@ fn intelShaderCoreCount(vkdev: vk.VkPhysicalDevice) u32 {
 /// whitespace, an optional sign, then digits in base 10; anything else, or
 /// overflow, throws -- and nothing catches it.
 fn stoull(comptime var_name: []const u8, s: [*:0]const u8) u64 {
-    var end: [*c]u8 = undefined;
-    std.c._errno().* = 0;
-    const v = strtoull(s, &end, 10);
-    if (end == @as([*c]const u8, s)) impl.abort("ggml_vulkan: std::stoull: no conversion (" ++ var_name ++ ")");
-    if (std.c._errno().* == @backingInt(std.c.E.RANGE)) impl.abort("ggml_vulkan: std::stoull: out of range (" ++ var_name ++ ")");
-    return v;
+    return switch (stdlib.num.stoull(std.mem.span(s))) {
+        .ok => |v| v,
+        .no_conversion => impl.abort("ggml_vulkan: std::stoull: no conversion (" ++ var_name ++ ")"),
+        .out_of_range => impl.abort("ggml_vulkan: std::stoull: out of range (" ++ var_name ++ ")"),
+    };
 }
-extern fn strtoull(s: [*:0]const u8, end: *[*c]u8, base: c_int) u64;
 
 /// `std::stoul`, which is `strtoul` and on an LP64 target the same width as
 /// `stoull`; the C++ then narrows the result to `uint32_t`.
@@ -1030,7 +1029,7 @@ pub fn getDevice(idx: usize) *Device {
         impl.logDebug("ggml_vulkan: WARNING: Async execution disabled on certain Intel devices.\n", .{});
     }
 
-    if (std.c.getenv("GGML_VK_FORCE_MAX_ALLOCATION_SIZE")) |s| {
+    if (stdlib.env.getenv("GGML_VK_FORCE_MAX_ALLOCATION_SIZE")) |s| {
         device.max_memory_allocation_size = stoull("GGML_VK_FORCE_MAX_ALLOCATION_SIZE", s);
     } else if (maintenance4_support) {
         device.max_memory_allocation_size = @min(props3.maxMemoryAllocationSize, props4.maxBufferSize);
@@ -1038,7 +1037,7 @@ pub fn getDevice(idx: usize) *Device {
         device.max_memory_allocation_size = props3.maxMemoryAllocationSize;
     }
 
-    if (std.c.getenv("GGML_VK_FORCE_MAX_BUFFER_SIZE")) |s| {
+    if (stdlib.env.getenv("GGML_VK_FORCE_MAX_BUFFER_SIZE")) |s| {
         device.max_buffer_size = stoull("GGML_VK_FORCE_MAX_BUFFER_SIZE", s);
     } else if (maintenance4_support) {
         device.max_buffer_size = props4.maxBufferSize;
@@ -1046,7 +1045,7 @@ pub fn getDevice(idx: usize) *Device {
         device.max_buffer_size = device.max_memory_allocation_size;
     }
 
-    if (std.c.getenv("GGML_VK_SUBALLOCATION_BLOCK_SIZE")) |s| {
+    if (stdlib.env.getenv("GGML_VK_SUBALLOCATION_BLOCK_SIZE")) |s| {
         device.suballocation_block_size = stoull("GGML_VK_SUBALLOCATION_BLOCK_SIZE", s);
     } else {
         // Limit batching of allocations to 1GB by default to avoid fragmentation issues
@@ -1084,7 +1083,7 @@ pub fn getDevice(idx: usize) *Device {
 
     // Submit at least every 100 nodes, in case there are workloads without as much matmul.
     device.max_nodes_per_submit = 100;
-    if (std.c.getenv("GGML_VK_MAX_NODES_PER_SUBMIT")) |s| {
+    if (stdlib.env.getenv("GGML_VK_MAX_NODES_PER_SUBMIT")) |s| {
         device.max_nodes_per_submit = @max(stoul("GGML_VK_MAX_NODES_PER_SUBMIT", s), 1);
     }
 
@@ -1441,7 +1440,7 @@ pub fn getDevice(idx: usize) *Device {
         device.xe_fa_support = device.coopmat_support and device.properties.limits.maxComputeSharedMemorySize >= 48 * 1024 and
             device.workgroup_memory_explicit_layout and device.workgroup_memory_explicit_layout_16bit and
             ((device.vendor_id == common.vendor_id.intel and (device.architecture == .intel_xe2 or (device.architecture == .intel_xe1 and device.uma))) or
-                (device.subgroup_size == 32 and device.coopmat_support_16x16x16_f32acc and std.c.getenv("GGML_VK_FORCE_XE_FA") != null));
+                (device.subgroup_size == 32 and device.coopmat_support_16x16x16_f32acc and stdlib.env.getenv("GGML_VK_FORCE_XE_FA") != null));
     }
 
     m.shaders.loadShaders(device, null);

@@ -27,7 +27,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const impl = @import("../impl.zig");
 const win32 = @import("../win32.zig");
-const sync = @import("sync");
+const sync = @import("stdlib").sync;
 const c = impl.c;
 
 pub const Tensor = c.ggml_tensor;

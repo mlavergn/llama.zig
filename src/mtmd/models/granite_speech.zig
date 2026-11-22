@@ -8,6 +8,7 @@
 //! began at.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const clip = @import("../clip.zig");
 const graph = @import("../graph.zig");
@@ -16,8 +17,6 @@ const T = graph.T;
 const gpa = impl.gpa;
 const ne = graph.ne;
 const nb = graph.nb;
-
-extern fn sqrtf(x: f32) f32;
 
 /// Ports `build` (granite-speech.cpp:5 @b1b770d90), a member of
 /// `mtmd_graph_granite_speech`.
@@ -233,7 +232,7 @@ pub fn build(g: *graph.Graph, params: ?*const clip.EncodeParams) clip.Error!?*c.
         const num_queries = @divTrunc(window_size, hparams.audio_proj_downsample_rate);
         const proj_n_head = hparams.audio_proj_head_count;
         const proj_d_head = @divTrunc(n_embd, proj_n_head);
-        const proj_kq_scale = 1.0 / sqrtf(@floatFromInt(proj_d_head));
+        const proj_kq_scale = 1.0 / libm.sqrtfInt(proj_d_head);
         const proj_eps: f32 = 1e-12;
         const nblocks_proj = @divTrunc(n_frames + window_size - 1, window_size);
         const padded_proj = nblocks_proj * window_size;

@@ -10,6 +10,7 @@
 //! `build_arch_graph`, and its `graph`.
 
 const std = @import("std");
+const libm = @import("stdlib").libm;
 const impl = @import("../impl.zig");
 const loader = @import("../loader.zig");
 const model_mod = @import("../model.zig");
@@ -32,7 +33,7 @@ pub fn loadArchHparams(self: *Model, ml: *const loader.Loader, exc: *Exception) 
     // XD-RoPE's NTK-aware scaling: base = rope_theta * alpha^(dim / (dim - 2)).
     if (hp.rope_scaling_alpha > 0.0) {
         const dim: c_int = @intCast(hp.nEmbdHeadK(0));
-        hp.rope_freq_base_train = hp.rope_freq_base_train * impl.powf(hp.rope_scaling_alpha, @as(f32, @floatFromInt(dim)) / @as(f32, @floatFromInt(dim - 2)));
+        hp.rope_freq_base_train = hp.rope_freq_base_train * libm.powf(hp.rope_scaling_alpha, @as(f32, @floatFromInt(dim)) / @as(f32, @floatFromInt(dim - 2)));
     }
 
     self.type = switch (hp.n_embd) {
@@ -102,7 +103,7 @@ pub fn buildGraph(model: *const Model, b: *const graph.Builder) void {
 
     const inp_attn = b.buildAttnInpKv();
 
-    const kq_scale: f32 = 1.0 / impl.sqrtf(@floatFromInt(n_embd_head));
+    const kq_scale: f32 = 1.0 / libm.sqrtfInt(n_embd_head);
 
     const inp_out_ids = b.buildInpOutIds();
 

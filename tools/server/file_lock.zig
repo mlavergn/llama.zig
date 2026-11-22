@@ -8,18 +8,30 @@
 //! target. Each declaration names what it ports and the line it began at.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const tc = @import("tools_common");
-const hf_cache = @import("hf_cache.zig");
 
 const log = tc.log;
 const Allocator = std.mem.Allocator;
 
-extern "c" fn flock(fd: c_int, op: c_int) c_int;
-extern "c" fn fchmod(fd: c_int, mode: std.c.mode_t) c_int;
+const LOCK = std.posix.LOCK;
 
-const LOCK_EX: c_int = 2;
-const LOCK_NB: c_int = 4;
-const LOCK_UN: c_int = 8;
+/// `open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0664)` on
+/// `std.Io`, which has no create without following a final link: an open
+/// that does not follow one, and when there is nothing to open, an
+/// exclusive create, which never follows one either; a file created
+/// between the two is opened on the next turn.
+fn openNoFollow(io: std.Io, path: []const u8) !std.Io.File {
+    const cwd = std.Io.Dir.cwd();
+    while (true) {
+        if (cwd.openFile(io, path, .{ .mode = .read_write, .follow_symlinks = false })) |f| {
+            return f;
+        } else |e| if (e != error.FileNotFound) return e;
+        if (cwd.createFile(io, path, .{ .read = true, .truncate = false, .exclusive = true, .permissions = .fromMode(0o664) })) |f| {
+            return f;
+        } else |e| if (e != error.PathAlreadyExists) return e;
+    }
+}
 
 /// `const std::function<bool()> & keep_waiting`.
 pub const KeepWaiting = struct {
@@ -36,7 +48,7 @@ pub const KeepWaiting = struct {
 pub const FileLock = struct {
     a: Allocator,
     lock_path: []const u8,
-    fd: c_int = -1,
+    file: ?std.Io.File = null,
     locked: bool = false,
 
     /// `status` (file-lock.h:24 @b1b770d90).
@@ -68,30 +80,36 @@ pub const FileLock = struct {
         if (self.lock_path.len == 0) {
             return .acquired; // no lock path, nothing to lock
         }
-        if (self.fd < 0) {
-            const z = try self.a.dupeSentinel(u8, self.lock_path, 0);
-            defer self.a.free(z);
+        const io = stdlib.file.defaultIo();
+        const f = self.file orelse f: {
             // group-writable, so users sharing a cache can wait on the lock
-            self.fd = std.c.open(z.ptr, .{ .ACCMODE = .RDWR, .CREAT = true, .CLOEXEC = true, .NOFOLLOW = true }, @as(std.c.mode_t, 0o664));
-            if (self.fd < 0) {
+            const f = openNoFollow(io, self.lock_path) catch {
+                const z = try self.a.dupeSentinel(u8, self.lock_path, 0);
+                defer self.a.free(z);
                 log.err("%s: cannot open lock file: %s\n", .{ func, z.ptr });
                 return .err;
-            }
+            };
             // open() filters the mode through the umask
-            _ = fchmod(self.fd, 0o664);
-        }
+            f.setPermissions(io, .fromMode(0o664)) catch |err| switch (err) {
+                else => {}, // fchmod's result unchecked
+            };
+            self.file = f;
+            break :f f;
+        };
 
-        if (flock(self.fd, LOCK_EX | LOCK_NB) == 0) {
+        // the system's flock, not std's tryLock, which folds EACCES and the
+        // errno printed below into errors of its own
+        const e = std.posix.errno(std.posix.system.flock(f.handle, LOCK.EX | LOCK.NB));
+        if (e == .SUCCESS) {
             self.locked = true;
             return .acquired;
         }
         // EACCES is reported as contention on some filesystems
-        const e = std.c._errno().*;
-        if (e == @backingInt(std.c.E.AGAIN) or e == @backingInt(std.c.E.ACCES)) {
+        if (e == .AGAIN or e == .ACCES) {
             return .busy;
         }
         // flock is not implemented (some NFS/FUSE mounts): report it instead of racing
-        log.err("%s: file locking failed (%s)\n", .{ func, tc.strings.strerror(e) });
+        log.err("%s: file locking failed (%s)\n", .{ func, stdlib.errno.strerror(@backingInt(e)) });
         return .err;
     }
 
@@ -104,13 +122,13 @@ pub const FileLock = struct {
     pub fn acquire(self: *FileLock, keep_waiting: ?KeepWaiting) Allocator.Error!bool {
         // the lock file is opened by try_lock, its parent must exist by then
         if (self.lock_path.len != 0) {
-            const lock_dir = hf_cache.pathParent(self.lock_path);
+            const lock_dir = stdlib.path.parent(self.lock_path);
             if (lock_dir.len != 0) {
-                const ec = hf_cache.createDirectories(self.a, lock_dir);
+                const ec = stdlib.fs.createDirectories(lock_dir);
                 if (ec != 0) {
                     const z = try self.a.dupeSentinel(u8, lock_dir, 0);
                     defer self.a.free(z);
-                    log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, hf_cache.errMessage(ec) });
+                    log.err("%s: unable to create lock directory '%s': %s\n", .{ "acquire", z.ptr, stdlib.errno.strerror(ec) });
                     return false;
                 }
             }
@@ -123,8 +141,7 @@ pub const FileLock = struct {
                     if (keep_waiting) |kw| if (!kw.call()) {
                         return false;
                     };
-                    var ts: std.c.timespec = .{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
-                    while (std.c.nanosleep(&ts, &ts) != 0) {}
+                    stdlib.clock.sleepMs(100);
                 },
                 .err => return false,
             }
@@ -135,13 +152,13 @@ pub const FileLock = struct {
     /// `common_file_lock`. The lock file is never deleted: another process
     /// could then create a fresh file at the same path and lock that.
     pub fn close(self: *FileLock) void {
-        if (self.fd >= 0) {
+        if (self.file) |f| {
             if (self.locked) {
-                _ = flock(self.fd, LOCK_UN);
+                _ = std.posix.system.flock(f.handle, LOCK.UN);
             }
-            _ = std.c.close(self.fd);
+            f.close(stdlib.file.defaultIo());
         }
-        self.fd = -1;
+        self.file = null;
         self.locked = false;
     }
 };

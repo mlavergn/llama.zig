@@ -37,10 +37,11 @@
 //!   so the bytes do not depend on how many threads there are.
 
 const std = @import("std");
+const stdlib = @import("stdlib");
 const builtin = @import("builtin");
 const impl = @import("impl.zig");
 const arch = @import("arch.zig");
-const libcxx = @import("libcxx.zig");
+const libcxx = @import("stdlib").libcxx;
 const loader = @import("loader.zig");
 const mmap = @import("mmap.zig");
 const model_mod = @import("model.zig");
@@ -244,12 +245,11 @@ const blk_pattern = "blk\\.(\\d+)\\.";
 
 /// `std::stoi` on a run of digits: `stoi: out of range` past `INT_MAX`.
 fn stoi(digits: []const u8, exc: *Exception) Thrown!c_int {
-    var v: i64 = 0;
-    for (digits) |d| {
-        v = v * 10 + (d - '0');
-        if (v > std.math.maxInt(c_int)) return exc.throw(.out_of_range, "stoi: out of range", .{});
-    }
-    return @intCast(v);
+    return switch (stdlib.num.stoi(digits)) {
+        .ok => |v| v,
+        .no_conversion => exc.throw(.invalid_argument, "stoi: no conversion", .{}),
+        .out_of_range => exc.throw(.out_of_range, "stoi: out of range", .{}),
+    };
 }
 
 /// The `std::map<int, std::string>` `remap_layer` fills: sorted by key.
@@ -1209,7 +1209,7 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
     var ftype: Ftype = params.ftype;
 
     var nthread: c_int = params.nthread;
-    if (nthread <= 0) nthread = @intCast(std.Thread.getCpuCount() catch 1);
+    if (nthread <= 0) nthread = @intCast(stdlib.thread.hardwareConcurrency());
 
     const default_type = ftypeGetDefaultType(ftype);
     if (default_type == c.GGML_TYPE_COUNT) {
@@ -1575,8 +1575,8 @@ pub fn quantize(fname_inp: [:0]const u8, fname_out: [:0]const u8, params: *const
 
             impl.logInfo("converting to %s .. ", .{typeName(new_type)});
             _ = c.fflush(impl.cStdout());
-            // and what a tool wrote through `sync.stdio`
-            @import("sync").stdio.stdout().flush();
+            // and what a tool wrote through `stdlib.stdio`
+            @import("stdlib").stdio.stdout().flush();
 
             const n_per_row = tensor.ne[0];
             const nrows_per_expert = tensor.ne[1];
